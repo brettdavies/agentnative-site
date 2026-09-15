@@ -1,4 +1,4 @@
-// WebMCP tools for a rendered /web/<domain> result page. Every tool
+// WebMCP tools for a rendered website result page. Every tool
 // reads the page and nothing else: no fetch, no form submission, no
 // navigation. Filtering, ordering, and pagination come from the shared
 // finding selector, so an agent and the on-page widget answer from one
@@ -6,6 +6,7 @@
 // freshness, and pages carry whole items — a page never slices its own
 // JSON to fit the output cap.
 
+import { fixPath } from '../shared/audit-routes';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
 import {
   FINDING_KEYWORDS,
@@ -114,7 +115,7 @@ const POINTER_RESERVE = 180;
 /** The pointer the trimmed prompt sends a reader to for the untruncated fix. */
 function skillUrlFor(id: string): string {
   const origin = typeof location !== 'undefined' && location.origin ? location.origin : CANONICAL_SITE_URL;
-  return `${origin}/web-audit/skill/${id}`;
+  return `${origin}${fixPath(id)}`;
 }
 
 /**

@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import type { InstallSpec } from '../src/worker/score/discover-binary';
 import type { DiscoveryHintsIndex, RegistryIndex } from '../src/worker/score/registry-lookup';
 import {
   deriveShareBinary,
-  deriveShareBinaryFromSpec,
   lookupRegistry,
+  lookupScorecard,
   SHARE_URL_BINARY_RE,
 } from '../src/worker/score/registry-lookup';
 import type { ValidatedInput } from '../src/worker/score/validate';
+import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 const REGISTRY: RegistryIndex = {
   by_slug: {
@@ -184,58 +184,55 @@ describe('deriveShareBinary — branch-aware', () => {
   });
 });
 
-describe('deriveShareBinaryFromSpec — post-discovery derivation', () => {
-  test('direct (releases-asset) spec → binary passes through', () => {
-    const spec: InstallSpec = {
-      pm: 'direct',
-      url: 'https://github.com/sharkdp/hexyl/releases/download/v0.16.0/hexyl-x86_64-linux.tar.gz',
-      binary: 'hexyl',
-    };
-    expect(deriveShareBinaryFromSpec(spec)).toBe('hexyl');
-  });
-
-  test('parsed-install spec (any PM) → binary passes through', () => {
-    for (const pm of ['brew', 'cargo-binstall', 'bun', 'pip', 'uv', 'npm', 'go'] as const) {
-      const spec: InstallSpec = { pm, package: 'foo', binary: 'foo' };
-      expect(deriveShareBinaryFromSpec(spec)).toBe('foo');
-    }
-  });
-
-  test('git-clone spec → null (branch-scoped, no shareable surface)', () => {
-    const spec: InstallSpec = {
-      pm: 'git-clone',
-      owner: 'sharkdp',
-      repo: 'hexyl',
-      branch: 'feature/x',
-      binary: 'hexyl',
-    };
-    expect(deriveShareBinaryFromSpec(spec)).toBeNull();
-  });
-
-  test('uppercase / underscore / period / leading hyphen → null', () => {
-    for (const binary of ['MyTool', 'my_tool', 'tool.js', '-bad']) {
-      const spec: InstallSpec = { pm: 'direct', url: 'https://x', binary };
-      expect(deriveShareBinaryFromSpec(spec)).toBeNull();
-    }
-  });
-
-  test('empty binary → null (refuse to mint /score/live/)', () => {
-    const spec: InstallSpec = { pm: 'direct', url: 'https://x', binary: '' };
-    expect(deriveShareBinaryFromSpec(spec)).toBeNull();
-  });
-
-  test('over-long binary (>64 chars) → null', () => {
-    const spec: InstallSpec = { pm: 'direct', url: 'https://x', binary: 'a'.repeat(65) };
-    expect(deriveShareBinaryFromSpec(spec)).toBeNull();
+describe('SHARE_URL_BINARY_RE — invariant', () => {
+  test('pins the pre-discovery cache-key slug shape', () => {
+    // A hint or install-command binary becomes an R2 key only when it has
+    // this shape, so the source string is pinned and a drift fails loudly.
+    expect(SHARE_URL_BINARY_RE.source).toBe('^[a-z0-9][a-z0-9-]{0,63}$');
   });
 });
 
-describe('SHARE_URL_BINARY_RE — invariant', () => {
-  test('matches the /score/live/<binary> route slug shape exactly', () => {
-    // The summary-render.ts BINARY_SLUG_RE is `SHARE_URL_BINARY_RE`
-    // (re-exported), so any value the handler mints is a value the
-    // route accepts. This test pins the source string so a refactor
-    // that drifts one without the other fails loudly.
-    expect(SHARE_URL_BINARY_RE.source).toBe('^[a-z0-9][a-z0-9-]{0,63}$');
+// ---------------------------------------------------------------------------
+// A binary key never names a branch record: a slash marks the branch family.
+// ---------------------------------------------------------------------------
+
+describe('cache-tier keys never alias a branch record', () => {
+  test('an install command whose package name carries a slash reads no record', async () => {
+    const stored = new Map<string, string>([
+      [
+        `scores/o/r@feature/${SPEC_VERSION}.json`,
+        JSON.stringify({
+          spec_version: SPEC_VERSION,
+          anc_version: '0.9.0',
+          tool_version: '',
+          source_sha: 'f'.repeat(40),
+          scorecard: {},
+        }),
+      ],
+    ]);
+    const env = {
+      ASSETS: { fetch: async () => new Response('{}', { status: 200 }) } as unknown as Fetcher,
+      SCORE_CACHE: {
+        async get(key: string) {
+          const raw = stored.get(key);
+          return raw === undefined ? null : { json: async () => JSON.parse(raw) };
+        },
+        async delete() {},
+      } as unknown as R2Bucket,
+    };
+    const input: ValidatedInput = {
+      kind: 'install-command',
+      spec: { pm: 'brew', package: 'o/r@feature', binary: 'o/r@feature' },
+    };
+    const result = await lookupScorecard(
+      input,
+      env,
+      { by_slug: {}, by_owner_repo: {} },
+      { by_owner_repo: {} },
+      {
+        specVersion: SPEC_VERSION,
+      },
+    );
+    expect(result.kind).toBe('miss');
   });
 });

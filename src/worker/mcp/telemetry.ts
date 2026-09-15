@@ -1,6 +1,11 @@
-// Structured MCP request telemetry — one PII-free `mcp.request` line per POST.
-// Replaces visitor-log.ts `[mcp-call]`. See docs/plans/2026-08-25-001-feat-mcp-
-// 2026-dual-protocol-plan.md appendix.
+// Structured MCP request telemetry: one PII-free `mcp.request` record per
+// POST, emitted through the central emitter, which caps the client-supplied
+// method, name, and client name and buckets the duration.
+
+import { msBucket, truncateClientName } from '../telemetry/caps';
+import { emitLog } from '../telemetry/log';
+
+export { msBucket, truncateClientName };
 
 export type McpEra = 'legacy' | 'modern';
 
@@ -49,18 +54,6 @@ const MAX_ERROR_BODY_BYTES = 4096;
 export function servedResponseFormat(response: Response): McpResponseFormat {
   const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
   return contentType.includes('text/event-stream') ? 'sse' : 'json';
-}
-
-export function msBucket(ms: number): '<50' | '50-200' | '200-1000' | '>1000' {
-  if (ms < 50) return '<50';
-  if (ms < 200) return '50-200';
-  if (ms < 1000) return '200-1000';
-  return '>1000';
-}
-
-export function truncateClientName(name: string | null | undefined, max = 64): string | null {
-  if (name == null || name === '') return null;
-  return name.length <= max ? name : `${name.slice(0, max - 1)}…`;
 }
 
 /**
@@ -132,21 +125,19 @@ export function extractProtocolVersion(parsedBody: unknown, request: Request): s
 }
 
 export function logMcpRequest(input: McpRequestLogInput): void {
-  // method and name can carry client-supplied strings on paths that
-  // fire before the rate limiter; cap them like client_name so a
-  // flood cannot amplify log volume with unbounded values.
-  const payload = {
-    event: 'mcp.request',
-    era: input.era,
-    method: truncateClientName(input.method),
-    name: truncateClientName(input.name),
-    client_name: input.client_name,
-    protocol_version: input.protocol_version,
-    host: input.host,
-    response_format: input.response_format,
-    outcome: input.outcome,
-    error_code: input.error_code,
-    ms_bucket: msBucket(input.duration_ms),
-  };
-  console.log(JSON.stringify(payload));
+  emitLog(
+    { event: 'mcp.request' },
+    {
+      era: input.era,
+      method: input.method,
+      name: input.name,
+      client_name: input.client_name,
+      protocol_version: input.protocol_version,
+      host: input.host,
+      response_format: input.response_format,
+      outcome: input.outcome,
+      error_code: input.error_code,
+      duration_ms: input.duration_ms,
+    },
+  );
 }

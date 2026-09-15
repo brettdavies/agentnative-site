@@ -13,14 +13,31 @@
 
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { isLegacyRequest } from '@modelcontextprotocol/server';
+import {
+  isAuditPath,
+  isLeaderboardPath,
+  isScorePath as isResultPath,
+  isScoringPath,
+  retiredRedirectFor,
+  SCORECARDS_PATH,
+} from '../shared/audit-routes';
 import { classifyGatewayRequest, detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
+import { type AuditApiEnv, handleAuditApi, isAuditApiPath } from './audit/api';
+import type { AuditJob } from './audit/job';
+import { handleResultRoute, type ResultEnv } from './audit/result';
+import { handleScoringPage, type ScoringPageEnv } from './audit/scoring-page';
+import { resolveBoardEntries, type WebBoardEnv } from './audit-web/board';
 import { getAggregate, type WebAggregateEntry, type WebCacheEnv } from './audit-web/cache';
 import { flushHitMinPurge, runWithHitMinPurge } from './audit-web/hit-min-purge';
 import {
+  buildBoardMarkdownRows,
+  buildBoardRows,
+  buildBoardViewNav,
   buildFrontpageBoardEmptyState,
   buildFrontpageBoardMarkdown,
   buildFrontpageBoardMarkdownEmptyState,
   buildFrontpageBoardRows,
+  type WebBoardView,
 } from './audit-web/leaderboard-render';
 import {
   handleWebBackfill,
@@ -30,17 +47,6 @@ import {
   type WebRescoreTriggerEnv,
 } from './audit-web/rescore-trigger';
 import type { WebRescoreWorkflowBinding } from './audit-web/rescore-workflow';
-import {
-  handleWebAudit,
-  handleWebLeaderboard,
-  handleWebResultPage,
-  handleWebScoringPage,
-  isWebAuditPath,
-  isWebLeaderboardPath,
-  isWebScoringPath,
-  parseWebResultPath,
-  type WebAuditRouteEnv,
-} from './audit-web/route';
 import { applyHeaders, isRepresentationPinned } from './headers';
 import { getWarmCatalog, loadCatalog } from './mcp/catalog';
 import { coerceMcpJsonResponse, stripCorsHeaders } from './mcp/coerce-json-response';
@@ -61,8 +67,10 @@ import {
 import { notFoundHtml, notFoundMarkdown } from './not-found';
 import { isScorePath } from './score/content-negotiation';
 import { handleScore, type ScoreEnv } from './score/handler';
-import { handleLiveScorePage, parseLiveScorePath } from './score/summary-render';
 import { SPEC_VERSION } from './spec-version.gen';
+import { emitLog } from './telemetry/log';
+import { recordPageRequest } from './telemetry/page-request';
+import { runWithRequestContext } from './telemetry/request-context';
 
 // The CF Sandbox/Containers SDK looks up `ctx.exports.ContainerProxy` at
 // outbound-handler dispatch time and throws "ctx.exports.ContainerProxy
@@ -73,6 +81,9 @@ import { SPEC_VERSION } from './spec-version.gen';
 // (Sandbox `fetch()` missing) — documented in
 // docs/solutions/integration-issues/cloudflare-workers-do-mock-must-mirror-binding-shape-2026-05-15.md.
 export { ContainerProxy } from '@cloudflare/sandbox';
+// Audit job DO class, exported for `class_name: "AuditJob"`.
+export { AuditJob } from './audit/job';
+
 // Web-rescore Workflow class. Re-exported so wrangler's binding resolver
 // can find `class_name: "WebRescoreWorkflow"` from wrangler.jsonc's
 // workflows section.
@@ -86,24 +97,30 @@ export { Sandbox } from './score/do';
 // the skip-Worker HIT target; default `fetch` is the uncached gateway.
 export class Cached extends WorkerEntrypoint<Env> {
   async fetch(request: Request): Promise<Response> {
-    return runWithHitMinPurge(this.ctx, async () => {
-      const response = await handleSiteRequest(request, this.env, this.ctx);
-      await flushHitMinPurge();
-      return response;
-    });
+    // The gateway reaches this entrypoint over ctx.exports.Cached.fetch, an
+    // RPC hop that resets the async context: a store entered in
+    // default.fetch reads undefined on this side, so the request context
+    // is entered here, where the emit sites below can see it.
+    return runWithRequestContext({}, () =>
+      runWithHitMinPurge(this.ctx, async () => {
+        const response = await handleSiteRequest(request, this.env, this.ctx);
+        await flushHitMinPurge();
+        return response;
+      }),
+    );
   }
 
   /** Purge HIT-min objects by Cache-Tag. Scoped to this cached entrypoint. */
   async purgeHitMinTags(tags: string[]): Promise<{ success: boolean; errors: { message: string }[] }> {
     const cache = this.ctx.cache;
     if (!cache || typeof cache.purge !== 'function') {
-      console.log(JSON.stringify({ scope: 'hit-min-purge', error: 'cache_purge_unavailable', tags }));
+      emitLog({ scope: 'hit-min-purge' }, { error: 'cache_purge_unavailable', tags });
       return { success: false, errors: [{ message: 'cache_purge_unavailable' }] };
     }
     const unique = [...new Set(tags.filter((t) => t.length > 0))];
     const result = await cache.purge({ tags: unique });
     if (!result.success) {
-      console.log(JSON.stringify({ scope: 'hit-min-purge', tags: unique, errors: result.errors }));
+      emitLog({ scope: 'hit-min-purge' }, { tags: unique, errors: result.errors });
     }
     return result;
   }
@@ -117,15 +134,18 @@ export class Cached extends WorkerEntrypoint<Env> {
 export interface Env {
   ASSETS: Fetcher;
   SCORE?: DurableObjectNamespace;
+  // The audit job for each running audit; the transact endpoint and the MCP
+  // transact tools attach late readers to it.
+  AUDIT_JOB?: DurableObjectNamespace<AuditJob>;
   SCORE_KV?: KVNamespace;
   SCORE_CACHE?: R2Bucket;
   SCORE_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   SCORE_LIMITER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   // TURNSTILE_SECRET is a secret (wrangler secret put). TURNSTILE_SITEKEY
   // is a public var the Worker substitutes into <meta name="turnstile-sitekey">
-  // on `/` and `/web-audit`. Absent on production means those forms refuse
-  // to render Turnstile (fail-loud pre-promotion). `/web/scoring` bakes the
-  // same var into the in-progress page body.
+  // on the two entry pages. Absent on production means those forms refuse to
+  // render Turnstile (fail-loud pre-promotion). The progress page and a
+  // result page's Re-audit control bake the same var into their own markup.
   TURNSTILE_SECRET?: string;
   TURNSTILE_SITEKEY?: string;
   SESSION_HMAC_SECRET?: string;
@@ -397,17 +417,14 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   const url = new URL(request.url);
   const pathname = url.pathname;
 
-  // Live-scoring routes. Sits ABOVE the asset call so the asset-first
-  // invariant for everything else (every other path proxies to
-  // env.ASSETS) is preserved by exclusion, not by overlap.
+  // The transact endpoint for both audit lanes. A POST to the bare path
+  // is the unified endpoint; the GET read path and the suffixed
+  // representations are the deployed homepage's handler.
+  if (isAuditApiPath(pathname) && request.method === 'POST') {
+    return handleAuditApi(request, env as AuditApiEnv, ctx);
+  }
   if (isScorePath(pathname)) {
     return handleScore(request, env as ScoreEnv);
-  }
-
-  // Web-audit streaming dispatch. Threads ctx so the engine's R2 write
-  // survives a mid-stream client disconnect via ctx.waitUntil (KTD-13).
-  if (isWebAuditPath(pathname)) {
-    return handleWebAudit(request, env as WebAuditRouteEnv, ctx);
   }
 
   // Post-deploy rescore hook (secret-authed). Shares the single-flight
@@ -762,85 +779,24 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
     }
   }
 
-  // /score/live/<binary>.html → 301 to /score/live/<binary>. Mirrors
-  // the rest of the site (static `/score/<tool>.html` is canonicalized
-  // away from the .html extension by CF Static Assets'
-  // html_handling=auto-trailing-slash); the /score/live/ route is
-  // Worker-served so the same redirect is explicit here.
-  const liveScoreHtmlMatch = pathname.match(/^\/score\/live\/([a-z0-9][a-z0-9-]{0,63})\.html$/);
-  if (liveScoreHtmlMatch) {
-    const canonical = `/score/live/${liveScoreHtmlMatch[1]}`;
+  if (isResultPath(pathname)) {
+    return handleResultRoute(request, env as ResultEnv);
+  }
+  // A retired path with an exact destination redirects rather than 404s, so
+  // an inbound link minted before the funnel merged still lands somewhere
+  // useful. The table in the route module decides which paths qualify.
+  const retiredTo = retiredRedirectFor(pathname);
+  if (retiredTo) {
     return new Response(null, {
       status: 301,
-      headers: { Location: canonical, 'Cache-Control': 'public, max-age=300' },
+      headers: { Location: retiredTo, 'Cache-Control': 'public, max-age=300' },
     });
   }
 
-  // Renamed page: `/check` -> `/audit` (the CLI subcommand rename).
-  // 301 the old path (and its markdown twin) so existing inbound links
-  // and any cached references resolve to the canonical page.
-  if (pathname === '/check' || pathname === '/check.md') {
-    const canonical = pathname.endsWith('.md') ? '/audit.md' : '/audit';
-    return new Response(null, {
-      status: 301,
-      headers: { Location: canonical, 'Cache-Control': 'public, max-age=300' },
-    });
-  }
-
-  // Shareable live-score result page. Reads the cached scorecard from
-  // R2 by binary slug, renders an HTML summary view.
-  // Strict regex enforced by parseLiveScorePath — slugs must match
-  // /^[a-z0-9][a-z0-9-]{0,63}$/, so an attacker can't pivot this
-  // route into an arbitrary R2 key read. Accepts both /score/live/<binary>
-  // and /score/live/<binary>.md (markdown twin) per the site-wide
-  // twin invariant. The "live" segment is reserved as a registry name
-  // (scorecards.mjs) so no curated tool can collide with this route.
-  if (parseLiveScorePath(pathname)) {
-    return handleLiveScorePage(request, env as ScoreEnv);
-  }
-
-  // /web board + .md twin — Worker-rendered from the R2 leaderboard
-  // aggregate, dispatched ahead of the asset fetch so no static
-  // dist/web.html ever serves the board. Legacy extension/slash forms
-  // canonicalize like the rest of the site.
-  if (pathname === '/web.html' || pathname === '/web/') {
-    return new Response(null, {
-      status: 301,
-      headers: { Location: '/web', 'Cache-Control': 'public, max-age=300' },
-    });
-  }
-  if (isWebLeaderboardPath(pathname)) {
-    const servedMarkdown = pathname.endsWith('.md') || detectPreference(request) === 'markdown';
-    const response = await handleWebLeaderboard(request, env as WebAuditRouteEnv);
-    if (response.status !== 200) return response;
-    return applyHeaders(response, { request, servedMarkdown, pathname: '/web' });
-  }
-
-  // /web/scoring[/<domain>] — the transient in-progress streaming page.
-  // Reserved above the result-page dispatch so `scoring` is never treated
-  // as a cached-result domain (mirrors the reserved `live` segment under
-  // /score/).
-  if (isWebScoringPath(pathname)) {
-    return handleWebScoringPage(request, env as WebAuditRouteEnv);
-  }
-
-  // /web/<domain>.html → 301 to /web/<domain>. Mirrors the live-score
-  // .html canonicalization; the /web route is Worker-served so the
-  // extension redirect is explicit here.
-  const webHtmlMatch = pathname.match(/^\/web\/([^/]+)\.html$/);
-  if (webHtmlMatch) {
-    return new Response(null, {
-      status: 301,
-      headers: { Location: `/web/${webHtmlMatch[1]}`, 'Cache-Control': 'public, max-age=300' },
-    });
-  }
-
-  // Shareable web-audit result page + markdown twin. Reads the cached
-  // web scorecard from R2 by domain slug (strict regex in
-  // parseWebResultPath bounds the R2 lookup). Sits above the asset-first
-  // dispatch like the live-score page.
-  if (parseWebResultPath(pathname)) {
-    return handleWebResultPage(request, env as WebAuditRouteEnv);
+  // The progress page and its twin render per request, ahead of the asset
+  // fetch: the page carries a request-time sitekey and exists for one run.
+  if (isScoringPath(pathname)) {
+    return handleScoringPage(request, env as ScoringPageEnv);
   }
 
   // /_internal/* paths are build-only assets (shell templates the
@@ -888,11 +844,30 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
     }
   }
 
-  // /web-audit form: same sitekey placeholder as the homepage, no board
-  // inject. Markdown twin and Accept: text/markdown skip this so the
+  // The merged leaderboard: the CLI board ships baked into the asset, the
+  // website pane is filled here from the same aggregate and the same opt-in
+  // gate the website board uses, so the two can never disagree on what lists.
+  // The page already carries the board tag and HIT-min from its path.
+  const isLeaderboard = isLeaderboardPath(pathname) || pathname === `${SCORECARDS_PATH}.html`;
+  if (isLeaderboard && upstream.ok) {
+    const contentType = (upstream.headers.get('content-type') ?? '').toLowerCase();
+    const wantsMarkdown =
+      servedMarkdown || pathname === `${SCORECARDS_PATH}.md` || contentType.includes('text/markdown');
+    if (wantsMarkdown || contentType.includes('text/html')) {
+      return injectLeaderboardBoard(upstream, env, {
+        request,
+        servedMarkdown,
+        pathname,
+        markdown: wantsMarkdown,
+        url,
+      });
+    }
+  }
+
+  // Entry-form pages: same sitekey placeholder as the homepage, no board
+  // inject. Markdown twins and Accept: text/markdown skip this so the
   // token never reaches the agent surface.
-  const isWebAuditForm = pathname === '/web-audit' || pathname === '/web-audit.html';
-  if (isWebAuditForm && upstream.ok) {
+  if (isAuditPath(pathname) && upstream.ok) {
     const contentType = (upstream.headers.get('content-type') ?? '').toLowerCase();
     const wantsMarkdown = servedMarkdown || contentType.includes('text/markdown');
     if (!wantsMarkdown && contentType.includes('text/html')) {
@@ -951,6 +926,62 @@ async function injectTurnstileSitekey(
   );
 }
 
+async function injectLeaderboardBoard(
+  upstream: Response,
+  env: Env,
+  opts: { request: Request; servedMarkdown: boolean; pathname: string; markdown: boolean; url: URL },
+): Promise<Response> {
+  // An unrecognized view falls back to the all board, as the website board
+  // does, so a mistyped parameter never empties a shareable URL.
+  const view: WebBoardView = opts.url.searchParams.get('view') === 'curated' ? 'curated' : 'all';
+  const [body, resolved] = await Promise.all([
+    upstream.text(),
+    resolveBoardEntries(env as unknown as WebBoardEnv, view),
+  ]);
+  const slice = opts.markdown
+    ? buildBoardMarkdownRows(resolved.entries, opts.url.origin)
+    : resolved.entries.length > 0
+      ? buildBoardRows(resolved.entries)
+      : buildFrontpageBoardEmptyState();
+  // The view switch is HTML-only: the twin's own view line belongs to the
+  // document that hosts it, and a second one here would contradict it.
+  // It carries the lane because it renders inside the website pane: dropped,
+  // the switch serves the CLI pane back and hides the list it just filtered.
+  const viewNav = opts.markdown
+    ? ''
+    : buildBoardViewNav({ view, curatedCount: resolved.curatedCount, userCount: resolved.userCount }, SCORECARDS_PATH, [
+        'lane=web',
+      ]);
+  // `?lane=web` opens on the website pane. A website result page links back
+  // here that way, so without this every visitor arriving from one lands on
+  // the CLI board and has to switch by hand.
+  // The minifier writes the boolean out as `checked="checked"`, so the match
+  // has to take the value with it: dropping only the bare word leaves an
+  // orphaned `="checked"` behind and the tag stops parsing as intended.
+  const withLane =
+    !opts.markdown && opts.url.searchParams.get('lane') === 'web'
+      ? body.replace(/id="s-cli"\s+checked(?:="checked")?/, 'id="s-cli"').replace('id="s-web"', 'id="s-web" checked')
+      : body;
+  const headers = new Headers(upstream.headers);
+  headers.delete('etag');
+  headers.delete('last-modified');
+  // One pass with a function replacement. A string replacement expands `$&`
+  // and its siblings, and a row's name is an audited site's own title; two
+  // sequential passes would also let a name holding the second placeholder
+  // splice the view nav inside a row.
+  const filled = withLane.replace(/\{\{WEB_BOARD_(ROWS|VIEW)\}\}/g, (_match: string, which: string) =>
+    which === 'ROWS' ? slice : viewNav,
+  );
+  return applyHeaders(
+    new Response(filled, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers,
+    }),
+    { request: opts.request, servedMarkdown: opts.servedMarkdown, pathname: opts.pathname },
+  );
+}
+
 async function injectHomepageBoards(
   upstream: Response,
   env: Env,
@@ -985,15 +1016,31 @@ function loopbackCachedFetch(ctx: ExecutionContext, env: Env, request: Request):
   return new Cached(ctx, env).fetch(request);
 }
 
+// Weekly web-rescore schedule; must match the string wrangler.jsonc
+// deploys or the tick falls through to the unrecognized-cron branch.
+const WEB_RESCORE_CRON = '0 9 * * SUN';
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    return loopbackCachedFetch(ctx, env, classifyGatewayRequest(request));
+    const started = Date.now();
+    const response = await loopbackCachedFetch(ctx, env, classifyGatewayRequest(request));
+    recordPageRequest(request, response, Date.now() - started);
+    return response;
   },
 
-  // Weekly board rescore. The cron and the deploy hook coalesce through
-  // the same single-flight helper, so a cron tick during an in-flight
-  // batch no-ops instead of double-spending the audit budget.
-  async scheduled(_controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
-    await startWebRescore(env as WebRescoreTriggerEnv);
+  // Cron dispatch on the controller's cron string; each schedule is
+  // declared per-env in wrangler.jsonc.
+  async scheduled(controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    switch (controller.cron) {
+      // Weekly board rescore. The cron and the deploy hook coalesce
+      // through the same single-flight helper, so a cron tick during an
+      // in-flight batch no-ops instead of double-spending the audit
+      // budget.
+      case WEB_RESCORE_CRON:
+        await startWebRescore(env as WebRescoreTriggerEnv);
+        return;
+      default:
+        emitLog({ scope: 'scheduled' }, { error: 'unrecognized_cron', cron: controller.cron });
+    }
   },
 } satisfies ExportedHandler<Env>;

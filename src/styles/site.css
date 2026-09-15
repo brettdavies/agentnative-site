@@ -68,6 +68,10 @@ p {
   --space-8: 4rem;
   --space-9: 6rem;
   --space-10: 8rem;
+
+  /* Reading columns. The crumb matches whichever one its page uses. */
+  --col-doc: 52rem;
+  --col-result: 64rem;
   --radius: 10px;
   --radius-lg: 16px;
   --container: 72rem;
@@ -143,6 +147,55 @@ main {
   margin-inline: auto;
   padding: clamp(1.5rem, 4vw, 3rem) clamp(1rem, 4vw, 2rem);
   box-sizing: border-box;
+}
+
+/* The breadcrumb is the document's first line, not a bar of header chrome:
+ * it sits on the content's own left edge and binds to the heading under it.
+ *
+ * It is emitted as a sibling of the page's content box, so on the page
+ * families that release main to full bleed it has no column of its own and
+ * needs the one its neighbor uses. The column widths are tokens for that
+ * reason: the crumb and the container it introduces read the same value. */
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: 0.78rem;
+  color: var(--fg-muted);
+  margin-bottom: var(--space-5);
+}
+.crumb a {
+  color: var(--fg-secondary);
+  text-decoration: none;
+}
+.crumb a:hover {
+  color: var(--accent);
+}
+.crumb .sep {
+  color: var(--border);
+}
+
+body:has(.doc) .crumb,
+body:has(.scorecard-page) .crumb {
+  width: 100%;
+  margin-inline: auto;
+  padding-inline: var(--space-6);
+  padding-block-start: var(--space-7);
+  box-sizing: border-box;
+}
+body:has(.doc) .crumb {
+  max-width: var(--col-doc);
+}
+body:has(.scorecard-page) .crumb {
+  max-width: var(--col-result);
+}
+
+/* The crumb now owns the space under the header, so the container it
+ * introduces no longer opens with its own. */
+main:has(> .crumb) > .doc,
+main:has(> .crumb) > .scorecard-page {
+  padding-block-start: 0;
 }
 
 main h1 {
@@ -954,6 +1007,11 @@ main .anchor-icon {
   color: inherit;
   text-decoration: none;
 }
+/* The grid above is an author rule and would otherwise beat the user agent's
+ * [hidden] display, so a filtered-out row would stay on screen. */
+.lrow[hidden] {
+  display: none;
+}
 .lrow:last-child {
   border-bottom: 0;
 }
@@ -1006,6 +1064,16 @@ main .anchor-icon {
   align-items: center;
   flex-wrap: wrap;
 }
+/* The website pane's rubric and its view switch share one line: the rubric
+ * takes the space it needs and the switch keeps its own width, wrapping to a
+ * second line before either is squeezed. */
+.board-view {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
 .board-rubric {
   margin-top: var(--space-4);
   color: var(--fg-secondary);
@@ -1020,6 +1088,13 @@ main .anchor-icon {
 .board > .board-rubric {
   margin: 0;
   padding: var(--space-4) var(--space-5);
+}
+/* After the base rule, not before it: the base sets margin-top and a full
+ * width that would otherwise land last and override the row's flex basis. */
+.board-view .board-rubric {
+  flex: 1 1 32ch;
+  margin: 0;
+  width: auto;
 }
 .board-rubric code {
   font-family: var(--font-mono);
@@ -1244,6 +1319,27 @@ body:has(.hero__grid) main {
 [data-s="web"] {
   display: none;
 }
+/* The pre-paint bridge comes first: before the radios parse there is nothing
+ * for :has() to match, so the stored surface rides on <html> and these mirror
+ * the radio rules below. They sit above those rules because :has(#s-web)
+ * carries an id and outranks them; surface.ts deletes the attribute once it
+ * has checked the matching radio, so the two are never both authoritative. */
+html[data-surface="web"] .scope [data-s="cli"] {
+  display: none;
+}
+html[data-surface="web"] .scope [data-s="web"] {
+  display: block;
+}
+html[data-surface="web"] .scope .board-try[data-s="web"] {
+  display: flex;
+}
+html[data-surface="web"] .scope .spec[data-s="web"] {
+  display: grid;
+}
+html[data-surface="web"] .scope .board-view[data-s="web"] {
+  display: flex;
+}
+
 .scope:has(#s-web:checked) [data-s="cli"] {
   display: none;
 }
@@ -1256,35 +1352,17 @@ body:has(.hero__grid) main {
 .scope:has(#s-web:checked) .spec[data-s="web"] {
   display: grid;
 }
+/* Like .board-try and .spec above: the generic pane rule restores `block`,
+ * which would flatten this row's own flex layout in the only state that
+ * shows it. */
+.scope:has(#s-web:checked) .board-view[data-s="web"] {
+  display: flex;
+}
 body:has(#s-web:checked) .hero__proof > [data-s="cli"] {
   display: none;
 }
 body:has(#s-web:checked) .hero__proof > [data-s="web"] {
   display: block;
-}
-
-/* Header Leaderboards — dual anchors; visibility follows homepage segment or
- * html[data-surface] off-home. Override global [data-s="web"] { display: none }
- * inside .site-nav only. */
-.site-nav [data-leaderboards-nav][data-s="web"],
-.site-nav [data-audit-nav][data-s="web"] {
-  display: none;
-}
-body:has(#s-web:checked) .site-nav [data-leaderboards-nav][data-s="cli"],
-body:has(#s-web:checked) .site-nav [data-audit-nav][data-s="cli"] {
-  display: none;
-}
-body:has(#s-web:checked) .site-nav [data-leaderboards-nav][data-s="web"],
-body:has(#s-web:checked) .site-nav [data-audit-nav][data-s="web"] {
-  display: inline;
-}
-html:not(:has(#s-cli))[data-surface="web"] .site-nav [data-leaderboards-nav][data-s="cli"],
-html:not(:has(#s-cli))[data-surface="web"] .site-nav [data-audit-nav][data-s="cli"] {
-  display: none;
-}
-html:not(:has(#s-cli))[data-surface="web"] .site-nav [data-leaderboards-nav][data-s="web"],
-html:not(:has(#s-cli))[data-surface="web"] .site-nav [data-audit-nav][data-s="web"] {
-  display: inline;
 }
 
 @keyframes principle-enter {
@@ -1344,7 +1422,7 @@ body:has(.doc) main {
 .doc {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  max-width: 52rem;
+  max-width: var(--col-doc);
   margin-inline: auto;
   padding-block: var(--space-8) var(--space-9);
 }
@@ -1366,26 +1444,6 @@ body:has(.doc) main {
 .doc p,
 .doc li {
   max-width: var(--measure);
-}
-
-.crumb {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
-  font-size: 0.78rem;
-  color: var(--fg-muted);
-  margin-bottom: var(--space-5);
-}
-.crumb a {
-  color: var(--fg-secondary);
-  text-decoration: none;
-}
-.crumb a:hover {
-  color: var(--accent);
-}
-.crumb .sep {
-  color: var(--border);
 }
 
 .doc__head {
@@ -1479,6 +1537,25 @@ body:has(.doc) main {
   margin: 0 0 var(--space-4);
   color: var(--fg-secondary);
 }
+/* The entry form stacks segment, target row, opt-in, examples, and status.
+ * Its row is .board-try, which lays out the input beside the submit, so the
+ * form supplies only the column rhythm; the paragraphs drop their own
+ * margins so one gap governs the spacing. */
+.audit-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+/* The hero's own help-text margin would otherwise reach the shared form and
+ * space it differently from the homepage copy of the same markup. */
+.audit-form > p,
+.audit-hero .audit-form > p {
+  margin: 0;
+}
+.audit-form__row input {
+  flex: 1;
+  min-width: 0;
+}
 .audit-hero__form input {
   flex: 1;
   min-width: 0;
@@ -1496,6 +1573,15 @@ body:has(.doc) main {
   font-size: 0.88rem;
   color: var(--fg-secondary);
   cursor: pointer;
+}
+/* The opt-in belongs to the website lane, and the rule above would otherwise
+ * outrank the pane rule that hides it: both are one class, and this one comes
+ * later. The pane restores the display type the label needs. */
+.audit-hero__optin[data-s="web"] {
+  display: none;
+}
+.scope:has(#s-web:checked) .audit-hero__optin[data-s="web"] {
+  display: inline-flex;
 }
 .audit-hero__optin input {
   flex: none;
@@ -1993,7 +2079,7 @@ a.tier-filter {
 }
 
 /* ================================================================
- * Scorecard — /score/<tool> + /score/live/<binary> (shared renderer)
+ * Scorecard — /score/<target>, curated and live (shared renderer)
  * ================================================================ */
 
 body:has(.scorecard-page) main {
@@ -2001,63 +2087,10 @@ body:has(.scorecard-page) main {
   padding: 0;
 }
 .scorecard-page {
-  max-width: 64rem;
+  max-width: var(--col-result);
   margin-inline: auto;
   padding-block: var(--space-7) var(--space-9);
 }
-.scorecard-page .crumb {
-  margin-bottom: var(--space-6);
-}
-
-/* Hero — mono tool name, command chip, summary chips, twin score cards. */
-.scorecard-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-6);
-  align-items: start;
-  padding-bottom: var(--space-7);
-  border-bottom: 1px solid var(--border-subtle);
-  margin-bottom: var(--space-7);
-}
-.scorecard-hero h1 {
-  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
-  font-size: clamp(2rem, 1.4rem + 2.4vw, 3.2rem);
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
-  margin: 0;
-}
-.scorecard-hero__id {
-  min-width: 0;
-}
-.scorecard-hero__id p {
-  overflow-wrap: anywhere;
-}
-.scorecard-hero__cmd {
-  margin: var(--space-4) 0 0;
-}
-.scorecard-hero__cmd code {
-  display: inline-block;
-  font-size: 0.85rem;
-  padding: 0.5em 0.8em;
-  border-radius: var(--radius);
-}
-.scorecard-hero__scores {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(11rem, 1fr));
-  gap: var(--space-4);
-}
-.scorecell {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-5);
-  background: var(--bg-raised);
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md);
-}
-
 .chiprow {
   display: flex;
   flex-wrap: wrap;
@@ -2205,9 +2238,6 @@ main .remediation__body {
 }
 
 @media (max-width: 900px) {
-  .scorecard-hero {
-    grid-template-columns: 1fr;
-  }
   .pscore__row {
     grid-template-columns: auto minmax(0, 1fr);
   }
@@ -2215,19 +2245,6 @@ main .remediation__body {
     grid-column: 2;
     justify-self: start;
   }
-}
-@media (max-width: 560px) {
-  .scorecard-hero__scores {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-/* Web result page — category cards with marked check rows. */
-.scorecard-hero__note {
-  margin: var(--space-3) 0 0;
-  font-size: 0.85rem;
-  color: var(--fg-muted);
-  max-width: 48ch;
 }
 .assemble-prompt {
   margin: var(--space-5) 0 var(--space-6);
@@ -2275,22 +2292,6 @@ main .remediation__body {
 .assemble-prompt [data-assemble-copy]:disabled {
   opacity: 0.55;
   cursor: not-allowed;
-}
-.catcard {
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-lg);
-  background: var(--bg);
-  box-shadow: var(--shadow-board);
-  overflow: hidden;
-  margin-bottom: var(--space-6);
-}
-.catcard__hd {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
-  background: var(--band-surface-bg);
-  border-bottom: 1px solid var(--border-subtle);
 }
 .audit-group__rollup {
   margin-left: auto;
@@ -2391,10 +2392,10 @@ main .remediation__body {
   overflow-wrap: anywhere;
 }
 
+/* The scoring page's header. */
 .scorecard-header {
   padding-bottom: 1.5rem;
 }
-
 .scorecard-header h1 {
   font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
   font-size: clamp(1.75rem, 2.5vw + 1rem, 2.5rem);
@@ -2402,29 +2403,6 @@ main .remediation__body {
   letter-spacing: -0.02em;
   margin: 0.25rem 0 0.5rem;
   line-height: 1.15;
-}
-
-.scorecard-header__desc {
-  color: var(--fg-secondary, #6a7278);
-  margin: 0 0 0.75rem;
-  font-size: 1.05rem;
-}
-
-.scorecard-header__meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem;
-  color: var(--fg-muted, #525960);
-  font-size: 0.88rem;
-}
-
-.scorecard-header__meta a {
-  color: var(--accent, #0058aa);
-  text-decoration: none;
-}
-.scorecard-header__meta a:hover {
-  text-decoration: underline;
 }
 
 /* Audience banner — informational signal above the score summary */
@@ -2499,11 +2477,6 @@ main .remediation__body {
   font-size: 0.95rem;
   font-weight: 600;
   margin: 0 0 0.5rem;
-}
-.catcard__hd .audit-group__title {
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 600;
 }
 
 .audit-group__title a {
@@ -2700,6 +2673,288 @@ main .remediation__body {
 :root[data-theme="dark"] .tier-badge--notable {
   background: oklch(23.00% 0.04 70);
   color: oklch(80.00% 0.08 70);
+}
+
+/* ================================================================
+ * Result page — one spine, one score head, grouped rows. The lanes
+ * differ in content, not layout; the crumb, the mono h1 with its lane
+ * chip, and the meta line are shared by every /score/<target> page.
+ * ================================================================ */
+.result-spine {
+  padding-bottom: var(--space-6);
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: var(--space-6);
+}
+.result-spine__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: clamp(1.75rem, 1.2rem + 2vw, 2.8rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin: 0;
+}
+.result-spine__target {
+  overflow-wrap: anywhere;
+}
+.result-spine__lane {
+  color: var(--fg-secondary);
+}
+.result-spine__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+}
+.result-spine__tier {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+}
+.result-spine__links a {
+  color: var(--fg-secondary);
+}
+.reaudit {
+  margin-inline-start: auto;
+}
+.reaudit[aria-disabled="true"] {
+  color: var(--fg-muted);
+  border-color: var(--border-subtle);
+  cursor: default;
+}
+.reaudit[aria-disabled="true"]:hover {
+  border-color: var(--border-subtle);
+}
+.reaudit__countdown {
+  font-family: var(--font-mono);
+  font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
+  white-space: pre;
+}
+
+/* Progress page (/scoring). Phase and check rows reuse the principle-row
+ * grid; the running row's pill is an outline in currentColor and its
+ * elapsed counter ticks beside it in tabular mono. No spinner and no
+ * animated glyph: the rows and the counter are the progress signal. */
+.scoring__rows .pscore__row {
+  animation: principle-enter 400ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.scoring__id {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--fg-secondary);
+}
+.scoring__trail {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  justify-self: end;
+}
+.scoring__pill--running {
+  color: var(--fg-secondary);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+.scoring__counter,
+.scoring__countdown {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
+  color: var(--fg-muted);
+  white-space: pre;
+}
+.scoring__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+.scoring__actions [aria-disabled="true"] {
+  color: var(--fg-muted);
+  cursor: default;
+  opacity: 0.7;
+}
+.scoring__bounce {
+  margin-top: var(--space-5);
+}
+.scoring__bounce .live-score__bounce-headline,
+.scoring__bounce .live-score__bounce-body {
+  display: block;
+}
+@media (max-width: 560px) {
+  .scoring__row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .scoring__trail {
+    grid-column: 2;
+    justify-self: start;
+  }
+  .scoring__actions .btn {
+    flex: 1 1 100%;
+    justify-content: center;
+    min-height: 44px;
+  }
+}
+
+/* Score head: the headline numeral, its meter, and the secondary numeral. */
+.result-score {
+  display: grid;
+  grid-template-columns: auto minmax(12rem, 22rem);
+  align-items: center;
+  column-gap: var(--space-6);
+  row-gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.result-score .bigscore {
+  grid-row: 1 / span 2;
+}
+.result-score__meter {
+  grid-column: 2;
+  display: block;
+}
+.result-score__meter .meter__track {
+  height: 12px;
+}
+.result-score__secondary {
+  grid-column: 2;
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--text-secondary);
+}
+.result-score__secondary-n {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
+  color: var(--fg-heading);
+}
+.result-score__note {
+  margin: 0 0 var(--space-6);
+  color: var(--fg-muted);
+  font-size: 0.85rem;
+  max-width: var(--measure);
+}
+/* The meter fills once on first paint; nothing else on the page animates. */
+.result-score .meter__fill {
+  transform-origin: left center;
+  animation: result-fill 600ms var(--ease) both;
+}
+@keyframes result-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .result-score .meter__fill {
+    animation-duration: 0.01ms;
+  }
+}
+
+/* CLI brief under the score head: description, the audit command, meta, chips. */
+.result-brief {
+  margin-bottom: var(--space-6);
+}
+.result-brief__desc {
+  color: var(--fg-secondary);
+  margin: 0 0 var(--space-3);
+  font-size: 1.05rem;
+  max-width: var(--measure);
+}
+.result-brief__cmd {
+  margin: 0 0 var(--space-3);
+}
+.result-brief__cmd code {
+  display: inline-block;
+  font-size: 0.85rem;
+  padding: 0.5em 0.8em;
+  border-radius: var(--radius);
+}
+.result-brief__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--fg-muted);
+  font-size: 0.88rem;
+  margin-bottom: var(--space-3);
+}
+.result-brief__meta a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.result-brief__meta a:hover {
+  text-decoration: underline;
+}
+
+/* Website category rows nest their check details under the row body. */
+.pscore__row--category .audit-group__title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.pscore__row--category .audit-group__rollup {
+  margin-left: 0;
+}
+.pscore__row--empty .spec__title,
+.pscore__row--empty .pscore__evidence {
+  color: var(--fg-muted);
+}
+.pscore__checks {
+  margin-top: var(--space-4);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+}
+.pscore__checks > .web-check {
+  min-width: 0;
+}
+
+/* The 404: one sentence, one prefilled audit link, a did-you-mean list. */
+.result-missing .result-spine__title {
+  font-size: clamp(1.4rem, 1rem + 1.6vw, 2rem);
+}
+.result-suggest ul {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-3) 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.result-suggest li a {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  padding: 0.35em 0.7em;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-decoration: none;
+  color: var(--fg-heading);
+}
+
+@media (max-width: 900px) {
+  .result-score {
+    grid-template-columns: 1fr;
+  }
+  .result-score .bigscore {
+    grid-row: auto;
+  }
+  .result-score__meter,
+  .result-score__secondary {
+    grid-column: 1;
+  }
+}
+@media (max-width: 560px) {
+  .result-spine__meta .reaudit {
+    flex-basis: 100%;
+    justify-content: center;
+    min-height: 44px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3007,7 +3262,7 @@ main .remediation__body {
 }
 
 /* =============================================================
- * /score/live/<binary> result page — share surface.
+ * Live CLI result page — share surface.
  * Reuses the per-tool scorecard score badge component; adds a
  * compact header with version + binary + freshness marker.
  * ============================================================= */

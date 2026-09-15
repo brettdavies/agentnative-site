@@ -5,11 +5,6 @@ export type Surface = 'cli' | 'web';
 
 const STORAGE_KEY = 'anc-surface';
 
-const CLI_BOARD_HREF = '/scorecards';
-const WEB_BOARD_HREF = '/web';
-const CLI_AUDIT_HREF = '/audit';
-const WEB_AUDIT_HREF = '/web-audit';
-
 export function getSurface(): Surface {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -28,22 +23,10 @@ export function setSurface(surface: Surface): void {
   }
 }
 
-/** Read-only href map for tests and diagnostics; production nav uses dual anchors + CSS. */
-export function leaderboardsHref(): string {
-  return getSurface() === 'web' ? WEB_BOARD_HREF : CLI_BOARD_HREF;
-}
-
-export function auditHref(): string {
-  return getSurface() === 'web' ? WEB_AUDIT_HREF : CLI_AUDIT_HREF;
-}
-
 type SurfaceProbeConfig = {
   segSelector: string;
   cliRadioId: string;
   webRadioId: string;
-  isOnCli: (path: string) => boolean;
-  isOnWeb: (path: string) => boolean;
-  peerHref: (surface: Surface) => string;
 };
 
 function surfaceFromHomeRadio(id: string): Surface {
@@ -65,8 +48,25 @@ function bindHomepage(): void {
   const web = document.getElementById('s-web') as HTMLInputElement | null;
   if (!cli || !web) return;
 
-  if (getSurface() === 'web') web.checked = true;
-  else cli.checked = true;
+  // A lane named in the URL is already checked on the served markup, and an
+  // explicit link beats a remembered preference: restoring the stored surface
+  // here would send a visitor who followed one straight back to the other
+  // pane.
+  let laneInUrl = false;
+  try {
+    laneInUrl = new URLSearchParams(globalThis.location?.search ?? '').has('lane');
+  } catch {
+    // No parseable location: the stored surface is the only signal there is.
+  }
+  if (!laneInUrl) {
+    if (getSurface() === 'web') web.checked = true;
+    else cli.checked = true;
+  }
+
+  // The pre-paint attribute has done its job now that a radio carries the
+  // surface. Leaving it set would overrule a later CLI selection, which is
+  // the fight the off-home reader above refuses to start.
+  delete document.documentElement.dataset.surface;
 
   for (const radio of [cli, web]) {
     radio.addEventListener('change', () => {
@@ -76,6 +76,10 @@ function bindHomepage(): void {
   }
 }
 
+// One board and one entry form serve both lanes, so flipping the segment
+// swaps panes on the page the visitor is already on. The flip records the
+// preference, which is what the header nav and the next page read; it never
+// navigates, because there is no peer page left to navigate to.
 function bindSurfaceProbe(config: SurfaceProbeConfig): void {
   const seg = document.querySelector(config.segSelector);
   if (!seg) return;
@@ -84,18 +88,10 @@ function bindSurfaceProbe(config: SurfaceProbeConfig): void {
   const web = document.getElementById(config.webRadioId) as HTMLInputElement | null;
   if (!cli || !web) return;
 
-  const currentPath = globalThis.location?.pathname ?? '';
-  const onCli = config.isOnCli(currentPath);
-  const onWeb = config.isOnWeb(currentPath);
-
   for (const radio of [cli, web]) {
     radio.addEventListener('change', () => {
       if (!radio.checked) return;
-      const next = surfaceFromRadioId(radio.id, config.webRadioId);
-      const staying = (onCli && next === 'cli') || (onWeb && next === 'web');
-      if (staying) return;
-      setSurface(next);
-      globalThis.location.assign(config.peerHref(next));
+      setSurface(surfaceFromRadioId(radio.id, config.webRadioId));
     });
   }
 }
@@ -104,18 +100,12 @@ const BOARD_PROBE: SurfaceProbeConfig = {
   segSelector: '[data-surface-board-seg]',
   cliRadioId: 'board-s-cli',
   webRadioId: 'board-s-web',
-  isOnCli: (path) => path === CLI_BOARD_HREF || path.startsWith('/score/'),
-  isOnWeb: (path) => path === WEB_BOARD_HREF || (path.startsWith('/web/') && !path.startsWith('/web-audit')),
-  peerHref: (surface) => (surface === 'web' ? WEB_BOARD_HREF : CLI_BOARD_HREF),
 };
 
 const AUDIT_PROBE: SurfaceProbeConfig = {
   segSelector: '[data-surface-audit-seg]',
   cliRadioId: 'audit-s-cli',
   webRadioId: 'audit-s-web',
-  isOnCli: (path) => path === CLI_AUDIT_HREF,
-  isOnWeb: (path) => path === WEB_AUDIT_HREF || path.startsWith('/web-audit/'),
-  peerHref: (surface) => (surface === 'web' ? WEB_AUDIT_HREF : CLI_AUDIT_HREF),
 };
 
 function init(): void {

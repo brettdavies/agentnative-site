@@ -169,7 +169,7 @@ expect_status_method() {
 }
 
 # expect_warm_hit LABEL BODY MAX_MS — POST and assert sub-MAX_MS round-trip
-# AND scorecard.kind != 'registry_hit' (live or cache-hit, not curated).
+# AND tier != 'registry' (live or cache-hit, not curated).
 expect_warm_hit() {
   local label=$1 body=$2 max_ms=$3
   local tmp
@@ -290,11 +290,11 @@ fi
 # Group A — input validation (warm; no sandbox)
 # -----------------------------------------------------------------------------
 printf '\n[A] input validation\n'
-expect_error_code "A01 empty input"            '{"input":"","turnstile_token":"x"}'                                         400 unrecognized_input
+expect_error_code "A01 empty input"            '{"target":"","turnstile_token":"x"}'                                         400 target_empty
 expect_status_post "A02 malformed JSON body"   'not json'                                                                    400
-expect_error_code "A03 non-https URL"          '{"input":"http://github.com/foo/bar","turnstile_token":"x"}'                400 non_https_url
-expect_error_code "A04 non-github host"        '{"input":"https://example.com/foo/bar","turnstile_token":"x"}'              400 non_github_host
-expect_error_code "A05 branch path URL"        '{"input":"https://github.com/foo/bar/tree/main","turnstile_token":"x"}'     400 invalid_url_path
+expect_error_code "A03 non-https URL"          '{"target":"http://github.com/foo/bar","turnstile_token":"x"}'                400 non_https_url
+expect_error_code "A04 non-github host"        '{"target":"https://example.com/foo/bar","turnstile_token":"x"}'              400 non_github_host
+expect_error_code "A05 branch path URL"        '{"target":"https://github.com/foo/bar/tree/main","turnstile_token":"x"}'     400 invalid_url_path
 
 # -----------------------------------------------------------------------------
 # Group B — method gate (warm; no sandbox)
@@ -310,20 +310,20 @@ expect_status_method "B02 PUT → 405"    PUT    405
 # (the "missing_token" check fires first). The CF test secret only matters
 # AFTER a non-empty token reaches siteverify.
 printf '\n[C] Turnstile semantics\n'
-expect_error_code "C01 empty turnstile_token"     '{"input":"https://github.com/foo/bar","turnstile_token":""}'  400 turnstile_failed
-expect_error_code "C02 missing turnstile_token"   '{"input":"https://github.com/foo/bar"}'                       400 turnstile_failed
+expect_error_code "C01 empty turnstile_token"     '{"target":"https://github.com/foo/bar","turnstile_token":""}'  400 turnstile_failed
+expect_error_code "C02 missing turnstile_token"   '{"target":"https://github.com/foo/bar"}'                       400 turnstile_failed
 
 # Curated registry hit (slug=ripgrep) is unmetered — bypasses Turnstile entirely.
 # Should return 200 with ANY token, including empty or missing.
-expect_status_post "C03 curated slug with token=x" '{"input":"ripgrep","turnstile_token":"x"}' 200
-expect_status_post "C04 curated slug with empty token (unmetered bypass)" '{"input":"ripgrep","turnstile_token":""}' 200
-expect_status_post "C05 curated slug without token field"                  '{"input":"ripgrep"}'                       200
+expect_status_post "C03 curated slug with token=x" '{"target":"ripgrep","turnstile_token":"x"}' 200
+expect_status_post "C04 curated slug with empty token (unmetered bypass)" '{"target":"ripgrep","turnstile_token":""}' 200
+expect_status_post "C05 curated slug without token field"                  '{"target":"ripgrep"}'                       200
 
 # -----------------------------------------------------------------------------
 # Group D — registry/cache read tier (warm; no sandbox)
 # -----------------------------------------------------------------------------
 printf '\n[D] read tiers\n'
-expect_warm_hit "D01 POST cowsay (cached from prior run)" '{"input":"npm install -g cowsay","turnstile_token":"x"}' 2000
+expect_warm_hit "D01 POST cowsay (cached from prior run)" '{"target":"npm install -g cowsay","turnstile_token":"x"}' 2000
 
 # GET path: cache tier also honored on GET per U7 (read-only contract extended).
 GET_LATENCY=$({
@@ -357,9 +357,9 @@ rm -f /tmp/d03
 if [ "$COLD" = true ]; then
   printf '\n[E] cold sandbox spawns (3 cold + 3 warm)\n'
 
-  expect_cold_then_warm "E01 pip install black"   '{"input":"pip install black","turnstile_token":"x"}'     black
-  expect_cold_then_warm "E02 cargo binstall ouch" '{"input":"cargo binstall ouch","turnstile_token":"x"}'   ouch
-  expect_cold_then_warm "E03 github.com/Aider-AI/aider (hint→pip aider-chat)" '{"input":"https://github.com/Aider-AI/aider","turnstile_token":"x"}' aider
+  expect_cold_then_warm "E01 pip install black"   '{"target":"pip install black","turnstile_token":"x"}'     black
+  expect_cold_then_warm "E02 cargo binstall ouch" '{"target":"cargo binstall ouch","turnstile_token":"x"}'   ouch
+  expect_cold_then_warm "E03 github.com/Aider-AI/aider (hint→pip aider-chat)" '{"target":"https://github.com/Aider-AI/aider","turnstile_token":"x"}' aider
 
   # E04 — ?fromCache=false bypass on a cached entry. Live re-spawn forced
   # even though cowsay is cached. The cache write still fires (overwriting
@@ -369,7 +369,7 @@ if [ "$COLD" = true ]; then
   code=$(curl -s -o /tmp/e04 -w '%{http_code}' --max-time 90 "${ACCESS_HEADERS[@]}" \
     -X POST -H 'content-type: application/json' \
     "$STAGING_URL/api/score?fromCache=false" \
-    --data '{"input":"npm install -g cowsay","turnstile_token":"x"}')
+    --data '{"target":"npm install -g cowsay","turnstile_token":"x"}')
   end_ms=$(now_ms)
   duration=$((end_ms - start_ms))
   if [ "$code" = "200" ] && [ "$duration" -gt 1500 ]; then

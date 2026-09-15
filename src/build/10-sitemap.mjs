@@ -5,6 +5,7 @@
 // ignores PUBLIC_BASE_URL. A staging sitemap advertising staging URLs
 // would invite crawlers to index the staging deployment.
 
+import { AUDIT_PATH } from '../shared/audit-routes.ts';
 import { canonicalBaseUrl } from './util.mjs';
 
 /**
@@ -22,7 +23,7 @@ export function buildSitemap({ principleNumbers, extraPaths = [], baseUrl, lastm
   const paths = [
     '/',
     ...principleNumbers.map((n) => `/p${n}`),
-    '/audit',
+    AUDIT_PATH,
     '/about',
     '/changelog',
     '/contribute',

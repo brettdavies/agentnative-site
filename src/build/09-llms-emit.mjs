@@ -8,6 +8,7 @@
 
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { SCORECARDS_PATH, scoreMarkdownPath } from '../shared/audit-routes';
 import { buildLlmsFull, buildLlmsIndex } from './llms.mjs';
 import { buildLeaderboardMarkdown } from './scorecards-render.mjs';
 import { absolutifyMarkdownLinks } from './util.mjs';
@@ -34,6 +35,18 @@ import { absolutifyMarkdownLinks } from './util.mjs';
  * @param {object} args.skillData                   — manifest object; .name embedded in the section heading
  * @param {string} args.skillMarkdown               — pre-built skill page body
  */
+/**
+ * Each curated tool's markdown twin, alphabetical so the llms.txt index reads
+ * as a browseable directory; the leaderboard owns rank order.
+ * @param {Array<{tool: {name: string}}>} leaderboard
+ * @returns {Array<{name: string, path: string}>}
+ */
+export function scorecardTwinLinks(leaderboard) {
+  return leaderboard
+    .map((e) => ({ name: e.tool.name, path: scoreMarkdownPath(e.tool.name) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export async function emitLlmsSurface({
   distDir,
   introTitle,
@@ -63,13 +76,9 @@ export async function emitLlmsSurface({
       { label: 'MCP client skill', path: '/mcp-skill.md' },
     ],
     scorecardLinks: [
-      { name: 'Leaderboard', path: '/scorecards.md' },
+      { name: 'Leaderboard', path: `${SCORECARDS_PATH}.md` },
       { name: 'Coverage Matrix', path: '/coverage.md' },
-      // Per-tool scorecards alphabetical so the llms.txt index reads as a
-      // browseable directory; the leaderboard itself owns rank-order presentation.
-      ...leaderboard
-        .map((e) => ({ name: e.tool.name, path: `/score/${e.tool.name}.md` }))
-        .sort((a, b) => a.name.localeCompare(b.name)),
+      ...scorecardTwinLinks(leaderboard),
     ],
     skillLinks: [
       { name: 'Skill (HTML)', path: '/skill.md' },
@@ -100,8 +109,8 @@ export async function emitLlmsSurface({
       {
         title: 'ANC 100 — Agent-Native CLI Leaderboard',
         body: absolutifyMarkdownLinks(buildLeaderboardMarkdown(leaderboard)),
-        htmlPath: '/scorecards',
-        mdPath: '/scorecards.md',
+        htmlPath: SCORECARDS_PATH,
+        mdPath: `${SCORECARDS_PATH}.md`,
       },
       {
         title: 'Spec Coverage Matrix',

@@ -60,6 +60,14 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+# The group key leads with a literal token naming the workflow that owns it, so
+# it cannot collide with a key a caller or callee produces from context alone.
+# This group never cancels: a run killed part way leaves a half-finished
+# release or deploy.
+concurrency:
+  group: deploy-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   staging:
     name: build + deploy staging
@@ -224,11 +232,41 @@ jobs:
             echo "$label: links resolve to $host"
           }
 
+          # A tool result carries two kinds of URL and only one of them is the
+          # deployment's to mint. The envelope's own scorecard_url, markdown_url
+          # and json_url must name the host that served the request. The
+          # scorecard attached inside it is a committed artifact whose badge
+          # block names the canonical host on purpose, because the markdown a
+          # user pastes into a README has to resolve for everyone rather than
+          # for this deployment. So the assertion reads the minted fields
+          # instead of grepping the whole payload.
+          assert_minted_self_hosted() {
+            local label=$1 body=$2 envelope minted
+            envelope=$(jq -er '.result.content[0].text' <<<"$body") || {
+              echo "::error::$label returned no tool content to read"
+              exit 1
+            }
+            minted=$(jq -er '[.scorecard_url, .markdown_url, .json_url] | map(select(. != null)) | .[]' <<<"$envelope") || {
+              echo "::error::$label minted no result URLs; the check proves nothing"
+              exit 1
+            }
+            if grep -qF 'https://anc.dev' <<<"$minted"; then
+              echo "::error::$label on staging minted a production URL"
+              grep -oF -m5 'https://anc.dev' <<<"$minted" || true
+              exit 1
+            fi
+            if ! grep -qF "$host" <<<"$minted"; then
+              echo "::error::$label minted no staging URL at all; the check proves nothing"
+              exit 1
+            fi
+            echo "$label: minted URLs resolve to $host"
+          }
+
           init=$(mcp_call '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"anc-origin-smoke","version":"0"}}}')
           assert_self_hosted "MCP instructions" "$init"
 
           card=$(mcp_call '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_scorecard","arguments":{"slug":"ripgrep"}}}')
-          assert_self_hosted "get_scorecard result" "$card"
+          assert_minted_self_hosted "get_scorecard result" "$card"
 
   production:
     name: build + deploy production

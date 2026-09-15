@@ -4,6 +4,8 @@
 // the seed-membership check on on-demand audits. Module-cached per env
 // like the registry loader.
 
+import { emitLog } from '../telemetry/log';
+
 export interface WebSeedEntry {
   domain: string;
   url: string;
@@ -32,7 +34,7 @@ export async function loadWebSeed(env: WebSeedEnv): Promise<WebSeedEntry[]> {
   const entries: WebSeedEntry[] = [];
   for (const item of raw) {
     if (!isWebSeedEntry(item)) {
-      console.log(JSON.stringify({ scope: 'web-seed', error: 'malformed_entry', entry: item }));
+      emitLog({ scope: 'web-seed' }, { error: 'malformed_entry', entry: item });
       continue;
     }
     entries.push({ domain: item.domain, url: item.url, name: item.name, description: item.description ?? '' });

@@ -352,10 +352,41 @@ describe('regression #6 — /install (CLI install page) — HTML+MD only, no JSO
 });
 
 describe('regression #4 — scorecard pages', () => {
-  test('dist/scorecards.html exists and contains a <table> element', async () => {
+  test('dist/scorecards.html renders both boards as compact rows behind one segment', async () => {
     const html = await readFile(join(DIST, 'scorecards.html'), 'utf8');
-    expect(html).toContain('<table');
-    expect(html).toContain('class="leaderboard-table"');
+    expect(html).toContain('data-surface-board-seg');
+    expect(html).toContain('<div class="board" data-s="cli"');
+    expect(html).toContain('<div class="board" data-s="web"');
+    expect(html).toContain('class="lrow');
+    // The columns live in the twin now; the page trades them for one row shape.
+    expect(html).not.toContain('class="leaderboard-table"');
+  });
+
+  test('both boards name themselves and every built row carries an accessible name', async () => {
+    // An aria-label on a bare div never reaches the accessibility tree, so the
+    // container needs a role for its name to count at all. A row without a name
+    // of its own announces as its contents: rank digits, tool, sub-label and a
+    // bare number.
+    for (const page of ['scorecards.html', 'index.html']) {
+      const html = await readFile(join(DIST, page), 'utf8');
+      const rows = html.match(/class="lrow[^"]*"[^>]*>/g) ?? [];
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) expect(row).toContain('aria-label="');
+      expect(html).toContain('<span class="rank" aria-hidden="true">');
+      expect(html).toContain('data-s="cli" role="group"');
+      expect(html).toContain('data-s="web" role="group"');
+    }
+  });
+
+  test('both scorecards emits carry the web-board placeholder for the Worker to fill', async () => {
+    // A missed inject must be impossible to ship: the placeholder has to be in
+    // the built HTML and the twin, and the Worker replaces it in both.
+    const html = await readFile(join(DIST, 'scorecards.html'), 'utf8');
+    const md = await readFile(join(DIST, 'scorecards.md'), 'utf8');
+    expect(html).toContain('{{WEB_BOARD_ROWS}}');
+    expect(html).toContain('{{WEB_BOARD_VIEW}}');
+    expect(md).toContain('## Web leaderboard');
+    expect(md).toContain('{{WEB_BOARD_ROWS}}');
   });
 
   test('dist/scorecards.md exists and is a readable markdown table', async () => {

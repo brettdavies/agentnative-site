@@ -16,7 +16,9 @@
   // surface for surfaces that actually serve. Public egress is also the
   // correct vantage point for an agent-readiness audit. External fetches
   // (package installs, github) already go public, so they are unaffected.
-  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  // `enable_request_signal` exposes the incoming request's abort signal to
+  // the Worker, so a streaming relay can observe a client disconnect.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public", "enable_request_signal"],
   // Project-scoped opt-out of wrangler telemetry. Travels with the repo so
   // CI runs and contributor invocations stay opted out regardless of
   // per-user `WRANGLER_SEND_METRICS` or per-machine `wrangler telemetry
@@ -69,11 +71,19 @@
       "max_instances": 3
     }
   ],
+  // AUDIT_JOB is the audit job object keyed by lane and input: it fans one
+  // running audit out to every reader of that input. `v4-audit-job` names the
+  // same migration in both environments; staging's list also carries its
+  // rollback rehearsal tags, and neither list may ever drop an applied tag.
   "durable_objects": {
     "bindings": [
       {
         "class_name": "Sandbox",
         "name": "SCORE"
+      },
+      {
+        "class_name": "AuditJob",
+        "name": "AUDIT_JOB"
       }
     ]
   },
@@ -81,6 +91,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["Sandbox"]
+    },
+    {
+      "tag": "v4-audit-job",
+      "new_sqlite_classes": ["AuditJob"]
     }
   ],
   "r2_buckets": [
@@ -319,15 +333,19 @@
           {
             "class_name": "Sandbox",
             "name": "SCORE"
+          },
+          {
+            "class_name": "AuditJob",
+            "name": "AUDIT_JOB"
           }
         ]
       },
       // env.staging.migrations is append-only: Cloudflare rejects any
       // deploy whose tag list is a subset of what's already applied to
-      // the env. staging carries the full sequence (v1, v2-drop-sandbox,
-      // v3-restore-sandbox); top-level `migrations` stays at v1 until
-      // prod runs its own rollback. See RELEASES.md § Cross-migration
-      // rollback rehearsal for the procedure that produces a new tag.
+      // the env. staging alone carries the rollback-rehearsal pair
+      // (v2-drop-sandbox, v3-restore-sandbox); every other tag matches the
+      // top-level list. See RELEASES.md § Cross-migration rollback
+      // rehearsal for the procedure that produces a new tag.
       "migrations": [
         {
           "tag": "v1",
@@ -340,6 +358,10 @@
         {
           "tag": "v3-restore-sandbox",
           "new_sqlite_classes": ["Sandbox"]
+        },
+        {
+          "tag": "v4-audit-job",
+          "new_sqlite_classes": ["AuditJob"]
         }
       ],
       "r2_buckets": [

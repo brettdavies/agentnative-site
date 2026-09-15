@@ -116,7 +116,7 @@ export function registerResources(server: McpServer, catalog: Catalog): void {
     {
       title: 'Cached scorecard',
       description:
-        'Registry-projected scorecard summary by binary slug. The full scorecard JSON sits under scorecard_url; ' +
+        'Registry-projected scorecard summary by binary slug. The full result envelope sits under json_url; ' +
         'this resource returns the registry entry shape so an agent can decide whether to follow the link.',
       mimeType: 'application/json',
     },

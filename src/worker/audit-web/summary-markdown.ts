@@ -1,6 +1,8 @@
 // Markdown twin for /web/<domain>.md. Absolute links so a cross-origin fetch
 // resolves them, and the fenced copy-paste prompt the HTML page withholds.
 
+import { auditPath } from '../../shared/audit-routes';
+import { resultFrontMatter } from '../../shared/result-spine';
 import { CANONICAL_SITE_URL } from '../../shared/site-url';
 import { freshnessMarkdown } from './summary-freshness';
 import { type WebSummaryInput, webSummaryView } from './summary-input';
@@ -38,7 +40,13 @@ export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
   const { model, freshnessState } = webSummaryView(input);
   const origin = input.origin ?? CANONICAL_SITE_URL;
 
-  const lines: string[] = [
+  const lines: string[] = [];
+  if (input.links) {
+    lines.push(
+      resultFrontMatter({ target: input.domain, lane: 'web', tier: input.spine?.tier ?? 'cache', links: input.links }),
+    );
+  }
+  lines.push(
     `# ${model.name} — Agent-Readiness Audit`,
     '',
     `Website: [${model.targetUrl}](${model.targetUrl})`,
@@ -48,7 +56,7 @@ export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
     '',
     freshnessMarkdown(freshnessState),
     '',
-  ];
+  );
 
   for (const category of model.categories) {
     lines.push(`## ${category.name} (${category.passed}/${category.counted})`, '');
@@ -58,10 +66,11 @@ export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
     for (const row of category.rows) renderCheck(row, lines);
   }
 
+  const reaudit = `${origin}${auditPath({ lane: 'web', target: input.domain })}`;
   lines.push(
     '## Re-run this audit',
     '',
-    `Re-run from [${origin}/web-audit](${origin}/web-audit), or call the \`audit_website\` MCP tool.`,
+    `Re-audit from [${reaudit}](${reaudit}), or call the \`audit_website\` MCP tool.`,
     '',
   );
   return lines.join('\n');

@@ -67,6 +67,33 @@ version). HIT-min is live-board HTML and markdown (`max-age=300`, purge by Cache
 every-request `no-store` (`/web/scoring*`, POST `/mcp`, `/api/score`, `/api/audit-web`). Homepage HTML and homepage
 markdown share HIT-min because they are one object that includes the live web pane.
 
+## Audit funnel
+
+### Target
+
+The one noun both lanes take: the string a visitor or an agent submits to be audited, at most 128 characters.
+Classification decides the lane from the shape alone, so nothing asks the reader which kind of thing they typed. A tool
+name, an install command, or a GitHub URL classifies CLI, and a GitHub URL naming a branch classifies as its own
+branch-scoped kind; a domain or a URL classifies website. The classifier returns the normalized form every later surface
+keys on, or a rejection carrying both a reason and the sentence shown to the reader. Top-level page names are reserved
+and a target can never shadow one.
+
+### Progress page
+
+`/scoring?target=<t>`, the single page both lanes run on. The Worker paints it from the target alone; the client owns
+every state after that, spending a stashed admission token, probing without one, or waiting for the reader to press
+Start, then rendering the stream and forwarding to the result. With no target it serves a pointer to the audit page, and
+a refused target serves that pointer with the reason. The page exists for one run, so it is neither cached at the edge
+nor indexed, and it never loads the in-page tool script: a tool that could reach it could make it transact.
+
+### Result envelope
+
+The one object every result representation is built from, so a result page, its markdown twin, and its JSON cannot
+disagree about what was scored. It names the lane, the tier it was served at, the target, the three representation URLs,
+the freshness pair, the spec version it was scored under, and the scorecard itself. A curated registry result, a live
+CLI result, and a website result each have their own builder, and all three produce this shape. Distinct from the
+scorecard, which is the audit's own output and rides inside the envelope as a single field.
+
 ## Live scoring
 
 ### anc100
@@ -218,6 +245,47 @@ The batch process that re-audits every curated board domain and rebuilds the lea
 schedule and after each deploy; only one batch runs at a time, so overlapping triggers coalesce rather than
 double-spending the audit budget. It is what keeps the board's live scores fresh without committing any scorecard
 snapshots. Distinct from an on-demand audit of a single domain, which caches its own result without starting a batch.
+
+### Declared host
+
+A host the entry site names in one of its own machine-readable surfaces: the MCP server card's remote or transport URL,
+an api-catalog anchor, the catalog's service-desc target, or RFC 9728 protected-resource metadata. A declared host is
+evaluated for the entry site's scorecard and never receives a scorecard of its own from that audit.
+
+### Follow phase
+
+The bounded slice of a web audit, after MCP discovery and before wave 1, in which declared hosts are fetched: documents
+by GET through the public-URL guard, one hop from the entry origin, under a wall-clock budget and per-audit caps on
+distinct hosts and requests. Exhaustion resolves dependent rows to not-applicable and never marks the audit incomplete.
+
+### Reciprocity
+
+The proof required before the audit sends an MCP wire probe to a declared host off the entry origin: the target's own
+server card at the SEP-2127 location, its RFC 9728 protected-resource metadata, or an MCP-shaped answer to a GET. Every
+failure mode collapses into one outcome, reciprocity refused, so a caller cannot distinguish them.
+
+### Endpoint of record
+
+The one MCP endpoint a web audit evaluates: the entry origin's own endpoint when it has one, otherwise the first
+followed remote. Other remotes are recorded in the declared-hosts trail as not followed.
+
+### Declared-hosts trail
+
+The scorecard's top-level list of every declared host and its outcome: followed, reciprocity refused, not followed,
+blocked, unreachable, or budget exceeded. It is the reader's explanation for why an entry site carries rows evaluated at
+another host.
+
+### Registry fingerprint
+
+The hash of the normalized web-audit registry, widened with the follow policy version and the follow kill-switch state,
+that the rescore Workflow compares against its stored value to decide whether the curated seeds must reflow. Its prefix
+is stamped on each scorecard as the registry it was scored under.
+
+### Watched source
+
+An entry in the standards manifest: an external specification artifact the registry relies on, with its stability tier,
+source type, pinned value, and canonicalization rule. The scheduled spec-drift poll compares each watched source against
+its pin and opens one issue per drifted source.
 
 ## Agent discovery
 
