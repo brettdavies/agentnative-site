@@ -488,6 +488,39 @@ agent-side rule (working today) and a Playwright snapshot diff in CI (planned, d
 stabilizes). Both live in [`AGENTS.md` § Visual fidelity](./AGENTS.md#visual-fidelity), the source of truth. A release
 that didn't satisfy those gates upstream isn't unblocked by the CI pipeline being green.
 
+## Why the release branch deploys to staging
+
+Staging deploys from `dev`. A release branch is `dev`'s tree minus the guarded paths, so the two build the same
+artifact whenever the strip is inert, and a preflight run against `dev`-on-staging then does describe the release. The
+condition is the problem: it holds for docs and prose config, and it stops holding the first time a guarded path reaches
+the build. Deploying the release commit costs one workflow dispatch and removes the inference.
+The equality is worth measuring rather than assuming, and it is cheap to measure: build both trees and compare the
+emitted files. On 2026-09-15 they differed only in two build timestamps.
+
+The deploy has to land before the live gates, and the container rollout has to finish before them too, because
+Cloudflare reports `wrangler deploy` success while instances are still draining. A gate that races the rollout reads a
+warm OLD-image instance and fails in a way indistinguishable from a real defect.
+
+## Why the live e2e suites gate the release
+
+`deep-check.yml` runs the four live Playwright projects on a schedule against `main`. That is the right place for them,
+since they need a deployed Worker and make real outbound probes, but it means they validate the release that already
+shipped. The PR gate runs `bun test` only. Between a contract change merging to `dev` and the next release, then,
+nothing live asserts the browser flow, the negotiated surfaces, the MCP transport as a client drives it, or the
+skip-Worker cache classes.
+
+That window closed badly on the 2026-09-15 unified-funnel release. The last scheduled run against `dev` was 2026-09-11
+and it had failed. Run against staging at release time, `edge-hit` would not start at all: two tests shared a title and
+Playwright refuses a whole project on that, so the only proof of the per-result cache classes had been inert since they
+landed. `staging-mcp` and `web-audit` each asserted fields the release had deliberately moved.
+
+Two lessons are baked into the gate. It reads Playwright's counts rather than its exit status, because a project that
+refuses to start exits non-zero with no failing test and a zero count: a shape that reads as "the suite failed" when it
+means "the suite never ran". And a red suite here is a stale test until proven otherwise: every one of these projects
+consumes a wire contract, so the release that renames a field is exactly the release whose suites go red. All five
+failures on 2026-09-15 were stale consumers; none was a product defect. Trace each one to the source before treating it
+as either.
+
 ## Skill releases
 
 `/skill.json` and `/skill` advertise the `agent-native-cli` skill, hosted at

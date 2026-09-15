@@ -21,6 +21,9 @@ catches mechanical regressions inside this repo. This checklist covers what CI s
   [`docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md`](./docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md)).
 - Distribution surfaces that only exercise on real artifacts (markdown twins, canonical redirects, Static-Assets cache
   headers, skill manifest live render).
+- The browser-level and edge-level contracts. `deep-check.yml` runs the four live Playwright projects on a schedule
+  against `main`, so they describe the PREVIOUS release; the PR gate runs `bun test` only. A contract a release changes
+  therefore has no automated live coverage at the moment the release is cut, which is what the `e2e` gate supplies.
 
 ## Quick start: run the automated gates
 
@@ -44,6 +47,7 @@ Sub-commands let you re-run one section in isolation:
 | `do-smoke`  | Live `/api/score` smoke against the `--env` target (fresh non-registry github URL)                                                                    | `curl` + `~/.claude/skills/1password` (staging mode)                         |
 | `mcp`       | Delegates to `scripts/release/mcp-smoke.sh` against the `--env` target                                                                                | `scripts/release/mcp-smoke.sh` + `~/.claude/skills/1password` (staging mode) |
 | `dist`      | Served `skill.json` version vs source against the `--env` target; `X-Robots-Tag: noindex` only in staging mode                                          | `curl`                                                                       |
+| `e2e`       | The four live Playwright projects against the `--env` target: `staging-mcp`, `edge-hit`, `web-audit`, `web-audit-webkit`. SKIPs in local mode         | `bun x playwright test` + `~/.claude/skills/1password` (staging mode)        |
 | `mechanics` | Leak check vs `origin/main`, unguarded docs added to `main`, diff-B vs `origin/dev` filtered by the guarded set                                        | `git`, `scripts/release/guarded-paths.sh`                                    |
 | `all`       | every above sequentially, drift first                                                                                                                 |                                                                              |
 
@@ -488,6 +492,27 @@ Driven by `scripts/release/preflight.sh dist`.
   ```
 
   If absent on staging, the staging-host guard in `src/worker/headers.ts` regressed.
+
+### Live e2e suites (mandatory)
+
+Driven by `scripts/release/preflight.sh e2e`.
+
+These four projects are the only coverage of the browser flow, the negotiated markdown and HTML surfaces, the MCP
+transport as a client drives it, and the skip-Worker edge cache classes. `wrangler dev` cannot produce a skip-Worker
+HIT, so `edge-hit` has no local equivalent and the gate SKIPs in local mode; run it in staging mode.
+
+- [ ] The release commit is deployed to staging (step 7 of the overlay recipe) and `wrangler containers list` shows
+      `STATE = ready`. Until then these gates describe `dev`, not the release.
+- [ ] `staging-mcp`, `edge-hit`, `web-audit`, and `web-audit-webkit` all pass, with a non-zero test count for each.
+
+**A zero count is a failure, not a pass.** Playwright refuses an entire project on a configuration error — a duplicate
+test title is the one that has actually happened — and reports it as a non-zero exit with no failing test. The gate
+reads the counts for that reason; if you run `bun x playwright test` by hand instead, check that tests actually ran.
+
+**Read a failure as a stale test before reading it as a product defect, and then prove which.** Every one of these
+projects consumes a wire contract, so a release that renames a request key or moves a response field breaks the suite
+that asserts the old shape. Trace each failure to the source: the 2026-09-15 unified-funnel release had five stale
+consumers across the gates and the specs, and no product defect behind any of them.
 
 ### Release mechanics sanity
 

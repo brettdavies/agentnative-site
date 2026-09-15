@@ -137,16 +137,32 @@ git diff --cached --name-only origin/main | grep -E "$GUARDED" \
 #       needs registering in the workflow's extra_paths and removing from the branch.
 git diff --cached --diff-filter=A --name-only origin/main | grep -E '(^docs/|\.md$)' | grep -Ev "$GUARDED" || echo "(none unguarded)"
 
-# 6. Commit the overlay as one commit sitting directly on top of main, then run the
-#    preflight gates against it.
+# 6. Commit the overlay as one commit sitting directly on top of main.
 git commit
+
+# 7. Push the branch, then deploy THIS commit to staging. Preflight's live gates
+#    read the staging Worker, so until staging runs the release's own build they
+#    describe dev, not the release. Wait for the deploy AND for the container
+#    rollout before any live gate: instances drain asynchronously, so a gate that
+#    races the rollout hits a warm OLD-image instance.
+git push -u origin release/<YYYY-MM-DD>-<slug>
+gh workflow run deploy.yml -f environment=staging -f ref="$(git rev-parse HEAD)"
+gh run watch <run-id> --exit-status
+bun x wrangler containers list                                  # STATE = ready
+
+# 8. Run every gate against the deployed release build. `all` includes `e2e`,
+#    the four live Playwright projects; nothing else exercises a browser or the
+#    edge cache classes.
 scripts/release/preflight.sh all
 
-# 7. Push and open the PR. Scrub body in /tmp/ first.
-git push -u origin release/<YYYY-MM-DD>-<slug>
+# 9. Open the PR. Scrub body in /tmp/ first.
 gh pr create --base main --head release/<YYYY-MM-DD>-<slug> \
   --title "release: <summary>" --body-file /tmp/body.md
 ```
+
+Staging keeps serving the release build until the next push to `dev` redeploys it. That is the intended window: it is
+what makes step 8's gates describe the release. If the release is abandoned, push to `dev` or dispatch
+`deploy.yml -f environment=staging` to put staging back on the integration branch.
 
 The result is a single commit whose diff against `main` is the release, with `main` as an ancestor, so the PR merges
 with zero conflicts.
@@ -160,7 +176,11 @@ removes `release/<slug>` from the remote on merge. `dev` is untouched.
 
 → Rationale (why overlay, not merge; why cut from `main`):
 [`RELEASES-RATIONALE.md` § Branching model](./RELEASES-RATIONALE.md#branching-model). CHANGELOG mechanics:
-[`RELEASES-RATIONALE.md` § CHANGELOG generation](./RELEASES-RATIONALE.md#changelog-generation).
+[`RELEASES-RATIONALE.md` § CHANGELOG generation](./RELEASES-RATIONALE.md#changelog-generation). Why step 7 deploys the
+release commit rather than trusting staging-on-`dev`:
+[`RELEASES-RATIONALE.md` § Why the release branch deploys to staging](./RELEASES-RATIONALE.md#why-the-release-branch-deploys-to-staging).
+Why step 8's live suites gate the release:
+[`RELEASES-RATIONALE.md` § Why the live e2e suites gate the release](./RELEASES-RATIONALE.md#why-the-live-e2e-suites-gate-the-release).
 
 ### Exception: cherry-pick
 
@@ -198,7 +218,7 @@ git cherry HEAD origin/dev | grep '^+' || echo "(none)"
 Cherry-picks of PRs that touched guarded paths hit modify/delete or rename/delete conflicts, since those paths live on
 `dev` but are blocked from `main`: mark each unmerged guarded path deleted in the index (`git update-index --remove
 $(git diff --name-only --diff-filter=U)`), trash the orphan worktree files, and `git cherry-pick --continue --no-edit`.
-Steps 4 to 7 of the overlay recipe then apply unchanged.
+Steps 4 to 9 of the overlay recipe then apply unchanged, including the staging deploy of the release commit.
 
 → Triple-diff false-positive triage:
 [`RELEASES-RATIONALE.md` § Triple-diff verification](./RELEASES-RATIONALE.md#triple-diff-verification).
@@ -559,7 +579,9 @@ anc.dev.
 ### Pre-release live-path smoke (manual)
 
 The CI post-deploy smoke above exercises the registry-fast-path only. The live DO path (install + `anc audit` inside the
-Sandbox container) is not exercised by automation and gates every `release/*` PR via the manual preflight checklist.
+Sandbox container) is not exercised by the deploy workflow and gates every `release/*` PR through
+`scripts/release/preflight.sh all`, which runs it as the `do-smoke` and `mcp` gates against the deployed release build.
+The browser-level and edge-level contracts gate the same way, as the `e2e` gate.
 
 → Procedure:
 [`RELEASES-PREFLIGHT.md` § Live-scoring Sandbox DO path (mandatory)](./RELEASES-PREFLIGHT.md#live-scoring-sandbox-do-path-mandatory).
@@ -686,8 +708,9 @@ other: `wrangler secret put` against a declared var name is rejected with Cloudf
    `/.well-known/ai.txt` carries `Programmatic-API: https://anc.dev/mcp` and `Contact:
    mailto:97-boss-beetle@icloud.com`.
 4. **Smoke the handshake.** `tests/e2e/mcp.e2e.ts` and `tests/e2e/discoverability.e2e.ts` ship as the staging-mcp
-   Playwright project. Set `ANC_STAGING_BASE_URL` and run `bun x playwright test --project=staging-mcp` against the live
-   host. Thirty-three tests; both files must pass.
+   Playwright project, which `scripts/release/preflight.sh e2e` runs against the deployed release build alongside the
+   other three live projects. Run the gate rather than the project directly; it stages CF Access and fails on a project
+   that refuses to start, which a bare `playwright test` reports as a non-zero exit with no failing test.
 
 ### Breaking: server-card schema moves to SEP-1649 shape
 
