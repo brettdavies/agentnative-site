@@ -24,6 +24,8 @@
 
 import { expect, test } from '@playwright/test';
 
+import { SPEC_VERSION } from '../../src/worker/spec-version.gen';
+
 const STAGING_BASE = process.env.ANC_STAGING_BASE_URL;
 
 test.skip(!STAGING_BASE, 'ANC_STAGING_BASE_URL not set — opt-in staging web-audit suite.');
@@ -40,6 +42,19 @@ test.use({ baseURL: STAGING_BASE, extraHTTPHeaders: ACCESS_HEADERS });
 
 const TARGET_DOMAIN = 'anc.dev';
 
+/**
+ * Selects the Website lane. The listing checkbox lives in the website pane
+ * (`data-s="web"`) and the form opens on the CLI lane, so a test that touches
+ * the box has to make the visitor's own lane gesture first: the submit-time
+ * flip happens too late to expose it, and `listingChoice` deliberately reports
+ * no choice when the box was never on screen. The radio is visually hidden
+ * behind its label, so this clicks the label the way a visitor does.
+ */
+async function selectWebsiteLane(page: import('@playwright/test').Page): Promise<void> {
+  await page.click('label[for="s-web"]');
+  await expect(page.locator('[data-audit-listing]')).toBeVisible();
+}
+
 test.describe('web audit — entry form, progress page, and result', () => {
   test('the entry form forwards to the progress page, which streams and lands on the result', async ({ page }) => {
     await page.goto('/audit');
@@ -54,6 +69,7 @@ test.describe('web audit — entry form, progress page, and result', () => {
     // waiting on a redirect the Worker had declined. Agreeing costs one flip
     // the first time and nothing after.
     await page.fill('[data-audit-target]', TARGET_DOMAIN);
+    await selectWebsiteLane(page);
     await page.check('[data-audit-listing]');
     await page.click('[data-audit-submit]');
 
@@ -90,13 +106,20 @@ test.describe('web audit — entry form, progress page, and result', () => {
     expect(res.status()).toBe(200);
     const contentType = res.headers()['content-type'] ?? '';
     if (contentType.includes('application/json')) {
-      // Cache hit: a single JSON envelope with the 0.2 scorecard.
+      // One envelope rather than a stream means the result was already
+      // finished. That covers a cache hit and, since the audit job fans one
+      // run out to every reader of the target, a reader that arrived while an
+      // audit was in flight and was handed the result it completed. The first
+      // reports `cached: true` and the second `cached: false`, so the flag is
+      // read as a reported boolean rather than pinned: the test above audits
+      // this same domain, and pinning it made this one fail on suite order.
       const body = (await res.json()) as {
-        freshness?: { cached?: boolean };
+        freshness?: { cached?: boolean; scored_at?: string | null };
         scorecard?: { score_pct?: number };
         scorecard_url?: string;
       };
-      expect(body.freshness?.cached).toBe(true);
+      expect(typeof body.freshness?.cached).toBe('boolean');
+      expect(body.freshness?.scored_at).toBeTruthy();
       expect(body.scorecard?.score_pct).toBeGreaterThanOrEqual(0);
       expect(body.scorecard_url).toMatch(new RegExp(`/score/${TARGET_DOMAIN}$`));
       return;
@@ -228,8 +251,10 @@ test.describe('web audit — public_listing opt-in transport', () => {
    * message and, by design, never redirects, so it timed out waiting for a
    * navigation the server had already refused.
    *
-   * The shape mirrors the real cache-hit branch in `handleWebAudit`, so the
-   * client forwards exactly as it would against staging.
+   * The body is the shared result envelope, which is what the client tests
+   * for before it forwards: it takes the cache-hit branch only on a payload
+   * carrying both `kind` and `freshness`, so a stub that reports `cached` at
+   * the top level is ignored and the page waits out the test instead.
    */
   async function stubAuditPost(page: import('@playwright/test').Page): Promise<void> {
     await page.route('**/api/score', async (route) => {
@@ -238,11 +263,19 @@ test.describe('web audit — public_listing opt-in transport', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          cached: true,
-          scored_at: scoredAt,
-          refresh_after: new Date(Date.parse(scoredAt) + 60_000).toISOString(),
-          scorecard: {},
+          kind: 'web',
+          tier: 'cache',
+          target: TARGET_DOMAIN,
           scorecard_url: `/score/${TARGET_DOMAIN}`,
+          markdown_url: `/score/${TARGET_DOMAIN}/md`,
+          json_url: `/score/${TARGET_DOMAIN}/json`,
+          freshness: {
+            cached: true,
+            scored_at: scoredAt,
+            refresh_after: new Date(Date.parse(scoredAt) + 60_000).toISOString(),
+          },
+          spec_version: SPEC_VERSION,
+          scorecard: {},
         }),
       });
     });
@@ -260,6 +293,7 @@ test.describe('web audit — public_listing opt-in transport', () => {
     await stubAuditPost(page);
     await page.goto('/audit');
     await page.fill('[data-audit-target]', TARGET_DOMAIN);
+    await selectWebsiteLane(page);
     await page.check('[data-audit-listing]');
     const posted = page.waitForRequest(isAuditPost, { timeout: 60_000 });
     await page.click('[data-audit-submit]');
@@ -272,6 +306,7 @@ test.describe('web audit — public_listing opt-in transport', () => {
     await stubAuditPost(page);
     await page.goto('/audit');
     await page.fill('[data-audit-target]', TARGET_DOMAIN);
+    await selectWebsiteLane(page);
     await expect(page.locator('[data-audit-listing]')).not.toBeChecked();
     const posted = page.waitForRequest(isAuditPost, { timeout: 60_000 });
     await page.click('[data-audit-submit]');
