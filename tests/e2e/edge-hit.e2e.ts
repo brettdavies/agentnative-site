@@ -158,7 +158,7 @@ test.describe('skip-Worker HIT — staging Workers Caching', () => {
   });
 
   test('GET /scoring is not a skip-Worker HIT', async ({ request }) => {
-    for (const path of ['/scoring?target=ripgrep', '/scoring.md']) {
+    for (const path of ['/scoring', '/scoring?target=ripgrep', '/scoring.md']) {
       const res = await request.get(`${STAGING_BASE}${path}`, { headers: { ...ACCESS_HEADERS, ...BROWSER } });
       expect(res.headers()['cf-cache-status']?.toUpperCase()).not.toBe('HIT');
       expect(res.headers()['cache-control'] ?? '').toContain('no-store');
@@ -174,14 +174,6 @@ test.describe('skip-Worker HIT — staging Workers Caching', () => {
     expect(bare.headers()['cache-control'] ?? '').toContain('max-age=300');
     expect(bare.headers()['cache-control'] ?? '').not.toContain('must-revalidate');
     expect(isSkipWorkerHit(bare.headers())).toBe(true);
-  });
-
-  test('GET /scoring is not a skip-Worker HIT', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/scoring`, {
-      headers: { ...ACCESS_HEADERS, ...BROWSER },
-    });
-    expect(res.headers()['cf-cache-status']?.toUpperCase()).not.toBe('HIT');
-    expect(res.headers()['cache-control'] ?? '').toContain('no-store');
   });
 
   test('a never-audited host 404 is not a skip-Worker HIT', async ({ request }) => {
