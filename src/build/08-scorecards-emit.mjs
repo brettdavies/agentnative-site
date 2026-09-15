@@ -192,6 +192,7 @@ export async function emitScorecardSurface({
       description:
         'Automated agent-readiness scores for real CLI tools, scored against the seven agent-native principles.',
       canonicalPath: SCORECARDS_PATH,
+      breadcrumb: 'Leaderboard',
       bodyHtml: leaderboardBody,
       themeInitJs: themeInit,
       // This page alone: the panes must settle on the stored surface before
@@ -283,6 +284,7 @@ export async function emitScorecardSurface({
       title: 'Spec Coverage Matrix — anc.dev',
       description: 'Which agent-native CLI requirements have automated audits and which remain uncovered.',
       canonicalPath: '/coverage',
+      breadcrumb: 'Coverage',
       bodyHtml: `<article class="container doc">${coverageBody}</article>`,
       themeInitJs: themeInit,
     }),
@@ -302,6 +304,7 @@ export async function emitScorecardSurface({
       title: `Install ${skillData.name}`,
       description: skillData.description,
       canonicalPath: '/skill',
+      breadcrumb: 'Skill',
       bodyHtml: `<article class="container doc">${skillBodyHtml}</article>`,
       themeInitJs: themeInit,
     }),

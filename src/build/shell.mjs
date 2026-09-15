@@ -48,24 +48,13 @@ export const NAV_LINKS = [
 // Organization node hands a crawler.
 const CONTACT_EMAIL = '97-boss-beetle@icloud.com';
 
-// Title-case a path segment for a breadcrumb label: `mcp-skill` reads as
-// "Mcp Skill" without the override, and the acronyms are the segments a
-// reader would recognize.
-const CRUMB_LABELS = {
-  mcp: 'MCP',
-  'mcp-skill': 'MCP skill',
-  p1: 'Principle 1',
-  p2: 'Principle 2',
-  p3: 'Principle 3',
-  p4: 'Principle 4',
-  p5: 'Principle 5',
-  p6: 'Principle 6',
-  p7: 'Principle 7',
-  p8: 'Principle 8',
-};
-
-const crumbLabel = (segment) =>
-  CRUMB_LABELS[segment] ?? segment.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase());
+/**
+ * Prefixes whose next segment is a target rather than a page. The prefix
+ * itself is dropped from a trail: `/score/` and `/fix/` are namespaces the
+ * route module owns, and the bare path is a 404, so a crumb pointing at one
+ * would send a reader to a miss.
+ */
+const TARGET_NAMESPACES = new Set([SCORE_PREFIX, FIX_PREFIX].map((prefix) => prefix.replace(/^\/|\/$/g, '')));
 
 /**
  * The trail from the home page to this one, or nothing.
@@ -75,22 +64,49 @@ const crumbLabel = (segment) =>
  * substitutes per request: a build-time trail would bake `{{CANONICAL_PATH}}`
  * into the graph a crawler reads.
  *
+ * A namespace segment is dropped rather than linked. `/score/` and `/fix/`
+ * are prefixes the route module owns, not pages: the bare path is a 404, and
+ * a crumb pointing at one would send a reader to a miss. The target under
+ * them keeps its exact text, because a binary name, a host, and an
+ * `owner/repo@branch` are identifiers that title case would corrupt.
+ *
+ * The last crumb takes the `label` the page supplies. Without one it is the
+ * URL segment verbatim, which is deliberately plain: a slug carries no casing
+ * a rule could recover, and a wrong-looking crumb is better than a
+ * plausible-looking one nobody notices.
+ *
  * @param {string} base
  * @param {string} path
+ * @param {string|null} label
  * @returns {object[]}
  */
-function breadcrumbNodes(base, path) {
+function breadcrumbNodes(base, path, label = null) {
   if (path.includes('{{')) return [];
   const segments = path
     .replace(/^\/+|\/+$/g, '')
     .split('/')
     .filter(Boolean);
   if (segments.length === 0) return [];
+
+  const namespace = TARGET_NAMESPACES.has(segments[0]) ? segments[0] : null;
   const items = [{ '@type': 'ListItem', position: 1, name: 'Home', item: base }];
+  if (namespace) {
+    // One crumb for the whole target, however many segments it spans: a
+    // branch-scoped result is `owner/repo@branch`, one identifier with a slash.
+    // A target under a namespace is an identifier: a binary name, a host, an
+    // `owner/repo@branch`. It reads verbatim unless the emitter supplied a
+    // label, which is how a fix page gets the name its registry entry authors
+    // rather than one guessed from the slug.
+    const target = decodeURIComponent(segments.slice(1).join('/'));
+    items.push({ '@type': 'ListItem', position: 2, name: label ?? target, item: `${base}${path}` });
+    return [{ '@type': 'BreadcrumbList', itemListElement: items }];
+  }
+
   let href = '';
   segments.forEach((segment, i) => {
     href += `/${segment}`;
-    items.push({ '@type': 'ListItem', position: i + 2, name: crumbLabel(segment), item: `${base}${href}` });
+    const last = i === segments.length - 1;
+    items.push({ '@type': 'ListItem', position: i + 2, name: last && label ? label : segment, item: `${base}${href}` });
   });
   return [{ '@type': 'BreadcrumbList', itemListElement: items }];
 }
@@ -242,6 +258,7 @@ export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
  *     `rel="alternate"` link markup (default: the markdown-twin link alone).
  * @param {string} args.bodyHtml             — rendered principle / page HTML.
  * @param {string} args.themeInitJs          — inline head script source.
+ * @param {string=} args.breadcrumb         — this page's label in its breadcrumb trail.
  * @param {boolean=} args.isIndex            — true on '/', adds the Turnstile sitekey meta.
  * @param {boolean=} args.turnstileSitekey   — true on form pages that acquire
  *     a token (`/` via isIndex, `/web-audit`). Emits the same placeholder meta.
@@ -260,6 +277,10 @@ export function emitShell({
   // its body paints. Empty on every page that does not.
   extraHeadJs = '',
   isIndex = false,
+  // The label this page takes in its breadcrumb trail. Supply it when the
+  // emitter knows a better name than the URL carries; the derived label is a
+  // reasonable default and handles every page that ships today.
+  breadcrumb = null,
   turnstileSitekey = false,
   baseUrl,
   extraScripts = [],
@@ -320,7 +341,7 @@ export function emitShell({
         },
         publisher: { '@id': orgId },
       },
-      ...breadcrumbNodes(base, canonicalPath),
+      ...breadcrumbNodes(base, canonicalPath, breadcrumb),
       {
         '@type': 'SoftwareApplication',
         '@id': `${base}/#anc-cli`,

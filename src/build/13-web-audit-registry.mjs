@@ -78,6 +78,7 @@ function expandProbeUserAgent(id, withParams) {
   return { ...withParams, headers: { ...headers, [uaKey]: expanded } };
 }
 
+const BREADCRUMB_MAX = 40;
 const PRINCIPLE_RE = /^P[1-8]$/;
 const CHECK_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -181,6 +182,18 @@ export function normalizeWebAuditRegistry(doc) {
     if (typeof check.hint !== 'string' || check.hint.length === 0) {
       throw new Error(`web-audit registry: check "${id}" missing hint`);
     }
+    // The label this check's fix page takes in a breadcrumb. Authored rather
+    // than derived from the id, because an id is a slug: `llms-txt-scoped` and
+    // `oauth-discovery` have no casing a rule could recover. Bounded because a
+    // crumb sits inline in a trail, where the title's sentence would not fit.
+    if (typeof check.breadcrumb !== 'string' || check.breadcrumb.length === 0) {
+      throw new Error(`web-audit registry: check "${id}" missing breadcrumb`);
+    }
+    if (check.breadcrumb.length > BREADCRUMB_MAX) {
+      throw new Error(
+        `web-audit registry: check "${id}" breadcrumb is ${check.breadcrumb.length} chars, over the ${BREADCRUMB_MAX} a trail fits`,
+      );
+    }
     if (!WEB_AUDIT_HANDLERS.has(check.handler)) {
       throw new Error(`web-audit registry: check "${id}" names unknown handler "${check.handler}"`);
     }
@@ -208,6 +221,7 @@ export function normalizeWebAuditRegistry(doc) {
       ...('eval' in check ? { eval: check.eval } : {}),
       weight: check.weight,
       title: check.title,
+      breadcrumb: check.breadcrumb,
       hint: check.hint,
       handler: check.handler,
       with: expandProbeUserAgent(id, check.with),

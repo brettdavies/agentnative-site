@@ -81,6 +81,7 @@ checks:
     antecedent: api-surface
     weight: 2
     title: An OpenAPI description is published
+    breadcrumb: OpenAPI description
     handler: http
     with:
       path_any: [/openapi.json, /openapi.yaml, /.well-known/openapi.json]
@@ -96,6 +97,7 @@ checks:
     antecedent: schemas-ref
     weight: 1
     title: Referenced JSON Schemas resolve as application/schema+json
+    breadcrumb: JSON Schemas
     handler: http
     with:
       path_any: [/api/schema/input.json, /api/schema/output.json, /schema.json]
@@ -110,6 +112,7 @@ checks:
     antecedent: api-surface
     weight: 2
     title: /.well-known/api-catalog published (RFC 9727)
+    breadcrumb: API catalog
     handler: http
     with:
       path: /.well-known/api-catalog
@@ -124,6 +127,7 @@ checks:
     antecedent: api-surface
     weight: 2
     title: API client errors return JSON, not HTML
+    breadcrumb: JSON errors
     handler: api-hygiene
     with: { op: json-errors }
     hint: Answer unknown or documented 4xx API GETs with a JSON error body, not an HTML page.
@@ -136,6 +140,7 @@ checks:
     antecedent: api-surface
     weight: 2
     title: API responses advertise rate-limit headers
+    breadcrumb: Rate-limit headers
     handler: api-hygiene
     with: { op: rate-limit }
     hint: Send RateLimit-* or X-RateLimit-* (or Retry-After) on API responses so agents can back off.
@@ -149,6 +154,7 @@ checks:
     antecedent: mcp-present
     weight: 5
     title: initialize handshake returns serverInfo + protocolVersion
+    breadcrumb: MCP initialize
     handler: mcp
     with: { op: initialize }
     hint: Answer JSON-RPC `initialize` with serverInfo{name,version} and protocolVersion.
@@ -161,6 +167,7 @@ checks:
     antecedent: mcp-present
     weight: 2
     title: initialize advertises capabilities (tools / resources / prompts)
+    breadcrumb: MCP capabilities
     handler: mcp
     with: { op: initialize, assert: capabilities }
     hint: Populate `capabilities` in the initialize result so clients gate feature use.
@@ -173,6 +180,7 @@ checks:
     antecedent: mcp-present
     weight: 4
     title: tools/list returns a tools array with input schemas
+    breadcrumb: MCP tools/list
     handler: mcp
     with: { op: tools-list }
     hint: Return `result.tools[]`, each with `name`, `description`, and a JSON `inputSchema`.
@@ -185,6 +193,7 @@ checks:
     antecedent: mcp-resources
     weight: 3
     title: resources/list returns at least one resource when advertised
+    breadcrumb: MCP resources/list
     handler: mcp
     with: { op: resources-list }
     hint: When initialize advertises capabilities.resources, return a non-empty result.resources array from resources/list.
@@ -197,6 +206,7 @@ checks:
     antecedent: mcp-present
     weight: 4
     title: header-routed tools/list (2026-07-28) returns tools without initialize
+    breadcrumb: MCP tools/list (modern)
     handler: mcp
     with: { op: modern-tools-list }
     hint: Answer a header-routed tools/list (MCP-Protocol-Version 2026-07-28, Mcp-Method, _meta envelope) without requiring initialize.
@@ -209,6 +219,7 @@ checks:
     antecedent: mcp-present
     weight: 3
     title: server/discover answers with server identity on the modern lane
+    breadcrumb: MCP server discovery
     handler: mcp
     with: { op: server-discover }
     hint: Answer server/discover with a well-formed discovery result on protocol 2026-07-28.
@@ -221,6 +232,7 @@ checks:
     antecedent: mcp-present
     weight: 2
     title: unknown JSON-RPC method returns -32601
+    breadcrumb: MCP unknown method
     handler: mcp
     with: { op: error, method: nonexistent/method, expect_code: -32601 }
     hint: Reject unknown methods with JSON-RPC error -32601 (Method not found), not a hang or 500.
@@ -237,6 +249,7 @@ checks:
     antecedent: mcp-present
     weight: 2
     title: a non-JSON body draws -32700 (or a typed HTTP 400/415 refusal)
+    breadcrumb: MCP malformed body
     handler: mcp
     with: { op: malformed-body }
     hint: Answer an unparseable POST body with JSON-RPC -32700 (Parse error) or a bare HTTP 400/415, never a 200 with garbage or a hang.
@@ -249,6 +262,7 @@ checks:
     antecedent: mcp-present
     weight: 2
     title: a batch carrying a modern-envelope request is rejected -32600
+    breadcrumb: MCP batch reject
     handler: mcp
     with: { op: batch-reject }
     hint: Reject a JSON array batch whose element carries the modern _meta envelope with JSON-RPC -32600 (Invalid Request).
@@ -261,6 +275,7 @@ checks:
     antecedent: mcp-present
     weight: 2
     title: tools/call with an unknown tool name returns -32602
+    breadcrumb: MCP unknown tool
     handler: mcp
     with: { op: unknown-tool }
     hint: Reject an unknown tool name on tools/call with JSON-RPC -32602 (Invalid params), not a hang or a 200 result.
@@ -273,6 +288,7 @@ checks:
     antecedent: mcp-present
     weight: 2
     title: an unknown method on the modern lane returns -32601
+    breadcrumb: MCP unknown method (modern)
     handler: mcp
     with: { op: modern-unknown-method }
     hint: Reject an unknown header-routed method (2026-07-28) with JSON-RPC -32601; HTTP 404 delivery conforms when the body carries the envelope.
@@ -285,6 +301,7 @@ checks:
     antecedent: mcp-present
     weight: 2
     title: _meta missing clientCapabilities is rejected (-32602 or -32600)
+    breadcrumb: MCP clientCapabilities
     handler: mcp
     with: { op: modern-clientcaps }
     hint: Reject a modern request whose _meta omits io.modelcontextprotocol/clientCapabilities with -32602 (or -32600); the key is mandatory on every modern request.
@@ -297,6 +314,7 @@ checks:
     antecedent: mcp-present
     weight: 2
     title: an Mcp-Method header disagreeing with the body method draws -32020
+    breadcrumb: MCP header mismatch
     handler: mcp
     with: { op: modern-header-mismatch }
     hint: Validate the SEP-2243 header mirror and reject a request whose Mcp-Method header names a different method than the body with -32020.
@@ -309,6 +327,7 @@ checks:
     antecedent: mcp-present
     weight: 2
     title: an unsupported protocol version is rejected -32022 with data.supported
+    breadcrumb: MCP version reject
     handler: mcp
     with: { op: modern-version-reject }
     hint: Reject an unsupported MCP-Protocol-Version claim with -32022 (UnsupportedProtocolVersion) and list the served revisions in error.data.supported.
@@ -321,6 +340,7 @@ checks:
     antecedent: mcp-resources
     weight: 2
     title: modern resources/read with an unknown URI returns -32602
+    breadcrumb: MCP resources miss
     handler: mcp
     with: { op: modern-resources-miss }
     hint: Answer a modern resources/read whose Mcp-Name mirrors an unknown URI with JSON-RPC -32602 (-32002 tolerated), never a hang or a 200 result.
@@ -336,6 +356,7 @@ checks:
     antecedent: mcp-present
     weight: 3
     title: a JSON-only Accept is answered without SSE framing
+    breadcrumb: MCP Accept JSON
     handler: mcp
     with: { op: accept-json }
     hint: Answer a POST whose Accept names only application/json with a single application/json response, never a text/event-stream body a JSON-only client cannot read.
@@ -348,6 +369,7 @@ checks:
     antecedent: mcp-present
     weight: 3
     title: an unsatisfiable Accept draws a 406 rather than an unasked-for type
+    breadcrumb: MCP Accept unsatisfiable
     handler: mcp
     with: { op: accept-unsatisfiable }
     hint: Refuse a POST whose Accept allows neither application/json nor text/event-stream with HTTP 406 Not Acceptable, never a 200 carrying a type the client did not ask for.
@@ -360,6 +382,7 @@ checks:
     antecedent: mcp-present
     weight: 3
     title: GET on the MCP endpoint answers fast (not a held-open hang)
+    breadcrumb: MCP GET fast-fail
     handler: http
     with:
       path: "{mcp_endpoint}"
@@ -376,6 +399,7 @@ checks:
     antecedent: mcp-present
     weight: 3
     title: CORS preflight (OPTIONS) succeeds with Access-Control-Allow-* headers
+    breadcrumb: MCP CORS preflight
     handler: cors-preflight
     with:
       path: "{mcp_endpoint}"
@@ -393,6 +417,7 @@ checks:
     antecedent: mcp-present
     weight: 2
     title: POST response carries Access-Control-Allow-Origin
+    breadcrumb: MCP CORS actual
     handler: cors-preflight
     with:
       path: "{mcp_endpoint}"
@@ -410,6 +435,7 @@ checks:
     antecedent: mcp-present
     weight: 3
     title: A .well-known MCP server card is published (SEP-1649)
+    breadcrumb: MCP server card
     handler: http
     with:
       path: /.well-known/mcp/server-card.json
@@ -425,6 +451,7 @@ checks:
     eval: legacy-alias-redirects
     weight: 1
     title: Legacy MCP card paths redirect to the canonical card
+    breadcrumb: MCP card legacy aliases
     handler: http
     with:
       canonical: /.well-known/mcp/server-card.json
@@ -442,6 +469,7 @@ checks:
     antecedent: mcp-present
     weight: 1
     title: A human/agent usage doc for the server resolves
+    breadcrumb: MCP usage doc
     handler: http
     with:
       path_any: [/mcp-skill.md, /mcp.md, /.well-known/mcp/usage.md]
@@ -456,6 +484,7 @@ checks:
     antecedent: html-root
     weight: 1
     title: Root HTML exposes WebMCP browser tools
+    breadcrumb: WebMCP
     handler: webmcp
     with: {}
     hint: Expose page tools via WebMCP (script type="application/webmcp+json" or a navigator.modelContext provider) so browser agents can call them.
@@ -469,6 +498,7 @@ checks:
     antecedent: none
     weight: 4
     title: /llms.txt present with a summary and link index
+    breadcrumb: llms.txt
     handler: http
     with:
       path: /llms.txt
@@ -484,6 +514,7 @@ checks:
     antecedent: root-llms-txt
     weight: 1
     title: llms.txt has H1, summary, and a link index
+    breadcrumb: llms.txt format
     handler: llms-txt-quality
     with: { op: format }
     hint: 'Structure /llms.txt with an H1 title, a blockquote summary, and a markdown link index (llmstxt.org). Presence alone is not enough.'
@@ -496,6 +527,7 @@ checks:
     antecedent: root-llms-txt
     weight: 1
     title: llms.txt links resolve
+    breadcrumb: llms.txt links
     handler: llms-txt-quality
     with: { op: links, max_candidates: 8 }
     hint: 'Keep every markdown href in /llms.txt fetchable (2xx/3xx). Dead index links waste an agent round-trip.'
@@ -508,6 +540,7 @@ checks:
     antecedent: root-llms-txt
     weight: 1
     title: llms.txt has a when-to-use or programmatic-access section
+    breadcrumb: llms.txt when-to-use
     handler: llms-txt-quality
     with: { op: when-to-use }
     hint: 'Add a short heading such as "When to use" or "Programmatic access" so an agent knows when the MCP or docs apply.'
@@ -520,6 +553,7 @@ checks:
     antecedent: docs-site
     weight: 2
     title: /llms-full.txt present (single-fetch full corpus)
+    breadcrumb: llms-full.txt
     handler: http
     with:
       path: /llms-full.txt
@@ -535,6 +569,7 @@ checks:
     eval: scoped-discovery
     weight: 1
     title: Per-section llms.txt files resolve under content subdirectories
+    breadcrumb: llms.txt scoped
     handler: scoped-llms
     with: { file: llms.txt, max_candidates: 8 }
     hint: Serve scoped llms.txt files (e.g. /docs/llms.txt) for major content sections linked from the root index.
@@ -548,6 +583,7 @@ checks:
     eval: scoped-discovery
     weight: 1
     title: Per-section llms-full.txt files resolve under content subdirectories
+    breadcrumb: llms-full.txt scoped
     handler: scoped-llms
     with: { file: llms-full.txt, max_candidates: 8 }
     hint: Serve scoped llms-full.txt corpora (e.g. /docs/llms-full.txt) so agents can ingest one section in one fetch.
@@ -560,6 +596,7 @@ checks:
     antecedent: html-root
     weight: 2
     title: Accept text/markdown content negotiation returns markdown
+    breadcrumb: Accept markdown
     handler: http
     with:
       path: /
@@ -575,6 +612,7 @@ checks:
     antecedent: markdown-twin
     weight: 1
     title: Bare CLI User-Agent receives the markdown twin
+    breadcrumb: Markdown for a CLI UA
     handler: http
     with:
       path: /
@@ -590,6 +628,7 @@ checks:
     antecedent: markdown-twin
     weight: 1
     title: AI user-fetch User-Agent receives the markdown twin
+    breadcrumb: Markdown for an agent UA
     handler: http
     with:
       path: /
@@ -605,6 +644,7 @@ checks:
     antecedent: http-root
     weight: 1
     title: AI user-fetch User-Agent can reach the homepage
+    breadcrumb: Agent UA reachable
     handler: http
     with:
       path: /
@@ -622,6 +662,7 @@ checks:
     antecedent: markdown-twin
     weight: 1
     title: Accept text/plain returns the markdown twin
+    breadcrumb: Markdown Accept plain
     handler: http
     with:
       path: /
@@ -637,6 +678,7 @@ checks:
     antecedent: markdown-twin
     weight: 1
     title: Negotiated responses carry Vary Accept, User-Agent
+    breadcrumb: Markdown Vary
     handler: http
     with:
       path: /
@@ -652,6 +694,7 @@ checks:
     antecedent: markdown-twin
     weight: 1
     title: Markdown twin carries YAML frontmatter
+    breadcrumb: Markdown frontmatter
     handler: markdown-frontmatter
     with:
       path: /
@@ -666,6 +709,7 @@ checks:
     antecedent: html-root
     weight: 2
     title: Root HTML has a descriptive <meta name="description">
+    breadcrumb: Root meta description
     handler: http
     with:
       path: /
@@ -680,6 +724,7 @@ checks:
     antecedent: html-root
     weight: 1
     title: Root HTML embeds Schema.org JSON-LD
+    breadcrumb: Schema.org JSON-LD
     handler: http
     with:
       path: /
@@ -694,6 +739,7 @@ checks:
     antecedent: html-root
     weight: 1
     title: Root HTML has an H1 and readable text without JavaScript
+    breadcrumb: Content without JS
     handler: content-without-js
     with: {}
     hint: 'Serve an H1 and at least ~200 characters of visible text in the raw root HTML. A thin shell is acceptable only when llms.txt links resolvable same-origin content.'
@@ -706,6 +752,7 @@ checks:
     antecedent: html-root
     weight: 1
     title: Root HTML uses semantic landmarks
+    breadcrumb: Semantic HTML
     handler: http
     with:
       path: /
@@ -720,6 +767,7 @@ checks:
     antecedent: html-root
     weight: 2
     title: Root HTML has a <noscript> with machine entry points
+    breadcrumb: noscript fallback
     handler: http
     with:
       path: /
@@ -735,6 +783,7 @@ checks:
     antecedent: none
     weight: 2
     title: /robots.txt present
+    breadcrumb: robots.txt
     handler: http
     with:
       path: /robots.txt
@@ -749,6 +798,7 @@ checks:
     antecedent: none
     weight: 1
     title: /sitemap.xml present
+    breadcrumb: Sitemap
     handler: http
     with:
       path: /sitemap.xml
@@ -764,6 +814,7 @@ checks:
     antecedent: http-root
     weight: 1
     title: Unknown paths return HTTP 404 or 410
+    breadcrumb: Agent-friendly 404
     handler: http
     with:
       path: /anc-web-audit-no-such-page
@@ -778,6 +829,7 @@ checks:
     antecedent: http-root
     weight: 1
     title: 404 body is markdown with a recovery link
+    breadcrumb: Agent-friendly 404 markdown
     handler: http
     with:
       path: /anc-web-audit-no-such-page
@@ -796,6 +848,7 @@ checks:
     antecedent: http-root
     weight: 3
     title: Homepage sends RFC 8288 Link headers pointing at agent resources
+    breadcrumb: Link headers
     handler: http
     with:
       path: /
@@ -811,6 +864,7 @@ checks:
     antecedent: html-root
     weight: 3
     title: Root HTML links to machine surfaces via <link rel>
+    breadcrumb: Root link rel
     handler: http
     with:
       path: /
@@ -825,6 +879,7 @@ checks:
     antecedent: none
     weight: 1
     title: DNS for AI Discovery (DNS-AID) records under _agents (IETF draft)
+    breadcrumb: DNS-AID
     handler: dns-doh
     with:
       names: ["_index._agents.{host}", "_a2a._agents.{host}", "_mcp._agents.{host}"]
@@ -840,6 +895,7 @@ checks:
     antecedent: robots-present
     weight: 2
     title: robots.txt declares AI-crawler rules (RFC 9309)
+    breadcrumb: robots.txt AI rules
     handler: http
     with:
       path: /robots.txt
@@ -854,6 +910,7 @@ checks:
     antecedent: robots-present
     weight: 2
     title: robots.txt declares Content-Signal AI-usage preferences
+    breadcrumb: Content signals
     handler: http
     with:
       path: /robots.txt
@@ -868,6 +925,7 @@ checks:
     antecedent: none
     weight: 1
     title: Web Bot Auth signature directory present (informational)
+    breadcrumb: Web Bot Auth
     handler: http
     with:
       path: /.well-known/http-message-signatures-directory
@@ -882,6 +940,7 @@ checks:
     antecedent: none
     weight: 1
     title: /.well-known/security.txt present (RFC 9116)
+    breadcrumb: security.txt
     handler: http
     with:
       path: /.well-known/security.txt
@@ -897,6 +956,7 @@ checks:
     antecedent: none
     weight: 2
     title: A2A Agent Card published for agent-to-agent discovery
+    breadcrumb: A2A agent card
     handler: http
     with:
       path_any: [/.well-known/agent-card.json, /.well-known/agent.json]
@@ -911,6 +971,7 @@ checks:
     antecedent: none
     weight: 1
     title: /.well-known/ai-catalog.json published (ARD)
+    breadcrumb: AI catalog
     handler: http
     with:
       path: /.well-known/ai-catalog.json
@@ -925,6 +986,7 @@ checks:
     antecedent: none
     weight: 2
     title: Agent-skills discovery index published
+    breadcrumb: Agent skills
     handler: http
     with:
       path_any: [/.well-known/agent-skills/index.json, /.well-known/skills/index.json]
@@ -939,6 +1001,7 @@ checks:
     antecedent: auth-present
     weight: 1
     title: OAuth/OIDC discovery metadata published
+    breadcrumb: OAuth discovery
     handler: http
     with:
       path_any: [/.well-known/openid-configuration, /.well-known/oauth-authorization-server]
@@ -953,6 +1016,7 @@ checks:
     antecedent: mcp-auth
     weight: 1
     title: OAuth Protected Resource Metadata published (RFC 9728)
+    breadcrumb: OAuth protected resource
     handler: http
     with:
       path: /.well-known/oauth-protected-resource
@@ -967,6 +1031,7 @@ checks:
     antecedent: auth-present
     weight: 1
     title: Agent auth/registration metadata doc published
+    breadcrumb: auth.md
     handler: auth-md
     with:
       path_any: [/.well-known/auth.md, /auth.md]
