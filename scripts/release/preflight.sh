@@ -29,6 +29,13 @@
 #   dist      Distribution surfaces against the --env target: the
 #             skill.json served version vs source. The X-Robots-Tag: noindex check runs only in
 #             staging mode (the staging-host guard does not fire for localhost in local mode).
+#   e2e       The four live-staging Playwright projects against the --env target: staging-mcp,
+#             edge-hit, web-audit, web-audit-webkit. These are the browser-level and edge-level
+#             contracts no curl gate reaches, and deep-check runs them on a schedule against main,
+#             so they validate the PREVIOUS release unless a release runs them itself. Staging mode
+#             stages CF Access from 1Password into the env vars the specs read. SKIPs in local mode:
+#             the specs target a deployed Worker, and edge-hit asserts skip-Worker cache classes
+#             wrangler dev cannot produce.
 #   mechanics Release mechanics sanity: leak check (no guarded paths in the diff vs origin/main),
 #             unguarded docs the release adds to main, diff-B against origin/dev filtered by the
 #             guarded set. Not env-dependent.
@@ -114,7 +121,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h | --help) usage ;;
-    drift | surface | coord | build | do-smoke | mcp | dist | mechanics | all)
+    drift | surface | coord | build | do-smoke | mcp | dist | e2e | mechanics | all)
       SUBCMD="$1"
       shift
       ;;
@@ -551,6 +558,62 @@ gate_dist() {
   rm -f "$cfg"
 }
 
+# Gate: e2e (live-staging Playwright projects) -------------------------------
+
+# The projects that only run against a deployed Worker. Named here rather than
+# discovered from playwright.config.ts so that adding a project to the config
+# is a deliberate decision to gate releases on it.
+readonly E2E_PROJECTS=(staging-mcp edge-hit web-audit web-audit-webkit)
+
+gate_e2e() {
+  header "Live e2e suites against $ENV_URL"
+
+  if [[ "$ENV_AUTH_NEEDED" -eq 0 ]]; then
+    gate_skip "live e2e suites" \
+      "local mode: the specs target a deployed Worker, and edge-hit asserts skip-Worker cache classes wrangler dev cannot produce"
+    return
+  fi
+
+  local cid csec
+  cid=$(read_op_field "$OP_ITEM_TOKEN" client_id) || true
+  csec=$(read_op_field "$OP_ITEM_TOKEN" client_secret) || true
+  if [[ -z "$cid" || -z "$csec" ]]; then
+    gate_skip "live e2e suites" \
+      "could not stage CF Access service token from 1Password ($OP_ITEM_TOKEN)"
+    return
+  fi
+
+  local args=()
+  local project
+  for project in "${E2E_PROJECTS[@]}"; do args+=(--project="$project"); done
+
+  # ANC_STAGING_BASE_URL is what makes playwright.config skip its local
+  # wrangler webServer and target the deployed origin.
+  local out status=0
+  out=$(
+    ANC_STAGING_BASE_URL="$ENV_URL" \
+      ANC_STAGING_ACCESS_CLIENT_ID="$cid" \
+      ANC_STAGING_ACCESS_CLIENT_SECRET="$csec" \
+      bun x playwright test "${args[@]}" --reporter=line 2>&1
+  ) || status=$?
+
+  # A duplicate test title, a missing browser, or a config error makes
+  # Playwright refuse a whole project while still exiting non-zero, so the
+  # counts are read rather than the exit status alone: "0 passed" with a
+  # non-zero exit is a project that never ran, not a suite that failed.
+  local passed failed
+  passed=$(printf '%s' "$out" | grep -oE '[0-9]+ passed' | tail -1 | grep -oE '[0-9]+' || true)
+  failed=$(printf '%s' "$out" | grep -oE '[0-9]+ failed' | tail -1 | grep -oE '[0-9]+' || true)
+
+  if [[ "$status" -eq 0 && -n "$passed" && "$passed" -gt 0 ]]; then
+    gate_pass "${#E2E_PROJECTS[@]} live projects, $passed tests passing (${E2E_PROJECTS[*]})"
+    return
+  fi
+
+  gate_fail "live e2e suites" "passed=${passed:-0} failed=${failed:-0} exit=$status"
+  printf '%s\n' "$out" | tail -25 | sed 's/^/    /'
+}
+
 # Gate: mechanics (release mechanics sanity) --------------------------------
 
 gate_mechanics() {
@@ -624,6 +687,7 @@ case "$SUBCMD" in
   do-smoke) gate_do_smoke ;;
   mcp) gate_mcp ;;
   dist) gate_dist ;;
+  e2e) gate_e2e ;;
   mechanics) gate_mechanics ;;
   all)
     gate_drift
@@ -633,6 +697,7 @@ case "$SUBCMD" in
     gate_do_smoke
     gate_mcp
     gate_dist
+    gate_e2e
     gate_mechanics
     ;;
 esac
