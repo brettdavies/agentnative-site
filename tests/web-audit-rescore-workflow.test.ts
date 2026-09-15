@@ -18,6 +18,7 @@ import {
 import {
   auditDomainToCache,
   type RescoreStep,
+  registryFingerprint,
   runWebRescore,
   type WebRescoreEnv,
   WebRescoreWorkflow,
@@ -335,6 +336,72 @@ describe('runWebRescore', () => {
       },
     });
     expect(calls).toEqual([SPEC_VERSION]);
+  });
+
+  // The fingerprint gates a full reflow: every seeded domain re-audited,
+  // which is the whole audit budget. It has to fire for anything that could
+  // change a scorecard and stay quiet for anything that could not, or a
+  // one-word edit re-audits the corpus.
+  describe('the fingerprint tracks scoring shape, not the whole registry', () => {
+    const registryWith = (check: Record<string, unknown>) => ({
+      version: 1,
+      category_order: ['discoverability'],
+      categories: { discoverability: 'Discoverability' },
+      checks: [
+        {
+          id: 'llms-txt',
+          category: 'discoverability',
+          tier: 'required',
+          keyword: 'must',
+          principle: 'P2',
+          weight: 2,
+          title: 'An llms.txt is published',
+          breadcrumb: 'llms.txt',
+          hint: 'Publish /llms.txt.',
+          handler: 'http',
+          with: { path_any: ['/llms.txt'] },
+          ...check,
+        },
+      ],
+    });
+    const fpOf = async (registry: unknown) => {
+      const { env } = makeEnv([seedEntry('a.test')], { registry });
+      return registryFingerprint(env);
+    };
+
+    test('a site-only field does not reflow the corpus', async () => {
+      // `breadcrumb` names the check's own page in the site's URL trail. No
+      // audit reads it, so no cached scorecard can differ because of it.
+      const base = await fpOf(registryWith({}));
+      expect(await fpOf(registryWith({ breadcrumb: 'A different label' }))).toBe(base);
+    });
+
+    test('anything the audit or a stored row carries still reflows', async () => {
+      const base = await fpOf(registryWith({}));
+      for (const [field, value] of [
+        ['tier', 'recommended'],
+        ['weight', 5],
+        ['handler', 'dns'],
+        ['category', 'agents'],
+        ['id', 'renamed'],
+        ['keyword', 'should'],
+        ['with', { path_any: ['/other.txt'] }],
+        ['title', 'A reworded title'],
+        ['hint', 'A reworded hint'],
+      ] as const) {
+        expect({ field, same: (await fpOf(registryWith({ [field]: value }))) === base }).toEqual({
+          field,
+          same: false,
+        });
+      }
+    });
+
+    test('an added check reflows', async () => {
+      const base = await fpOf(registryWith({}));
+      const two = registryWith({});
+      two.checks = [...two.checks, { ...two.checks[0], id: 'second' }];
+      expect(await fpOf(two)).not.toBe(base);
+    });
   });
 
   test('a changed registry fingerprint reflows every domain even when all are fresh', async () => {
