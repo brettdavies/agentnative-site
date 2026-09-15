@@ -11,8 +11,10 @@
 #   7. malformed-body: non-JSON POST answers HTTP 400 + JSON-RPC -32700
 #
 # Anc-specific extensions (after check 7):
-#   - Symmetry contract: get_scorecard and score_cli on ripgrep both return
-#     source=registry; score_cli bounces with next_tool=get_scorecard.
+#   - Symmetry contract: get_scorecard and score_cli on ripgrep both report
+#     tier=registry; score_cli bounces with source=registry and
+#     next_tool=get_scorecard. `source` is the audit tool's cost signal and
+#     the shared envelope leaves it off the pure read.
 #   - Live audit: score_cli against `--mcp-binary` (fresh non-registry binary)
 #     completes with audited=true, source=live, anc_version populated, no error.
 #
@@ -287,23 +289,23 @@ run_check_3_legacy_tools_list() {
 }
 
 run_check_4_legacy_get_scorecard() {
-  local http_code inner source has_scorecard
+  local http_code inner tier has_scorecard
   http_code=$(curl -sS -w '%{http_code}' -o "$OUT/4-get-scorecard.json" -K "$CF_CONFIG" -m 15 \
     -H 'Content-Type: application/json' -H 'Accept: application/json' \
     -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_scorecard","arguments":{"slug":"ripgrep"}}}' \
     "${BASE_URL}/mcp" 2>/dev/null || echo "000")
   inner=$(jq -r '.result.content[0].text // empty' "$OUT/4-get-scorecard.json" 2>/dev/null || true)
-  source=$(printf '%s' "$inner" | jq -r '.source // empty' 2>/dev/null || true)
+  tier=$(printf '%s' "$inner" | jq -r '.tier // empty' 2>/dev/null || true)
   has_scorecard=$(printf '%s' "$inner" | jq -r '.scorecard != null' 2>/dev/null || echo "false")
 
   if [[ "$http_code" == "503" ]]; then
     report 4 legacy-get-scorecard no "HTTP 503 (MCP_ENABLED off?)"
     return
   fi
-  if [[ "$http_code" == "200" && ("$source" == "registry" || "$has_scorecard" == "true") ]]; then
-    report 4 legacy-get-scorecard ok "source=$source registry hit on ripgrep"
+  if [[ "$http_code" == "200" && ("$tier" == "registry" || "$has_scorecard" == "true") ]]; then
+    report 4 legacy-get-scorecard ok "tier=$tier registry hit on ripgrep"
   else
-    report 4 legacy-get-scorecard no "http=$http_code source=$source has_scorecard=$has_scorecard"
+    report 4 legacy-get-scorecard no "http=$http_code tier=$tier has_scorecard=$has_scorecard"
   fi
 }
 
@@ -332,14 +334,14 @@ run_check_5_modern_tools_list() {
 }
 
 run_check_6_modern_get_scorecard() {
-  local http_hit http_miss inner_hit inner_miss source has_sc found hit_ok miss_ok
+  local http_hit http_miss inner_hit inner_miss tier has_sc found hit_ok miss_ok
   http_hit=$(curl -sS -w '%{http_code}' -o "$OUT/6-modern-hit.json" -K "$CF_CONFIG" -m 15 \
     -H 'Content-Type: application/json' -H 'Accept: application/json' \
     -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: tools/call' -H 'Mcp-Name: get_scorecard' \
     -d "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"tools/call\",\"params\":{\"name\":\"get_scorecard\",\"arguments\":{\"slug\":\"ripgrep\"},$META}}" \
     "${BASE_URL}/mcp" 2>/dev/null || echo "000")
   inner_hit=$(jq -r '.result.content[0].text // empty' "$OUT/6-modern-hit.json" 2>/dev/null || true)
-  source=$(printf '%s' "$inner_hit" | jq -r '.source // empty' 2>/dev/null || true)
+  tier=$(printf '%s' "$inner_hit" | jq -r '.tier // empty' 2>/dev/null || true)
   has_sc=$(printf '%s' "$inner_hit" | jq -r '.scorecard != null' 2>/dev/null || echo "false")
 
   http_miss=$(curl -sS -w '%{http_code}' -o "$OUT/6-modern-miss.json" -K "$CF_CONFIG" -m 15 \
@@ -360,7 +362,7 @@ run_check_6_modern_get_scorecard() {
 
   hit_ok=0
   miss_ok=0
-  if [[ "$http_hit" == "200" && ("$source" == "registry" || "$has_sc" == "true") ]]; then
+  if [[ "$http_hit" == "200" && ("$tier" == "registry" || "$has_sc" == "true") ]]; then
     hit_ok=1
   fi
   if [[ "$http_miss" == "200" && "$found" == "false" ]]; then
@@ -368,10 +370,10 @@ run_check_6_modern_get_scorecard() {
   fi
 
   if [[ "$hit_ok" -eq 1 && "$miss_ok" -eq 1 ]]; then
-    report 6 modern-get-scorecard ok "hit source=$source; miss found=false"
+    report 6 modern-get-scorecard ok "hit tier=$tier; miss found=false"
   else
     report 6 modern-get-scorecard no \
-      "hit http=$http_hit source=$source has_scorecard=$has_sc; miss http=$http_miss found=$found"
+      "hit http=$http_hit tier=$tier has_scorecard=$has_sc; miss http=$http_miss found=$found"
   fi
 }
 
@@ -400,29 +402,37 @@ run_check_7_malformed_body() {
 
 # Anc-specific extensions (symmetry + live audit) ----------------------------
 
-run_gate_symmetry() {
-  local read_source audit_source audit_next
-  read_source=$(curl -fsSL -K "$CF_CONFIG" -m 15 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-    -d '{"jsonrpc":"2.0","id":20,"method":"tools/call","params":{"name":"get_scorecard","arguments":{"slug":"ripgrep"}}}' \
+# Calls one scorecard tool on the curated slug and echoes the envelope fields
+# this gate grades, tab-separated: tier, then the tool-specific field named by
+# $2 ("" when the tool carries none).
+symmetry_probe() {
+  local tool=$1 extra=$2 filter
+  filter=".tier // \"\""
+  [[ -n "$extra" ]] && filter="$filter, (.${extra} // \"\")"
+  curl -fsSL -K "$CF_CONFIG" -m 15 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"tools/call\",\"params\":{\"name\":\"${tool}\",\"arguments\":{\"slug\":\"ripgrep\"}}}" \
     "${BASE_URL}/mcp" 2>/dev/null \
     | jq -r '.result.content[0].text' 2>/dev/null \
-    | jq -r '.source // empty' 2>/dev/null || true)
-  audit_source=$(curl -fsSL -K "$CF_CONFIG" -m 15 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-    -d '{"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"score_cli","arguments":{"slug":"ripgrep"}}}' \
-    "${BASE_URL}/mcp" 2>/dev/null \
-    | jq -r '.result.content[0].text' 2>/dev/null \
-    | jq -r '.source // empty' 2>/dev/null || true)
-  audit_next=$(curl -fsSL -K "$CF_CONFIG" -m 15 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-    -d '{"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"score_cli","arguments":{"slug":"ripgrep"}}}' \
-    "${BASE_URL}/mcp" 2>/dev/null \
-    | jq -r '.result.content[0].text' 2>/dev/null \
-    | jq -r '.next_tool // empty' 2>/dev/null || true)
+    | jq -r "[${filter}] | @tsv" 2>/dev/null || true
+}
 
-  if [[ "$read_source" == "registry" && "$audit_source" == "registry" && "$audit_next" == "get_scorecard" ]]; then
-    gate_pass "symmetry contract: both scorecard tools return source=registry on curated slug"
+# The read tool and the audit tool agree that a curated slug is registry-tier,
+# and the audit tool meters nothing for it. `source` is graded on `score_cli`
+# alone: it reports how an audit was satisfied, which is the cost signal, and
+# the shared envelope deliberately leaves it off the pure read.
+run_gate_symmetry() {
+  local read_tier read_found audit_tier audit_source audit_next
+  IFS=$'\t' read -r read_tier read_found < <(symmetry_probe get_scorecard found)
+  IFS=$'\t' read -r audit_tier audit_source < <(symmetry_probe score_cli source)
+  IFS=$'\t' read -r _ audit_next < <(symmetry_probe score_cli next_tool)
+
+  if [[ "$read_tier" == "registry" && "$read_found" == "true" &&
+    "$audit_tier" == "registry" && "$audit_source" == "registry" &&
+    "$audit_next" == "get_scorecard" ]]; then
+    gate_pass "symmetry contract: both scorecard tools report tier=registry on curated slug; score_cli defers to the read"
   else
     gate_fail "symmetry contract" \
-      "get_scorecard.source=$read_source score_cli.source=$audit_source next_tool=$audit_next"
+      "get_scorecard.tier=$read_tier found=$read_found score_cli.tier=$audit_tier source=$audit_source next_tool=$audit_next"
   fi
 }
 
