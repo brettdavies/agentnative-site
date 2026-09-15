@@ -1301,11 +1301,20 @@ describe('worker.fetch — retired paths', () => {
     }
   });
 
-  test('a website result path redirects to its result, twin included', async () => {
+  // Every website result path redirects, not a listed set: the host is in the
+  // URL, so the rule resolves by shape and covers any domain that was ever
+  // audited. A host that differs from its canonical form only in case lands on
+  // the canonical result in one hop rather than chaining a second 301.
+  test('a website result path redirects to its result, twin and any host included', async () => {
     const env = makeEnv({});
     const cases: Array<[string, string]> = [
       ['/web/sounding.brettdavies.workers.dev', '/score/sounding.brettdavies.workers.dev'],
       ['/web/anc.dev', '/score/anc.dev'],
+      ['/web/modelcontextprotocol.io', '/score/modelcontextprotocol.io'],
+      ['/web/developers.cloudflare.com', '/score/developers.cloudflare.com'],
+      ['/web/sub.deep.example.co.uk', '/score/sub.deep.example.co.uk'],
+      ['/web/example.com:8443', '/score/example.com:8443'],
+      ['/web/ANC.dev', '/score/anc.dev'],
       ['/web/anc.dev.md', '/score/anc.dev/md'],
     ];
     for (const [from, to] of cases) {

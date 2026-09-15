@@ -77,8 +77,13 @@ export function retiredRedirectFor(pathname: string): string | null {
   if (Object.hasOwn(RETIRED_REDIRECTS, pathname)) return RETIRED_REDIRECTS[pathname];
   const match = RETIRED_WEB_RESULT_RE.exec(pathname);
   if (!match) return null;
-  const host = decodeURIComponentSafe(match[1]);
-  if (host === null || laneOf(host) !== 'web' || !isResultTarget(host)) return null;
+  const raw = decodeURIComponentSafe(match[1]);
+  if (raw === null || laneOf(raw) !== 'web') return null;
+  // Normalize before building the destination. A host that differs from its
+  // canonical form only in case or encoding would otherwise land on a result
+  // path that immediately redirects again, and one 301 is the whole point.
+  const host = normalizeTarget(raw);
+  if (host === null || !isResultTarget(host)) return null;
   return match[2] ? scoreMarkdownPath(host) : scorePath(host);
 }
 

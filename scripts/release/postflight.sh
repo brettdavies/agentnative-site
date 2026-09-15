@@ -353,10 +353,11 @@ RETIRED_PATHS=(
   /api/score.md
 )
 
-# Retired paths that still resolve, as `<path>|<location>`. Two inbound links
-# are published outside this site and keep working until they are deprecated
-# deliberately; the gate pins the destination so a redirect cannot quietly
-# become a 404 or start pointing somewhere else.
+# Retired paths that still resolve, as `<path>|<location>`. The entry page is
+# one path; the website result is a rule over every audited host, and the row
+# below is one live sample of it rather than the whole set. The gate pins each
+# destination so a redirect cannot quietly become a 404 or start pointing
+# somewhere else.
 RETIRED_REDIRECTS=(
   "/web-audit|/audit?lane=web"
   "/web-audit.md|/audit.md"
