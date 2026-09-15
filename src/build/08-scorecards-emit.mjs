@@ -19,7 +19,7 @@
 import { mkdir, readdir, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { buildRegistryEnvelope } from '../shared/audit-envelope';
-import { scoreMarkdownPath, scorePath } from '../shared/audit-routes';
+import { SCORECARDS_PATH, scoreMarkdownPath, scorePath } from '../shared/audit-routes';
 import { resultAlternateLinks } from '../shared/result-head';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
 import { renderBadgeSvg } from './badge.mjs';
@@ -191,7 +191,7 @@ export async function emitScorecardSurface({
       title: 'ANC 100 — Agent-Native CLI Leaderboard',
       description:
         'Automated agent-readiness scores for real CLI tools, scored against the seven agent-native principles.',
-      canonicalPath: '/scorecards',
+      canonicalPath: SCORECARDS_PATH,
       bodyHtml: leaderboardBody,
       themeInitJs: themeInit,
       // This page alone: the panes must settle on the stored surface before

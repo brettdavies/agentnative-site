@@ -154,7 +154,7 @@ test.describe('keyboard + a11y', () => {
   // wrangler-dev server (empty R2) it exercises the scoring-in-progress
   // empty state. The populated result-page archetype is covered by the
   // staging-targeting web-audit project.
-  for (const path of ['/score/ripgrep', '/web', '/scorecards', '/web-audit']) {
+  for (const path of ['/score/ripgrep', '/score/anc.dev', '/scorecards', '/audit', '/scoring?target=anc.dev']) {
     for (const scheme of ['light', 'dark'] as const) {
       test(`axe: 0 serious/critical violations on ${path} in ${scheme} mode`, async ({ page }) => {
         await page.emulateMedia({ colorScheme: scheme });
@@ -166,7 +166,7 @@ test.describe('keyboard + a11y', () => {
   }
 
   test('no horizontal overflow at 390/768/1440 on each archetype', async ({ page }) => {
-    for (const path of ['/p1', '/score/ripgrep', '/scorecards', '/web', '/web-audit', '/install']) {
+    for (const path of ['/p1', '/score/ripgrep', '/scorecards', '/audit', '/install']) {
       for (const width of [390, 768, 1440]) {
         await page.setViewportSize({ width, height: 900 });
         await page.goto(path);
@@ -530,10 +530,10 @@ test.describe('audit surface nav', () => {
     await expect(page.locator('.site-nav [data-audit-nav]')).toHaveAttribute('href', '/audit');
   });
 
-  test('cold /web-audit visit does not write preference', async ({ page }) => {
+  test('a cold audit-page visit does not write preference', async ({ page }) => {
     await page.setViewportSize(DESKTOP_NAV_VIEWPORT);
     await page.addInitScript(() => localStorage.removeItem('anc-surface'));
-    await page.goto('/web-audit');
+    await page.goto('/audit');
     const stored = await page.evaluate(() => localStorage.getItem('anc-surface'));
     expect(stored).toBeNull();
   });
@@ -553,7 +553,7 @@ test.describe('audit surface nav', () => {
   test('Probe A navigates web audit → CLI audit and writes preference', async ({ page }) => {
     await page.goto('/');
     await page.locator('label[for="s-web"]').click();
-    await page.goto('/web-audit');
+    await page.goto('/audit');
     await page.locator('label[for="audit-s-cli"]').click();
     await expect(page).toHaveURL(/\/audit$/);
     expect(await page.evaluate(() => localStorage.getItem('anc-surface'))).toBe('cli');

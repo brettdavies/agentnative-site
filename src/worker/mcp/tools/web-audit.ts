@@ -25,6 +25,8 @@ import {
   type CachedWebAudit,
   get as cacheGet,
   put as cachePut,
+  canonicalTargetOf,
+  coerceUrl,
   getAggregate,
   isBoardListable,
   isStale,
@@ -45,7 +47,6 @@ import {
   resolveAuditListing,
 } from '../../audit-web/public-listing';
 import { loadWebAuditRegistry } from '../../audit-web/registry';
-import { canonicalTargetOf, coerceUrl } from '../../audit-web/route';
 import { boardExcludeDomains } from '../../audit-web/seed';
 import { validatePublicUrl } from '../../audit-web/ssrf';
 import { type NotifyEnv, notifyFailure } from '../../notify';

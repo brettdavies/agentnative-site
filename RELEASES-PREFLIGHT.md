@@ -43,7 +43,7 @@ Sub-commands let you re-run one section in isolation:
 | `build`     | `bun run build` exit, scorecard corpus orphans, badge SVG coverage, markdown twin coverage                                                            | `bun run build`                                                              |
 | `do-smoke`  | Live `/api/score` smoke against the `--env` target (fresh non-registry github URL)                                                                    | `curl` + `~/.claude/skills/1password` (staging mode)                         |
 | `mcp`       | Delegates to `scripts/release/mcp-smoke.sh` against the `--env` target                                                                                | `scripts/release/mcp-smoke.sh` + `~/.claude/skills/1password` (staging mode) |
-| `dist`      | `/check` → `/audit` redirect and served `skill.json` version vs source against the `--env` target; `X-Robots-Tag: noindex` only in staging mode       | `curl`                                                                       |
+| `dist`      | Served `skill.json` version vs source against the `--env` target; `X-Robots-Tag: noindex` only in staging mode                                          | `curl`                                                                       |
 | `mechanics` | Leak check vs `origin/main`, unguarded docs added to `main`, diff-B vs `origin/dev` filtered by the guarded set                                        | `git`, `scripts/release/guarded-paths.sh`                                    |
 | `all`       | every above sequentially, drift first                                                                                                                 |                                                                              |
 
@@ -264,7 +264,7 @@ Driven by `scripts/release/preflight.sh do-smoke`. The fresh-binary picker is th
   curl -fSsL -H "Content-Type: application/json" \
     -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
     -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
-    -d "{\"input\":\"https://github.com/<owner>/${BINARY}\",\"turnstile_token\":\"x\"}" \
+    -d "{\"target\":\"https://github.com/<owner>/${BINARY}\",\"turnstile_token\":\"x\"}" \
     https://agentnative-site-staging.brettdavies.workers.dev/api/score \
     | jq '{
         ok:           (.scorecard != null and .scorecard.tool.binary != null),
@@ -272,7 +272,8 @@ Driven by `scripts/release/preflight.sh do-smoke`. The fresh-binary picker is th
         score_pct:    .scorecard.badge.score_pct,
         anc_version:  .anc_version,
         spec_version: .spec_version,
-        share_url:    .share_url,
+        tier:         .tier,
+        scorecard_url: .scorecard_url,
         error:        .error
       }'
   ```
@@ -282,7 +283,7 @@ Driven by `scripts/release/preflight.sh do-smoke`. The fresh-binary picker is th
 - `ok: true`, no `error`
 - `binary` matches the input
 - `anc_version` and `spec_version` populated
-- `share_url` shaped `/score/live/<binary>`
+- `tier` is `live` and `scorecard_url` ends in `/score/<binary>`
 
   Red outcomes (block the release):
 
@@ -294,30 +295,29 @@ Driven by `scripts/release/preflight.sh do-smoke`. The fresh-binary picker is th
 - `details: timeout` → DO budget exceeded. Check install or audit duration in observability.
 - HTTP 503 `sandbox_unavailable` → container app not bound. Verify the staging `containers[]` block and `wrangler
   containers list`.
-- [ ] **Share-URL renders the full scorecard.** Confirm the live-scored share URL the smoke just minted renders:
+- [ ] **The result page renders the full scorecard.** Confirm the `scorecard_url` the smoke just minted renders:
 
   ```bash
   curl -fSsL -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
     -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
-    https://agentnative-site-staging.brettdavies.workers.dev/score/live/${BINARY} \
+    https://agentnative-site-staging.brettdavies.workers.dev/score/${BINARY} \
     | grep -E 'scorecard-(summary|audits|meta|embed)'
   ```
 
   At least four classes (`scorecard-summary`, `scorecard-audits`, `scorecard-meta`, `scorecard-embed`) should appear,
   proving the shared renderer is producing parity sections.
-- [ ] **Curated-tool redirect at `/score/live/<curated-binary>` still 301s to `/score/<slug>`.** This is the
-  defense-in-depth redirect for stale cache entries and direct URL construction. Pick any registry binary (e.g., `anc`,
-  `rg`):
+- [ ] **A curated tool's binary alias still 301s to its slug.** One tool owns one page, so the binary name redirects
+  rather than rendering a second copy. Pick any registry binary whose name differs from its slug (`rg` for `ripgrep`):
 
   ```bash
   curl -sSI -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
     -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
-    https://agentnative-site-staging.brettdavies.workers.dev/score/live/anc \
+    https://agentnative-site-staging.brettdavies.workers.dev/score/rg \
     | grep -E '^(HTTP|location:)'
   ```
 
-  Expect `HTTP/2 301` and `location: /score/anc`. A 200 here means a curated tool would render twice — once at the
-  live path and once at the static path — with no canonical hint.
+  Expect `HTTP/2 301` and `location: /score/ripgrep`. A 200 here means a curated tool renders twice, under its slug and
+  under its binary, with no canonical hint.
 
 ### Live MCP surface (mandatory)
 
@@ -466,17 +466,6 @@ The curl recipes below show the **staging** shape (with CF Access headers). For 
 Surfaces that don't fail unit tests but break the user experience.
 
 Driven by `scripts/release/preflight.sh dist`.
-
-- [ ] **`/check` → `/audit` redirect still serves.** The 2026-05-29 rename PR added a 301 from the prior URL. Confirm
-  against staging:
-
-  ```bash
-  curl -sSI -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
-    -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
-    https://agentnative-site-staging.brettdavies.workers.dev/check | head -3
-  # HTTP/2 301
-  # location: /audit
-  ```
 
 - [ ] **Skill manifest endpoint serves the bumped version.** If `src/data/skill/skill.json` changed in this release:
 

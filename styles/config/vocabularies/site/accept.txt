@@ -307,3 +307,10 @@ frontpage
 restamps
 statelessly
 params
+lockfile
+unmerged
+worktree
+hotfixes
+Dependabot
+Dependabot's
+reconverges

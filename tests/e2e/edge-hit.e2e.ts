@@ -176,16 +176,16 @@ test.describe('skip-Worker HIT — staging Workers Caching', () => {
     expect(isSkipWorkerHit(bare.headers())).toBe(true);
   });
 
-  test('GET /web/scoring is not a skip-Worker HIT', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/web/scoring`, {
+  test('GET /scoring is not a skip-Worker HIT', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/scoring`, {
       headers: { ...ACCESS_HEADERS, ...BROWSER },
     });
     expect(res.headers()['cf-cache-status']?.toUpperCase()).not.toBe('HIT');
     expect(res.headers()['cache-control'] ?? '').toContain('no-store');
   });
 
-  test('never-audited /web/<host> 404 is not a skip-Worker HIT', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/web/never-audited.dev`, {
+  test('a never-audited host 404 is not a skip-Worker HIT', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/score/never-audited.dev`, {
       headers: { ...ACCESS_HEADERS, ...BROWSER },
     });
     expect(res.status()).toBe(404);

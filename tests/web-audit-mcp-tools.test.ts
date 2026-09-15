@@ -12,10 +12,11 @@ import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build
 import type { AuditEvent } from '../src/shared/audit-events';
 import type { AuditJob } from '../src/worker/audit/job';
 import { _resetResultCaches, handleResultRoute, type ResultEnv } from '../src/worker/audit/result';
+import { resolveBoardEntries, type WebBoardEnv } from '../src/worker/audit-web/board';
 import { keyFor, WEB_AUDIT_STALE_AFTER_MS } from '../src/worker/audit-web/cache';
 import { flushHitMinPurge, runWithHitMinPurge } from '../src/worker/audit-web/hit-min-purge';
+import { enforcePublicListingFlipLimit } from '../src/worker/audit-web/public-listing';
 import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
-import { handleWebAudit, handleWebLeaderboard, type WebAuditRouteEnv } from '../src/worker/audit-web/route';
 import { resetCatalogCacheForTests } from '../src/worker/mcp/catalog';
 import type { McpEnv } from '../src/worker/mcp/server';
 import { resetWebRemediationCacheForTests } from '../src/worker/mcp/tools/web-remediation';
@@ -500,17 +501,6 @@ function listedRow(domain: string, publicListing?: boolean): ListedObject {
 
 // The domains rendered as user (on-demand) rows on the /web markdown board,
 // pulled from the /web/<domain> link in each on-demand table row.
-function onDemandDomainsFromMarkdown(md: string): string[] {
-  return md
-    .split('\n')
-    .filter((line) => line.includes('| on-demand |'))
-    .map((line) => {
-      const m = line.match(/\/web\/([^)]+)\)/);
-      if (!m) throw new Error(`no domain link in on-demand row: ${line}`);
-      return m[1];
-    });
-}
-
 describe('list_website_audits', () => {
   test('returns board summaries from the leaderboard aggregate with scorecard_urls', async () => {
     const env = await makeEnv({
@@ -618,13 +608,16 @@ describe('list_website_audits', () => {
       .filter((d) => !curated.includes(d))
       .sort();
 
-    const res = await handleWebLeaderboard(
-      new Request('https://anc.dev/web.md?view=all'),
-      env as unknown as WebAuditRouteEnv,
-    );
-    const webUserRows = onDemandDomainsFromMarkdown(await res.text()).sort();
+    // The board's own resolver is the other side of the comparison: both the
+    // rendered board and this tool read their non-curated rows from it, so a
+    // divergence here is a divergence on the page.
+    const board = await resolveBoardEntries(env as unknown as WebBoardEnv, 'all');
+    const boardUserRows = board.entries
+      .filter((e) => !e.curated)
+      .map((e) => e.domain)
+      .sort();
 
-    expect(mcpUserRows).toEqual(webUserRows);
+    expect(mcpUserRows).toEqual(boardUserRows);
     expect(mcpUserRows).toEqual(['another-in.dev', 'opted-in.dev']);
   });
 
@@ -1093,14 +1086,7 @@ describe('web-audit MCP freshness envelope', () => {
   const refreshAfter = (scoredAt: string) => new Date(Date.parse(scoredAt) + WEB_AUDIT_STALE_AFTER_MS).toISOString();
 
   type Freshness = { cached: unknown; scored_at: unknown; refresh_after: unknown };
-  // MCP results carry freshness inside the shared envelope; the legacy browser
-  // route still carries the three fields at the top level until it retires.
   const freshnessOf = (body: Record<string, unknown>): Freshness => body.freshness as Freshness;
-  const flatFreshnessOf = (body: Record<string, unknown>): Freshness => ({
-    cached: body.cached,
-    scored_at: body.scored_at,
-    refresh_after: body.refresh_after,
-  });
 
   function storedEntry(opts: { scoredAt?: string; stored?: boolean } = {}): string {
     const scorecard: Record<string, unknown> = {
@@ -1218,7 +1204,7 @@ describe('web-audit MCP freshness envelope', () => {
   });
 
   // AE5 across surfaces: one stored entry, three read paths, identical values.
-  test('the browser API and both MCP read tools report byte-identical freshness for one stored entry', async () => {
+  test('both MCP read tools and the result JSON report byte-identical freshness for one stored entry', async () => {
     const scoredAt = new Date().toISOString();
     const store = new Map<string, string>();
     store.set(await keyFor(TARGET, SPEC_VERSION), storedEntry({ scoredAt, stored: true }));
@@ -1228,35 +1214,18 @@ describe('web-audit MCP freshness envelope', () => {
     const getBody = jsonContent(await callTool(env, 'get_website_audit', { url: 'example.com' }));
     const auditBody = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, IP));
 
-    // The web route's serve-cached branch precedes every metered gate, so it
-    // needs only R2 to answer.
-    const webEnv = {
-      ASSETS: {
-        async fetch() {
-          return new Response('not found', { status: 404 });
-        },
-      } as unknown as Fetcher,
-      SCORE_CACHE: makeBucket(store),
-      WEB_AUDIT_ENABLED: 'true',
-      TURNSTILE_SECRET: 'test-turnstile-secret',
-      SESSION_HMAC_SECRET: 'test-session-secret',
-    } as unknown as WebAuditRouteEnv;
-    const resp = await handleWebAudit(
-      new Request('https://anc.dev/api/audit-web', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ url: 'example.com' }),
-      }),
-      webEnv,
-      { waitUntil() {}, passThroughOnException() {}, props: {} } as unknown as ExecutionContext,
+    _resetResultCaches();
+    const res = await handleResultRoute(
+      new Request('https://anc.dev/score/example.com/json'),
+      env as unknown as ResultEnv,
     );
-    expect(resp.status).toBe(200);
-    const webBody = (await resp.json()) as Record<string, unknown>;
+    expect(res.status).toBe(200);
+    const routeBody = (await res.json()) as Record<string, unknown>;
 
     const expected = { cached: true, scored_at: scoredAt, refresh_after: refreshAfter(scoredAt) };
     expect(freshnessOf(getBody)).toEqual(expected);
     expect(freshnessOf(auditBody)).toEqual(expected);
-    expect(flatFreshnessOf(webBody)).toEqual(expected);
+    expect(freshnessOf(routeBody)).toEqual(expected);
   });
 
   test('both read-tool descriptions document the fields and the eligibility caveat', async () => {
@@ -1320,44 +1289,21 @@ describe('audit_website public_listing flip budget', () => {
     expect(r2.get(key)).toBe(afterFive);
   });
 
-  test('a budget exhausted through the web route blocks the MCP tool for the same domain', async () => {
+  test('a budget exhausted through the shared flip meter blocks the MCP tool for the same domain', async () => {
     const r2 = new Map<string, string>();
     const kv = new Map<string, string>();
     const key = await seed(r2, false, freshStamp());
-    const alwaysPass = { limit: async () => ({ success: true }) };
-    const turnstileFetch = (async () =>
-      new Response(JSON.stringify({ success: true }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      })) as unknown as typeof fetch;
-    const throwingProbe = (() => {
-      throw new Error('engine must not run on a flag-only patch');
-    }) as unknown as typeof fetch;
-    const makeCtx = () => ({ waitUntil() {}, passThroughOnException() {}, props: {} }) as unknown as ExecutionContext;
-    // The web-route patch path needs no ASSETS or registry, only shared R2 + KV.
-    const webEnv = {
-      ASSETS: {
-        async fetch() {
-          return new Response('not found', { status: 404 });
-        },
-      } as unknown as Fetcher,
-      SCORE_CACHE: makeBucket(r2),
-      SCORE_KV: makeKvStore(kv),
-      WEB_AUDIT_ENABLED: 'true',
-      TURNSTILE_SECRET: 'test-turnstile-secret',
-      SESSION_HMAC_SECRET: 'test-session-secret',
-      WEB_AUDIT_LIMITER: alwaysPass,
-      WEB_AUDIT_LIMITER_IP: alwaysPass,
-    } as unknown as WebAuditRouteEnv;
-    // Exhaust the budget through the web route (five flips, F -> T, F, T, F, T).
+    // Both the transact endpoint and this tool meter a flip through the one
+    // helper, keyed by domain rather than by caller, so spending the budget
+    // through the helper is spending it for every surface.
+    const kvStore = makeKvStore(kv);
     for (let i = 0; i < 5; i++) {
-      const req = new Request('https://anc.dev/api/audit-web', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.13' },
-        body: JSON.stringify({ url: 'example.com', turnstile_token: 'x', public_listing: i % 2 === 0 }),
+      const outcome = await enforcePublicListingFlipLimit({
+        write: { path: 'audit', value: i % 2 === 0, flagChanges: true },
+        kv: kvStore,
+        domain: 'example.com',
       });
-      const resp = await handleWebAudit(req, webEnv, makeCtx(), { turnstileFetch, probeFetch: throwingProbe });
-      expect(resp.status).toBe(200);
+      expect(outcome).toBe('allowed');
     }
     // The MCP tool (fresh IP, same domain) draws from the same exhausted
     // per-domain budget: its sixth flip is rejected and writes nothing.
@@ -1365,7 +1311,9 @@ describe('audit_website public_listing flip budget', () => {
     (mcpEnv as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(r2);
     (mcpEnv as { SCORE_KV: KVNamespace }).SCORE_KV = makeKvStore(kv);
     const before = r2.get(key);
-    const res = await callTool(mcpEnv, 'audit_website', { url: 'example.com', public_listing: false }, '203.0.113.14');
+    // The stored flag is false, so asking for true is a real flip and has to
+    // draw on the exhausted budget rather than serving the cached record.
+    const res = await callTool(mcpEnv, 'audit_website', { url: 'example.com', public_listing: true }, '203.0.113.14');
     expect(res.result?.isError).toBe(true);
     expect(res.result?.content?.[0]?.text ?? '').toContain('flip_rate_limited');
     expect(r2.get(key)).toBe(before);

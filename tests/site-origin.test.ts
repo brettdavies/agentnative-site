@@ -34,15 +34,14 @@ import { emitShell } from '../src/build/shell.mjs';
 import { absolutifyMarkdownLinks, canonicalBaseUrl, composeTwin, resolveBaseUrl } from '../src/build/util.mjs';
 import { toolsFor } from '../src/client/webmcp-lib';
 import { CANONICAL_SITE_URL } from '../src/shared/site-url';
-import { handleLegacyLiveScorePath, handleLegacyWebResultPath, type ResultEnv } from '../src/worker/audit/result';
+import { handleResultRoute, type ResultEnv } from '../src/worker/audit/result';
 import { keyFor as webKeyFor } from '../src/worker/audit-web/cache';
 import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
-import { handleWebAudit, handleWebScoringPage, type WebAuditRouteEnv } from '../src/worker/audit-web/route';
 import { resetWebRemediationCacheForTests } from '../src/worker/mcp/tools/web-remediation';
 import { keyFor as scoreKeyFor } from '../src/worker/score/cache';
 import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
 import { _resetShellTemplateCache } from '../src/worker/shell-template';
-import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { ANC_VERSION, AUDITOR_URL, SPEC_VERSION } from '../src/worker/spec-version.gen';
 import {
   getJsonToolContent,
   type JsonRpcBody,
@@ -358,43 +357,28 @@ describe('MCP surface links back to the origin it was called on', () => {
 // ---------------------------------------------------------------------------
 
 describe('web result pages link back to the origin they were served from', () => {
-  async function webEnv(prefill: Record<string, unknown> = {}): Promise<WebAuditRouteEnv> {
-    return {
-      ASSETS: await makeAssets(),
-      SCORE_CACHE: makeR2(prefill),
-    } as unknown as WebAuditRouteEnv;
+  async function webEnv(prefill: Record<string, unknown> = {}): Promise<ResultEnv> {
+    return { ASSETS: await makeAssets(), SCORE_CACHE: makeR2(prefill) } as unknown as ResultEnv;
   }
 
-  test('/web/<domain> HTML', async () => {
+  test('a website result page and its markdown twin', async () => {
     const env = await webEnv(await cachedWebAudit('https://example.com/'));
-    const res = await handleLegacyWebResultPath(new Request(`${NON_CANONICAL_ORIGIN}/web/example.com`), env);
-    expect(res.status).toBe(200);
-    expectServedOnOwnOrigin(await res.text());
+    for (const path of ['/score/example.com', '/score/example.com/md']) {
+      const res = await handleResultRoute(new Request(`${NON_CANONICAL_ORIGIN}${path}`), env);
+      expect({ path, status: res.status }).toEqual({ path, status: 200 });
+      expectServedOnOwnOrigin(await res.text());
+    }
   });
 
-  test('/web/<domain>.md markdown twin', async () => {
-    const env = await webEnv(await cachedWebAudit('https://example.com/'));
-    const res = await handleLegacyWebResultPath(new Request(`${NON_CANONICAL_ORIGIN}/web/example.com.md`), env);
-    expect(res.status).toBe(200);
-    expectServedOnOwnOrigin(await res.text());
-  });
-
-  test('/web/<unknown>.md not-found twin', async () => {
+  test('an unaudited host answers its not-found twin on the serving origin', async () => {
     const env = await webEnv();
-    const res = await handleLegacyWebResultPath(new Request(`${NON_CANONICAL_ORIGIN}/web/never-audited.test.md`), env);
+    const res = await handleResultRoute(new Request(`${NON_CANONICAL_ORIGIN}/score/never-audited.test/md`), env);
     expect(res.status).toBe(404);
-    expectServedOnOwnOrigin(await res.text());
-  });
-
-  test('/web/scoring/<domain>.md in-progress twin', async () => {
-    const env = await webEnv();
-    const res = await handleWebScoringPage(new Request(`${NON_CANONICAL_ORIGIN}/web/scoring.md`), env);
-    expect(res.status).toBe(200);
     expectServedOnOwnOrigin(await res.text());
   });
 });
 
-describe('live-score pages link back to the origin they were served from', () => {
+describe('live CLI result pages link back to the origin they were served from', () => {
   async function liveEnv(prefill: Record<string, unknown> = {}) {
     return { ASSETS: await makeAssets(), SCORE_CACHE: makeR2(prefill) } as unknown as ResultEnv;
   }
@@ -408,16 +392,16 @@ describe('live-score pages link back to the origin they were served from', () =>
     },
   };
 
-  test('/score/live/<binary>.md markdown twin', async () => {
+  test('a live binary markdown twin', async () => {
     const env = await liveEnv(cached);
-    const res = await handleLegacyLiveScorePath(new Request(`${NON_CANONICAL_ORIGIN}/score/live/cowsay.md`), env);
+    const res = await handleResultRoute(new Request(`${NON_CANONICAL_ORIGIN}/score/cowsay/md`), env);
     expect(res.status).toBe(200);
     expectServedOnOwnOrigin(await res.text());
   });
 
-  test('/score/live/<unknown>.md not-found twin', async () => {
+  test('an unknown binary not-found twin', async () => {
     const env = await liveEnv();
-    const res = await handleLegacyLiveScorePath(new Request(`${NON_CANONICAL_ORIGIN}/score/live/nosuchtool.md`), env);
+    const res = await handleResultRoute(new Request(`${NON_CANONICAL_ORIGIN}/score/nosuchtool/md`), env);
     expect(res.status).toBe(404);
     expectServedOnOwnOrigin(await res.text());
   });
@@ -428,32 +412,31 @@ describe('live-score pages link back to the origin they were served from', () =>
 // ---------------------------------------------------------------------------
 
 describe('JSON API responses carry no foreign host', () => {
-  test('/api/web-audit cache hit', async () => {
+  test('a website result JSON carries site-relative result URLs and no foreign host', async () => {
     const target = 'https://example.com/';
     const env = {
       ASSETS: await makeAssets(),
       SCORE_CACHE: makeR2(await cachedWebAudit(target)),
-      SCORE_KV: makeKv(),
-      WEB_AUDIT_ENABLED: 'true',
-      TURNSTILE_SECRET: 'test-turnstile-secret',
-      SESSION_HMAC_SECRET: 'test-session-secret',
-      WEB_AUDIT_LIMITER: alwaysPassLimiter(),
-      WEB_AUDIT_LIMITER_IP: alwaysPassLimiter(),
-    } as unknown as WebAuditRouteEnv;
-    const res = await handleWebAudit(
-      new Request(`${NON_CANONICAL_ORIGIN}/api/web-audit`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.7' },
-        body: JSON.stringify({ url: 'example.com' }),
-      }),
-      env,
-      { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext,
-    );
-    const raw = await res.text();
+    } as unknown as ResultEnv;
+    const res = await handleResultRoute(new Request(`${NON_CANONICAL_ORIGIN}/score/example.com/json`), env);
     expect(res.status).toBe(200);
-    // share_url is site-relative, so nothing in this body may name a host.
-    expect(raw).not.toContain(`https://${new URL(CANONICAL_SITE_URL).host}`);
-    expect(raw).toContain('"share_url":"/web/example.com"');
+    const body = (await res.json()) as Record<string, unknown>;
+    expect({
+      scorecard_url: body.scorecard_url,
+      markdown_url: body.markdown_url,
+      json_url: body.json_url,
+    }).toEqual({
+      scorecard_url: `${NON_CANONICAL_ORIGIN}/score/example.com`,
+      markdown_url: `${NON_CANONICAL_ORIGIN}/score/example.com/md`,
+      json_url: `${NON_CANONICAL_ORIGIN}/score/example.com/json`,
+    });
+    // `auditor_url` is the one deliberate exception: it names the canonical
+    // live-scoring surface for a client that cannot reach this deployment, so
+    // it is pinned rather than rewritten. Everything else stays on this origin.
+    expect(body.auditor_url).toBe(AUDITOR_URL);
+    const canonicalHost = `https://${new URL(CANONICAL_SITE_URL).host}`;
+    const { auditor_url: _pinned, ...rest } = body;
+    expect(JSON.stringify(rest)).not.toContain(canonicalHost);
   });
 });
 

@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
-import { fixPath } from '../shared/audit-routes';
+import { AUDIT_PATH, fixPath } from '../shared/audit-routes';
 import { escHtml } from '../shared/scorecard-format.mjs';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from './13-web-audit-registry.mjs';
 import { renderMarkdown } from './render.mjs';
@@ -66,7 +66,7 @@ function assembleSkill(check, remediation, categories, baseUrl) {
   // A skill page describes a check in general, so it has no run to quote: the
   // audit's own finding rides the delimited evidence block that the result
   // page appends. tests/web-audit-skills.test.ts pins the two together.
-  const promptIntro = `Paste this into your coding agent. [Your audit](${baseUrl}/web-audit) adds what it observed for this check:`;
+  const promptIntro = `Paste this into your coding agent. [Your audit](${baseUrl}${AUDIT_PATH}) adds what it observed for this check:`;
   const promptLines = [
     `Goal: ${oneLine(remediation.goal)}`,
     `Fix: ${oneLine(remediation.fix)}`,
@@ -76,7 +76,7 @@ function assembleSkill(check, remediation, categories, baseUrl) {
   const verify = [
     '## Verify',
     '',
-    `Re-run the audit at [${baseUrl}/web-audit](${baseUrl}/web-audit) or call the \`audit_website\` MCP tool; the \`${check.id}\` check should report \`pass\`.`,
+    `Re-run the audit at [${baseUrl}${AUDIT_PATH}](${baseUrl}${AUDIT_PATH}) or call the \`audit_website\` MCP tool; the \`${check.id}\` check should report \`pass\`.`,
     '',
   ];
   return { prose, promptIntro, promptLines, verify };
@@ -136,8 +136,9 @@ export async function emitWebAuditSkillPages({ distDir, registryPath, remediatio
   );
 
   const skillDir = join(distDir, 'fix');
-  // dist/ survives between builds, so the pages this replaced would go on
-  // serving their retired path beside the new one.
+  // dist/ survives between builds, and the Worker no longer claims the retired
+  // path: a page left there would be served straight off the assets binding
+  // beside the new one.
   await rm(join(distDir, 'web-audit', 'skill'), { recursive: true, force: true });
   await mkdir(skillDir, { recursive: true });
 

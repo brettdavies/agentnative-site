@@ -29,11 +29,10 @@
 //                        live, branch, or website result is HIT-min under
 //                        the tag its writer purges, in every representation
 //
-// The 404 body is one sentence, one prefilled `/audit` link, and a
+// The 404 body is one sentence, one prefilled audit link, and a
 // "Did you mean?" list from the registry (CLI shapes) or the seed list
 // plus the leaderboard aggregate's hosts (host shapes), never a form or a
-// sitekey. The legacy `/score/live/<binary>` and `/web/<host>` paths are
-// adapters over the same renderer.
+// sitekey.
 
 import {
   type AuditEnvelope,
@@ -45,7 +44,6 @@ import {
 import {
   auditPath,
   classifyTarget,
-  isResultTarget,
   type Lane,
   type Representation,
   SCORE_PREFIX,
@@ -124,44 +122,6 @@ export async function handleResultRoute(request: Request, env: ResultEnv, deps: 
   const expected = pathFor(split.target, split.representation);
   if (expected !== url.pathname) return redirect(expected);
   return serveResult(request, env, deps, { target: split.target, representation: split.representation });
-}
-
-/** `/score/live/<binary>` and its `.md` twin, served through the unified renderer. */
-export function handleLegacyLiveScorePath(request: Request, env: ResultEnv, deps: ResultDeps = {}): Promise<Response> {
-  return serveLegacyPath(request, env, deps, { pattern: /^\/score\/live\/([^/]+?)(\.md|\.html)?$/, lane: 'cli' });
-}
-
-/** `/web/<host>` and its `.md` twin, served through the unified renderer. */
-export function handleLegacyWebResultPath(request: Request, env: ResultEnv, deps: ResultDeps = {}): Promise<Response> {
-  return serveLegacyPath(request, env, deps, { pattern: /^\/web\/([^/]+?)(\.md|\.html)?$/, lane: 'web' });
-}
-
-// A lane-specific path names its lane up front. Its `.html` form redirects
-// to the unified page only for a target the route can serve; anything else
-// is the 404, never a throw from the path builder.
-async function serveLegacyPath(
-  request: Request,
-  env: ResultEnv,
-  deps: ResultDeps,
-  legacy: { pattern: RegExp; lane: Lane },
-): Promise<Response> {
-  const denied = methodDenied(request);
-  if (denied) return denied;
-  const match = new URL(request.url).pathname.match(legacy.pattern);
-  const target = match ? decodeURIComponentSafe(match[1]) : '';
-  const classified = classifyTarget(target);
-  const servable =
-    match !== null && classified.ok && classified.lane === legacy.lane && isResultTarget(classified.target);
-  if (match?.[2] === '.html') {
-    if (servable) return redirect(pathFor(classified.target, 'html'));
-    return notFound(request, env, deps, { target, lane: legacy.lane, rep: negotiate(request, 'html'), legacy: true });
-  }
-  const representation: Representation = match?.[2] === '.md' ? 'md' : 'html';
-  if (!servable) {
-    const rep = negotiate(request, representation);
-    return notFound(request, env, deps, { target, lane: legacy.lane, rep, legacy: true });
-  }
-  return serveResult(request, env, deps, { target: classified.target, representation, legacy: true });
 }
 
 /** The representation a bare path serves: what the client asked for, or the pinned segment. */

@@ -561,8 +561,8 @@ describe('emitShell — one Leaderboards anchor + surface script', () => {
     // The segment on the page picks the lane, so the board pages share one
     // header destination and the current marker follows the pathname.
     expect(shell('/scorecards')).toContain('href="/scorecards" data-leaderboards-nav aria-current="page"');
-    expect(shell('/web')).toContain('href="/scorecards" data-leaderboards-nav aria-current="page"');
     expect(shell('/score/ripgrep')).toContain('href="/scorecards" data-leaderboards-nav aria-current="page"');
+    expect(shell('/score/anc.dev')).toContain('href="/scorecards" data-leaderboards-nav aria-current="page"');
     expect(shell('/about')).not.toContain('data-leaderboards-nav aria-current');
   });
 });
@@ -587,7 +587,6 @@ describe('emitShell — one Audit anchor', () => {
 
   test('aria-current marks the one anchor on every path the entry forms answer', () => {
     expect(shell('/audit')).toContain('href="/audit" data-audit-nav aria-current="page"');
-    expect(shell('/web-audit')).toContain('href="/audit" data-audit-nav aria-current="page"');
     expect(shell('/fix/openapi')).toContain('href="/audit" data-audit-nav aria-current="page"');
     expect(shell('/about')).not.toContain('data-audit-nav aria-current');
   });
@@ -3151,32 +3150,9 @@ describe('emitSubPages — twin frontmatter', () => {
     expect(privacyHtml).not.toMatch(/^url: /m);
   });
 
-  test('web-audit landing emits audit Probe A with Website checked', async () => {
-    const webAuditHtml = await readFile(join(distDir, 'web-audit.html'), 'utf8');
-    expect(webAuditHtml).toContain('data-surface-audit-seg');
-    expect(webAuditHtml).toContain('id="audit-s-web" checked');
-    expect(webAuditHtml).toContain('<meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />');
-    expect(webAuditHtml).toContain('/js/webmcp.js');
-    expect(webAuditHtml).toContain('/js/web-audit.js');
-  });
-
   test('/audit HTML carries the Turnstile sitekey meta, because its form transacts', async () => {
     const auditHtml = await readFile(join(distDir, 'audit.html'), 'utf8');
     expect(auditHtml).toContain('name="turnstile-sitekey"');
-  });
-
-  test('widget page twin keeps the prose pointer and no form markup after the frontmatter', async () => {
-    const webAuditMd = await readFile(join(distDir, 'web-audit.md'), 'utf8');
-    expect(webAuditMd.startsWith('---\n')).toBe(true);
-    expect(webAuditMd).toContain(`url: ${CANONICAL_SITE_URL}/web-audit\n`);
-    // The widget's stand-in is a prose pointer whose target absolutifies,
-    // so the twin's only actionable link resolves on whatever host built it.
-    expect(webAuditMd).toContain('Enter a public URL on the');
-    expect(webAuditMd).toContain(`[web audit page](${resolveBaseUrl()}/web-audit)`);
-    expect(webAuditMd).not.toContain('data-web-audit-form');
-    expect(webAuditMd).not.toContain('turnstile-sitekey');
-    expect(webAuditMd).not.toContain('{{TURNSTILE_SITEKEY}}');
-    expect(webAuditMd).not.toContain('/js/webmcp.js');
   });
 
   test('subPageData still carries the frontmatter-free twin source for llms-full.txt', () => {

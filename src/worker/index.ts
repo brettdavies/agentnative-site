@@ -13,20 +13,22 @@
 
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { isLegacyRequest } from '@modelcontextprotocol/server';
-import { isAuditPath, isScorePath as isResultPath, isScoringPath, SCORECARDS_PATH } from '../shared/audit-routes';
+import {
+  isAuditPath,
+  isLeaderboardPath,
+  isScorePath as isResultPath,
+  isScoringPath,
+  retiredRedirectFor,
+  SCORECARDS_PATH,
+} from '../shared/audit-routes';
 import { classifyGatewayRequest, detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
 import { type AuditApiEnv, handleAuditApi, isAuditApiPath } from './audit/api';
 import type { AuditJob } from './audit/job';
-import {
-  handleLegacyLiveScorePath,
-  handleLegacyWebResultPath,
-  handleResultRoute,
-  type ResultEnv,
-} from './audit/result';
+import { handleResultRoute, type ResultEnv } from './audit/result';
 import { handleScoringPage, type ScoringPageEnv } from './audit/scoring-page';
+import { resolveBoardEntries, type WebBoardEnv } from './audit-web/board';
 import { getAggregate, type WebAggregateEntry, type WebCacheEnv } from './audit-web/cache';
 import { flushHitMinPurge, runWithHitMinPurge } from './audit-web/hit-min-purge';
-import { webTag } from './audit-web/hit-min-tags';
 import {
   buildBoardMarkdownRows,
   buildBoardRows,
@@ -45,16 +47,6 @@ import {
   type WebRescoreTriggerEnv,
 } from './audit-web/rescore-trigger';
 import type { WebRescoreWorkflowBinding } from './audit-web/rescore-workflow';
-import {
-  handleWebAudit,
-  handleWebLeaderboard,
-  handleWebScoringPage,
-  isWebAuditPath,
-  isWebLeaderboardPath,
-  isWebScoringPath,
-  resolveBoardEntries,
-  type WebAuditRouteEnv,
-} from './audit-web/route';
 import { applyHeaders, isRepresentationPinned } from './headers';
 import { getWarmCatalog, loadCatalog } from './mcp/catalog';
 import { coerceMcpJsonResponse, stripCorsHeaders } from './mcp/coerce-json-response';
@@ -152,9 +144,9 @@ export interface Env {
   SCORE_LIMITER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   // TURNSTILE_SECRET is a secret (wrangler secret put). TURNSTILE_SITEKEY
   // is a public var the Worker substitutes into <meta name="turnstile-sitekey">
-  // on `/` and `/web-audit`. Absent on production means those forms refuse
-  // to render Turnstile (fail-loud pre-promotion). `/web/scoring` bakes the
-  // same var into the in-progress page body.
+  // on the two entry pages. Absent on production means those forms refuse to
+  // render Turnstile (fail-loud pre-promotion). The progress page and a
+  // result page's Re-audit control bake the same var into their own markup.
   TURNSTILE_SECRET?: string;
   TURNSTILE_SITEKEY?: string;
   SESSION_HMAC_SECRET?: string;
@@ -441,12 +433,6 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   }
   if (isScorePath(pathname)) {
     return handleScore(request, env as ScoreEnv);
-  }
-
-  // Web-audit streaming dispatch. Threads ctx so the engine's R2 write
-  // survives a mid-stream client disconnect via ctx.waitUntil (KTD-13).
-  if (isWebAuditPath(pathname)) {
-    return handleWebAudit(request, env as WebAuditRouteEnv, ctx);
   }
 
   // Post-deploy rescore hook (secret-authed). Shares the single-flight
@@ -801,66 +787,24 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
     }
   }
 
-  // The legacy live-score path serves through the unified result renderer
-  // until it retires; it is dispatched ahead of the result route because
-  // `live/<binary>` would otherwise read as a GitHub shorthand target.
-  if (/^\/score\/live\/[^/]+$/.test(pathname)) {
-    return handleLegacyLiveScorePath(request, env as ResultEnv);
-  }
   if (isResultPath(pathname)) {
     return handleResultRoute(request, env as ResultEnv);
   }
+  // A retired path with an exact destination redirects rather than 404s, so
+  // an inbound link minted before the funnel merged still lands somewhere
+  // useful. The table in the route module decides which paths qualify.
+  const retiredTo = retiredRedirectFor(pathname);
+  if (retiredTo) {
+    return new Response(null, {
+      status: 301,
+      headers: { Location: retiredTo, 'Cache-Control': 'public, max-age=300' },
+    });
+  }
+
   // The progress page and its twin render per request, ahead of the asset
   // fetch: the page carries a request-time sitekey and exists for one run.
   if (isScoringPath(pathname)) {
     return handleScoringPage(request, env as ScoringPageEnv);
-  }
-
-  // Renamed page: `/check` -> `/audit` (the CLI subcommand rename).
-  // 301 the old path (and its markdown twin) so existing inbound links
-  // and any cached references resolve to the canonical page.
-  if (pathname === '/check' || pathname === '/check.md') {
-    const canonical = pathname.endsWith('.md') ? '/audit.md' : '/audit';
-    return new Response(null, {
-      status: 301,
-      headers: { Location: canonical, 'Cache-Control': 'public, max-age=300' },
-    });
-  }
-
-  // /web board + .md twin — Worker-rendered from the R2 leaderboard
-  // aggregate, dispatched ahead of the asset fetch so no static
-  // dist/web.html ever serves the board. Legacy extension/slash forms
-  // canonicalize like the rest of the site.
-  if (pathname === '/web.html' || pathname === '/web/') {
-    return new Response(null, {
-      status: 301,
-      headers: { Location: '/web', 'Cache-Control': 'public, max-age=300' },
-    });
-  }
-  if (isWebLeaderboardPath(pathname)) {
-    const servedMarkdown = pathname.endsWith('.md') || detectPreference(request) === 'markdown';
-    const response = await handleWebLeaderboard(request, env as WebAuditRouteEnv);
-    if (response.status !== 200) return response;
-    return applyHeaders(response, {
-      request,
-      servedMarkdown,
-      pathname: '/web',
-      cache: { klass: 'hit-min', tag: webTag() },
-    });
-  }
-
-  // /web/scoring[/<domain>] — the transient in-progress streaming page.
-  // Reserved above the result-page dispatch so `scoring` is never treated
-  // as a cached-result domain (mirrors the reserved `live` segment under
-  // /score/).
-  if (isWebScoringPath(pathname)) {
-    return handleWebScoringPage(request, env as WebAuditRouteEnv);
-  }
-
-  // The legacy website result path serves through the unified result
-  // renderer until it retires.
-  if (/^\/web\/[^/]+$/.test(pathname)) {
-    return handleLegacyWebResultPath(request, env as ResultEnv);
   }
 
   // /_internal/* paths are build-only assets (shell templates the
@@ -912,10 +856,11 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   // website pane is filled here from the same aggregate and the same opt-in
   // gate the website board uses, so the two can never disagree on what lists.
   // The page already carries the board tag and HIT-min from its path.
-  const isLeaderboard = pathname === '/scorecards' || pathname === '/scorecards.html' || pathname === '/scorecards.md';
+  const isLeaderboard = isLeaderboardPath(pathname) || pathname === `${SCORECARDS_PATH}.html`;
   if (isLeaderboard && upstream.ok) {
     const contentType = (upstream.headers.get('content-type') ?? '').toLowerCase();
-    const wantsMarkdown = servedMarkdown || pathname === '/scorecards.md' || contentType.includes('text/markdown');
+    const wantsMarkdown =
+      servedMarkdown || pathname === `${SCORECARDS_PATH}.md` || contentType.includes('text/markdown');
     if (wantsMarkdown || contentType.includes('text/html')) {
       return injectLeaderboardBoard(upstream, env, {
         request,
@@ -930,8 +875,7 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   // Entry-form pages: same sitekey placeholder as the homepage, no board
   // inject. Markdown twins and Accept: text/markdown skip this so the
   // token never reaches the agent surface.
-  const isEntryForm = pathname === '/web-audit' || pathname === '/web-audit.html' || isAuditPath(pathname);
-  if (isEntryForm && upstream.ok) {
+  if (isAuditPath(pathname) && upstream.ok) {
     const contentType = (upstream.headers.get('content-type') ?? '').toLowerCase();
     const wantsMarkdown = servedMarkdown || contentType.includes('text/markdown');
     if (!wantsMarkdown && contentType.includes('text/html')) {
@@ -1000,7 +944,7 @@ async function injectLeaderboardBoard(
   const view: WebBoardView = opts.url.searchParams.get('view') === 'curated' ? 'curated' : 'all';
   const [body, resolved] = await Promise.all([
     upstream.text(),
-    resolveBoardEntries(env as unknown as WebAuditRouteEnv, view),
+    resolveBoardEntries(env as unknown as WebBoardEnv, view),
   ]);
   const slice = opts.markdown
     ? buildBoardMarkdownRows(resolved.entries, opts.url.origin)

@@ -8,6 +8,7 @@
 // no wrangler dev needed.
 
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { RETIRED_REDIRECTS } from '../src/shared/audit-routes';
 import { classifyGatewayRequest, detectPreference } from '../src/worker/accept';
 import { applyHeaders, isRepresentationPinned, isStagingHost, resultCacheClass } from '../src/worker/headers';
 import worker from '../src/worker/index';
@@ -732,16 +733,6 @@ describe('applyHeaders — MISS class', () => {
     expect(res.headers.get('Cache-Tag')).toBeNull();
   });
 
-  test('/web/scoring* is MISS even on 200', () => {
-    const res = applyHeaders(new Response('scoring'), {
-      request: req('https://anc.dev/web/scoring/example.com'),
-      servedMarkdown: false,
-      pathname: '/web/scoring/example.com',
-    });
-    expect(res.headers.get('Cache-Control')).toBe('no-store');
-    expect(res.headers.get('Cache-Tag')).toBeNull();
-  });
-
   test('/scoring with a target and /scoring.md are MISS on 200', () => {
     const page = applyHeaders(new Response('progress'), {
       request: req('https://anc.dev/scoring?target=ripgrep'),
@@ -1285,6 +1276,88 @@ describe('worker.fetch — /api/score routing', () => {
       {} as ExecutionContext,
     );
     expect(res.headers.get('Content-Type')).toContain('application/json');
+  });
+});
+
+// R20 with one carve-out: a retired path that had an exact destination on the
+// new funnel redirects, and everything else the funnel retired is a 404. A
+// redirect to an approximation would be worse than a clear miss, so the table
+// in the route module is the whole allowance.
+describe('worker.fetch — retired paths', () => {
+  beforeEach(() => {
+    _resetIndexCache();
+  });
+
+  test('the retired entry page 301s to the audit page with its lane, and its twin to the twin', async () => {
+    const env = makeEnv({});
+    for (const [from, to] of Object.entries(RETIRED_REDIRECTS)) {
+      const res = await worker.fetch(req(`https://anc.dev${from}`), env, {} as ExecutionContext);
+      expect({ from, status: res.status, location: res.headers.get('location') }).toEqual({
+        from,
+        status: 301,
+        location: to,
+      });
+      expect(res.headers.get('cache-control')).toBe('public, max-age=300');
+    }
+  });
+
+  // Every website result path redirects, not a listed set: the host is in the
+  // URL, so the rule resolves by shape and covers any domain that was ever
+  // audited. A host that differs from its canonical form only in case lands on
+  // the canonical result in one hop rather than chaining a second 301.
+  test('a website result path redirects to its result, twin and any host included', async () => {
+    const env = makeEnv({});
+    const cases: Array<[string, string]> = [
+      ['/web/sounding.brettdavies.workers.dev', '/score/sounding.brettdavies.workers.dev'],
+      ['/web/anc.dev', '/score/anc.dev'],
+      ['/web/modelcontextprotocol.io', '/score/modelcontextprotocol.io'],
+      ['/web/developers.cloudflare.com', '/score/developers.cloudflare.com'],
+      ['/web/sub.deep.example.co.uk', '/score/sub.deep.example.co.uk'],
+      ['/web/example.com:8443', '/score/example.com:8443'],
+      ['/web/ANC.dev', '/score/anc.dev'],
+      ['/web/anc.dev.md', '/score/anc.dev/md'],
+    ];
+    for (const [from, to] of cases) {
+      const res = await worker.fetch(req(`https://anc.dev${from}`), env, {} as ExecutionContext);
+      expect({ from, status: res.status, location: res.headers.get('location') }).toEqual({
+        from,
+        status: 301,
+        location: to,
+      });
+    }
+  });
+
+  // A redirect is only better than a 404 when it lands somewhere real. A
+  // reserved name or a deeper path under /web/ has no result to point at.
+  // `/score/live/<binary>` is absent here because it is no longer a dispatch
+  // decision: the result route reads it as an ordinary target and answers
+  // from R2, which tests/audit-result-route.test.ts covers with that env.
+  // `notFoundUnlessListed` mirrors Static Assets: a retired path has no asset
+  // behind it, so the fall-through is the site 404.
+  test('every other retired path is a 404 with no redirect', async () => {
+    // The result route reads the registry index before it can answer, so a
+    // missing index would be a 503 about the index rather than the 404 the
+    // retirement is being asserted on.
+    const env = makeEnv(
+      { '/registry-index.json': '{"by_slug":{},"by_owner_repo":{}}' },
+      { notFoundUnlessListed: true },
+    );
+    for (const path of [
+      '/check',
+      '/web',
+      '/web.md',
+      '/web/scoring',
+      '/web/scoring/anc.dev',
+      '/web/api',
+      '/api/audit-web',
+    ]) {
+      const res = await worker.fetch(req(`https://anc.dev${path}`), env, {} as ExecutionContext);
+      expect({ path, status: res.status, location: res.headers.get('location') }).toEqual({
+        path,
+        status: 404,
+        location: null,
+      });
+    }
   });
 });
 

@@ -9,8 +9,6 @@ import { join } from 'node:path';
 import { WEB_AUDIT_STALE_AFTER_MS } from '../src/worker/audit-web/cache';
 import {
   buildFrontpageBoardRows,
-  buildWebLeaderboardBody,
-  buildWebLeaderboardMarkdown,
   rankWebEntries,
   type WebBoardEntry,
 } from '../src/worker/audit-web/leaderboard-render';
@@ -704,67 +702,6 @@ describe('web scorecard category cards (six categories, no group tier)', () => {
   });
 });
 
-describe('web leaderboard (U15)', () => {
-  // A small perfect site (relative 100, low global) vs a bigger,
-  // higher-GLOBAL platform: GLOBAL ranks the platform first by default;
-  // RELATIVE puts the perfect site on top.
-  function entry(domain: string, relative: number, globalScore: number): WebBoardEntry {
-    return {
-      domain,
-      url: `https://${domain}/`,
-      name: domain,
-      description: 'x',
-      score_pct: relative,
-      score: { relative, global: globalScore },
-      curated: true,
-    };
-  }
-  const entries = [entry('small-perfect.dev', 100, 45), entry('big-platform.dev', 88, 79)];
-  const boardOpts = { view: 'all', curatedCount: 2, userCount: 0 } as const;
-
-  test('default order is RELATIVE descending: the perfect-for-its-type site outranks the bigger routine', () => {
-    const ranked = rankWebEntries(entries);
-    expect(ranked.map((e) => e.domain)).toEqual(['small-perfect.dev', 'big-platform.dev']);
-    expect(ranked[0].rank).toBe(1);
-  });
-
-  test('the GLOBAL key re-ranks the bigger routine to the top', () => {
-    const ranked = rankWebEntries(entries, 'global');
-    expect(ranked.map((e) => e.domain)).toEqual(['big-platform.dev', 'small-perfect.dev']);
-  });
-
-  test('renders both score columns, row sort data, the toggle control, and /web links', () => {
-    const html = buildWebLeaderboardBody(entries, boardOpts);
-    expect(html).toContain('data-surface-board-seg');
-    expect(html).toContain('id="board-s-web"');
-    expect(html).toContain('href="/web/small-perfect.dev"');
-    expect(html).toContain('data-web-sort="global"');
-    expect(html).toContain('data-web-sort="relative"');
-    expect(html).toContain('data-global="79" data-relative="88"');
-    expect(html).toContain('<th class="lb-score">Global</th>');
-    expect(html).toContain('<th class="lb-score">Relative</th>');
-    expect(html).not.toContain('lb-principles');
-    expect(html).not.toContain('ANC 100');
-  });
-
-  test('an empty board renders the scoring-in-progress state, not a broken table', () => {
-    const html = buildWebLeaderboardBody([], { view: 'all', curatedCount: 0, userCount: 0 });
-    expect(html).not.toContain('<tbody>');
-    expect(html).toContain('Scoring in progress');
-    expect(html).toContain('data-surface-board-seg');
-  });
-
-  test('markdown twin lists RELATIVE-ordered rows with both columns, origin-absolute', () => {
-    const md = buildWebLeaderboardMarkdown(entries, 'https://anc.dev', boardOpts);
-    expect(md).toContain('| 1 | [small-perfect.dev](https://anc.dev/web/small-perfect.dev) | 45% | 100% | curated |');
-    expect(md).toContain('| 2 | [big-platform.dev](https://anc.dev/web/big-platform.dev) | 79% | 88% | curated |');
-  });
-
-  test('the CLI leaderboard hero is not present on the web board', () => {
-    expect(buildWebLeaderboardBody(entries, boardOpts)).toContain('Web Agent-Readiness Leaderboard');
-  });
-});
-
 const DOCUMENTED_TOP_LEVEL = [
   'schema_version',
   'spec_version',
@@ -919,48 +856,6 @@ describe('web scorecard schema doc drift guard (U16)', () => {
     const example = doc.slice(doc.indexOf('## Top-level fields'), doc.indexOf('| Field'));
     const documented = [...example.matchAll(/^\s*"([a-z_]+)":/gm)].map((m) => m[1]);
     expect(documented.sort()).toEqual([...DOCUMENTED_TOP_LEVEL].sort());
-  });
-});
-
-describe('leaderboard friendly-name display', () => {
-  function entry(over: Partial<WebBoardEntry> = {}): WebBoardEntry {
-    return {
-      domain: 'developers.cloudflare.com',
-      url: 'https://developers.cloudflare.com/',
-      name: 'Cloudflare Developers',
-      description: 'Cloudflare developer docs.',
-      score_pct: 96,
-      score: { relative: 96, global: 90 },
-      curated: true,
-      ...over,
-    };
-  }
-  const singleOpts = { view: 'all', curatedCount: 1, userCount: 0 } as const;
-
-  test('/web renders "<domain> (<name>)" linking to the detail page, not the external site', () => {
-    const html = buildWebLeaderboardBody([entry()], singleOpts);
-    // whole-row stretched link: one anchor on the domain, row is position-anchored
-    expect(html).toContain('<tr class="lb-row"');
-    expect(html).toContain('<a class="lb-rowlink" href="/web/developers.cloudflare.com">developers.cloudflare.com</a>');
-    expect(html).toContain('<span class="lb-tool__name">(Cloudflare Developers)</span>');
-    // never links to the external site
-    expect(html).not.toContain('href="https://developers.cloudflare.com');
-  });
-
-  test('a row whose name equals its domain shows no parenthetical', () => {
-    const html = buildWebLeaderboardBody(
-      [entry({ domain: 'crates.io', url: 'https://crates.io/', name: 'crates.io' })],
-      singleOpts,
-    );
-    expect(html).not.toContain('lb-tool__name');
-  });
-
-  test('the homepage pane shows the friendly name and the site score (relative), not global', () => {
-    const rows = buildFrontpageBoardRows([entry()]);
-    expect(rows).toContain('developers.cloudflare.com (Cloudflare Developers)');
-    expect(rows).toContain('href="/web/developers.cloudflare.com"');
-    expect(rows).toContain('width:96%'); // relative meter
-    expect(rows).not.toContain('width:90%'); // not the global score
   });
 });
 

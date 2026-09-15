@@ -112,7 +112,7 @@ falls back to a shared `anon` bucket on missing `cf-connecting-ip`. `MCP_AUDIT_L
 audits only, at 5 fresh audits per 60 minutes per IP, with **no anon fallback**. `audit_website` fresh audits key
 `WEB_AUDIT_LIMITER_IP` (30 per 60 seconds per IP burst, no anon fallback) plus a shared 30-per-hour-per-IP ceiling;
 missing IP returns `-32099` rather than consuming a shared bucket, because the audit cost is non-trivial. The
-`/api/audit-web` webapp route reaches the same hourly counter but gates the human path like `/api/score` does: a
+browser path reaches the same hourly counter through `POST /api/score`, gated on a session rather than an IP: a
 Turnstile solve mints a `__Host-anc-session` cookie, `WEB_AUDIT_LIMITER` caps 10 audits per session per 60 seconds keyed
 `<sid>:<sha256(target)>`, and `WEB_AUDIT_LIMITER_IP` is the coarse per-IP fallback. The hourly window is enforced in two
 layers: the CF Rate Limiting binding only accepts `period: 10 | 60`, so the binding holds the per-60-seconds burst floor
@@ -139,7 +139,7 @@ hazards: the [operator runbook](docs/runbooks/mcp-operator.md).
   `next_tool: get_scorecard` redirect; the read tier stays alive.
 - `MCP_LEGACY_ENABLED`: gates the legacy lane only. Falsy returns JSON-RPC `-32022` (`data.supported: ["2026-07-28"]`)
   at the shell before the SDK handles legacy `initialize` / stateless legacy calls; modern SEP-2243 requests stay live.
-- `WEB_AUDIT_ENABLED`: gates the website audit (`audit_website` and the `/api/audit-web` route). Falsy returns `audited:
+- `WEB_AUDIT_ENABLED`: gates the website audit (`audit_website` and the endpoint's web lane). Falsy returns `audited:
   false` with a disabled message; `get_website_audit` still serves cached web scorecards.
 
 **Errors carry on two layers.** Tool-level failures return `CallToolResult` with `isError: true` plus a textual message;
@@ -174,11 +174,18 @@ single-source bump breaks the build.
 
 The site speaks as a **standard**, not a person. Think RFC, not blog post.
 
+<!-- vale brand.MarketingRegister = NO -->
+<!-- The Bad lines quote the register this rule bans, which is the point of
+     showing them. Scoped to this block so the rule keeps firing everywhere
+     the prose is speaking rather than illustrating. -->
+
 - Good: "CLI tools that block on interactive prompts are invisible to agents. The agent hangs, the user sees nothing,
   and the operation times out silently."
 - Bad: "We believe that CLI tools should be non-interactive because agents can't handle prompts."
 - Good: "MUST support `--output json` for machine-readable output."
 - Bad: "It's really important to have JSON output for your CLI."
+
+<!-- vale brand.MarketingRegister = YES -->
 
 Use RFC 2119 language (MUST, SHOULD, MAY) for requirements. Concrete examples, not abstractions. Show the failure mode,
 then show the fix.
@@ -249,8 +256,9 @@ Until then, the agent-side browser-verify rule above is the working gate.
 `bun run dev` (which runs `bun run build && wrangler dev --env staging --local --port 8787`) on `http://localhost:8787`
 is the only valid local preview. The Worker entrypoint at `src/worker/index.ts` is the source of content negotiation,
 the `applyHeaders` policy (`Link: rel=alternate`, `X-Llms-Txt`, staging `X-Robots-Tag: noindex`, `Cache-Control`), the
-`/mcp` transport, the `/api/score` + `/score/live/<binary>` live-scoring path, the `/check` → `/audit` redirect, the
-`/_internal/*` 404 guard, and the homepage `{{TURNSTILE_SITEKEY}}` substitution. Without the Worker, none of those
+`/mcp` transport, the `POST /api/score` transact endpoint with the `/scoring` progress page and the
+`/score/<target>` result route it forwards to, the retired-path redirects, the `/_internal/*` 404 guard, and the
+entry pages' `{{TURNSTILE_SITEKEY}}` substitution. Without the Worker, none of those
 contracts are visible. Static-file servers (`python -m http.server`, `serve`, `npx http-server`, etc.) bypass the Worker
 entirely and produce a false preview. Never use them to verify any of those surfaces or the `.md`-twin contract.
 
@@ -351,10 +359,10 @@ engine against a public URL) and for operating the web-board rescore (weekly cro
   asserts against whatever the *previous* checkout left in `dist/` and fails with output that reads exactly like a
   content regression, when the actual cause is a stale build artifact. `ci.yml` already encodes the correct order (lint
   · build · test); mirror it locally.
-- **Assert against the representation you actually received.** Every `/web/<domain>`, `/score/<name>`, and content page
-  serves an HTML page and a markdown twin from one URL, chosen by `Accept`. `curl` sends `Accept: */*` and resolves to
-  the twin, so grepping a bare `curl` response for HTML markers (`data-web-audit-context`, `class="web-check"`, a
-  `<time>` element) finds nothing on a page that renders them correctly. "The assertion found nothing" and "the feature
+- **Assert against the representation you actually received.** Every `/score/<target>` and content page serves an HTML
+  page and a markdown twin from one URL, chosen by `Accept`. `curl` sends `Accept: */*` and resolves to the twin, so
+  grepping a bare `curl` response for HTML markers (`data-web-audit-context`, `class="web-check"`, a `<time>` element)
+  finds nothing on a page that renders them correctly. "The assertion found nothing" and "the feature
   is missing" are indistinguishable until you confirm which document you got. Send an explicit `Accept:
   text/html,application/xhtml+xml` when checking HTML, `Accept: text/markdown` (or the `.md` suffix) when checking the
   twin, and check a marker unique to that representation before trusting a negative result.

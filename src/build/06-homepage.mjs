@@ -18,6 +18,7 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { AUDIT_PATH, auditPath, leaderboardPath, scorePath } from '../shared/audit-routes.ts';
 import { bandOf, principleTier, renderMeter } from '../shared/scorecard-format.mjs';
 import { buildWebHeroCardEmptyState, buildWebHeroCardFromSnapshot } from '../shared/web-hero-card.mjs';
 import { renderAuditForm } from './audit-form.mjs';
@@ -122,7 +123,7 @@ function buildCliBoardRows(leaderboard) {
       // Without a name of its own the row announces as its own contents, which
       // read as a number salad: rank digits, tool, description, bare score.
       const label = escHtml(`${entry.tool.name}, score ${pct} percent, rank ${entry.rank}`);
-      return `        <a class="lrow ${bandOf(pct)}" aria-label="${label}" href="/score/${name}"><span class="rank" aria-hidden="true">${String(entry.rank).padStart(2, '0')}</span><span class="name">${name} <span class="name-sub">${desc}</span></span>${renderMeter(pct)}</a>`;
+      return `        <a class="lrow ${bandOf(pct)}" aria-label="${label}" href="${scorePath(name)}"><span class="rank" aria-hidden="true">${String(entry.rank).padStart(2, '0')}</span><span class="name">${name} <span class="name-sub">${desc}</span></span>${renderMeter(pct)}</a>`;
     })
     .join('\n');
 }
@@ -132,7 +133,7 @@ function buildCliBoardMarkdown(leaderboard) {
   const rows = leaderboard.slice(0, BOARD_ROWS).map((entry) => {
     const pct = entry.scorecard.badge.score_pct;
     const name = entry.tool.name;
-    return `| ${entry.rank} | [${name}](/score/${name}) | ${pct}% |`;
+    return `| ${entry.rank} | [${name}](${scorePath(name)}) | ${pct}% |`;
   });
   return ['| # | Tool | Score |', '|---|------|-------|', ...rows, ''].join('\n');
 }
@@ -156,7 +157,7 @@ export function buildWebCheckRows() {
   // check rows of the /web-audit scorecard, not on the category summary.
   return WEB_CHECKS.map(
     (c) =>
-      `      <li class="spec__row spec__row--untiered"><span class="spec__id">${c.id}</span><div class="spec__body"><div class="spec__head"><a class="spec__title" href="/web-audit">${c.title}</a></div><p class="spec__desc">${c.desc}</p></div></li>`,
+      `      <li class="spec__row spec__row--untiered"><span class="spec__id">${c.id}</span><div class="spec__body"><div class="spec__head"><a class="spec__title" href="${auditPath({ lane: 'web' })}">${c.title}</a></div><p class="spec__desc">${c.desc}</p></div></li>`,
   ).join('\n');
 }
 
@@ -208,8 +209,8 @@ ${buildCliBoardRows(leaderboard)}
       <div class="board" data-s="web" role="group" aria-label="Top websites">
 {{WEB_BOARD_ROWS}}
       </div>
-      <p class="board-rubric" data-s="cli">Scored against the <strong>${principles.length} principles</strong>. Run <code>anc audit &lt;tool&gt;</code> locally for source + project depth. <a href="/scorecards">Full board&nbsp;▸</a></p>
-      <p class="board-rubric" data-s="web">Scored against the emerging agent-web standards: <code>MCP</code>, <code>llms.txt</code>, <code>OpenAPI</code>, JSON Schema, discovery. anc audits; it doesn't own them. <a href="/web">Full board&nbsp;▸</a></p>
+      <p class="board-rubric" data-s="cli">Scored against the <strong>${principles.length} principles</strong>. Run <code>anc audit &lt;tool&gt;</code> locally for source + project depth. <a href="${leaderboardPath({ lane: 'cli' })}">Full board&nbsp;▸</a></p>
+      <p class="board-rubric" data-s="web">Scored against the emerging agent-web standards: <code>MCP</code>, <code>llms.txt</code>, <code>OpenAPI</code>, JSON Schema, discovery. anc audits; it doesn't own them. <a href="${leaderboardPath({ lane: 'web' })}">Full board&nbsp;▸</a></p>
     </div>
   </section>
   <section class="spec-section" id="principles">
@@ -332,7 +333,7 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles,
     '',
     '## Audit a CLI tool or a website, live.',
     '',
-    'Pick CLI or Website on the homepage form or the [audit page](/audit) and enter a target. A CLI target is a tool name, an install command, or a GitHub URL: `ripgrep`, `cargo binstall ouch`, `npm install -g cowsay`, `pip install black`, `uv tool install rclone`, `github.com/cli/cli`. A website target is a domain or a URL: `anc.dev`, `modelcontextprotocol.io`. [Install `anc` locally](/install) for source and project depth.',
+    'Pick CLI or Website on the homepage form or the [audit page](${AUDIT_PATH}) and enter a target. A CLI target is a tool name, an install command, or a GitHub URL: `ripgrep`, `cargo binstall ouch`, `npm install -g cowsay`, `pip install black`, `uv tool install rclone`, `github.com/cli/cli`. A website target is a domain or a URL: `anc.dev`, `modelcontextprotocol.io`. [Install `anc` locally](/install) for source and project depth.',
     '',
     '## Principles',
     '',

@@ -5,6 +5,7 @@
 // Sync via: scripts/sync-coverage-matrix.sh
 
 import { readFile } from 'node:fs/promises';
+import { SCORECARDS_PATH } from '../shared/audit-routes.ts';
 import { escHtml, PRINCIPLE_NAMES } from './util.mjs';
 
 /**
@@ -162,7 +163,7 @@ export function buildCoverageBody(matrix) {
   registry — a flat list of every MUST, SHOULD, and MAY across the eight principles, each mapped to the audit IDs
   that verify it. Requirements with no verifiers are marked <strong>UNCOVERED</strong>: the spec requires them but
   <code>anc</code> does not yet test for them.</p>
-  <p>"Covered" means an audit exists that targets this requirement. "Verified" (on <a href="/scorecards">scorecard pages</a>)
+  <p>"Covered" means an audit exists that targets this requirement. "Verified" (on <a href="${SCORECARDS_PATH}">scorecard pages</a>)
   means the audit actually ran for a specific tool. A requirement can be covered in the matrix but unverified for a
   particular tool if the audit was skipped (e.g., source audits on a binary-only audit).</p>
 </section>`;

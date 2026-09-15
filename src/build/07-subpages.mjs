@@ -20,21 +20,11 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { renderSurfaceSeg } from '../shared/surface-seg.mjs';
 import { renderAuditForm } from './audit-form.mjs';
 import { extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, WEBMCP_SCRIPT } from './shell.mjs';
 import { composeTwin } from './util.mjs';
-
-const auditSurfaceSegWeb = renderSurfaceSeg({
-  dataAttr: 'data-surface-audit-seg',
-  radioName: 'audit-surface',
-  cliId: 'audit-s-cli',
-  webId: 'audit-s-web',
-  checked: 'web',
-  ariaLabel: 'Audit surface',
-});
 
 // The audit page's hero: the shared entry form under the page's heading and
 // lede. The content after the slot is the CLI pane and `lanes.web` the
@@ -50,36 +40,6 @@ const AUDIT_WIDGET = {
   lanes: { web: '_audit-web.md' },
 };
 
-// The web-audit hero. Submitting navigates to /web/scoring/<host>, which
-// streams the audit; web-audit.js binds the data-* hooks.
-const WEB_AUDIT_WIDGET = {
-  placeholder: '{{WEB_AUDIT_FORM}}',
-  html: `<section class="audit-hero" aria-labelledby="web-audit-heading" data-web-audit-section>
-  ${auditSurfaceSegWeb}
-  <h2 id="web-audit-heading" class="audit-hero__title">Score a website, live.</h2>
-  <p class="audit-hero__lede">Enter a public URL. We open an in-progress page that streams each check as it resolves, then forwards to a shareable <code>/web/&lt;domain&gt;</code> scorecard.</p>
-  <form class="board-try audit-hero__form" method="get" action="/web/scoring" novalidate data-web-audit-form>
-    <input id="web-audit-input" name="url" type="text" autocomplete="off" spellcheck="false" placeholder="anc.dev" required aria-label="Website URL" aria-describedby="web-audit-help" data-web-audit-input />
-    <button type="submit" class="btn btn--primary" data-web-audit-submit>Audit</button>
-    <label class="audit-hero__optin">
-      <input type="checkbox" name="public_listing" value="true" data-web-audit-listing />
-      List this site on the public web leaderboard
-    </label>
-  </form>
-  <p id="web-audit-help" class="live-score__help">
-    or try
-    <button type="button" class="live-score__chip" data-web-audit-example="anc.dev" aria-label="Try example: anc.dev"><code>anc.dev</code></button>,
-    <button type="button" class="live-score__chip" data-web-audit-example="modelcontextprotocol.io" aria-label="Try example: modelcontextprotocol.io"><code>modelcontextprotocol.io</code></button>.
-  </p>
-  <p class="live-score__status" data-web-audit-status role="status" aria-live="polite" hidden></p>
-</section>`,
-  // Site-relative so absolutifyMarkdownLinks resolves it against the
-  // build's target host. An already-absolute target passes through that
-  // rewrite untouched, which on a staging build would point the twin's
-  // only actionable link back at production.
-  md: 'Enter a public URL on the [web audit page](/web-audit) to run the audit in your browser.',
-};
-
 /**
  * Emit content-driven sub-pages (HTML + MD twin via shared pipeline).
  *
@@ -92,11 +52,6 @@ const WEB_AUDIT_WIDGET = {
  */
 export const SUB_PAGES = [
   { name: 'audit', extraScripts: ['/js/audit-entry.js', WEBMCP_SCRIPT], widget: AUDIT_WIDGET },
-  {
-    name: 'web-audit',
-    extraScripts: ['/js/web-audit.js', WEBMCP_SCRIPT],
-    widget: WEB_AUDIT_WIDGET,
-  },
   { name: 'install' },
   { name: 'about' },
   { name: 'badge' },

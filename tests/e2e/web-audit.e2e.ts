@@ -40,14 +40,11 @@ test.use({ baseURL: STAGING_BASE, extraHTTPHeaders: ACCESS_HEADERS });
 
 const TARGET_DOMAIN = 'anc.dev';
 
-test.describe('web audit — scoring-page flow and shareable result', () => {
-  test('form navigates to /web/scoring, streams, and forwards to the shareable /web/<domain> page', async ({
-    page,
-  }) => {
-    await page.goto('/web-audit');
-    await expect(page.locator('[data-web-audit-form]')).toBeVisible();
+test.describe('web audit — entry form, progress page, and result', () => {
+  test('the entry form forwards to the progress page, which streams and lands on the result', async ({ page }) => {
+    await page.goto('/audit');
+    await expect(page.locator('[data-audit-form]')).toBeVisible();
 
-    await page.fill('[data-web-audit-input]', TARGET_DOMAIN);
     // Opt in, matching the value the round-trip test below stores. The two are
     // the only tests here that let a flag-changing write reach the Worker, and
     // a write that changes the stored flag spends one of the five per-hour
@@ -56,81 +53,65 @@ test.describe('web audit — scoring-page flow and shareable result', () => {
     // so a third run in the same hour was refused and this flow timed out
     // waiting on a redirect the Worker had declined. Agreeing costs one flip
     // the first time and nothing after.
-    await page.check('[data-web-audit-listing]');
-    await page.click('[data-web-audit-submit]');
+    await page.fill('[data-audit-target]', TARGET_DOMAIN);
+    await page.check('[data-audit-listing]');
+    await page.click('[data-audit-submit]');
 
-    // Submit navigates to the dedicated in-progress page.
-    await page.waitForURL(`**/web/scoring/${TARGET_DOMAIN}`, { timeout: 30_000 });
+    await page.waitForURL(`**/scoring?target=${TARGET_DOMAIN}*`, { timeout: 30_000 });
 
-    // The scoring page acquires a token, POSTs, and either streams per-check
-    // rows (fresh audit) or forwards immediately (cache hit). Either way the
-    // flow ends on the shareable result page.
-    const streamedRow = page.locator('[data-web-audit-results] tr').first();
+    // The progress page spends the stashed token, POSTs, and either streams
+    // per-phase rows (fresh audit) or forwards immediately (cache hit). Either
+    // way the flow ends on the result page.
+    const phaseRow = page.locator('[data-phase-row]').first();
     const sawStreaming = await Promise.race([
-      streamedRow.waitFor({ state: 'visible', timeout: 75_000 }).then(
+      phaseRow.waitFor({ state: 'visible', timeout: 75_000 }).then(
         () => true,
         () => false,
       ),
-      page.waitForURL(`**/web/${TARGET_DOMAIN}`, { timeout: 75_000 }).then(() => false),
+      page.waitForURL(`**/score/${TARGET_DOMAIN}*`, { timeout: 75_000 }).then(() => false),
     ]);
-    await page.waitForURL(`**/web/${TARGET_DOMAIN}`, { timeout: 75_000 });
+    await page.waitForURL(`**/score/${TARGET_DOMAIN}*`, { timeout: 75_000 });
     expect(typeof sawStreaming).toBe('boolean');
     await expect(page.locator('.result-score .bigscore__n').first()).toContainText(/\d/);
-    await expect(page.locator('.scorecard-audits')).toBeVisible();
 
-    // The scoring page used location.replace(), so it never entered history:
-    // back from the result page returns to the form, not the scoring page.
+    // The progress page used location.replace(), so it never entered history:
+    // back from the result page returns to the form, not the progress page.
     await page.goBack();
-    await expect(page).toHaveURL(/\/web-audit$/);
+    await expect(page).toHaveURL(/\/audit$/);
   });
 
-  test('/web/scoring/<domain> serves the JS-required in-progress page with a noscript fallback', async ({
-    request,
-  }) => {
-    const res = await request.get(`/web/scoring/${TARGET_DOMAIN}`);
-    expect(res.status()).toBe(200);
-    expect(res.headers()['content-type']).toContain('text/html');
-    expect(res.headers()['cache-control']).toBe('no-store');
-    expect(res.headers()['x-robots-tag']).toBe('noindex');
-    const html = await res.text();
-    expect(html).toContain('meta name="turnstile-sitekey"');
-    expect(html).toContain('/js/web-audit-scoring.js');
-    expect(html).toContain('<noscript>');
-
-    // The transient page still answers markdown with a pointer.
-    const md = await request.get(`/web/scoring/${TARGET_DOMAIN}`, { headers: { accept: 'text/markdown' } });
-    expect(md.headers()['content-type']).toContain('text/markdown');
-    expect(await md.text()).toContain(`/web/${TARGET_DOMAIN}.md`);
-  });
-
-  test('/api/audit-web streams NDJSON check events then a terminal complete', async ({ request }) => {
+  test('the transact endpoint streams NDJSON check events then a terminal complete', async ({ request }) => {
     // Staging binds the Turnstile always-passes test secret, so "x" verifies.
-    const res = await request.post('/api/audit-web', {
+    const res = await request.post('/api/score', {
       headers: { 'content-type': 'application/json' },
-      data: { url: TARGET_DOMAIN, turnstile_token: 'x' },
+      data: { target: TARGET_DOMAIN, turnstile_token: 'x' },
       timeout: 75_000,
     });
     expect(res.status()).toBe(200);
     const contentType = res.headers()['content-type'] ?? '';
     if (contentType.includes('application/json')) {
       // Cache hit: a single JSON envelope with the 0.2 scorecard.
-      const body = (await res.json()) as { cached?: boolean; scorecard?: { score_pct?: number }; share_url?: string };
-      expect(body.cached).toBe(true);
+      const body = (await res.json()) as {
+        freshness?: { cached?: boolean };
+        scorecard?: { score_pct?: number };
+        scorecard_url?: string;
+      };
+      expect(body.freshness?.cached).toBe(true);
       expect(body.scorecard?.score_pct).toBeGreaterThanOrEqual(0);
-      expect(body.share_url).toBe(`/web/${TARGET_DOMAIN}`);
+      expect(body.scorecard_url).toMatch(new RegExp(`/score/${TARGET_DOMAIN}$`));
       return;
     }
     const lines = (await res.text())
       .split('\n')
       .filter((l) => l.trim().length > 0)
-      .map((l) => JSON.parse(l) as { type: string; share_url?: string });
+      .map((l) => JSON.parse(l) as { type: string; scorecard_url?: string });
     const checks = lines.filter((l) => l.type === 'check');
     expect(checks.length).toBeGreaterThan(0);
-    expect(lines.at(-1)?.share_url).toBe(`/web/${TARGET_DOMAIN}`);
+    expect(lines.at(-1)?.scorecard_url).toMatch(new RegExp(`/score/${TARGET_DOMAIN}$`));
   });
 
-  test('the /web/<domain> markdown twin mirrors the category structure with both scores', async ({ request }) => {
-    const res = await request.get(`/web/${TARGET_DOMAIN}.md`);
+  test('the website result markdown twin mirrors the category structure with both scores', async ({ request }) => {
+    const res = await request.get(`/score/${TARGET_DOMAIN}/md`);
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('text/markdown');
     const body = await res.text();
@@ -143,7 +124,7 @@ test.describe('web audit — scoring-page flow and shareable result', () => {
   });
 
   test('@render the result page groups by category and headlines RELATIVE with GLOBAL secondary', async ({ page }) => {
-    await page.goto(`/web/${TARGET_DOMAIN}`);
+    await page.goto(`/score/${TARGET_DOMAIN}`);
     await expect(page.locator('.result-score .bigscore__n').first()).toContainText(/\d/);
     await expect(page.locator('.result-score .bigscore__l').first()).toContainText('site score');
     await expect(page.locator('.result-score__secondary')).toContainText('global-ready');
@@ -160,9 +141,9 @@ test.describe('web audit — scoring-page flow and shareable result', () => {
   });
 
   test('a site_type-scoped audit gates the api-only checks to n_a', async ({ request }) => {
-    const res = await request.post('/api/audit-web', {
+    const res = await request.post('/api/score', {
       headers: { 'content-type': 'application/json' },
-      data: { url: TARGET_DOMAIN, site_type: 'content', turnstile_token: 'x' },
+      data: { target: TARGET_DOMAIN, site_type: 'content', turnstile_token: 'x' },
       timeout: 75_000,
     });
     expect(res.status()).toBe(200);
@@ -190,10 +171,8 @@ test.describe('web audit — scoring-page flow and shareable result', () => {
 });
 
 test.describe('web audit — per-check fix skills', () => {
-  test('/web-audit/skill/<id> HTML carries the copy mechanism (no fenced prompt); the .md keeps it', async ({
-    request,
-  }) => {
-    const htmlRes = await request.get('/web-audit/skill/openapi');
+  test('/fix/<id> HTML carries the copy mechanism (no fenced prompt); the .md keeps it', async ({ request }) => {
+    const htmlRes = await request.get('/fix/openapi');
     expect(htmlRes.status()).toBe(200);
     expect(htmlRes.headers()['content-type']).toContain('text/html');
     const html = await htmlRes.text();
@@ -202,7 +181,7 @@ test.describe('web audit — per-check fix skills', () => {
     expect(html).not.toContain('<pre>');
     expect(html).not.toContain("Issue: <the audit's finding for this check>");
 
-    const mdRes = await request.get('/web-audit/skill/openapi.md');
+    const mdRes = await request.get('/fix/openapi.md');
     expect(mdRes.status()).toBe(200);
     expect(mdRes.headers()['content-type']).toContain('text/markdown');
     const md = await mdRes.text();
@@ -212,13 +191,13 @@ test.describe('web audit — per-check fix skills', () => {
   });
 
   test('content negotiation serves the twin for Accept: text/markdown', async ({ request }) => {
-    const res = await request.get('/web-audit/skill/llms-txt', { headers: { accept: 'text/markdown' } });
+    const res = await request.get('/fix/llms-txt', { headers: { accept: 'text/markdown' } });
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('text/markdown');
   });
 
   test('an unknown check id 404s', async ({ request }) => {
-    const res = await request.get('/web-audit/skill/not-a-check');
+    const res = await request.get('/fix/not-a-check');
     expect(res.status()).toBe(404);
   });
 });
@@ -234,7 +213,7 @@ test.describe('web audit — public_listing opt-in transport', () => {
   test.describe.configure({ mode: 'serial' });
 
   function isAuditPost(r: import('@playwright/test').Request): boolean {
-    return r.method() === 'POST' && r.url().includes('/api/audit-web');
+    return r.method() === 'POST' && r.url().includes('/api/score');
   }
 
   /**
@@ -253,7 +232,7 @@ test.describe('web audit — public_listing opt-in transport', () => {
    * client forwards exactly as it would against staging.
    */
   async function stubAuditPost(page: import('@playwright/test').Page): Promise<void> {
-    await page.route('**/api/audit-web', async (route) => {
+    await page.route('**/api/score', async (route) => {
       const scoredAt = new Date().toISOString();
       await route.fulfill({
         status: 200,
@@ -263,7 +242,7 @@ test.describe('web audit — public_listing opt-in transport', () => {
           scored_at: scoredAt,
           refresh_after: new Date(Date.parse(scoredAt) + 60_000).toISOString(),
           scorecard: {},
-          share_url: `/web/${TARGET_DOMAIN}`,
+          scorecard_url: `/score/${TARGET_DOMAIN}`,
         }),
       });
     });
@@ -272,18 +251,18 @@ test.describe('web audit — public_listing opt-in transport', () => {
   /** The page's audit flow has settled: forwarded to the saved result, or ended on the retry state. */
   async function settled(page: import('@playwright/test').Page): Promise<void> {
     await Promise.race([
-      page.waitForURL(`**/web/${TARGET_DOMAIN}`, { timeout: 75_000 }),
+      page.waitForURL(`**/score/${TARGET_DOMAIN}*`, { timeout: 75_000 }),
       page.locator('[data-web-audit-retry]').waitFor({ state: 'visible', timeout: 75_000 }),
     ]);
   }
 
   test('a checked box sends public_listing: true in the POST body', async ({ page }) => {
     await stubAuditPost(page);
-    await page.goto('/web-audit');
-    await page.fill('[data-web-audit-input]', TARGET_DOMAIN);
-    await page.check('[data-web-audit-listing]');
+    await page.goto('/audit');
+    await page.fill('[data-audit-target]', TARGET_DOMAIN);
+    await page.check('[data-audit-listing]');
     const posted = page.waitForRequest(isAuditPost, { timeout: 60_000 });
-    await page.click('[data-web-audit-submit]');
+    await page.click('[data-audit-submit]');
     const body = (await posted).postDataJSON() as Record<string, unknown>;
     expect(body.public_listing).toBe(true);
     await settled(page);
@@ -291,11 +270,11 @@ test.describe('web audit — public_listing opt-in transport', () => {
 
   test('an unchecked box (the default) sends an explicit public_listing: false', async ({ page }) => {
     await stubAuditPost(page);
-    await page.goto('/web-audit');
-    await page.fill('[data-web-audit-input]', TARGET_DOMAIN);
-    await expect(page.locator('[data-web-audit-listing]')).not.toBeChecked();
+    await page.goto('/audit');
+    await page.fill('[data-audit-target]', TARGET_DOMAIN);
+    await expect(page.locator('[data-audit-listing]')).not.toBeChecked();
     const posted = page.waitForRequest(isAuditPost, { timeout: 60_000 });
-    await page.click('[data-web-audit-submit]');
+    await page.click('[data-audit-submit]');
     const body = (await posted).postDataJSON() as Record<string, unknown>;
     expect(body.public_listing).toBe(false);
     await settled(page);
@@ -307,7 +286,7 @@ test.describe('web audit — public_listing opt-in transport', () => {
     // stored choice.
     await stubAuditPost(page);
     const posted = page.waitForRequest(isAuditPost, { timeout: 60_000 });
-    await page.goto(`/web/scoring/${TARGET_DOMAIN}`);
+    await page.goto(`/scoring?target=${TARGET_DOMAIN}`);
     const body = (await posted).postDataJSON() as Record<string, unknown>;
     expect('public_listing' in body).toBe(false);
   });
@@ -330,17 +309,17 @@ test.describe('web audit — public_listing opt-in transport', () => {
       return terminal?.scorecard ?? {};
     }
 
-    const wrote = await request.post('/api/audit-web', {
+    const wrote = await request.post('/api/score', {
       headers: { 'content-type': 'application/json' },
-      data: { url: TARGET_DOMAIN, turnstile_token: 'x', public_listing: true },
+      data: { target: TARGET_DOMAIN, turnstile_token: 'x', public_listing: true },
       timeout: 75_000,
     });
     expect(wrote.status()).toBe(200);
     expect((await envelopeOf(wrote)).public_listing).toBe(true);
 
-    const blank = await request.post('/api/audit-web', {
+    const blank = await request.post('/api/score', {
       headers: { 'content-type': 'application/json' },
-      data: { url: TARGET_DOMAIN, turnstile_token: 'x' },
+      data: { target: TARGET_DOMAIN, turnstile_token: 'x' },
       timeout: 75_000,
     });
     expect(blank.status()).toBe(200);
@@ -387,7 +366,7 @@ test.describe('web audit — MCP fresh path', () => {
     const content = firstJsonContent(body);
     // Links follow the deployment that served them, so this is the staging
     // host even though the audited target happens to be anc.dev.
-    expect(content.share_url).toBe(`${STAGING_BASE}/web/${TARGET_DOMAIN}`);
+    expect(content.scorecard_url).toBe(`${STAGING_BASE}/score/${TARGET_DOMAIN}`);
     const scorecard = content.scorecard as {
       score_pct?: number;
       score?: { relative: number; global: number };
@@ -401,7 +380,7 @@ test.describe('web audit — MCP fresh path', () => {
     const nonPassing = scorecard?.results?.find((r) => r.status === 'broken' || r.status === 'absent');
     if (nonPassing) {
       expect(nonPassing.remediation?.prompt).toContain('Goal:');
-      expect(nonPassing.remediation?.skill_url).toContain('/web-audit/skill/');
+      expect(nonPassing.remediation?.skill_url).toContain('/fix/');
     }
   });
 
@@ -422,7 +401,7 @@ test.describe('web audit — MCP fresh path', () => {
     expect(content.found).toBe(true);
     const remediation = content.remediation as { goal?: string; fix?: string; prompt?: string; skill_url?: string };
     expect(remediation.fix).toContain('OpenAPI');
-    expect(remediation.prompt).toContain(`Skill: ${STAGING_BASE}/web-audit/skill/openapi`);
+    expect(remediation.prompt).toContain(`Skill: ${STAGING_BASE}/fix/openapi`);
   });
 
   test('get_web_remediation appends caller evidence as a delimited untrusted block', async ({ request }) => {
@@ -459,17 +438,10 @@ test.describe('web audit — MCP fresh path', () => {
 test.describe('@render web audit — result-page context and WebMCP tools', () => {
   const STATUSES = ['pass', 'noncompliant', 'broken', 'absent', 'n_a', 'skip', 'error'] as const;
   const RESULT_TOOLS = ['get_worksheet', 'get_fix_prompt', 'get_fix_prompts', 'get_audit_summary'] as const;
-  // Tools that fill or submit the audit form. They belong to /web-audit and
+  // Tools that fill the entry form. They belong to the two entry pages and
   // must never reach a result page: a browser-origin audit path would sit
-  // outside the Turnstile gate the form POST goes through.
-  const SUBMISSION_TOOLS = [
-    'fill_audit_url',
-    'set_plan',
-    'set_public_listing',
-    'open_web_audit',
-    'fill_web_target',
-    'audit_website',
-  ];
+  // outside the Turnstile gate the form submit goes through.
+  const SUBMISSION_TOOLS = ['set_surface', 'fill_target', 'open_audit', 'audit_website'];
   // The browser tools answer within a DOMString cap that binds WebMCP only,
   // not the regular MCP server. WEBMCP_EXECUTE_MAX in
   // src/client/webmcp-lib.ts is the source of truth.
@@ -532,7 +504,7 @@ test.describe('@render web audit — result-page context and WebMCP tools', () =
   }
 
   test('the page carries a machine-readable audit context matching its rendered rows', async ({ page }) => {
-    await page.goto(`/web/${TARGET_DOMAIN}`);
+    await page.goto(`/score/${TARGET_DOMAIN}`);
     const context = page.locator('[data-web-audit-context]');
     await expect(context).toHaveCount(1);
     const attrs = await context.evaluate((el) => {
@@ -590,7 +562,7 @@ test.describe('@render web audit — result-page context and WebMCP tools', () =
   });
 
   test('the result page registers four read-only tools and no audit-submission tool', async ({ page }) => {
-    const tools = await registerCapture(page, `/web/${TARGET_DOMAIN}`);
+    const tools = await registerCapture(page, `/score/${TARGET_DOMAIN}`);
     const names = tools.map((tool) => tool.name);
     for (const name of RESULT_TOOLS) expect(names).toContain(name);
     for (const name of SUBMISSION_TOOLS) expect(names).not.toContain(name);
@@ -601,7 +573,7 @@ test.describe('@render web audit — result-page context and WebMCP tools', () =
   test('the result tools answer from the page alone, within the output cap', async ({ page }) => {
     const requested: string[] = [];
     page.on('request', (req) => requested.push(req.url()));
-    await registerCapture(page, `/web/${TARGET_DOMAIN}`);
+    await registerCapture(page, `/score/${TARGET_DOMAIN}`);
     const context = await page
       .locator('[data-web-audit-context]')
       .evaluate((el) => ({ scoredAt: el.getAttribute('data-scored-at'), cached: el.getAttribute('data-cached') }));
@@ -657,11 +629,11 @@ test.describe('@render web audit — result-page context and WebMCP tools', () =
 
     // Reading the page is the whole implementation: nothing here reached the
     // audit endpoint, so no browser tool can bypass Turnstile.
-    expect(requested.filter((url) => url.includes('/api/audit-web'))).toEqual([]);
+    expect(requested.filter((url) => url.includes('/api/score'))).toEqual([]);
   });
 
   test('the published tool table matches the registered input schemas', async ({ page, request }) => {
-    const doc = await (await request.get('/web-audit.md')).text();
+    const doc = await (await request.get('/mcp-skill.md')).text();
     const documented = new Map<string, string[]>();
     for (const line of doc.split('\n')) {
       const row = /^\|\s*`(get_[a-z_]+)`\s*\|([^|]*)\|/.exec(line);
@@ -672,11 +644,11 @@ test.describe('@render web audit — result-page context and WebMCP tools', () =
       );
     }
 
-    const tools = await registerCapture(page, `/web/${TARGET_DOMAIN}`);
+    const tools = await registerCapture(page, `/score/${TARGET_DOMAIN}`);
     for (const name of RESULT_TOOLS) {
       const schema = tools.find((tool) => tool.name === name)?.inputSchema;
       const args = documented.get(name);
-      expect(args, `${name} has no argument row in /web-audit.md`).toBeDefined();
+      expect(args, `${name} has no argument row in /mcp-skill.md`).toBeDefined();
       expect([...(args ?? [])].sort()).toEqual(Object.keys(schema?.properties ?? {}).sort());
       for (const required of schema?.required ?? []) expect(args).toContain(required);
     }

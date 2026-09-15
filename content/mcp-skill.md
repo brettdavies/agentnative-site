@@ -213,6 +213,49 @@ envelope's own `scorecard_url`. The scorecard inside the envelope carries the re
 applies: each row's current category and normative keyword, a `result` line, and an inline `remediation` object on
 every non-passing row. `get_web_remediation` is for a check id you do not already hold a row for.
 
+
+### From a website result page
+
+A website result page publishes its own read-only [WebMCP](https://webmachinelearning.github.io/webmcp/) tools, so a
+browser agent reads a finished audit from the page it is already looking at. Each tool reads the rendered page and
+nothing else: no fetch, no form submission, no navigation. None of them starts an audit, so none of them can bypass the
+Turnstile challenge the browser audit sits behind. To run an audit, use the MCP tools above.
+
+| Tool                | Arguments                                        | Returns                                                                                                               |
+| ------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `get_worksheet`     | `ids`, `keywords`, `statuses`, `offset`, `limit` | One row per matching finding: `id`, `keyword`, `tier`, `status`, `unprobed`, `result`, `remediable`.                  |
+| `get_fix_prompt`    | `id` (required)                                  | The stored prompt for one check id, or a reason it has none, or `found: false` for an id the page does not render.    |
+| `get_fix_prompts`   | `ids`, `keywords`, `statuses`, `offset`, `limit` | A prompt per matching fixable row; a selected row that needs no fix comes back with `remediable: false` and a reason. |
+| `get_audit_summary` | `offset`, `limit`                                | `site_score`, `global_score`, a count for each of the seven statuses, and the paged issue list.                       |
+
+Every response is a JSON envelope carrying `ok`, the page's `cached` / `scored_at` / `refresh_after`, and the result.
+Rejected input answers `{ "ok": false, "error": { "code", "field", "message" } }`, with `allowed` listing the accepted
+values when the field is an enum.
+
+**Filters.** `ids`, `keywords`, and `statuses` are independent dimensions. Values OR within one dimension and the
+dimensions AND across, so `{ "keywords": ["must", "should"], "statuses": ["broken"] }` selects the broken MUST and
+SHOULD rows. `keywords` accepts `must`, `should`, and `may`; `statuses` accepts `pass`, `noncompliant`, `broken`,
+`absent`, `n_a`, `skip`, and `error`. An omitted filter selects every value, with one exception: an omitted `statuses`
+selects the observed fixable rows (`broken`, `noncompliant`, and `absent`, excluding `unprobed` ones), because an agent
+asking for findings with no status in mind wants what it can fix. Naming statuses explicitly selects those rows whether
+or not the run probed them, so every rendered row stays reachable. A present but empty array is rejected rather than
+read as "none"; omit the filter instead.
+
+**Order.** Every paginated surface returns one order: normative keyword `must`, `should`, `may`; then status `broken`,
+`absent`, `noncompliant`, `error`, `pass`, `n_a`, `skip`; then observed rows before `unprobed` ones; then rendered page
+order.
+
+**Pagination.** `offset` defaults to 0 and accepts any integer from 0 up. `limit` defaults to 10 and accepts 1 through
+25. Each response reports `total` (items matching the filters), `returned` (items in this page), `omitted` (matching
+items left after this page), and `next_offset`. Follow `next_offset` until it comes back `null`. A page carries whole
+items only, so a page of long prompts can return fewer than `limit`; `next_offset` advances by `returned`, so following
+it never skips an item.
+
+**Prompt size.** Browser tools answer inside a 1,500-character cap. A prompt too long to fit whole comes back with
+`prompt_truncated: true` and a `full_fix` object naming both an MCP tool call (`get_web_remediation` with the check id)
+and the skill page's markdown URL. Only the `Fix:` line is ever shortened: the run's evidence block exists nowhere else
+in the response, and `Goal:` and `Skill:` are how a reader recovers everything else.
+
 ## Browse the catalog
 
 Three tools over the curated registry. None of them require a network round trip on the server side, since every

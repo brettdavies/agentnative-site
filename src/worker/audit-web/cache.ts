@@ -90,6 +90,17 @@ export function normalizeTargetUrl(raw: string): string {
 }
 
 /** Canonical audited target: scheme + host + `/` (drops path/query/fragment beyond the origin). */
+/** Prepend https:// when the input carries no scheme; null on unparseable input. */
+export function coerceUrl(raw: unknown): URL | null {
+  if (typeof raw !== 'string' || raw.trim().length === 0) return null;
+  const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw.trim()) ? raw.trim() : `https://${raw.trim()}`;
+  try {
+    return new URL(candidate);
+  } catch {
+    return null;
+  }
+}
+
 export function canonicalTargetOf(url: URL): string {
   return `${url.protocol}//${url.host}/`;
 }
