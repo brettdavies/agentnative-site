@@ -112,10 +112,15 @@ export async function scanTree(root: string = SRC_DIR): Promise<Hit[]> {
   return perFile.flat();
 }
 
-/** The guard mode an environment value selects; unset means warn, anything but warn or gate is an error. */
+/**
+ * The guard mode an environment value selects. The migration is over, so an
+ * unset value gates: a funnel path literal outside the route module is a
+ * build failure, not a warning anyone has to notice. `warn` stays selectable
+ * for a sweep that wants the whole list at once instead of the first failure.
+ */
 export function resolveMode(value: string | undefined): GuardMode {
-  if (value === undefined || value === '' || value === 'warn') return 'warn';
-  if (value === 'gate') return 'gate';
+  if (value === undefined || value === '' || value === 'gate') return 'gate';
+  if (value === 'warn') return 'warn';
   throw new Error(`FUNNEL_PATH_GUARD_MODE must be 'warn' or 'gate', got ${JSON.stringify(value)}`);
 }
 

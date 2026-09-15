@@ -8,7 +8,7 @@
 
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { scoreMarkdownPath } from '../shared/audit-routes';
+import { SCORECARDS_PATH, scoreMarkdownPath } from '../shared/audit-routes';
 import { buildLlmsFull, buildLlmsIndex } from './llms.mjs';
 import { buildLeaderboardMarkdown } from './scorecards-render.mjs';
 import { absolutifyMarkdownLinks } from './util.mjs';
@@ -76,7 +76,7 @@ export async function emitLlmsSurface({
       { label: 'MCP client skill', path: '/mcp-skill.md' },
     ],
     scorecardLinks: [
-      { name: 'Leaderboard', path: '/scorecards.md' },
+      { name: 'Leaderboard', path: `${SCORECARDS_PATH}.md` },
       { name: 'Coverage Matrix', path: '/coverage.md' },
       ...scorecardTwinLinks(leaderboard),
     ],
@@ -109,8 +109,8 @@ export async function emitLlmsSurface({
       {
         title: 'ANC 100 — Agent-Native CLI Leaderboard',
         body: absolutifyMarkdownLinks(buildLeaderboardMarkdown(leaderboard)),
-        htmlPath: '/scorecards',
-        mdPath: '/scorecards.md',
+        htmlPath: SCORECARDS_PATH,
+        mdPath: `${SCORECARDS_PATH}.md`,
       },
       {
         title: 'Spec Coverage Matrix',

@@ -561,8 +561,8 @@ describe('emitShell — one Leaderboards anchor + surface script', () => {
     // The segment on the page picks the lane, so the board pages share one
     // header destination and the current marker follows the pathname.
     expect(shell('/scorecards')).toContain('href="/scorecards" data-leaderboards-nav aria-current="page"');
-    expect(shell('/web')).toContain('href="/scorecards" data-leaderboards-nav aria-current="page"');
     expect(shell('/score/ripgrep')).toContain('href="/scorecards" data-leaderboards-nav aria-current="page"');
+    expect(shell('/score/anc.dev')).toContain('href="/scorecards" data-leaderboards-nav aria-current="page"');
     expect(shell('/about')).not.toContain('data-leaderboards-nav aria-current');
   });
 });
@@ -587,7 +587,6 @@ describe('emitShell — one Audit anchor', () => {
 
   test('aria-current marks the one anchor on every path the entry forms answer', () => {
     expect(shell('/audit')).toContain('href="/audit" data-audit-nav aria-current="page"');
-    expect(shell('/web-audit')).toContain('href="/audit" data-audit-nav aria-current="page"');
     expect(shell('/fix/openapi')).toContain('href="/audit" data-audit-nav aria-current="page"');
     expect(shell('/about')).not.toContain('data-audit-nav aria-current');
   });

@@ -7,10 +7,16 @@
 
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { AUDIT_PATH, FIX_PREFIX, SCORE_PREFIX, SCORECARDS_PATH } from '../shared/audit-routes.ts';
 import { markdownAlternateLink } from '../shared/result-head';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
 import { loadInstallCommands } from './install-commands.mjs';
 import { canonicalBaseUrl, escHtml, SITE_SPEC_VERSION } from './util.mjs';
+
+// navCurrent appends the separator itself, so a namespace pattern is the
+// prefix without its trailing slash.
+const SCORE_ROOT = SCORE_PREFIX.replace(/\/$/, '');
+const FIX_ROOT = FIX_PREFIX.replace(/\/$/, '');
 
 const CONTENT_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../content');
 const INSTALL_COMMANDS = loadInstallCommands(CONTENT_DIR);
@@ -25,13 +31,13 @@ const SITE_TAGLINE = 'the agent-native standard';
 export const NAV_LINKS = [
   {
     label: 'Leaderboards',
-    href: '/scorecards',
-    match: ['/scorecards', '/web', '/score'],
+    href: SCORECARDS_PATH,
+    match: [SCORECARDS_PATH, SCORE_ROOT],
     navAttr: 'data-leaderboards-nav',
   },
   // A fix skill is reached from an audit result, so Audit is the entry the
   // reader arrived through and the one that should read as current.
-  { label: 'Audit', href: '/audit', match: ['/audit', '/web-audit', '/fix'], navAttr: 'data-audit-nav' },
+  { label: 'Audit', href: AUDIT_PATH, match: [AUDIT_PATH, FIX_ROOT], navAttr: 'data-audit-nav' },
   { label: 'The standard', href: '/#principles', match: [/^\/p\d+$/] },
   { label: 'Install', href: '/install', match: ['/install'] },
   { label: 'Skill', href: '/skill', match: ['/skill'] },
@@ -255,7 +261,7 @@ export function emitShell({
         ],
         installUrl: `${base}/install`,
         documentation: 'https://docs.rs/agentnative',
-        url: `${base}/audit`,
+        url: `${base}${AUDIT_PATH}`,
         offers: { '@type': 'Offer', price: 0, priceCurrency: 'USD' },
         publisher: { '@id': orgId },
       },

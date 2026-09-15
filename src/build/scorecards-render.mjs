@@ -47,7 +47,7 @@ export function buildLeaderboardBody(leaderboard, methodology) {
       // Without a name of its own the row announces as its own contents, which
       // read as a number salad: rank digits, tool, binary, bare score.
       const label = escHtml(`${entry.tool.name}, score ${pct} percent, rank ${entry.rank}`);
-      return `        <a class="lrow ${bandOf(pct)}" aria-label="${label}" href="/score/${name}" data-tier="${escHtml(entry.tool.tier)}" data-audience="${audience}" data-audit-profile="${auditProfile}"><span class="rank" aria-hidden="true">${String(entry.rank).padStart(2, '0')}</span><span class="name">${name} <span class="name-sub">${binary}</span></span>${renderMeter(pct)}</a>`;
+      return `        <a class="lrow ${bandOf(pct)}" aria-label="${label}" href="${scorePath(name)}" data-tier="${escHtml(entry.tool.tier)}" data-audience="${audience}" data-audit-profile="${auditProfile}"><span class="rank" aria-hidden="true">${String(entry.rank).padStart(2, '0')}</span><span class="name">${name} <span class="name-sub">${binary}</span></span>${renderMeter(pct)}</a>`;
     })
     .join('\n');
 
@@ -199,7 +199,7 @@ export function buildLeaderboardMarkdown(leaderboard) {
     const ps = entry.principleScore;
     const principles = `${ps.met}/${ps.total}`;
     lines.push(
-      `| ${entry.rank} | [${entry.tool.name}](/score/${entry.tool.name}) | ${entry.tool.tier} | ${entry.tool.language} | ${score} | ${principles} |`,
+      `| ${entry.rank} | [${entry.tool.name}](${scorePath(entry.tool.name)}) | ${entry.tool.tier} | ${entry.tool.language} | ${score} | ${principles} |`,
     );
   }
 

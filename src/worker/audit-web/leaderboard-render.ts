@@ -7,7 +7,7 @@
 // (cold start, or a SPEC_VERSION bump that rotated every key) the board
 // renders a scoring-in-progress empty state rather than failing.
 
-import { scorePath } from '../../shared/audit-routes';
+import { AUDIT_PATH, auditPath, leaderboardPath, SCORECARDS_PATH, scorePath } from '../../shared/audit-routes';
 import { bandOf, escHtml, renderMeter } from '../../shared/scorecard-format.mjs';
 import type { WebAggregateEntry } from './cache';
 
@@ -60,7 +60,7 @@ function viewHref(
   target: WebBoardView,
   sort: 'global' | 'relative' | null | undefined,
   markdown: boolean,
-  base = '/web',
+  base = SCORECARDS_PATH,
   extraParams: readonly string[] = [],
 ): string {
   const path = markdown ? `${base}.md` : base;
@@ -79,7 +79,7 @@ function viewHref(
  */
 export function buildBoardViewNav(
   opts: WebBoardRenderOpts,
-  base = '/web',
+  base = SCORECARDS_PATH,
   extraParams: readonly string[] = [],
 ): string {
   const link = (target: WebBoardView, label: string): string => {
@@ -115,7 +115,7 @@ function escMdCell(value: string): string {
 export function buildBoardMarkdownRows(entries: WebBoardEntry[], origin: string): string {
   const ranked = rankWebEntries(entries, 'relative');
   if (ranked.length === 0) {
-    return `Scoring in progress: board results land after the next rescore pass. Audit a website at [/web-audit](${origin}/web-audit).\n`;
+    return `Scoring in progress: board results land after the next rescore pass. Audit a website at [${AUDIT_PATH}](${origin}${auditPath({ lane: 'web' })}).\n`;
   }
   const lines = ['| # | Site | Global | Relative | Source |', '|---|------|--------|----------|--------|'];
   for (const entry of ranked) {
@@ -157,7 +157,7 @@ export function buildFrontpageBoardRows(entries: WebAggregateEntry[]): string {
 
 /** Homepage web-board empty state (aggregate absent or empty). */
 export function buildFrontpageBoardEmptyState(): string {
-  return `        <p class="board-rubric">Scoring in progress: web results land after the next rescore pass. <a href="/web">See the board</a> or <a href="/web-audit">audit a website</a>.</p>`;
+  return `        <p class="board-rubric">Scoring in progress: web results land after the next rescore pass. <a href="${leaderboardPath({ lane: 'web' })}">See the board</a> or <a href="${auditPath({ lane: 'web' })}">audit a website</a>.</p>`;
 }
 
 /**
@@ -177,7 +177,7 @@ export function buildFrontpageBoardMarkdown(entries: WebAggregateEntry[]): strin
 
 /** Homepage markdown empty state when the frontpage aggregate is missing. */
 export function buildFrontpageBoardMarkdownEmptyState(): string {
-  return 'Scoring in progress: web results land after the next rescore pass. [See the board](/web.md) or [audit a website](/web-audit).\n';
+  return `Scoring in progress: web results land after the next rescore pass. [See the board](${leaderboardPath({ lane: 'web' })}) or [audit a website](${auditPath({ lane: 'web' })}).\n`;
 }
 
 /**

@@ -1,8 +1,8 @@
 // Source-level guard: every audit-funnel path literal outside the shared
 // route module is a place a rename can miss. The guard scans src/ for
-// retired and current funnel paths. In warning mode it reports each hit as a
-// loud warning and exits green; in gate mode it fails on any hit. The
-// default is warning mode; FUNNEL_PATH_GUARD_MODE=gate selects gate mode.
+// retired and current funnel paths and fails on any hit. Gate mode is the
+// default; FUNNEL_PATH_GUARD_MODE=warn downgrades it to a report of every
+// hit at once, which is what a sweep wants and a build never does.
 
 import { describe, expect, test } from 'bun:test';
 import {
@@ -27,6 +27,9 @@ const MODE = resolveMode(process.env.FUNNEL_PATH_GUARD_MODE);
 describe('funnel path literal guard', () => {
   test('the src tree carries no funnel path literal outside the route module', async () => {
     const hits = await scanTree();
+    // Named in the failure rather than just counted: the whole point of the
+    // gate is that the next reader sees which file to fix.
+    expect(hits.map((h) => `${h.file}:${h.line} ${h.literal}`)).toEqual([]);
     enforce(hits, MODE);
   });
 
@@ -119,11 +122,12 @@ describe('funnel path literal guard: review fixtures', () => {
     expect(files).not.toContain('src/shared/audit-routes.ts');
   });
 
-  test('an unrecognized mode value throws instead of defaulting to warn', () => {
+  test('an unrecognized mode value throws instead of defaulting to a mode', () => {
     expect(() => resolveMode('true')).toThrow(/FUNNEL_PATH_GUARD_MODE/);
     expect(() => resolveMode('1')).toThrow(/FUNNEL_PATH_GUARD_MODE/);
-    expect(resolveMode(undefined)).toBe('warn');
-    expect(resolveMode('warn')).toBe('warn');
+    expect(resolveMode(undefined)).toBe('gate');
+    expect(resolveMode('')).toBe('gate');
     expect(resolveMode('gate')).toBe('gate');
+    expect(resolveMode('warn')).toBe('warn');
   });
 });

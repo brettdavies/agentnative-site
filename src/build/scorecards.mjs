@@ -8,6 +8,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
+import { scorePath } from '../shared/audit-routes.ts';
 import { computePrincipleScore as sharedComputePrincipleScore } from '../shared/scorecard-format.mjs';
 
 // Re-exported from shared so the Worker live-score renderer reads from
@@ -90,7 +91,7 @@ export async function loadRegistry(registryPath) {
     }
     if (t.name === 'live') {
       throw new Error(
-        'registry.yaml: "live" is reserved — slug collision with the /score/live/<binary> dynamic share-URL namespace',
+        'registry.yaml: "live" is reserved: it would collide with a live binary under the result namespace',
       );
     }
     if (seen.has(t.name)) {
@@ -100,7 +101,7 @@ export async function loadRegistry(registryPath) {
     if (binaryRedirectSlugs.has(t.name)) {
       throw new Error(
         `registry.yaml: name "${t.name}" collides with another tool's binary slug. ` +
-          `The /score/${t.name} URL would be ambiguous between the canonical page and the binary-name redirect. ` +
+          `The ${scorePath(t.name)} URL would be ambiguous between the canonical page and the binary-name redirect. ` +
           `Rename one of the entries.`,
       );
     }

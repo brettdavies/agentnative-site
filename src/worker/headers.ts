@@ -276,15 +276,9 @@ export function isRepresentationPinned(pathname: string): boolean {
   return pathname.endsWith('.md') || isSingleRepresentation(pathname) || isPinnedResultRepresentation(pathname);
 }
 
-// The progress page of either lane and the legacy in-progress web page are
-// never stored at the edge, whatever their status.
+// The progress page is never stored at the edge, whatever its status.
 function isAlwaysMissPath(pathname: string): boolean {
-  return (
-    isProgressPath(pathname) ||
-    pathname === '/web/scoring' ||
-    pathname === '/web/scoring.md' ||
-    pathname.startsWith('/web/scoring/')
-  );
+  return isProgressPath(pathname);
 }
 
 /**

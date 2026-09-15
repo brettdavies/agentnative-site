@@ -10,13 +10,7 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import { scoreJsonPath, scoreMarkdownPath, scorePath } from '../src/shared/audit-routes';
-import {
-  _resetResultCaches,
-  handleLegacyLiveScorePath,
-  handleLegacyWebResultPath,
-  handleResultRoute,
-  type ResultEnv,
-} from '../src/worker/audit/result';
+import { _resetResultCaches, handleResultRoute, type ResultEnv } from '../src/worker/audit/result';
 import { keyFor as webKeyFor } from '../src/worker/audit-web/cache';
 import { webEnvelope } from '../src/worker/audit-web/core';
 import { keyFor as cliKeyFor } from '../src/worker/score/cache';
@@ -677,14 +671,6 @@ describe('representations and headers', () => {
     expect(json.headers.get('cloudflare-cdn-cache-control')).toBeNull();
   });
 
-  test('the legacy adapters carry the same tag as the unified page', async () => {
-    const env = await seededEnv();
-    const legacyWeb = await handleLegacyWebResultPath(get('/web/anc.dev'), env);
-    expect(legacyWeb.headers.get('cache-tag')).toBe('web:anc.dev');
-    const legacyLive = await handleLegacyLiveScorePath(get('/score/live/ouch'), env);
-    expect(legacyLive.headers.get('cache-tag')).toBe('cli:ouch');
-  });
-
   test('a 404 and the registry-outage 503 carry no tag and are no-store', async () => {
     const env = await seededEnv();
     const missing = await route('/score/never-audited.dev/json', env);
@@ -732,33 +718,7 @@ describe('representations and headers', () => {
   });
 });
 
-describe('legacy paths served through the unified renderer', () => {
-  test('/score/live/ouch renders the /score/ouch page with the canonical /score/ouch and the same body; a curated binary 301s to its slug', async () => {
-    const env = await seededEnv();
-    const legacy = await handleLegacyLiveScorePath(get('/score/live/ouch'), env);
-    expect(legacy.status).toBe(200);
-    const legacyBody = await legacy.text();
-    const unified = await (await route('/score/ouch', env)).text();
-    expect(legacyBody).toBe(unified);
-    expect(legacyBody).toContain('<link rel="canonical" href="https://anc.dev/score/ouch"');
-    const twin = await handleLegacyLiveScorePath(get('/score/live/ouch.md'), env);
-    expect(twin.headers.get('content-type')).toContain('text/markdown');
-    const alias = await handleLegacyLiveScorePath(get('/score/live/rg.md'), env);
-    expect(alias.status).toBe(301);
-    expect(alias.headers.get('location')).toBe('/score/ripgrep/md');
-  });
-
-  test('/web/anc.dev and its twin render the website result; an unknown domain is the 404 pointer', async () => {
-    const env = await seededEnv();
-    const page = await handleLegacyWebResultPath(get('/web/anc.dev'), env);
-    expect(page.status).toBe(200);
-    expect(await page.text()).toContain('site score');
-    const twin = await handleLegacyWebResultPath(get('/web/anc.dev.md'), env);
-    expect(twin.headers.get('content-type')).toContain('text/markdown');
-    const missing = await handleLegacyWebResultPath(get('/web/nosuch.example'), env);
-    expect(missing.status).toBe(404);
-  });
-});
+describe('result-route edge cases', () => {});
 
 describe('review pins', () => {
   test('the registry-outage 503 goes through the header policy: JSON carries CORS and no-store', async () => {
@@ -771,15 +731,11 @@ describe('review pins', () => {
     expect(res.headers.get('retry-after')).toBe('30');
   });
 
-  test('a legacy .html form for a reserved or unroutable target is a 404, never a throw', async () => {
+  test('an .html form for a reserved or unroutable target is a 404, never a throw', async () => {
     const env = await seededEnv();
-    for (const path of ['/web/scoring.html', '/web/api.html']) {
-      const res = await handleLegacyWebResultPath(get(path), env);
-      expect(res.status).toBe(404);
-    }
-    for (const path of ['/score/live/api.html', '/score/live/foo%2Fjson.html', '/score/live/scoring.html']) {
-      const res = await handleLegacyLiveScorePath(get(path), env);
-      expect(res.status).toBe(404);
+    for (const path of ['/score/api.html', '/score/foo%2Fjson.html', '/score/scoring.html']) {
+      const res = await route(path, env);
+      expect({ path, status: res.status }).toEqual({ path, status: 404 });
     }
   });
 
@@ -796,14 +752,12 @@ describe('review pins', () => {
     expect(md.headers.get('content-type')).toContain('text/markdown');
   });
 
-  test('the footer twin on a result page and on its 404 is the /md segment, and a legacy 404 keeps its .md twin', async () => {
+  test('the footer twin on a result page and on its 404 is the /md segment', async () => {
     const env = await seededEnv();
     const page = await (await route('/score/ouch', env)).text();
     expect(page).toContain(`<a href="${scoreMarkdownPath('ouch')}">This page as markdown</a>`);
     const missing = await (await route('/score/nosuchtool', env)).text();
     expect(missing).toContain('<a href="/score/nosuchtool/md">This page as markdown</a>');
-    const legacy = await (await handleLegacyWebResultPath(get('/web/nosuch.example'), env)).text();
-    expect(legacy).toContain('<a href="/web/nosuch.example.md">This page as markdown</a>');
   });
 
   test('a non-canonical target form redirects to its canonical page', async () => {

@@ -32,7 +32,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { scorePath } from '../shared/audit-routes';
+import { API_SCORE_PATH, SCORECARDS_PATH, scorePath } from '../shared/audit-routes';
 import { principleTier } from '../shared/scorecard-format.mjs';
 // Pipeline-stage modules sort in execution order via numeric filename
 // prefixes (00-… → 06-…). Numbering is decorative; build() below is the
@@ -146,7 +146,7 @@ export async function runInvariantChecks(distDir, principleSlugs, principleSourc
   // no /api/score documentation). An agent fetching either twin is pointed
   // at the MCP tools and `anc audit`; the form is HTML-only by design. A copy
   // edit that leaks any of these tokens into either twin fails the build.
-  const FORBIDDEN_IN_ENTRY_MD = ['live-score', 'turnstile', 'challenges.cloudflare.com', '/api/score'];
+  const FORBIDDEN_IN_ENTRY_MD = ['live-score', 'turnstile', 'challenges.cloudflare.com', API_SCORE_PATH];
   for (const twin of ['index.md', 'audit.md']) {
     const text = (await readFile(join(distDir, twin), 'utf8')).toLowerCase();
     for (const needle of FORBIDDEN_IN_ENTRY_MD) {
@@ -217,7 +217,7 @@ export async function build() {
     const next =
       i < principles.length - 1
         ? `<a class="next" href="/p${principles[i + 1].n}"><span class="dir">next ▸</span><span class="t">P${principles[i + 1].n} · ${shortTitle(principles[i + 1].title)}</span></a>`
-        : `<a class="next" href="/scorecards"><span class="dir">next ▸</span><span class="t">The ANC 100</span></a>`;
+        : `<a class="next" href="${SCORECARDS_PATH}"><span class="dir">next ▸</span><span class="t">The ANC 100</span></a>`;
     const pager = `<nav class="pager" aria-label="Principle pages">${prev}${next}</nav>`;
 
     // The audit-note sits ahead of the Requirements section when present,
@@ -319,7 +319,7 @@ export async function build() {
   const sitemap = buildSitemap({
     principleNumbers: principles.map((p) => p.n),
     extraPaths: [
-      '/scorecards',
+      SCORECARDS_PATH,
       '/coverage',
       '/install',
       '/skill',
@@ -404,7 +404,7 @@ export async function build() {
   const minifyStats = await minifyDist(DIST_DIR);
 
   const scorecardPageCount = scorecardPaths.length;
-  const leaderboardPageCount = 1; // /scorecards index, counted in htmlPages but not scorecardPages
+  const leaderboardPageCount = 1; // the leaderboard index, counted in htmlPages but not scorecardPages
   // 7: check, install, about, badge, changelog, methodology, coverage
   // (scorecard-schema is in subPages but counts under the sub-pages tally
   // emitted alongside; skill.html is also emitted separately. The

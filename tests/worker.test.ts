@@ -732,16 +732,6 @@ describe('applyHeaders — MISS class', () => {
     expect(res.headers.get('Cache-Tag')).toBeNull();
   });
 
-  test('/web/scoring* is MISS even on 200', () => {
-    const res = applyHeaders(new Response('scoring'), {
-      request: req('https://anc.dev/web/scoring/example.com'),
-      servedMarkdown: false,
-      pathname: '/web/scoring/example.com',
-    });
-    expect(res.headers.get('Cache-Control')).toBe('no-store');
-    expect(res.headers.get('Cache-Tag')).toBeNull();
-  });
-
   test('/scoring with a target and /scoring.md are MISS on 200', () => {
     const page = applyHeaders(new Response('progress'), {
       request: req('https://anc.dev/scoring?target=ripgrep'),

@@ -13,7 +13,13 @@
 
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { isLegacyRequest } from '@modelcontextprotocol/server';
-import { isAuditPath, isScorePath as isResultPath, isScoringPath, SCORECARDS_PATH } from '../shared/audit-routes';
+import {
+  isAuditPath,
+  isLeaderboardPath,
+  isScorePath as isResultPath,
+  isScoringPath,
+  SCORECARDS_PATH,
+} from '../shared/audit-routes';
 import { classifyGatewayRequest, detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
 import { type AuditApiEnv, handleAuditApi, isAuditApiPath } from './audit/api';
 import type { AuditJob } from './audit/job';
@@ -838,10 +844,11 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   // website pane is filled here from the same aggregate and the same opt-in
   // gate the website board uses, so the two can never disagree on what lists.
   // The page already carries the board tag and HIT-min from its path.
-  const isLeaderboard = pathname === '/scorecards' || pathname === '/scorecards.html' || pathname === '/scorecards.md';
+  const isLeaderboard = isLeaderboardPath(pathname) || pathname === `${SCORECARDS_PATH}.html`;
   if (isLeaderboard && upstream.ok) {
     const contentType = (upstream.headers.get('content-type') ?? '').toLowerCase();
-    const wantsMarkdown = servedMarkdown || pathname === '/scorecards.md' || contentType.includes('text/markdown');
+    const wantsMarkdown =
+      servedMarkdown || pathname === `${SCORECARDS_PATH}.md` || contentType.includes('text/markdown');
     if (wantsMarkdown || contentType.includes('text/html')) {
       return injectLeaderboardBoard(upstream, env, {
         request,
