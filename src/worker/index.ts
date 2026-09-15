@@ -18,6 +18,7 @@ import {
   isLeaderboardPath,
   isScorePath as isResultPath,
   isScoringPath,
+  retiredRedirectFor,
   SCORECARDS_PATH,
 } from '../shared/audit-routes';
 import { classifyGatewayRequest, detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
@@ -789,6 +790,17 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   if (isResultPath(pathname)) {
     return handleResultRoute(request, env as ResultEnv);
   }
+  // A retired path with an exact destination redirects rather than 404s, so
+  // an inbound link minted before the funnel merged still lands somewhere
+  // useful. The table in the route module decides which paths qualify.
+  const retiredTo = retiredRedirectFor(pathname);
+  if (retiredTo) {
+    return new Response(null, {
+      status: 301,
+      headers: { Location: retiredTo, 'Cache-Control': 'public, max-age=300' },
+    });
+  }
+
   // The progress page and its twin render per request, ahead of the asset
   // fetch: the page carries a request-time sitekey and exists for one run.
   if (isScoringPath(pathname)) {

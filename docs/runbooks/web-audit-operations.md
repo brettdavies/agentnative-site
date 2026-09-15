@@ -173,7 +173,8 @@ reversing two of them reads as a failure that is really a race:
 
 1. **Deploy**, then wait for the rollout to reach `ready`.
 2. **Purge** the zone when the release retired or renamed a public path (see `RELEASES.md`). A tag purge cannot reach a
-   path whose route is gone.
+   path whose route is gone. A retired path that still redirects is cached too, so it needs the purge as much as one
+   that started answering 404.
 3. **Rescore**, and let the instance finish. The post-deploy hook starts it; a manual run uses the endpoint below.
 4. **Walk the sitemap** (`postflight.sh --env <env> sitemap`). The sitemap lists a result page per seeded domain, and a
    domain the rescore has not written yet answers 404. Walking before the rescore drains reports those 404s as

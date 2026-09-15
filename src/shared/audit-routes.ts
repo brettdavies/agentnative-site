@@ -48,6 +48,48 @@ export const AUDIT_PATH = '/audit';
 export const FIX_PREFIX = '/fix/';
 export const API_SCORE_PATH = '/api/score';
 
+/**
+ * Retired paths that answer a redirect instead of a 404, and where each one
+ * goes. A path earns a row here when it was linked from outside the site and
+ * has an exact destination on the new funnel; everything else the funnel
+ * retired is a 404, because a redirect to an approximation is worse than a
+ * clear miss. Owned here so the paths stay in the one module that knows them
+ * and the literal guard keeps its zero.
+ */
+export const RETIRED_REDIRECTS: Readonly<Record<string, string>> = {
+  '/web-audit': `${AUDIT_PATH}?lane=web`,
+  '/web-audit.md': `${AUDIT_PATH}.md`,
+};
+
+/** The retired website result path; its host is the target the result route serves. */
+const RETIRED_WEB_RESULT_RE = /^\/web\/([^/]+?)(\.md)?$/;
+
+/**
+ * The destination a retired path redirects to, or null when it is a 404.
+ *
+ * The website result path carries its target in the URL, so it resolves by
+ * shape rather than by table: a host the result route can serve redirects to
+ * that result, and anything else under `/web/` (a reserved name, a second
+ * segment, a target the classifier refuses) is a 404 rather than a redirect
+ * into a page that would 404 anyway.
+ */
+export function retiredRedirectFor(pathname: string): string | null {
+  if (Object.hasOwn(RETIRED_REDIRECTS, pathname)) return RETIRED_REDIRECTS[pathname];
+  const match = RETIRED_WEB_RESULT_RE.exec(pathname);
+  if (!match) return null;
+  const host = decodeURIComponentSafe(match[1]);
+  if (host === null || laneOf(host) !== 'web' || !isResultTarget(host)) return null;
+  return match[2] ? scoreMarkdownPath(host) : scorePath(host);
+}
+
+function decodeURIComponentSafe(value: string): string | null {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
+}
+
 export type TargetRejection =
   | 'target_empty'
   | 'target_too_long'

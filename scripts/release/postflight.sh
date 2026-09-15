@@ -26,8 +26,10 @@
 #   container  Env container app state is `ready`
 #   pages      `<env-url>/`, `/scorecards`, `/api/score` registry-hit all return
 #              expected
-#   retired    every path the funnel retired answers 404 with no redirect. Run
-#              after the zone purge, or a cached pre-cut response answers first.
+#   retired    every path the funnel retired answers 404 with no redirect,
+#              except the published inbound links, which 301 to a pinned
+#              destination. Run after the zone purge, or a cached pre-cut
+#              response answers first.
 #   sitemap    every `<loc>` the sitemap advertises returns 200
 #   mcp        Live MCP suite (transport + symmetry + live audit) via
 #              scripts/release/mcp-smoke.sh against the env URL. Passes
@@ -345,19 +347,27 @@ RETIRED_PATHS=(
   /check
   /web
   /web.md
-  /web/anc.dev
   /web/scoring
-  /web-audit
   /web-audit/skill/openapi
   /score/live/ouch
   /api/score.md
+)
+
+# Retired paths that still resolve, as `<path>|<location>`. Two inbound links
+# are published outside this site and keep working until they are deprecated
+# deliberately; the gate pins the destination so a redirect cannot quietly
+# become a 404 or start pointing somewhere else.
+RETIRED_REDIRECTS=(
+  "/web-audit|/audit?lane=web"
+  "/web-audit.md|/audit.md"
+  "/web/sounding.brettdavies.workers.dev|/score/sounding.brettdavies.workers.dev"
 )
 
 gate_retired() {
   header "Retired paths against $ENV_URL"
   require_bin curl
 
-  local path out code location
+  local path out code location entry want
   for path in "${RETIRED_PATHS[@]}"; do
     out=$(ecurl -sSI -m 10 -o /dev/null -w '%{http_code} %{redirect_url}' "${ENV_URL}${path}" 2>/dev/null || true)
     code=${out%% *}
@@ -366,6 +376,19 @@ gate_retired() {
       gate_pass "$path is 404 with no redirect"
     else
       gate_fail "$path retirement" "code=$code redirect=${location:-none}"
+    fi
+  done
+
+  for entry in "${RETIRED_REDIRECTS[@]}"; do
+    path=${entry%%|*}
+    want=${entry#*|}
+    out=$(ecurl -sSI -m 10 -o /dev/null -w '%{http_code} %{redirect_url}' "${ENV_URL}${path}" 2>/dev/null || true)
+    code=${out%% *}
+    location=${out#* }
+    if [[ "$code" == "301" && "$location" == *"$want" ]]; then
+      gate_pass "$path 301s to $want"
+    else
+      gate_fail "$path redirect" "code=$code redirect=${location:-none} want=$want"
     fi
   done
 }

@@ -49,7 +49,7 @@ Sub-commands let you re-run one verification in isolation. Each is parameterized
 | `deploy`    | `deploy.yml` on the env's branch (`dev` for staging, `main` for prod): conclusion=success             | `gh run view`                          |
 | `container` | Env container app (`agentnative-site[-staging]-sandbox`) state is `ready`                             | `bunx wrangler containers list`        |
 | `pages`     | `<env-url>/`, `/scorecards`, and `/api/score` registry-hit all return expected                        | `curl`                                 |
-| `retired`   | Every path the funnel retired answers 404 with no redirect; run after the zone purge                  | `curl`                                 |
+| `retired`   | Retired paths answer 404 with no redirect, and the published inbound links 301 to a pinned destination; run after the zone purge | `curl`                |
 | `sitemap`   | Every `<loc>` in `<env-url>/sitemap.xml` returns 200                                                  | `curl`                                 |
 | `mcp`       | `<env-url>/mcp` initialize + `tools/list` + registry-tier symmetry + live audit against `$MCP_BINARY` | `scripts/release/mcp-smoke.sh`         |
 | `purge`     | `<env-url>/skill.json` version matches `src/data/skill/skill.json`                                    | `curl`                                 |
