@@ -142,11 +142,15 @@ git commit
 
 # 7. Push the branch, then deploy THIS commit to staging. Preflight's live gates
 #    read the staging Worker, so until staging runs the release's own build they
-#    describe dev, not the release. Wait for the deploy AND for the container
-#    rollout before any live gate: instances drain asynchronously, so a gate that
-#    races the rollout hits a warm OLD-image instance.
+#    describe dev, not the release. `--ref` is load-bearing and names the branch:
+#    it selects the workflow DEFINITION as well as the code, and without it the
+#    default branch's deploy.yml runs against the release's build. A release that
+#    changes a post-deploy smoke then fails under main's copy of that smoke.
+#    Wait for the deploy AND for the container rollout before any live gate:
+#    instances drain asynchronously, so a gate that races the rollout hits a warm
+#    OLD-image instance.
 git push -u origin release/<YYYY-MM-DD>-<slug>
-gh workflow run deploy.yml -f environment=staging -f ref="$(git rev-parse HEAD)"
+gh workflow run deploy.yml --ref release/<YYYY-MM-DD>-<slug> -f environment=staging
 gh run watch <run-id> --exit-status
 bun x wrangler containers list                                  # STATE = ready
 
@@ -352,6 +356,11 @@ gh workflow run deploy.yml -f environment=staging              # redeploy stagin
 gh workflow run deploy.yml -f environment=production            # redeploy production
 gh workflow run deploy.yml -f environment=staging -f ref=<sha>  # specific SHA to staging
 ```
+
+`-f ref=<sha>` picks the code to build; the workflow definition still comes from the branch `gh` dispatches against,
+which defaults to the repository's default branch. Pass `--ref <branch>` to move both together. That is the difference
+between deploying a commit with today's workflow and deploying a branch with its own, and a release needs the second:
+see step 7 of [§ Releasing dev to main](#releasing-dev-to-main).
 
 ### Docs-only commits skip deploy
 

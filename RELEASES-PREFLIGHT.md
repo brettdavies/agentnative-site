@@ -503,6 +503,10 @@ HIT, so `edge-hit` has no local equivalent and the gate SKIPs in local mode; run
 
 - [ ] The release commit is deployed to staging (step 7 of the overlay recipe) and `wrangler containers list` shows
       `STATE = ready`. Until then these gates describe `dev`, not the release.
+- [ ] That deploy was dispatched with `--ref <release branch>`, not with `-f ref=<sha>` alone. The input selects the
+      code; the dispatch ref selects the workflow, and the default branch's `deploy.yml` running against the release's
+      build fails any post-deploy smoke the release itself changed. A green `Deploy to staging` step under a red job is
+      this: the Worker published and a stale smoke rejected it.
 - [ ] `staging-mcp`, `edge-hit`, `web-audit`, and `web-audit-webkit` all pass, with a non-zero test count for each.
 
 **A zero count is a failure, not a pass.** Playwright refuses an entire project on a configuration error — a duplicate
