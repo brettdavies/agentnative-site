@@ -7,6 +7,7 @@ import {
   type CachedWebAudit,
   get,
   getAggregate,
+  getForRequest,
   isStale,
   keyFor,
   listAllWebAudits,
@@ -18,6 +19,7 @@ import {
   WEB_AUDIT_STALE_AFTER_MS,
   type WebAggregateEntry,
   type WebCacheEnv,
+  WebCacheUnavailableError,
   webAuditFreshness,
 } from '../src/worker/audit-web/cache';
 import {
@@ -36,6 +38,8 @@ type ListedObject = { key: string; customMetadata?: Record<string, string> };
 
 type StubOpts = {
   throwOnGet?: boolean;
+  /** Fail this many gets, then serve normally, to exercise the retry. */
+  failGetTimes?: number;
   throwOnPut?: boolean;
   throwOnList?: boolean;
   prefill?: Record<string, unknown>;
@@ -45,6 +49,7 @@ type StubOpts = {
 type PutOptions = { customMetadata?: Record<string, string> };
 
 function makeR2Stub(opts: StubOpts = {}): {
+  getCalls: string[];
   env: WebCacheEnv;
   store: Map<string, string>;
   deletedKeys: string[];
@@ -53,6 +58,7 @@ function makeR2Stub(opts: StubOpts = {}): {
 } {
   const store = new Map<string, string>();
   const deletedKeys: string[] = [];
+  const getCalls: string[] = [];
   const putOptions = new Map<string, PutOptions | undefined>();
   const listCalls: Array<{ cursor?: string }> = [];
   if (opts.prefill) {
@@ -63,7 +69,11 @@ function makeR2Stub(opts: StubOpts = {}): {
   const env: WebCacheEnv = {
     SCORE_CACHE: {
       async get(key: string) {
+        getCalls.push(key);
         if (opts.throwOnGet) throw new Error('r2_get_failed');
+        if (opts.failGetTimes !== undefined && getCalls.length <= opts.failGetTimes) {
+          throw new Error('get: We encountered an internal error. Please try again. (10001)');
+        }
         const raw = store.get(key);
         if (raw === undefined) return null;
         return {
@@ -95,7 +105,7 @@ function makeR2Stub(opts: StubOpts = {}): {
       },
     } as unknown as R2Bucket,
   };
-  return { env, store, deletedKeys, putOptions, listCalls };
+  return { env, store, deletedKeys, putOptions, listCalls, getCalls };
 }
 
 function sampleScorecard(url: string) {
@@ -198,6 +208,40 @@ describe('cache.put / get', () => {
   test('a read failure returns null instead of throwing', async () => {
     const { env } = makeR2Stub({ throwOnGet: true });
     expect(await get(env, await keyFor('https://example.com/', SPEC_VERSION))).toBeNull();
+  });
+
+  // R2 answers an internal error with "please try again", and a live scorecard
+  // 404'd because the first of those was taken as proof the audit never ran.
+  describe('an unreadable cache is not an empty one', () => {
+    const url = 'https://example.com/';
+    const prefill = (key: string) => ({ [key]: { spec_version: SPEC_VERSION, target_url: url, scorecard: { id: 1 } } });
+
+    test('a transient read is retried and the record comes back', async () => {
+      const key = await keyFor(url, SPEC_VERSION);
+      const { env, getCalls } = makeR2Stub({ prefill: prefill(key), failGetTimes: 2 });
+      expect(await getForRequest(env, key)).toMatchObject({ target_url: url });
+      expect(getCalls.length).toBe(3);
+    });
+
+    test('a read that never succeeds is reported, not reported as missing', async () => {
+      const key = await keyFor(url, SPEC_VERSION);
+      const { env, deletedKeys } = makeR2Stub({ prefill: prefill(key), throwOnGet: true });
+      expect(getForRequest(env, key)).rejects.toBeInstanceOf(WebCacheUnavailableError);
+      // The object is still there; an unreadable key must never be cleaned up.
+      expect(deletedKeys).toEqual([]);
+    });
+
+    test('the tolerant read still degrades to a miss for the batch paths', async () => {
+      const key = await keyFor(url, SPEC_VERSION);
+      const { env } = makeR2Stub({ prefill: prefill(key), throwOnGet: true });
+      expect(await get(env, key)).toBeNull();
+    });
+
+    test('a key that genuinely holds nothing is still a miss, with no retry', async () => {
+      const { env, getCalls } = makeR2Stub();
+      expect(await getForRequest(env, await keyFor(url, SPEC_VERSION))).toBeNull();
+      expect(getCalls.length).toBe(1);
+    });
   });
 
   test('CachedWebAudit type carries target_url + spec_version + scorecard', async () => {
