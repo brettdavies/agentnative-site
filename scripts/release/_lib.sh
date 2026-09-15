@@ -67,6 +67,24 @@ gate_skip() {
 }
 header() { printf "\n%s== %s ==%s\n" "$C_BLD" "$1" "$C_RST"; }
 
+# Renders a newline-separated path list as gate detail: the count first, then
+# the paths. A gate that printed a bare `head -N` told the operator neither how
+# many there were nor that the list was cut, so a release deliberately
+# diverging from dev read as three stray files instead of sixteen.
+#
+# Args: $1 newline-separated list; $2 optional cap (default 20).
+count_and_list() {
+  local list=$1 cap=${2:-20} n shown remainder
+  n=$(printf '%s\n' "$list" | grep -c . || true)
+  shown=$(printf '%s\n' "$list" | grep . | head -"$cap" | tr '\n' ' ')
+  remainder=$((n - cap))
+  if [[ "$remainder" -gt 0 ]]; then
+    printf '%s file(s): %s(+%s more)' "$n" "$shown" "$remainder"
+  else
+    printf '%s file(s): %s' "$n" "$shown"
+  fi
+}
+
 # Dependency checks ----------------------------------------------------------
 
 require_bin() {
