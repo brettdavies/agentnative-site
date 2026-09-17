@@ -683,7 +683,12 @@ checks:
     with:
       path: /
       expect:
-        header_regex: { name: vary, pattern: "(?=.*accept(?!-))(?=.*user-agent)" }
+        # Both tokens present, in either order, with `accept` not the prefix of
+        # `accept-encoding` or `accept-language`. Spelled without lookaround
+        # because the CLI compiles every registry pattern with a linear-time
+        # engine that has none; tests/web-audit-vary-pattern.test.ts pins it
+        # to the lookaround form it replaces.
+        header_regex: { name: vary, pattern: "accept(?:user-agent|[^-\\n\\r\\u2028\\u2029].*user-agent)|user-agent.*accept(?:[^-]|$)" }
     hint: 'Emit Vary: Accept, User-Agent when the markdown twin is negotiated on the same URL, so shared caches never serve one client the wrong variant.'
 
   - id: markdown-frontmatter
