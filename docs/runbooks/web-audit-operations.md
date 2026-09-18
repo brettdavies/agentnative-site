@@ -48,11 +48,24 @@ token from 1Password, and rebuilds `dist/_internal/web-audit-registry.json` firs
 
 ```bash
 scripts/web-audit/run.sh                              # full report + score for staging
-scripts/web-audit/run.sh --check mcp-get-fast-fail    # one check; exit 0 = pass, 1 = failing, 3 = not evaluable
+scripts/web-audit/run.sh --check mcp-get-fast-fail    # one check, gated on the exit table below
 scripts/web-audit/run.sh --target https://anc.dev/    # a public target (e.g. production after a release)
 scripts/web-audit/run.sh --json                       # the full scorecard as JSON
 scripts/web-audit/run.sh --no-build                   # reuse the existing dist/ (skip the rebuild)
 ```
+
+Every run closes by naming the code it returns and what earned it. The table is the one the `anc` binary returns from
+`anc web` and `anc audit`, defined once in `src/shared/web-audit-exit.ts` and pinned by `tests/web-audit-exit.test.ts`:
+
+| Code | Meaning                                                                                                 |
+| ---- | ------------------------------------------------------------------------------------------------------- |
+| 0    | clean: every applicable check passed                                                                    |
+| 1    | warnings only: a SHOULD or MAY check missed                                                             |
+| 2    | failures present: a MUST check missed, or a usage error such as an unknown `--check` id                 |
+| 3    | could not check: the target was unreachable, a probe errored or was cut short, or every check was `n_a` |
+
+`--check <id>` returns the same table for one row, so `3` separates "this check does not apply to this site" from a
+miss. A target that answers nothing returns `3` rather than reading as a site with failures.
 
 This runs the audit **logic** you are about to ship against **live** content, so a change to an antecedent or a check
 assertion shows its effect immediately. A check whose pass depends on the target's own **content** (`noscript-fallback`,
@@ -156,11 +169,11 @@ The two lanes disagree on what an absent switch means, and the disagreement is d
 in KV where an absent key is the normal steady state, while the website lane's lives in `wrangler.jsonc` vars where an
 absent value means the deploy forgot it.
 
-| Switch                     | Lane | Absent means | Set to `"true"` means | Reaches                                |
-| -------------------------- | ---- | ------------ | --------------------- | -------------------------------------- |
-| `MCP_LIVE_SCORING_ENABLED` | CLI  | disabled     | enabled               | `score_cli`; the read tier stays alive  |
+| Switch                     | Lane | Absent means | Set to `"true"` means | Reaches                                     |
+| -------------------------- | ---- | ------------ | --------------------- | ------------------------------------------- |
+| `MCP_LIVE_SCORING_ENABLED` | CLI  | disabled     | enabled               | `score_cli`; the read tier stays alive      |
 | `WEB_AUDIT_ENABLED`        | web  | disabled     | enabled               | `audit_website` and the endpoint's web lane |
-| `MCP_ENABLED`              | both | disabled     | enabled               | the whole MCP surface                  |
+| `MCP_ENABLED`              | both | disabled     | enabled               | the whole MCP surface                       |
 
 A missing binding, as opposed to a missing value, fails closed on both lanes. Flipping any of them off leaves every
 cached result readable: the read tiers and the result route never consult a switch, so a disabled lane serves what it

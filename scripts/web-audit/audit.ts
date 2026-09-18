@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type AuditEvent, runWebAudit } from '../../src/worker/audit-web/engine';
 import type { WebAuditRegistry } from '../../src/worker/audit-web/registry';
+import { EXIT_COULD_NOT_CHECK, EXIT_FAILURES, webExitCode, webExitReason } from '../../src/shared/web-audit-exit';
 import { SPEC_VERSION } from '../../src/worker/spec-version.gen';
 
 type Scorecard = Extract<AuditEvent, { type: 'complete' }>['scorecard'];
@@ -23,17 +24,9 @@ const REPO_ROOT = join(import.meta.dir, '..', '..');
 const DEFAULT_TARGET = process.env.STAGING_URL ?? 'https://agentnative-site-staging.brettdavies.workers.dev/';
 const STAGING_HOST_MARK = 'agentnative-site-staging';
 
-// Exit code by status so `--check <id>` can gate CI/agents: 0 pass, 1 the
-// surface exists but fails, 3 the check could not be evaluated.
-const STATUS_EXIT: Record<string, number> = {
-  pass: 0,
-  noncompliant: 1,
-  broken: 1,
-  absent: 1,
-  error: 1,
-  skip: 1,
-  n_a: 3,
-};
+// Exit codes come from the one table `anc web` and `anc audit` return
+// (src/shared/web-audit-exit.ts, plan-003 KTD12), so a script gating on
+// this runner and a script gating on the binary read the same four codes.
 
 interface Args {
   target: string;
@@ -108,27 +101,45 @@ async function main(): Promise<number> {
   });
 
   let scorecard: Scorecard | null = null;
+  let unreachable: string | null = null;
   for (let ev = await audit.next(); !ev.done; ev = await audit.next()) {
     if (ev.value.type === 'complete') scorecard = ev.value.scorecard;
+    if (ev.value.type === 'unreachable') unreachable = ev.value.reason;
+  }
+  // Nothing answered, so there is nothing to score: the code the table
+  // added, rather than the failure code a scoreless run used to return.
+  if (unreachable !== null) {
+    console.error(unreachable);
+    console.error(`exit ${EXIT_COULD_NOT_CHECK}: could not check`);
+    return EXIT_COULD_NOT_CHECK;
   }
   if (!scorecard) {
     console.error('audit produced no scorecard');
-    return 2;
+    console.error(`exit ${EXIT_COULD_NOT_CHECK}: could not check`);
+    return EXIT_COULD_NOT_CHECK;
   }
+
+  // One row or every row, the code comes from the same table, which is
+  // what makes `3` mean "this check did not apply here" to a CI gate.
+  const scored = args.check ? scorecard.results.filter((r) => r.id === args.check) : scorecard.results;
+  if (args.check && scored.length === 0) {
+    console.error(`no such check: ${args.check}`);
+    console.error('run `bun run scripts/web-audit/audit.ts --json` and read `results[].id` for every id');
+    return EXIT_FAILURES;
+  }
+  const code = webExitCode(scored);
+  const reason = webExitReason(code, scored);
 
   if (args.json) {
     console.log(JSON.stringify(scorecard, null, 2));
-    return 0;
+    console.error(`exit ${code}: ${reason}`);
+    return code;
   }
 
   if (args.check) {
-    const result = scorecard.results.find((r) => r.id === args.check);
-    if (!result) {
-      console.error(`no such check: ${args.check}`);
-      return 3;
-    }
+    const result = scored[0];
     console.log(`${result.id}\t${result.status}\t${result.evidence ?? ''}`);
-    return STATUS_EXIT[result.status] ?? 1;
+    return code;
   }
 
   console.log(`target       = ${scorecard.target_url}`);
@@ -139,7 +150,8 @@ async function main(): Promise<number> {
   for (const result of scorecard.results) {
     console.log(`${result.status.padEnd(7)} ${result.id.padEnd(28)} ${result.evidence ?? ''}`);
   }
-  return 0;
+  console.log(`\nexit ${code}: ${reason}`);
+  return code;
 }
 
 process.exit(await main());
