@@ -71,8 +71,25 @@ export function prepareWebTarget(host: string): { ok: true; target: WebTarget } 
   }
   const canonical = canonicalTargetOf(url);
   const validation = validatePublicUrl(canonical);
-  if (!validation.ok) return { ok: false, reason: validation.reason };
+  if (!validation.ok) return { ok: false, reason: webRefusal(url.host, validation.reason) };
   return { ok: true, target: { host: url.host, canonical } };
+}
+
+/**
+ * A host the SSRF gate blocked is not bad input: it is a host this service
+ * cannot reach, and the same 65 checks run locally against it. The visitor
+ * has just proved they want exactly that, so the refusal names the command
+ * instead of stopping at "not a public host". Reasons the gate gives for
+ * anything else (an unparseable URL, a non-http scheme) pass through
+ * unchanged, because no local command fixes them.
+ */
+export function webRefusal(host: string, reason: string): string {
+  if (!reason.startsWith('blocked:')) return reason;
+  return (
+    `${reason}. anc.dev reaches public hosts only. The agentnative CLI runs this same audit from ` +
+    `your own machine, where the host is reachable: \`anc web ${host}\` ` +
+    '(https://github.com/brettdavies/agentnative-cli).'
+  );
 }
 
 export type WebTier =

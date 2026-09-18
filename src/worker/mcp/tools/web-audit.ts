@@ -37,7 +37,7 @@ import {
   scorecardWithPublicListing,
   WEB_AUDIT_STALE_AFTER_MS,
 } from '../../audit-web/cache';
-import { webEnvelope } from '../../audit-web/core';
+import { webEnvelope, webRefusal } from '../../audit-web/core';
 import { runWebAudit } from '../../audit-web/engine';
 import { queueHitMinPurge, webDomainTag, webTag } from '../../audit-web/hit-min-purge';
 import { consumeWebAuditHourlyBudget } from '../../audit-web/limiter';
@@ -126,7 +126,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       const parsed = coerceUrl(url);
       if (!parsed) return isError('invalid url');
       const validation = validatePublicUrl(canonicalTargetOf(parsed));
-      if (!validation.ok) return isError(validation.reason);
+      if (!validation.ok) return isError(webRefusal(parsed.host, validation.reason));
       const domain = parsed.host;
       const hit = await resolveCachedAudit(env, domain);
       if (hit) {
@@ -194,7 +194,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       if (!parsed) return isError('invalid url');
       const canonicalTarget = canonicalTargetOf(parsed);
       const validation = validatePublicUrl(canonicalTarget);
-      if (!validation.ok) return isError(validation.reason);
+      if (!validation.ok) return isError(webRefusal(parsed.host, validation.reason));
       const domain = parsed.host;
 
       // Cache hit short-circuits ahead of the kill switch: cache state is
