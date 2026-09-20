@@ -21,7 +21,13 @@ import {
   retiredRedirectFor,
   SCORECARDS_PATH,
 } from '../shared/audit-routes';
-import { classifyGatewayRequest, detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
+import {
+  canonicalHostRedirect,
+  classifyGatewayRequest,
+  detectMcpFormat,
+  detectMcpGetFormat,
+  detectPreference,
+} from './accept';
 import { type AuditApiEnv, handleAuditApi, isAuditApiPath } from './audit/api';
 import type { AuditJob } from './audit/job';
 import { handleResultRoute, type ResultEnv } from './audit/result';
@@ -1023,6 +1029,14 @@ const WEB_RESCORE_CRON = '0 9 * * SUN';
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const started = Date.now();
+    // Canonical host first: www 301s to the apex before the request can enter
+    // the cached entrypoint, so no www response is ever stored under a cache
+    // key and the duplicate hostname never serves a 200 body.
+    const hostRedirect = canonicalHostRedirect(request);
+    if (hostRedirect) {
+      recordPageRequest(request, hostRedirect, Date.now() - started);
+      return hostRedirect;
+    }
     const response = await loopbackCachedFetch(ctx, env, classifyGatewayRequest(request));
     recordPageRequest(request, response, Date.now() - started);
     return response;

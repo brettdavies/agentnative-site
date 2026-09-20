@@ -9,7 +9,7 @@
 
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { RETIRED_REDIRECTS } from '../src/shared/audit-routes';
-import { classifyGatewayRequest, detectPreference } from '../src/worker/accept';
+import { canonicalHostRedirect, classifyGatewayRequest, detectPreference } from '../src/worker/accept';
 import { applyHeaders, isRepresentationPinned, isStagingHost, resultCacheClass } from '../src/worker/headers';
 import worker from '../src/worker/index';
 import { _resetIndexCache } from '../src/worker/score/handler';
@@ -234,6 +234,42 @@ describe('classifyGatewayRequest — format-class table', () => {
     const browser = classifyGatewayRequest(req('https://anc.dev/mcp', '*/*', UA.browser));
     expect(curl.headers.get('accept')).toBe('text/markdown');
     expect(browser.headers.get('accept')).toBe('text/html');
+  });
+
+  // canonicalHostRedirect — www.anc.dev is its own custom domain, so without
+  // a redirect it serves the apex body under a duplicate hostname.
+  describe('canonicalHostRedirect', () => {
+    test('GET www.anc.dev 301s to the apex, preserving path and query', () => {
+      const res = canonicalHostRedirect(req('https://www.anc.dev/p1?ref=x', 'text/html', UA.browser));
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(301);
+      expect(res!.headers.get('location')).toBe('https://anc.dev/p1?ref=x');
+    });
+
+    test('HEAD takes 301 as well', () => {
+      const res = canonicalHostRedirect(new Request('https://www.anc.dev/about', { method: 'HEAD' }));
+      expect(res!.status).toBe(301);
+      expect(res!.headers.get('location')).toBe('https://anc.dev/about');
+    });
+
+    test('non-GET takes 308 so method and body survive the hop', () => {
+      const res = canonicalHostRedirect(new Request('https://www.anc.dev/mcp', { method: 'POST', body: '{}' }));
+      expect(res!.status).toBe(308);
+      expect(res!.headers.get('location')).toBe('https://anc.dev/mcp');
+    });
+
+    test('carries a bounded Cache-Control so the 301 is not pinned forever', () => {
+      const res = canonicalHostRedirect(req('https://www.anc.dev/', 'text/html', UA.browser));
+      expect(res!.headers.get('cache-control')).toBe('public, max-age=3600');
+    });
+
+    test('apex, staging, and localhost are left alone', () => {
+      expect(canonicalHostRedirect(req('https://anc.dev/p1', 'text/html', UA.browser))).toBeNull();
+      expect(
+        canonicalHostRedirect(req('https://agentnative-site.brett.workers.dev/p1', 'text/html', UA.browser)),
+      ).toBeNull();
+      expect(canonicalHostRedirect(req('http://localhost:8787/p1', 'text/html', UA.browser))).toBeNull();
+    });
   });
 
   test('www.anc.dev coalesces to anc.dev; staging hosts are left alone', () => {
@@ -929,6 +965,33 @@ describe('applyHeaders — staging-host guard (locked decision #4)', () => {
 // ---------------------------------------------------------------------------
 
 describe('worker.fetch — CN rewrite + asset lookup', () => {
+  // The gateway wiring, not just the helper: a www request must 301 out of
+  // worker.fetch without ever reaching the asset fetcher (and so without
+  // being stored under a cache key by the cached entrypoint).
+  test('www.anc.dev 301s at the gateway and never touches ASSETS', async () => {
+    let assetHits = 0;
+    const env = makeEnv();
+    const spied = {
+      ASSETS: {
+        async fetch(request: Request | string): Promise<Response> {
+          assetHits += 1;
+          return env.ASSETS.fetch(request as Request);
+        },
+      } as unknown as Fetcher,
+    } as unknown as typeof env;
+    const res = await worker.fetch(req('https://www.anc.dev/p3?a=1'), spied, {} as ExecutionContext);
+    expect(res.status).toBe(301);
+    expect(res.headers.get('location')).toBe('https://anc.dev/p3?a=1');
+    expect(assetHits).toBe(0);
+  });
+
+  test('apex still serves normally through the gateway', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(req('https://anc.dev/p3'), env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('X-Echo-Path')).toBe('/p3');
+  });
+
   test('/p3 no Accept → fetches /p3 (HTML, auto-trailing-slash resolves to p3.html)', async () => {
     const env = makeEnv();
     const res = await worker.fetch(req('https://anc.dev/p3'), env, {} as ExecutionContext);

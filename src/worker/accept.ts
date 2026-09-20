@@ -207,6 +207,11 @@ const MCP_GET_CLASS_ACCEPT: Record<McpGetFormat, string> = {
 // that is not already in that allowlist (KTD8).
 const MARKDOWN_CLASS_UA = 'curl/';
 
+// Production hostnames. `www` is a second custom domain in wrangler.jsonc
+// `routes`; the apex is the one canonical origin every surface resolves to.
+const CANONICAL_HOST = 'anc.dev';
+const WWW_HOST = 'www.anc.dev';
+
 export function isGetOrHead(method: string): boolean {
   const upper = method.toUpperCase();
   return upper === 'GET' || upper === 'HEAD';
@@ -225,16 +230,53 @@ function applyUaClass(headers: Headers, siteClass: Preference): void {
 }
 
 /**
+ * Canonical-host redirect. `www.anc.dev` is bound as its own custom domain
+ * (wrangler.jsonc `routes`), so without this it serves the apex body verbatim
+ * under a second hostname — a duplicate surface that splits crawl signal, and
+ * the canonical-plus-redirect-aliases audit rule credits only 301/308.
+ *
+ * GET/HEAD take 301: the permanent canonicalization search engines fold into
+ * the apex. Every other method takes 308, which preserves method and body, so
+ * a POST to /api/* or /mcp aimed at www is not silently downgraded to GET.
+ *
+ * Cache-Control is explicit and deliberately short. A bare 301 is cached by
+ * browsers indefinitely, which would make the www binding practically
+ * unrecoverable if it ever needs to serve something other than a redirect.
+ * This response is emitted at the gateway, ahead of the cached entrypoint, so
+ * it carries no cache class and never reaches applyHeaders.
+ *
+ * Returns null for every other host — apex, staging `*.workers.dev`, and
+ * localhost are left alone.
+ */
+export function canonicalHostRedirect(request: Request): Response | null {
+  const url = new URL(request.url);
+  if (url.hostname !== WWW_HOST) return null;
+  url.hostname = CANONICAL_HOST;
+  return new Response(null, {
+    status: isGetOrHead(request.method) ? 301 : 308,
+    headers: {
+      location: url.toString(),
+      'cache-control': 'public, max-age=3600',
+    },
+  });
+}
+
+/**
  * Uncached-gateway rewrite (KTD1 / KTD8): classify HTML vs markdown the way
  * detectPreference already does, then canonicalize Accept and UA so Workers
  * Caching keys on the class rather than raw header strings. GET /mcp uses
  * detectMcpGetFormat so the JSON 301 cannot share a cache object with the
- * HTML/markdown page. www.anc.dev coalesces to anc.dev on production only.
+ * HTML/markdown page. www.anc.dev coalesces to anc.dev on production only
+ * (behind the canonicalHostRedirect 301 the gateway emits first).
  */
 export function classifyGatewayRequest(request: Request): Request {
   const url = new URL(request.url);
-  if (url.hostname === 'www.anc.dev') {
-    url.hostname = 'anc.dev';
+  // Defence in depth. canonicalHostRedirect fronts this in the deployed
+  // gateway, so a www request 301s before it ever reaches classification;
+  // coalescing stays so any other caller of this pure function cannot split
+  // the cache key across two hostnames.
+  if (url.hostname === WWW_HOST) {
+    url.hostname = CANONICAL_HOST;
   }
 
   if (!isGetOrHead(request.method)) {
