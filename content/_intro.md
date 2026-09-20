@@ -1,4 +1,4 @@
-# The agent-native standard
+# The agent-native standard for CLIs and websites
 
 One bar for agent-readiness, measured on two surfaces: your CLI and your website. Scored MUST / SHOULD / MAY, not
 asserted.
