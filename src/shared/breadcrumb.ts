@@ -9,13 +9,15 @@
 //
 // A trail is empty for the home page, where one item names only itself.
 //
-// A namespace prefix is not a page. `/score/` and `/fix/` are prefixes the
-// route module owns, and their bare paths are 404s, so a crumb linking to one
-// would send a reader, and a crawler, to a miss. Where the namespace has a
-// real parent the trail names that page instead; where it has none the
-// namespace is dropped and its target hangs off the home page.
+// A namespace prefix is not automatically a page. `/score/` is a prefix the
+// route module owns and its bare path is a 404, so a crumb linking to it would
+// send a reader, and a crawler, to a miss. Where the namespace has a real
+// parent the trail names that page instead; where it has none the namespace is
+// dropped and its target hangs off the home page. `/fix/` is the one prefix
+// whose bare path IS a page — the generated index at FIX_INDEX_PATH — so its
+// targets crumb through it.
 
-import { FIX_PREFIX, SCORE_PREFIX, SCORECARDS_PATH } from './audit-routes';
+import { FIX_INDEX_PATH, FIX_PREFIX, SCORE_PREFIX, SCORECARDS_PATH } from './audit-routes';
 import { escHtml } from './esc-html';
 
 // A crumb holds the site-relative path, never an absolute URL: the nav a
@@ -37,7 +39,7 @@ const segmentOf = (prefix: string) => prefix.replaceAll('/', '');
 /** The page a namespace's targets belong under, or null when it has none. */
 const NAMESPACE_PARENT: Readonly<Record<string, Crumb | null>> = {
   [segmentOf(SCORE_PREFIX)]: { name: 'Leaderboard', path: SCORECARDS_PATH },
-  [segmentOf(FIX_PREFIX)]: null,
+  [segmentOf(FIX_PREFIX)]: { name: 'Fixes', path: FIX_INDEX_PATH },
 };
 
 const namespaceOf = (segment: string): string | null => (Object.hasOwn(NAMESPACE_PARENT, segment) ? segment : null);
@@ -63,6 +65,9 @@ export function breadcrumbTrail(path: string, label?: string | null): Crumb[] {
   const namespace = namespaceOf(segments[0]);
   if (namespace !== null) {
     const parent = NAMESPACE_PARENT[namespace];
+    // A namespace whose bare path is a real page IS that parent crumb, so it
+    // ends the trail rather than appearing twice as its own child.
+    if (parent && parent.path === path) return [...trail, parent];
     if (parent) trail.push(parent);
     // One crumb for the whole target however many segments it spans: a
     // branch-scoped result is `owner/repo@branch`, one identifier with a slash.

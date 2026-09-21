@@ -29,10 +29,10 @@
 // Fail-fast: the invariant check throws on violation so CI/`bun run build`
 // exits non-zero. Regression tests are the verification net.
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { API_SCORE_PATH, SCORECARDS_PATH, scorePath } from '../shared/audit-routes';
+import { API_SCORE_PATH, FIX_INDEX_PATH, fixPath, SCORECARDS_PATH, scorePath } from '../shared/audit-routes';
 import { principleTier } from '../shared/scorecard-format.mjs';
 // Pipeline-stage modules sort in execution order via numeric filename
 // prefixes (00-… → 06-…). Numbering is decorative; build() below is the
@@ -49,13 +49,13 @@ import { buildSitemap } from './10-sitemap.mjs';
 import { emitMcpCatalog } from './11-mcp-catalog.mjs';
 import { emitAgentReadiness, emitDiscovery } from './11a-discovery-emit.mjs';
 import { minifyDist } from './12-minify-dist.mjs';
-import { emitWebAuditRegistry, emitWebRemediation } from './13-web-audit-registry.mjs';
+import { emitWebAuditRegistry, emitWebRemediation, loadWebAuditCheckIds } from './13-web-audit-registry.mjs';
 import { emitWebSeedProjection, loadWebSeed } from './14-web-scorecards-emit.mjs';
 import { emitWebAuditSkillPages } from './15-web-audit-skills.mjs';
 import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, emitShellTemplate, WEBMCP_SCRIPT } from './shell.mjs';
-import { composeTwin, escHtml, parseFilename, sortedGlob } from './util.mjs';
+import { canonicalBaseUrl, composeTwin, escHtml, parseFilename, sortedGlob } from './util.mjs';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const CONTENT_DIR = join(REPO_ROOT, 'content');
@@ -156,6 +156,33 @@ export async function runInvariantChecks(distDir, principleSlugs, principleSourc
         );
       }
     }
+  }
+
+  // 6. Every fix page is reachable. The check pages are generated, so nothing
+  // authored links them: for a stretch every one of them was emitted
+  // indexable, listed in no sitemap, and pointed at by no page, which is a
+  // page that exists for no one. Both halves are asserted because either one
+  // alone still leaves a crawler without a route it will follow.
+  const fixIndexHtml = await readFile(join(distDir, 'fix.html'), 'utf8');
+  const sitemapXml = await readFile(join(distDir, 'sitemap.xml'), 'utf8');
+  const fixPages = (await readdir(join(distDir, 'fix')))
+    .filter((name) => name.endsWith('.html'))
+    .map((name) => name.slice(0, -'.html'.length));
+  if (fixPages.length === 0) {
+    throw new Error('invariant: no fix pages were emitted; the fix index would link nothing');
+  }
+  for (const id of fixPages) {
+    if (!fixIndexHtml.includes(`href="${fixPath(id)}"`)) {
+      throw new Error(
+        `invariant: fix.html does not link ${fixPath(id)}; a generated page nothing points at is orphaned`,
+      );
+    }
+    if (!sitemapXml.includes(`<loc>${canonicalBaseUrl()}${fixPath(id)}</loc>`)) {
+      throw new Error(`invariant: sitemap.xml omits ${fixPath(id)}`);
+    }
+  }
+  if (!sitemapXml.includes(`<loc>${canonicalBaseUrl()}${FIX_INDEX_PATH}</loc>`)) {
+    throw new Error(`invariant: sitemap.xml omits the fix index ${FIX_INDEX_PATH}`);
   }
 }
 
@@ -316,6 +343,13 @@ export async function build() {
   // (the result route drops noindex for a seed member), so leaving it out is
   // the difference between a crawlable corpus and pages nothing points at. An
   // on-demand host keeps noindex and stays unlisted.
+  // The fix pages are that same rule applied to the other generated corpus:
+  // every one is indexable, and every one was unreachable until the index at
+  // FIX_INDEX_PATH linked them. The ids load here rather than riding out of
+  // stage 11a-bis because the sitemap is written first.
+  const webAuditCheckIds = await loadWebAuditCheckIds({
+    registryPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml'),
+  });
   const sitemap = buildSitemap({
     principleNumbers: principles.map((p) => p.n),
     extraPaths: [
@@ -325,6 +359,8 @@ export async function build() {
       '/skill',
       '/badge',
       '/web-scorecard-schema',
+      FIX_INDEX_PATH,
+      ...webAuditCheckIds.map((id) => fixPath(id)),
       ...scorecardPaths,
       ...webSeed.entries.map((entry) => scorePath(entry.domain)),
     ],

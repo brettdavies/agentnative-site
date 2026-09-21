@@ -77,16 +77,30 @@ describe('JSON-LD graph', () => {
     ]);
   });
 
-  // `/fix` and `/score` are namespaces, not pages: `/score/` bare is a 404. A
-  // crumb linking to one would send a reader, and a crawler, to a miss.
-  test('a namespace segment is dropped rather than linked', () => {
+  // A namespace segment is never linked as itself: `/score/` bare is a 404, so
+  // a crumb naming it would send a reader, and a crawler, to a miss. The trail
+  // names the namespace's real parent page instead.
+  test('a /score target crumbs through the leaderboard, not through /score', () => {
+    const crumbs = nodeOf(graphOf(shell({ canonicalPath: '/score/anc.dev', breadcrumb: 'anc.dev' })), 'BreadcrumbList');
+    expect(crumbs?.itemListElement).toEqual([
+      { '@type': 'ListItem', position: 1, name: 'Home', item: CANONICAL_SITE_URL },
+      { '@type': 'ListItem', position: 2, name: 'Leaderboard', item: `${CANONICAL_SITE_URL}/scorecards` },
+      { '@type': 'ListItem', position: 3, name: 'anc.dev', item: `${CANONICAL_SITE_URL}/score/anc.dev` },
+    ]);
+  });
+
+  // `/fix` is the one namespace whose bare path is a real page: the generated
+  // index is what makes the 65 check pages reachable at all, so the trail goes
+  // through it rather than hanging each page off the home page.
+  test('a /fix target crumbs through the fix index', () => {
     const crumbs = nodeOf(
       graphOf(shell({ canonicalPath: '/fix/openapi', breadcrumb: 'OpenAPI description' })),
       'BreadcrumbList',
     );
     expect(crumbs?.itemListElement).toEqual([
       { '@type': 'ListItem', position: 1, name: 'Home', item: CANONICAL_SITE_URL },
-      { '@type': 'ListItem', position: 2, name: 'OpenAPI description', item: `${CANONICAL_SITE_URL}/fix/openapi` },
+      { '@type': 'ListItem', position: 2, name: 'Fixes', item: `${CANONICAL_SITE_URL}/fix` },
+      { '@type': 'ListItem', position: 3, name: 'OpenAPI description', item: `${CANONICAL_SITE_URL}/fix/openapi` },
     ]);
   });
 

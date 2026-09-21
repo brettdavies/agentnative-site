@@ -46,6 +46,12 @@ export const SCORE_PREFIX = '/score/';
 export const SCORECARDS_PATH = '/scorecards';
 export const AUDIT_PATH = '/audit';
 export const FIX_PREFIX = '/fix/';
+/**
+ * The fix namespace's index. Unlike `/score/`, this prefix has a real page at
+ * its bare path: the per-check pages are generated, so without one nothing on
+ * the site links them and a crawler has no route in.
+ */
+export const FIX_INDEX_PATH = '/fix';
 export const API_SCORE_PATH = '/api/score';
 
 /**

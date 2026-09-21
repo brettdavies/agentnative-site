@@ -10,7 +10,11 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { buildAgentSkillsIndex, buildAgentSkillsIndexMd } from '../src/build/11a-discovery-emit.mjs';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
-import { buildSkillMarkdown, emitWebAuditSkillPages } from '../src/build/15-web-audit-skills.mjs';
+import {
+  buildFixIndexMarkdown,
+  buildSkillMarkdown,
+  emitWebAuditSkillPages,
+} from '../src/build/15-web-audit-skills.mjs';
 import { assembleRemediation } from '../src/worker/audit-web/remediation';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
@@ -150,6 +154,64 @@ describe('emitWebAuditSkillPages', () => {
     });
     expect(await readdir(stale).catch(() => null)).toBeNull();
   }, 30_000);
+});
+
+// The fix index. Every check page is generated, so before this page nothing
+// on the site linked one and a crawler had no route in; these tests pin the
+// two properties that make them reachable — a link per check, and the flat
+// `fix.html` placement that lets `/fix` resolve beside the `/fix/` directory.
+describe('the fix index', () => {
+  type Check = { id: string; title: string; category: string; keyword: 'must' | 'should' | 'may' };
+  type Registry = { category_order: string[]; categories: Record<string, string>; checks: Check[] };
+  const registry = async () =>
+    normalizeWebAuditRegistry(yaml.load(await readFile(REGISTRY_PATH, 'utf8')) as object) as Registry;
+
+  test('links every check in the registry exactly once', async () => {
+    const reg = await registry();
+    const md = buildFixIndexMarkdown(reg);
+    for (const check of reg.checks) {
+      const occurrences = md.split(`](/fix/${check.id})`).length - 1;
+      expect(`${check.id}: ${occurrences}`).toBe(`${check.id}: 1`);
+    }
+  });
+
+  test('groups under every category, in category_order', async () => {
+    const reg = await registry();
+    const md = buildFixIndexMarkdown(reg);
+    const headings = [...md.matchAll(/^## (.+)$/gm)].map((m) => m[1]);
+    expect(headings).toEqual(reg.category_order.map((slug) => reg.categories[slug]));
+  });
+
+  test('names each check its registry title and keyword', async () => {
+    const reg = await registry();
+    const md = buildFixIndexMarkdown(reg);
+    const check = reg.checks[0];
+    const label = { must: 'MUST', should: 'SHOULD', may: 'MAY' }[check.keyword];
+    expect(label).toBeDefined();
+    expect(md).toContain(`[${check.title}](/fix/${check.id}) — ${label}`);
+  });
+
+  test('emits flat as fix.html + fix.md, not as a directory index', async () => {
+    const { distDir } = await emitToTmp();
+    const names = await readdir(distDir);
+    expect(names).toContain('fix.html');
+    expect(names).toContain('fix.md');
+    // A directory index would shadow the flat page and break /fix.md.
+    expect(await readdir(join(distDir, 'fix'))).not.toContain('index.html');
+  });
+
+  test('the twin absolutifies its check links so a fetched document resolves', async () => {
+    const { distDir } = await emitToTmp();
+    const md = await readFile(join(distDir, 'fix.md'), 'utf8');
+    expect(md).toContain('](https://anc.dev/fix/');
+    expect(md).toContain('url: https://anc.dev/fix');
+  });
+
+  test('the page keeps its check links site-relative', async () => {
+    const { distDir } = await emitToTmp();
+    const html = await readFile(join(distDir, 'fix.html'), 'utf8');
+    expect(html).toContain('href="/fix/');
+  });
 });
 
 describe('agent-skills directory of pointers (U11)', () => {

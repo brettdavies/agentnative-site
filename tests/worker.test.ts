@@ -992,6 +992,31 @@ describe('worker.fetch — CN rewrite + asset lookup', () => {
     expect(res.headers.get('X-Echo-Path')).toBe('/p3');
   });
 
+  // The fix index sits flat at dist/fix.html beside the dist/fix/ directory,
+  // so /fix negotiates like any other page and its twin is /fix.md. A
+  // dist/fix/index.html would have broken both.
+  test('/fix no Accept → fetches /fix and points at the /fix.md twin', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(req('https://anc.dev/fix'), env, {} as ExecutionContext);
+    expect(res.headers.get('X-Echo-Path')).toBe('/fix');
+    expect(res.headers.get('Link')).toContain('</fix.md>');
+    expect(res.headers.get('X-Robots-Tag')).toBeNull();
+  });
+
+  test('/fix with Accept: text/markdown → fetches /fix.md', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(req('https://anc.dev/fix', 'text/markdown'), env, {} as ExecutionContext);
+    expect(res.headers.get('X-Echo-Path')).toBe('/fix.md');
+    expect(res.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
+  });
+
+  test('a /fix/<id> check page still resolves under the namespace', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(req('https://anc.dev/fix/llms-txt'), env, {} as ExecutionContext);
+    expect(res.headers.get('X-Echo-Path')).toBe('/fix/llms-txt');
+    expect(res.headers.get('Link')).toContain('</fix/llms-txt.md>');
+  });
+
   test('/p3 no Accept → fetches /p3 (HTML, auto-trailing-slash resolves to p3.html)', async () => {
     const env = makeEnv();
     const res = await worker.fetch(req('https://anc.dev/p3'), env, {} as ExecutionContext);

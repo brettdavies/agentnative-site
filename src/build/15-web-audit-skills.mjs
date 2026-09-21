@@ -11,12 +11,12 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
-import { AUDIT_PATH, fixPath } from '../shared/audit-routes';
+import { AUDIT_PATH, FIX_INDEX_PATH, fixPath } from '../shared/audit-routes';
 import { escHtml } from '../shared/scorecard-format.mjs';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from './13-web-audit-registry.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell } from './shell.mjs';
-import { absolutifyMarkdownLinks, resolveBaseUrl } from './util.mjs';
+import { absolutifyMarkdownLinks, composeTwin, resolveBaseUrl } from './util.mjs';
 
 const KEYWORD_LABELS = { must: 'MUST', should: 'SHOULD', may: 'MAY' };
 
@@ -120,9 +120,90 @@ async function buildSkillHtmlBody(check, remediation, categories, baseUrl) {
   return `${await renderMarkdown(head)}\n${carrier}\n${await renderMarkdown(tail)}`;
 }
 
+const FIX_INDEX_TITLE = 'Agent-readiness fixes';
+
 /**
- * Emit every fix-skill page (HTML + markdown twin) and return the entries
- * the agent-skills discovery index lists.
+ * The index's markdown, and the single source both its HTML and its twin
+ * render from — the same STAR posture the per-check pages take.
+ *
+ * Every check page is generated, so before this page existed nothing on the
+ * site linked one: the 65 of them were reachable only by guessing a slug.
+ * This is the hub that makes them crawlable, and the reason `/fix` appears in
+ * the footer of every page and in the sitemap.
+ *
+ * Checks are grouped by `category_order` rather than by tier, because a reader
+ * arrives holding a category ("my MCP surface is failing"), not a keyword.
+ *
+ * @param {{ category_order: string[], categories: Record<string, string>, checks: Array<object> }} registry
+ * @returns {string} markdown body (no frontmatter)
+ */
+export function buildFixIndexMarkdown(registry) {
+  const byCategory = new Map(registry.category_order.map((slug) => [slug, []]));
+  for (const check of registry.checks) {
+    byCategory.get(check.category)?.push(check);
+  }
+
+  const categoryNames = registry.category_order.map((slug) => registry.categories[slug]);
+  const lines = [
+    `# ${FIX_INDEX_TITLE}`,
+    '',
+    `Every check the website audit runs, each with a copy-paste fix you can hand to a coding agent. ${registry.checks.length} checks across ${registry.category_order.length} categories: ${categoryNames.join(', ')}.`,
+    '',
+    `Run the audit at [${AUDIT_PATH}](${AUDIT_PATH}) to find out which of these your site fails.`,
+    '',
+  ];
+
+  for (const slug of registry.category_order) {
+    const checks = byCategory.get(slug) ?? [];
+    if (checks.length === 0) continue;
+    lines.push(`## ${registry.categories[slug]}`, '');
+    for (const check of checks) {
+      const keyword = KEYWORD_LABELS[check.keyword] ?? check.keyword;
+      // Three registry titles name an element inline (`<link rel>`,
+      // `<noscript>`, `<meta name="description">`). Markdown passes raw HTML
+      // through, so an unescaped title renders as a tag and its text vanishes.
+      lines.push(`- [${escHtml(check.title)}](${fixPath(check.id)}) — ${keyword}`);
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Emit the fix index (HTML + markdown twin) at the namespace's bare path.
+ * Flat like every other page — `dist/fix.html` beside the `dist/fix/`
+ * directory, not `dist/fix/index.html` — so `/fix` resolves the page and the
+ * Worker's `markdownTwinFor` lands on `/fix.md`.
+ */
+async function emitFixIndex({ distDir, registry, themeInit, baseUrl }) {
+  const markdown = buildFixIndexMarkdown(registry);
+  const description = `Every web-audit check anc.dev runs, each with a copy-paste fix: ${registry.category_order
+    .map((slug) => registry.categories[slug])
+    .join(', ')}.`;
+
+  await writeFile(
+    join(distDir, 'fix.md'),
+    composeTwin({ title: FIX_INDEX_TITLE, description, canonicalPath: FIX_INDEX_PATH }, markdown, baseUrl),
+  );
+  await writeFile(
+    join(distDir, 'fix.html'),
+    emitShell({
+      title: FIX_INDEX_TITLE,
+      description,
+      canonicalPath: FIX_INDEX_PATH,
+      breadcrumb: 'Fixes',
+      // Site-relative in the page (a staging build links staging); composeTwin
+      // absolutifies for the twin, where a fetched document must self-resolve.
+      bodyHtml: await renderMarkdown(markdown),
+      themeInitJs: themeInit,
+    }),
+  );
+}
+
+/**
+ * Emit the fix index plus every fix-skill page (HTML + markdown twin) and
+ * return the entries the agent-skills discovery index lists.
  *
  * @param {{ distDir: string, registryPath: string, remediationPath: string, themeInit: string, baseUrl?: string }} opts
  * @returns {Promise<{ pages: Array<{ id: string, title: string, description: string, url: string, digest: string }> }>}
@@ -167,5 +248,8 @@ export async function emitWebAuditSkillPages({ distDir, registryPath, remediatio
       digest: createHash('sha256').update(served).digest('hex'),
     });
   }
+
+  await emitFixIndex({ distDir, registry, themeInit, baseUrl });
+
   return { pages };
 }

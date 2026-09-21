@@ -87,7 +87,7 @@ const CHECK_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
  * error on any missing/invalid field so the build fails loudly.
  *
  * @param {object} doc — js-yaml load of src/data/web-audit/registry.yaml
- * @returns {{ version: number, mcp_discovery: object, categories: Record<string,string>, checks: Array<object> }}
+ * @returns {{ version: number, mcp_discovery: object, category_order: string[], categories: Record<string,string>, checks: Array<object> }}
  */
 export function normalizeWebAuditRegistry(doc) {
   if (!doc || typeof doc !== 'object') {
@@ -239,6 +239,21 @@ export function normalizeWebAuditRegistry(doc) {
     categories,
     checks: normalized,
   };
+}
+
+/**
+ * The check ids, loaded straight from the registry. The sitemap needs them at
+ * stage 10, before the fix pages themselves are emitted at 11a-bis, and this
+ * file is already read once per emitter that projects from it — so a fourth
+ * read is the cheap, drift-proof way to get them early (same file, same
+ * normalizer, so the two lists cannot disagree).
+ *
+ * @param {{ registryPath: string }} opts
+ * @returns {Promise<string[]>} check ids in registry order
+ */
+export async function loadWebAuditCheckIds({ registryPath }) {
+  const registry = normalizeWebAuditRegistry(yaml.load(await readFile(registryPath, 'utf8')));
+  return registry.checks.map((check) => check.id);
 }
 
 /**

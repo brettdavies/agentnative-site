@@ -3172,6 +3172,15 @@ describe('runInvariantChecks — principle twin equivalence (invariant #4)', () 
     await writeFile(join(distDir, 'index.md'), '# Home\n\nQuiet twin.\n');
     await writeFile(join(distDir, 'audit.md'), '# Audit\n\nQuiet twin.\n');
     await writeFile(join(distDir, 'p1.md'), p1Md);
+    // Invariant #6: a fix page counts as reachable only when the index links
+    // it AND the sitemap lists it, so the fixture has to carry both halves.
+    await mkdir(join(distDir, 'fix'), { recursive: true });
+    await writeFile(join(distDir, 'fix', 'demo-check.html'), '<html><body><h1>Demo</h1></body></html>');
+    await writeFile(join(distDir, 'fix.html'), '<html><body><a href="/fix/demo-check">Demo</a></body></html>');
+    await writeFile(
+      join(distDir, 'sitemap.xml'),
+      '<?xml version="1.0"?><urlset><url><loc>https://anc.dev/fix</loc></url><url><loc>https://anc.dev/fix/demo-check</loc></url></urlset>',
+    );
     return { distDir, sourcePath };
   }
 
@@ -3190,6 +3199,46 @@ describe('runInvariantChecks — principle twin equivalence (invariant #4)', () 
     const { distDir, sourcePath } = await seedDist(expectedTwin());
     try {
       await runInvariantChecks(distDir, [SLUG], [{ n: 1, sourcePath }]);
+    } finally {
+      await rm(distDir, { recursive: true, force: true });
+    }
+  });
+
+  // Invariant #6 — the regression this guards is a generated page emitted
+  // indexable that nothing links and no sitemap lists.
+  test('a fix page the index does not link fails as orphaned', async () => {
+    const { distDir, sourcePath } = await seedDist(expectedTwin());
+    await writeFile(join(distDir, 'fix.html'), '<html><body><p>No links here.</p></body></html>');
+    try {
+      await expect(runInvariantChecks(distDir, [SLUG], [{ n: 1, sourcePath }])).rejects.toThrow(/orphaned/);
+    } finally {
+      await rm(distDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a fix page the sitemap omits fails even when the index links it', async () => {
+    const { distDir, sourcePath } = await seedDist(expectedTwin());
+    await writeFile(
+      join(distDir, 'sitemap.xml'),
+      '<?xml version="1.0"?><urlset><url><loc>https://anc.dev/fix</loc></url></urlset>',
+    );
+    try {
+      await expect(runInvariantChecks(distDir, [SLUG], [{ n: 1, sourcePath }])).rejects.toThrow(
+        /sitemap\.xml omits \/fix\/demo-check/,
+      );
+    } finally {
+      await rm(distDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a sitemap missing the fix index itself fails', async () => {
+    const { distDir, sourcePath } = await seedDist(expectedTwin());
+    await writeFile(
+      join(distDir, 'sitemap.xml'),
+      '<?xml version="1.0"?><urlset><url><loc>https://anc.dev/fix/demo-check</loc></url></urlset>',
+    );
+    try {
+      await expect(runInvariantChecks(distDir, [SLUG], [{ n: 1, sourcePath }])).rejects.toThrow(/omits the fix index/);
     } finally {
       await rm(distDir, { recursive: true, force: true });
     }

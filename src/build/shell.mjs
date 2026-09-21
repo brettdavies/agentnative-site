@@ -7,7 +7,7 @@
 
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AUDIT_PATH, FIX_PREFIX, SCORE_PREFIX, SCORECARDS_PATH } from '../shared/audit-routes.ts';
+import { AUDIT_PATH, FIX_INDEX_PATH, FIX_PREFIX, SCORE_PREFIX, SCORECARDS_PATH } from '../shared/audit-routes.ts';
 import {
   BREADCRUMB_JSONLD_TOKEN,
   breadcrumbJsonLd,
@@ -485,6 +485,7 @@ ${SOURCE_REPOS.map(
           <a href="/changelog">Changelog</a>
           <a href="/methodology">Methodology</a>
           <a href="/coverage">Coverage</a>
+          <a href="${FIX_INDEX_PATH}">Fixes</a>
           <a href="/contribute">Contribute</a>
           <a href="/scorecard-schema">Scorecard schema</a>
           <a href="/web-scorecard-schema">Web scorecard schema</a>
