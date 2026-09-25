@@ -274,16 +274,33 @@ awk -v v='<version>' '/^## \[/ { p = index($0, "[" v "]") > 0 } p' CHANGELOG.md 
 gh release create v<version> --title "v<version>" --notes-file /tmp/notes-v<version>.md
 ```
 
-Then bring the release bookkeeping (`package.json` version, `CHANGELOG.md`) back to `dev` so the integration branch
-starts from the released baseline:
+Then bring the release bookkeeping (`package.json` version, `CHANGELOG.md`) and every other release-only edit back to
+`dev` so the integration branch starts from the released baseline:
 
 ```bash
+scripts/sync-dev-after-release.sh v<version> --dry-run   # preview: creates no branch, leaves the tree clean
 scripts/sync-dev-after-release.sh v<version>
 ```
 
-The script checks that the tag is reachable from `origin/main` and that the GitHub Release is published, then opens a
-PR against `dev` titled `chore(release): sync dev after v<version>`; merge it once CI is green. The postflight backport
-gate finds that merged PR by title: `scripts/release/postflight.sh --env prod --release-slug v<version> backport`.
+The script checks that the tag is reachable from `origin/main` and that the GitHub Release is published. It writes the
+released version into `package.json` in place and copies `CHANGELOG.md` verbatim from `origin/main` when `main`
+carries one. It then classifies every other path `main` and `dev` disagree about, guarded paths excepted, against the
+previous `v*` tag:
+
+- **release-prep**: `dev`'s copy still matches the previous tag, so only the release changed it. Adopted.
+- **contested**: both branches changed it since the previous tag. Listed and left out; `--include-contested` adopts
+  every contested path.
+
+`--only PATH` (repeatable) adopts exactly the discovered paths it names, release-prep or contested, and no other
+discovered path; the script syncs `package.json` and `CHANGELOG.md` either way. Resolve anything left out by hand.
+Discovery needs a previous `v*` tag, so the first tagged release syncs `package.json` and `CHANGELOG.md` only.
+
+After committing, when the sync carried `CHANGELOG.md` and `git-cliff` is on `PATH`, the script runs
+`scripts/generate-changelog.py --dry-run --tag v<version>` and warns with the generator's own reason if the regenerated
+changelog would differ (a PR body edited after the release, or a difference in line wrapping only). The warning does
+not block the backport. The script then opens a PR against `dev` titled `chore(release): sync dev after v<version>`;
+merge it once CI is green. The postflight backport gate finds that merged PR by title:
+`scripts/release/postflight.sh --env prod --release-slug v<version> backport`.
 Never merge `main` into `dev` or push to `dev` directly: the squash-merged histories share no recent ancestry, so the
 merge conflicts on every file both sides touched, and a direct push bypasses `dev`'s required checks.
 
