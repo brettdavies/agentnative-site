@@ -171,9 +171,11 @@ cherry-picked branch it runs `git-cliff` first to prepend a versioned entry from
 same way. This repo's release branches carry no version in their name (`release/<YYYY-MM-DD>-<slug>`), so the tag is
 passed explicitly (`--tag v<version>`).
 
-If a PR's body carries no changelog content, its title becomes a `Changed` bullet, except for `chore`, `ci`, `build`,
-`style`, and `test` PRs, which stay out unless they carry a `## Changelog` of their own. To fix a wrong CHANGELOG
-entry, fix the input: edit the squash-merged PR body, then re-run the script. Do **not** edit `CHANGELOG.md` directly.
+If a PR's body has no `## Changelog` section at all, its title becomes a `Changed` bullet, except for `chore`, `ci`,
+`build`, `style`, and `test` PRs, which stay out unless they carry a `## Changelog` of their own. A PR that leaves its
+`## Changelog` heading empty, as the template allows for a change that is not user-facing, adds nothing whatever its
+type. To fix a wrong CHANGELOG entry, fix the input: edit the squash-merged PR body, then re-run the script. Do **not**
+edit `CHANGELOG.md` directly.
 
 ### Why backport `main` → `dev` after publish
 
