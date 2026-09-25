@@ -187,6 +187,15 @@ touched, and a direct push to `dev` bypasses its required status checks. The scr
 `package.json`, copies `CHANGELOG.md` from `main`, and opens the PR; the postflight backport gate treats that merged PR
 as the durable signal that the backport ran.
 
+The script discovers other release-only edits rather than listing them. Release branches take edits for reasons nobody
+predicts (a doc fix, a reverted payload, a deleted config), each such edit lands against `main`'s base, and a fixed
+list misses it silently; the next release's overlay then restores `dev`'s copy over `main`'s and undoes the edit. The
+previous `v*` tag, the last point the two branches agreed, bounds discovery, so it cannot revert `dev`'s unreleased
+work: a path whose `dev` copy still matches that tag counts as release-prep and the script adopts it, while a path both
+branches changed counts as contested, and the script reports it and adopts it only when the operator names it
+(`--only PATH`) or takes every contested path (`--include-contested`). Guarded paths never enter discovery, since they
+live on `dev` by design.
+
 ### Rollback
 
 Rollback happens at the surface users consume (the production Worker deployment), not in git. `wrangler rollback`

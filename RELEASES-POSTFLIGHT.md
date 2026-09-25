@@ -310,9 +310,12 @@ directly from `dev` — there is no `main → dev` flow to verify.
 - [ ] **Backport `main` → `dev`** via the **PR `scripts/sync-dev-after-release.sh v<version>` opens against `dev`.**
   The release branch lands edits on `main` that never round-trip to `dev` (the `package.json` version, the
   `CHANGELOG.md` section, RELEASES.md meta-edits). The script writes the released version into `package.json`, copies
-  `CHANGELOG.md` from `main`, and opens a PR titled `chore(release): sync dev after v<version>`; merge it once CI is
-  green. That keeps the next release's preflight diff-B quiet, so a real missed change stands out instead of hiding in
-  expected divergence noise. Never merge `main` into `dev` or push to `dev` directly (see
+  `CHANGELOG.md` from `main`, and adopts every other release-only edit whose `dev` copy still matches the previous `v*`
+  tag. It lists the contested paths both branches changed since that tag and leaves them out; name the ones to take
+  with `--only PATH`, or take them all with `--include-contested`. It then opens a PR titled
+  `chore(release): sync dev after v<version>`; merge it once CI is green. That keeps the next release's preflight
+  diff-B quiet, so a real missed change stands out instead of hiding in expected divergence noise. Never merge `main`
+  into `dev` or push to `dev` directly (see
   [`RELEASES.md` § After merge](./RELEASES.md#after-merge-tag-then-sync-dev-with-the-release)).
 
   The gate (`scripts/release/postflight.sh --env prod --release-slug v<version> backport`) is signal-agnostic about
