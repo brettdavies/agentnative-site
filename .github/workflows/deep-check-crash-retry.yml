@@ -49,6 +49,9 @@ concurrency:
   group: deep-check-crash-retry-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   retry:
     name: retry once on the upstream wrangler crash
