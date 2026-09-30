@@ -5,7 +5,9 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
+  canonicalJson,
   checkDrift,
   type FetchImpl,
   MANIFEST_PATH,
@@ -263,5 +265,14 @@ describe('the committed manifest', () => {
   test('an unknown tier or source type is rejected', () => {
     expect(() => parseManifest(MANIFEST.replace('tier: draft', 'tier: rumor'))).toThrow(/tier/);
     expect(() => parseManifest(MANIFEST.replace('type: url-status', 'type: url-body'))).toThrow(/type/);
+  });
+
+  test('the server-card schema pin is the vendored schema, so an upstream shape change reads as drift', () => {
+    const entry = parseManifest(readFileSync(MANIFEST_PATH, 'utf8')).find((e) => e.id === 'mcp-server-card-schema');
+    const vendored = readFileSync(
+      join(import.meta.dir, '..', 'src', 'data', 'web-audit', 'server-card.schema.json'),
+      'utf8',
+    );
+    expect(sha256(canonicalJson(JSON.parse(vendored)))).toBe(String(entry?.pinned));
   });
 });
