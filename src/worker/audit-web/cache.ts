@@ -145,7 +145,7 @@ export function isStale(scoredAt: string | undefined, thresholdMs: number, now: 
 
 /**
  * Response-envelope freshness for one per-target audit result. Lives
- * outside the scorecard so schema 0.4 stays untouched: `cached` is
+ * outside the scorecard so it never moves the schema version: `cached` is
  * response provenance (an existing-cache read or a listing-only patch,
  * versus a result the current run produced), and the two instants are the
  * authoritative scoring time and the earliest moment the entry leaves the

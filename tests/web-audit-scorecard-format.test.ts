@@ -366,7 +366,7 @@ describe('canonical row metadata on every row root (R1)', () => {
   }
 
   const metadataScorecard = {
-    schema_version: '0.4',
+    schema_version: '0.5',
     spec_version: SPEC_VERSION,
     target_url: 'https://example.com/',
     tool: { name: 'example.com', url: 'https://example.com/' },
@@ -406,7 +406,7 @@ describe('canonical row metadata on every row root (R1)', () => {
     return m === null ? null : m[1];
   }
 
-  test('every schema 0.4 status renders canonical root metadata', () => {
+  test('every web scorecard status renders canonical root metadata', () => {
     for (const status of ALL_STATUSES) {
       const tag = openTag(`check-${status}`);
       expect(attrOf(tag, 'data-status')).toBe(status);
@@ -783,8 +783,8 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
     expect('badge' in produced).toBe(false);
   });
 
-  test('schema_version is the site-owned 0.4, independent of the CLI schema', () => {
-    expect(produced.schema_version).toBe('0.4');
+  test('schema_version is the site-owned 0.5, independent of the CLI schema', () => {
+    expect(produced.schema_version).toBe('0.5');
   });
 
   test('the web tool shape is { name, url } with no CLI fields', () => {
@@ -806,10 +806,10 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
     expect(produced.coverage_summary.may).toEqual({ total: 0, verified: 0 });
   });
 
-  test('public_listing round-trips an explicit meta value; schema_version stays 0.4', () => {
+  test('public_listing round-trips an explicit meta value; schema_version stays 0.5', () => {
     const listed = buildWebScorecard(ENGINE_ROWS, { ...BASE_META, publicListing: true });
     expect(listed.public_listing).toBe(true);
-    expect(listed.schema_version).toBe('0.4');
+    expect(listed.schema_version).toBe('0.5');
     expect(buildWebScorecard(ENGINE_ROWS, { ...BASE_META, publicListing: false }).public_listing).toBe(false);
   });
 
@@ -914,6 +914,46 @@ describe('stored scorecards that predate provenance', () => {
     const model = webSummaryModel({ ...input, scorecard });
     expect(model.declaredHosts).toEqual([]);
     expect(model.registryFingerprint).toBe('3f2a9c1b7e40');
+  });
+
+  test("a declared-host reason's result line names the row host, or the audited host for a row without provenance", () => {
+    const base = webScorecard();
+    const scorecard = {
+      ...base,
+      results: [
+        ...base.results,
+        {
+          id: 'mcp-tools-list',
+          label: 'tools/list',
+          category: 'mcp',
+          group: 'P2',
+          principle: 'P2',
+          keyword: 'must',
+          tier: 'required',
+          status: 'n_a' as ScorecardStatus,
+          na_reason: 'auth-required' as NaReason,
+          evidence: null,
+          hosts: [{ host: 'mcp.example.com' }],
+          host: 'mcp.example.com',
+        },
+        {
+          id: 'mcp-capabilities',
+          label: 'capabilities',
+          category: 'mcp',
+          group: 'P2',
+          principle: 'P2',
+          keyword: 'should',
+          tier: 'recommended',
+          status: 'n_a' as ScorecardStatus,
+          na_reason: 'reciprocity-refused' as NaReason,
+          evidence: null,
+        },
+      ],
+    };
+    const rows = webSummaryModel({ ...input, scorecard }).categories.flatMap((c) => c.rows);
+    const byId = new Map(rows.map((row) => [row.id, row.result]));
+    expect(byId.get('mcp-tools-list')).toBe('Not evaluated: mcp.example.com requires sign-in');
+    expect(byId.get('mcp-capabilities')).toBe('Not evaluated: example.com did not confirm this endpoint');
   });
 
   test('both renderers render a scorecard missing every provenance field', () => {

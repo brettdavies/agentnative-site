@@ -8,17 +8,19 @@
 // so a change to one had no way of reaching the other.
 //
 // This module also owns the display vocabulary. STATUS_LABELS is the single
-// enumeration of the seven schema 0.4 statuses; STATUS_ORDER derives from it
+// enumeration of the seven web scorecard statuses; STATUS_ORDER derives from it
 // rather than repeating the list, so a status added there reaches the labels,
 // the marks, the counts, and the machine context together.
 
 import {
   type DeclaredHostEntry,
+  entryHostOf,
   type FollowState,
   type RowHost,
   readDeclaredHosts,
   readFollowState,
   readRegistryFingerprint,
+  rowHostOf,
 } from './provenance';
 import type { McpLaneSpec } from './registry';
 import type { WebRemediationResource } from './remediation';
@@ -189,7 +191,12 @@ function isFixable(row: WebScorecardRow): boolean {
   return row.unprobed !== true && isFixableStatus(row.status);
 }
 
-function summaryRow(row: WebScorecardRow, catalog: WebRemediationCatalog, origin: string): SummaryRow {
+function summaryRow(
+  row: WebScorecardRow,
+  catalog: WebRemediationCatalog,
+  origin: string,
+  entryHost: string,
+): SummaryRow {
   const entry = catalog[row.id];
   const assembled = assembleRemediation(entry, { checkId: row.id, origin, evidence: row.evidence });
   return {
@@ -200,7 +207,7 @@ function summaryRow(row: WebScorecardRow, catalog: WebRemediationCatalog, origin
     status: row.status,
     unprobed: row.unprobed === true,
     fixable: isFixable(row),
-    result: resultLine(row.status, row.evidence, row.na_reason),
+    result: resultLine(row.status, row.evidence, row.na_reason, rowHostOf(row, entryHost) ?? entryHost),
     goal: entry?.goal ?? assembled.goal,
     fix: assembled.fix,
     prompt: assembled.prompt,
@@ -268,12 +275,13 @@ export function webSummaryModel(input: WebSummaryModelInput): WebSummaryModel {
   const { relative, global: globalScore } = scoresOf(sc);
   const lanes = input.registry?.mcp_lanes ?? {};
   const placement = lanePlacement(input.registry);
+  const entryHost = entryHostOf(sc.target_url) ?? input.domain;
 
   const byCategory = new Map<string, SummaryRow[]>();
   for (const row of rows) {
     const key = row.category ?? '';
     const bucket = byCategory.get(key) ?? [];
-    bucket.push(summaryRow(row, catalog, input.origin));
+    bucket.push(summaryRow(row, catalog, input.origin, entryHost));
     byCategory.set(key, bucket);
   }
 

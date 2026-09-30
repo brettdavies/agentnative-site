@@ -1,7 +1,7 @@
 // Map engine results into the web scorecard (plan U5, reshaped per
 // plan-003 U4/KTD-8).
 //
-// Schema 0.4: the headline is a top-level `score_pct` (the RELATIVE
+// The headline is a top-level `score_pct` (the RELATIVE
 // score) beside a `score { relative, global }` pair and per-category
 // `categories[]` rollups; there is no badge (no embeddable web badge).
 // Each result row carries its visible `category` plus `principle` as a
@@ -9,7 +9,8 @@
 // surfaces). `group` mirrors `principle` for the interim shared-renderer
 // path; the category-grouped web renderer replaces that consumer.
 
-import type { EvidenceItem, NaReason } from './handlers/types';
+import type { NaReason } from '../../shared/web-audit-findings';
+import type { EvidenceItem } from './handlers/types';
 import { type DeclaredHostEntry, type RowHost, rowHostFields } from './provenance';
 import type { WebAuditRegistry, WebCheckKeyword, WebCheckTier, WebSiteType } from './registry';
 import {
@@ -21,7 +22,7 @@ import {
   universeMaxOf,
 } from './score';
 
-export type { NaReason } from './handlers/types';
+export type { NaReason } from '../../shared/web-audit-findings';
 
 /**
  * Web scorecard status vocabulary. `absent`, `noncompliant` and `broken`
@@ -110,7 +111,7 @@ export interface WebScorecard {
 
 // Web scorecard schema version, independent of the CLI schema (0.7) and
 // of agentnative-spec. Documented in content/web-scorecard-schema.md.
-export const WEB_SCHEMA_VERSION = '0.4';
+export const WEB_SCHEMA_VERSION = '0.5';
 
 function coverageLevel(results: EngineResult[], keyword: WebCheckKeyword): WebCoverageLevel {
   let total = 0;

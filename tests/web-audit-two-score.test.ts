@@ -203,7 +203,7 @@ describe('categoryRollups', () => {
   });
 });
 
-describe('buildWebScorecard (schema 0.4)', () => {
+describe('buildWebScorecard (schema 0.5)', () => {
   function engineRow(partial: Partial<EngineResult>): EngineResult {
     return {
       id: 'llms-txt',
@@ -251,7 +251,7 @@ describe('buildWebScorecard (schema 0.4)', () => {
 
   test('carries score_pct (RELATIVE), the score pair, and no badge', () => {
     expect(scorecard.schema_version).toBe(WEB_SCHEMA_VERSION);
-    expect(WEB_SCHEMA_VERSION).toBe('0.4');
+    expect(WEB_SCHEMA_VERSION).toBe('0.5');
     expect(typeof scorecard.score_pct).toBe('number');
     expect(scorecard.score_pct).toBe(scorecard.score.relative);
     expect(typeof scorecard.score.global).toBe('number');

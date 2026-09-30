@@ -3,6 +3,7 @@
 // handler with a prefilled cache.
 
 import { describe, expect, test } from 'bun:test';
+import { NA_REASONS, naReasonPhrase } from '../src/shared/web-audit-findings';
 import {
   assembleRemediation,
   PROMPT_EVIDENCE_MAX,
@@ -119,26 +120,65 @@ describe('assembleRemediation', () => {
 
 describe('resultLine', () => {
   test('derives affirmative and negative lines from status + evidence', () => {
-    expect(resultLine('pass', 'https://x.dev/llms.txt -> 200')).toBe('Verified (https://x.dev/llms.txt -> 200)');
-    expect(resultLine('broken', 'wrong content-type')).toBe('Present but broken (wrong content-type)');
-    expect(resultLine('absent', 'https://x.dev/openapi.json -> 404')).toBe(
+    expect(resultLine('pass', 'https://x.dev/llms.txt -> 200', undefined, 'x.dev')).toBe(
+      'Verified (https://x.dev/llms.txt -> 200)',
+    );
+    expect(resultLine('broken', 'wrong content-type', undefined, 'x.dev')).toBe(
+      'Present but broken (wrong content-type)',
+    );
+    expect(resultLine('absent', 'https://x.dev/openapi.json -> 404', undefined, 'x.dev')).toBe(
       'Not found (https://x.dev/openapi.json -> 404)',
     );
   });
 
   test('the three n_a wordings are distinct (antecedent-unmet vs optional-absent vs posture-consistent)', () => {
-    expect(resultLine('n_a', 'no MCP endpoint discovered', 'antecedent-unmet')).toBe(
+    expect(resultLine('n_a', 'no MCP endpoint discovered', 'antecedent-unmet', 'x.dev')).toBe(
       'Not applicable (no MCP endpoint discovered)',
     );
-    expect(resultLine('n_a', 'x -> 404', 'optional-absent')).toBe('Not implemented, optional (x -> 404)');
-    expect(resultLine('n_a', 'no allow-origin on preflight or POST', 'posture-consistent')).toBe(
+    expect(resultLine('n_a', 'x -> 404', 'optional-absent', 'x.dev')).toBe('Not implemented, optional (x -> 404)');
+    expect(resultLine('n_a', 'no allow-origin on preflight or POST', 'posture-consistent', 'x.dev')).toBe(
       'Deliberate posture, not scored (no allow-origin on preflight or POST)',
     );
-    expect(resultLine('n_a', 'x', 'posture-consistent')).not.toBe(resultLine('n_a', 'x', 'antecedent-unmet'));
+    expect(resultLine('n_a', 'x', 'posture-consistent', 'x.dev')).not.toBe(
+      resultLine('n_a', 'x', 'antecedent-unmet', 'x.dev'),
+    );
   });
 
   test('skip and error read as not-evaluated', () => {
-    expect(resultLine('skip', null)).toContain('Not evaluated');
-    expect(resultLine('error', null)).toBe('Not evaluated');
+    expect(resultLine('skip', null, undefined, 'x.dev')).toContain('Not evaluated');
+    expect(resultLine('error', null, undefined, 'x.dev')).toBe('Not evaluated');
+  });
+
+  test('the declared-host reasons read as not evaluated and name the row host', () => {
+    const host = 'mcp.example.com';
+    expect(naReasonPhrase('follow-disabled', host)).toBe(
+      'Not evaluated: declared hosts were not followed for this audit',
+    );
+    expect(naReasonPhrase('reciprocity-refused', host)).toBe(
+      'Not evaluated: mcp.example.com did not confirm this endpoint',
+    );
+    expect(naReasonPhrase('declared-host-unreachable', host)).toBe('Not evaluated: mcp.example.com did not answer');
+    expect(naReasonPhrase('declared-host-budget-exceeded', host)).toBe(
+      "Not evaluated: anc's hourly probe limit for mcp.example.com was reached",
+    );
+    expect(naReasonPhrase('auth-required', host)).toBe('Not evaluated: mcp.example.com requires sign-in');
+    expect(resultLine('n_a', 'initialize -> 401', 'auth-required', host)).toBe(
+      'Not evaluated: mcp.example.com requires sign-in (initialize -> 401)',
+    );
+  });
+
+  // A reason with no phrase would fall through to the generic reason-less
+  // line, which an agent reading the result could not tell apart from an
+  // antecedent that simply did not apply.
+  test('every na_reason has its own phrase, and the result line reads it from the shared table', () => {
+    const phrases = NA_REASONS.map((reason) => naReasonPhrase(reason, 'h.example'));
+    for (const [i, reason] of NA_REASONS.entries()) {
+      expect({ reason, line: resultLine('n_a', null, reason, 'h.example') }).toEqual({ reason, line: phrases[i] });
+    }
+    expect(new Set(phrases).size).toBe(NA_REASONS.length);
+    const generic = resultLine('n_a', null, undefined, 'h.example');
+    expect(NA_REASONS.filter((reason) => naReasonPhrase(reason, 'h.example') === generic)).toEqual([
+      'antecedent-unmet',
+    ]);
   });
 });

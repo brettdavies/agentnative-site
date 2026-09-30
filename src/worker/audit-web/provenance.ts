@@ -56,6 +56,11 @@ export function readRowHosts(row: { hosts?: unknown; host?: unknown }, entryHost
   return entryHost === null ? [] : [entryHost];
 }
 
+/** The host a row's result line names: its first host, else the audited host. */
+export function rowHostOf(row: { hosts?: unknown; host?: unknown }, entryHost: string | null): string | null {
+  return readRowHosts(row, entryHost)[0] ?? entryHost;
+}
+
 /** Only a recorded `true` reads as on; a missing or malformed value was never evaluated. */
 export function readFollowState(value: unknown): FollowState {
   if (value === true) return 'on';

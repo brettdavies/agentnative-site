@@ -349,6 +349,31 @@ describe('provenance on stored scorecards', () => {
     expect('host' in (byId.get('mcp-tools-list') ?? {})).toBe(false);
   });
 
+  test("a declared-host reason's result line names the row host, or the audited host for a row without provenance", () => {
+    const stored = {
+      target_url: 'https://example.com/',
+      results: [
+        {
+          id: 'mcp-tools-list',
+          status: 'n_a',
+          na_reason: 'auth-required',
+          evidence: null,
+          hosts: [{ host: 'mcp.example.com' }],
+          host: 'mcp.example.com',
+        },
+        { id: 'mcp-initialize', status: 'n_a', na_reason: 'declared-host-unreachable', evidence: null },
+      ],
+    };
+    const out = enrichWebScorecardForDisplay(stored, {
+      registry: SPLIT_REGISTRY,
+      catalog: CATALOG,
+      origin: 'https://anc.dev',
+    }) as { results: Array<{ id: string; result?: string }> };
+    const byId = new Map(out.results.map((r) => [r.id, r.result]));
+    expect(byId.get('mcp-tools-list')).toBe('Not evaluated: mcp.example.com requires sign-in');
+    expect(byId.get('mcp-initialize')).toBe('Not evaluated: example.com did not answer');
+  });
+
   test('a scorecard missing every provenance field enriches without a follow state, a trail, or a fingerprint', () => {
     const out = enrichWebScorecardForDisplay(oldShapeStored(), {
       registry: SPLIT_REGISTRY,

@@ -22,7 +22,7 @@
 // stored, so a scorecard without a follow state, trail, or registry
 // fingerprint still reads as not evaluated rather than as an empty record.
 
-import { entryHostOf, type RowHost } from './provenance';
+import { entryHostOf, type RowHost, rowHostOf } from './provenance';
 import { assembleRemediation, isFixableStatus, resultLine, type WebRemediationCatalog } from './remediation';
 import { categoryRollups } from './score';
 import type { NaReason, ScorecardStatus } from './scorecard';
@@ -125,10 +125,11 @@ export function attachDefaultRowHosts(scorecard: unknown): unknown {
  */
 export function attachInlineRemediation(scorecard: unknown, catalog: WebRemediationCatalog, origin: string): unknown {
   if (!hasResults(scorecard)) return scorecard;
+  const entryHost = entryHostOf(scorecard.target_url);
   return {
     ...scorecard,
     results: scorecard.results.map((row) => {
-      const result = resultLine(row.status, row.evidence ?? null, row.na_reason);
+      const result = resultLine(row.status, row.evidence ?? null, row.na_reason, rowHostOf(row, entryHost) ?? '');
       if (row.unprobed !== true && isFixableStatus(row.status)) {
         const remediation = assembleRemediation(catalog[row.id], {
           checkId: row.id,
