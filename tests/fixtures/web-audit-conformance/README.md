@@ -53,6 +53,13 @@ the engine's `unreachable` event writes `{"unreachable": "<reason>"}` instead of
 under a fixed clock, so no per-audit deadline fires; per-probe timeouts appear only as declared transport
 failures.
 
+Each row's `hosts` lists the distinct hosts its raw evidence items were requested from, in evidence order, as
+`{"host": ...}` objects. Only an item with a string `url` and no `blocked` marker counts: a request the SSRF
+guard refused never reached a host. The host is the WHATWG URL `host`, which keeps a non-default port
+(`example.com:8443`), so an engine whose URL library drops the port must add it back. An item whose `url` does
+not parse contributes nothing, and a row with no counting item has `hosts: []`. `host` is present, holding the
+same value, exactly when `hosts` has one entry.
+
 ## scores.json
 
 One entry per scenario, keyed by scenario name in sorted order: `score_pct`, `score` (`relative` and
