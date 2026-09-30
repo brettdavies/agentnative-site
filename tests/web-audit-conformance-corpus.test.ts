@@ -62,6 +62,35 @@ describe('web-audit conformance corpus', () => {
     }
   });
 
+  // The index exists so a regeneration that moves a score reads as a short
+  // diff of one file; it is only worth reading if it agrees with the goldens.
+  test('scores.json indexes each golden: its scores and every row id, status, and na_reason', () => {
+    const committed = committedFiles();
+    const index = JSON.parse(committed.get('scores.json') ?? 'null') as Record<string, unknown>;
+    expect(Object.keys(index)).toEqual(Object.keys(SCENARIOS).sort());
+    for (const name of Object.keys(index)) {
+      const golden = JSON.parse(committed.get(`scenarios/${name}/scorecard.json`) ?? 'null') as {
+        unreachable?: string;
+        score_pct: number;
+        score: { relative: number; global: number };
+        results: Array<{ id: string; status: string; na_reason?: string }>;
+      };
+      const expected =
+        golden.unreachable !== undefined
+          ? { unreachable: true }
+          : {
+              score_pct: golden.score_pct,
+              score: { relative: golden.score.relative, global: golden.score.global },
+              results: golden.results.map((row) => ({
+                id: row.id,
+                status: row.status,
+                ...(row.na_reason !== undefined ? { na_reason: row.na_reason } : {}),
+              })),
+            };
+      expect({ name, entry: index[name] }).toEqual({ name, entry: expected });
+    }
+  });
+
   test('two generations produce identical bytes (determinism)', async () => {
     const first = await generateCorpus(registry);
     const second = await generateCorpus(registry);
