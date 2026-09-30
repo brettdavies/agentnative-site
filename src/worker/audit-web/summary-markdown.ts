@@ -21,8 +21,8 @@ function mdFenced(text: string): string {
   return text.replaceAll('```', "'''");
 }
 
-function renderCheck(row: SummaryRow, lines: string[]): void {
-  lines.push(`### ${statusLabel(row.status)} — ${row.label}`, '');
+function renderCheck(row: SummaryRow, lines: string[], heading = '###'): void {
+  lines.push(`${heading} ${statusLabel(row.status)} — ${row.label}`, '');
   if (row.keyword && row.keyword in TIER_LABELS) lines.push(`- Tier: ${TIER_LABELS[row.keyword]}`);
   lines.push(`- Goal: ${row.goal}.`);
   lines.push(`- Result: ${mdInline(row.result)}`);
@@ -63,7 +63,15 @@ export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
     if (category.counted === 0) {
       lines.push('No checks in this category apply to this site.', '');
     }
-    for (const row of category.rows) renderCheck(row, lines);
+    if (category.lanes) {
+      for (const lane of category.lanes) {
+        const count = lane.counted > 0 ? ` (${lane.passed}/${lane.counted})` : '';
+        lines.push(`### ${lane.label}${count}`, '', `${lane.note}.`, '');
+        for (const row of lane.rows) renderCheck(row, lines, '####');
+      }
+    } else {
+      for (const row of category.rows) renderCheck(row, lines);
+    }
   }
 
   const reaudit = `${origin}${auditPath({ lane: 'web', target: input.domain })}`;

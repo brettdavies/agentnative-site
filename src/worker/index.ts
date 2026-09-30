@@ -65,8 +65,6 @@ import {
   servedResponseFormat,
 } from './mcp/telemetry';
 import { notFoundHtml, notFoundMarkdown } from './not-found';
-import { isScorePath } from './score/content-negotiation';
-import { handleScore, type ScoreEnv } from './score/handler';
 import { SPEC_VERSION } from './spec-version.gen';
 import { emitLog } from './telemetry/log';
 import { recordPageRequest } from './telemetry/page-request';
@@ -422,9 +420,6 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   // representations are the deployed homepage's handler.
   if (isAuditApiPath(pathname) && request.method === 'POST') {
     return handleAuditApi(request, env as AuditApiEnv, ctx);
-  }
-  if (isScorePath(pathname)) {
-    return handleScore(request, env as ScoreEnv);
   }
 
   // Post-deploy rescore hook (secret-authed). Shares the single-flight

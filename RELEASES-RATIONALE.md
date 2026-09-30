@@ -171,9 +171,11 @@ cherry-picked branch it runs `git-cliff` first to prepend a versioned entry from
 same way. This repo's release branches carry no version in their name (`release/<YYYY-MM-DD>-<slug>`), so the tag is
 passed explicitly (`--tag v<version>`).
 
-If a PR's body carries no changelog content, its title becomes a `Changed` bullet, except for `chore`, `ci`, `build`,
-`style`, and `test` PRs, which stay out unless they carry a `## Changelog` of their own. To fix a wrong CHANGELOG
-entry, fix the input: edit the squash-merged PR body, then re-run the script. Do **not** edit `CHANGELOG.md` directly.
+If a PR's body has no `## Changelog` section at all, its title becomes a `Changed` bullet, except for `chore`, `ci`,
+`build`, `style`, and `test` PRs, which stay out unless they carry a `## Changelog` of their own. A PR that leaves its
+`## Changelog` heading empty, as the template allows for a change that is not user-facing, adds nothing whatever its
+type. To fix a wrong CHANGELOG entry, fix the input: edit the squash-merged PR body, then re-run the script. Do **not**
+edit `CHANGELOG.md` directly.
 
 ### Why backport `main` → `dev` after publish
 
@@ -186,6 +188,15 @@ direct push. The squash-merged branches share no recent history, so a merge conf
 touched, and a direct push to `dev` bypasses its required status checks. The script writes the released version into
 `package.json`, copies `CHANGELOG.md` from `main`, and opens the PR; the postflight backport gate treats that merged PR
 as the durable signal that the backport ran.
+
+The script discovers other release-only edits rather than listing them. Release branches take edits for reasons nobody
+predicts (a doc fix, a reverted payload, a deleted config), each such edit lands against `main`'s base, and a fixed
+list misses it silently; the next release's overlay then restores `dev`'s copy over `main`'s and undoes the edit. The
+previous `v*` tag, the last point the two branches agreed, bounds discovery, so it cannot revert `dev`'s unreleased
+work: a path whose `dev` copy still matches that tag counts as release-prep and the script adopts it, while a path both
+branches changed counts as contested, and the script reports it and adopts it only when the operator names it
+(`--only PATH`) or takes every contested path (`--include-contested`). Guarded paths never enter discovery, since they
+live on `dev` by design.
 
 ### Rollback
 
