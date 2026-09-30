@@ -293,6 +293,7 @@ async function serveWeb(ctx: RenderContext, host: string): Promise<Response> {
       name: seedEntry?.name,
       targetUrl,
       remediation,
+      registry: registryLoad.status === 'fulfilled' ? registryLoad.value : undefined,
       origin: ctx.origin,
       freshness: envelope.freshness,
       now,

@@ -10,7 +10,7 @@ import type { WebAuditFreshness } from './cache';
 import type { WebRemediationCatalog } from './remediation';
 import type { FreshnessState } from './summary-freshness';
 import { freshnessState, resolveFreshness } from './summary-freshness';
-import { type WebScorecardShape, type WebSummaryModel, webSummaryModel } from './summary-model';
+import { type SummaryRegistry, type WebScorecardShape, type WebSummaryModel, webSummaryModel } from './summary-model';
 
 export interface WebSummaryInput {
   scorecard: WebScorecardShape;
@@ -20,6 +20,8 @@ export interface WebSummaryInput {
   name?: string;
   /** Static remediation catalog; absent entries degrade to generic prompts. */
   remediation?: WebRemediationCatalog;
+  /** The live registry; its lanes group the MCP category's rows. Omitted renders rows ungrouped. */
+  registry?: SummaryRegistry;
   /** Origin for skill links in prompts; defaults to the canonical site. */
   origin?: string;
   /**
@@ -54,6 +56,7 @@ export function webSummaryView(input: WebSummaryInput): WebSummaryView {
       targetUrl: input.targetUrl,
       name: input.name,
       remediation: input.remediation,
+      registry: input.registry,
       origin: input.origin ?? CANONICAL_SITE_URL,
     }),
     freshness,

@@ -103,22 +103,26 @@ const RESCORE_MAX_CYCLES = 200;
 // age out.
 const REGISTRY_FINGERPRINT_KEY = 'web_rescore:registry_fp';
 
-/** SHA-256 hex of the normalized registry JSON: any shape change moves it. */
 /**
- * Registry fields the audit never reads.
+ * Registry fields no stored scorecard depends on.
  *
  * The fingerprint answers one question: could this registry produce a
  * different scorecard than the cached ones? A field no audit consumes cannot,
  * and hashing it spends the whole audit budget re-deriving identical evidence
  * across every seeded domain. `breadcrumb` labels a check's own page in the
  * site's URL trail; its only reader is the build that emits those pages.
+ * `lane` and the `mcp_lanes` map group MCP rows on the result page, read from
+ * the live registry at render time, so a stored scorecard picks up a lane
+ * change on its next render without a re-audit.
  *
- * Membership here is a claim that the Worker never reads the field. Anything
- * absent from this set counts as scoring shape, so a new field reflows until
- * someone establishes otherwise.
+ * Membership here is a claim that the field is build-only or read from the
+ * live registry at render time, never copied into a stored scorecard.
+ * Anything absent from this set counts as scoring shape, so a new field
+ * reflows until someone establishes otherwise.
  */
-const SITE_ONLY_REGISTRY_FIELDS: ReadonlySet<string> = new Set(['breadcrumb']);
+const SITE_ONLY_REGISTRY_FIELDS: ReadonlySet<string> = new Set(['breadcrumb', 'lane', 'mcp_lanes']);
 
+/** SHA-256 hex of the normalized registry JSON minus its site-only fields. */
 export async function registryFingerprint(env: WebRescoreEnv): Promise<string> {
   const registry = await loadWebAuditRegistry(env);
   // A replacer rather than a rebuilt object: it drops the named keys while

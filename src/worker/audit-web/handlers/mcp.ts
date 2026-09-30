@@ -179,6 +179,11 @@ export const NEGOTIATION_OPS = opsWhere((spec) => spec.framed === true);
 /** Every row judged by the era branch, in registry order. */
 export const ERA_OPS = opsWhere((spec) => spec.family === 'era');
 
+/** The protocol era whose wire shape an op probes. */
+export function mcpOpEra(op: McpOp): McpOpSpec['era'] {
+  return specOf(op).era;
+}
+
 const SESSION_REQUIRED_CODE = -32000;
 
 // A refusal delivered as an HTTP status with no JSON-RPC envelope: the

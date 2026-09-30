@@ -12,8 +12,10 @@
 // rather than repeating the list, so a status added there reaches the labels,
 // the marks, the counts, and the machine context together.
 
+import type { McpLaneSpec } from './registry';
 import type { WebRemediationResource } from './remediation';
 import { assembleRemediation, isFixableStatus, resultLine, type WebRemediationCatalog } from './remediation';
+import { SCORED_STATUSES } from './score';
 import type { NaReason, ScorecardStatus } from './scorecard';
 
 export type WebScorecardRow = {
@@ -104,13 +106,31 @@ export type SummaryRow = {
   resources: WebRemediationResource[];
 };
 
+/** One protocol lane's rows inside a category, with its own rollup. */
+export type SummaryLane = {
+  id: string;
+  label: string;
+  note: string;
+  passed: number;
+  counted: number;
+  rows: SummaryRow[];
+};
+
 export type SummaryCategory = {
   id: string;
   name: string;
   passed: number;
   counted: number;
   rows: SummaryRow[];
+  /** Present when the registry files this category's checks under lanes; rows then render by lane. */
+  lanes?: SummaryLane[];
 };
+
+/** The registry fields lane grouping reads; a full registry satisfies it. */
+export interface SummaryRegistry {
+  mcp_lanes?: Record<string, McpLaneSpec>;
+  checks: ReadonlyArray<{ id: string; lane?: string }>;
+}
 
 export type WebSummaryModel = {
   name: string;
@@ -127,6 +147,8 @@ export interface WebSummaryModelInput {
   targetUrl: string;
   name?: string;
   remediation?: WebRemediationCatalog;
+  /** The live registry, whose lanes group stored rows regardless of when they were scored. */
+  registry?: SummaryRegistry;
   origin: string;
 }
 
@@ -169,6 +191,52 @@ function summaryRow(row: WebScorecardRow, catalog: WebRemediationCatalog, origin
   };
 }
 
+/** Each lane-filed check's lane and its position in registry order, by check id. */
+type LanePlacement = Map<string, { lane: string; index: number }>;
+
+function lanePlacement(registry: SummaryRegistry | undefined): LanePlacement {
+  const placement: LanePlacement = new Map();
+  const lanes = registry?.mcp_lanes ?? {};
+  registry?.checks.forEach((check, index) => {
+    if (check.lane && Object.hasOwn(lanes, check.lane)) placement.set(check.id, { lane: check.lane, index });
+  });
+  return placement;
+}
+
+/**
+ * Split a category's rows into the registry's lanes, in lane-map order, with
+ * rows in registry order inside each lane. Stored rows sit in the order their
+ * probes completed, which says nothing a reader can use. A row whose id the
+ * registry no longer carries lands in the first lane, after the known rows. A
+ * category none of whose rows the registry files under a lane gets none.
+ */
+function laneBlocks(
+  rows: readonly SummaryRow[],
+  lanes: Record<string, McpLaneSpec>,
+  placement: LanePlacement,
+): SummaryLane[] | undefined {
+  if (!rows.some((row) => placement.has(row.id))) return undefined;
+  const laneIds = Object.keys(lanes);
+  const byLane = new Map<string, SummaryRow[]>(laneIds.map((id) => [id, []]));
+  const positionOf = (row: SummaryRow) => placement.get(row.id)?.index ?? 0;
+  const known = rows.filter((row) => placement.has(row.id)).sort((a, b) => positionOf(a) - positionOf(b));
+  for (const row of known) byLane.get(placement.get(row.id)?.lane ?? laneIds[0])?.push(row);
+  byLane.get(laneIds[0])?.push(...rows.filter((row) => !placement.has(row.id)));
+  return [...byLane]
+    .filter(([, laneRows]) => laneRows.length > 0)
+    .map(([id, laneRows]) => {
+      const counted = laneRows.filter((row) => SCORED_STATUSES.has(row.status));
+      return {
+        id,
+        label: lanes[id].label,
+        note: lanes[id].note,
+        passed: counted.filter((row) => row.status === 'pass').length,
+        counted: counted.length,
+        rows: laneRows,
+      };
+    });
+}
+
 /**
  * Resolve one stored scorecard into the record both renderers read. Rows are
  * grouped by the category order the scorecard carries; a category with no
@@ -180,6 +248,8 @@ export function webSummaryModel(input: WebSummaryModelInput): WebSummaryModel {
   const catalog = input.remediation ?? {};
   const rows = sc.results ?? [];
   const { relative, global: globalScore } = scoresOf(sc);
+  const lanes = input.registry?.mcp_lanes ?? {};
+  const placement = lanePlacement(input.registry);
 
   const byCategory = new Map<string, SummaryRow[]>();
   for (const row of rows) {
@@ -195,9 +265,10 @@ export function webSummaryModel(input: WebSummaryModelInput): WebSummaryModel {
     relative,
     global: globalScore,
     counts: countsOf(rows),
-    categories: (sc.categories ?? []).map((category) => ({
-      ...category,
-      rows: byCategory.get(category.id) ?? [],
-    })),
+    categories: (sc.categories ?? []).map((category) => {
+      const categoryRows = byCategory.get(category.id) ?? [];
+      const laneRows = laneBlocks(categoryRows, lanes, placement);
+      return { ...category, rows: categoryRows, ...(laneRows ? { lanes: laneRows } : {}) };
+    }),
   };
 }

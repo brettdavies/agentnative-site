@@ -56,7 +56,15 @@ export interface WebCheck {
   title: string;
   hint: string;
   handler: WebCheckHandler;
+  /** MCP checks only: the key of `mcp_lanes` the row groups under on the result page. */
+  lane?: string;
   with: Record<string, unknown>;
+}
+
+/** One protocol lane the MCP category's rows group under, keyed by lane id. */
+export interface McpLaneSpec {
+  label: string;
+  note: string;
 }
 
 export interface WebAuditDiscoveryConfig {
@@ -70,6 +78,8 @@ export interface WebAuditRegistry {
   mcp_discovery: WebAuditDiscoveryConfig;
   category_order: string[];
   categories: Record<string, string>;
+  /** Display order is key order. */
+  mcp_lanes?: Record<string, McpLaneSpec>;
   checks: WebCheck[];
 }
 
