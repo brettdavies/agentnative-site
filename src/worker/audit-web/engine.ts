@@ -6,10 +6,10 @@
 // no duplicate `/` fetch. Each check finalizes to
 // pass / noncompliant / broken / absent / n_a / skip / error; an
 // applicable MAY that comes back absent is re-tagged n_a with na_reason
-// 'optional-absent', an unmet antecedent yields na_reason
-// 'antecedent-unmet', and a handler-stated na_reason (the CORS pair's
-// 'posture-consistent') passes through to the result row alongside the
-// handler's `unprobed` marker.
+// 'optional-absent', an unmet antecedent yields the na_reason its
+// resolver named or else 'antecedent-unmet', and a handler-stated
+// na_reason (the CORS pair's 'posture-consistent') passes through to the
+// result row alongside the handler's `unprobed` marker.
 //
 // The engine yields each result as it finalizes (KTD-6: streaming
 // transport is the route's concern) and a terminal `complete` event
@@ -17,6 +17,7 @@
 
 import {
   type AntecedentContext,
+  type AntecedentResolution,
   antecedentUnmetEvidence,
   resolveAntecedent,
   siteTypeApplies,
@@ -247,6 +248,14 @@ function isEdgeErrorStatus(status: number | null): boolean {
   return status !== null && (status === 530 || (status >= 520 && status <= 527));
 }
 
+/** The row a check settles to from its antecedent, or null when the check must be probed. */
+export function antecedentGate(check: WebCheck, resolution: AntecedentResolution): EngineResult | null {
+  if (resolution === 'apply') return null;
+  if (resolution === 'error') return errorResult(check, 'antecedent unresolvable: root fetch failed');
+  const reason = resolution === 'n_a' ? 'antecedent-unmet' : resolution.reason;
+  return naResult(check, reason, antecedentUnmetEvidence(check.antecedent));
+}
+
 /** An applicable MAY that is simply absent is optional, not a miss (R3). */
 function finalizeOptional(check: WebCheck, result: EngineResult): EngineResult {
   if (check.keyword === 'may' && result.status === 'absent') {
@@ -420,14 +429,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     if (!siteTypeApplies(check.site_types, actx)) {
       return naResult(check, 'antecedent-unmet', 'not applicable to the declared site type');
     }
-    const resolution = resolveAntecedent(check.antecedent, actx);
-    if (resolution === 'n_a') {
-      return naResult(check, 'antecedent-unmet', antecedentUnmetEvidence(check.antecedent));
-    }
-    if (resolution === 'error') {
-      return errorResult(check, 'antecedent unresolvable: root fetch failed');
-    }
-    return null;
+    return antecedentGate(check, resolveAntecedent(check.antecedent, actx));
   };
 
   // Finalize + yield wave-1 results through the same gate.
