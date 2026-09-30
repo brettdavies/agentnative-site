@@ -65,8 +65,11 @@ the build nor the web-audit registry fingerprint reads it.
 `bun scripts/standards/check-drift.ts` fetches every source, canonicalizes both sides (sorted-key JSON, or bytes as
 served for text files) before comparing or hashing, and prints a JSON report on stdout. It exits 0 when every source
 matches its pin, 1 when any source drifted (each listed with its id, tier, type, URL, and old and new values), and 2
-when a source could not be checked. It runs manually. After reviewing an upstream change, re-pin by copying the
-report's `new` value into the entry's `pinned`.
+when a source could not be checked; drift found in the same run is still listed. Each error names its next step:
+`retry` for a network failure, a timeout, a rate limit, or a server error, and `fix-manifest` when the watched file
+answers 404 or 410 or a JSON Pointer no longer resolves, since those need the entry re-pointed rather than re-pinned. It
+runs manually. After reviewing an upstream change, re-pin by copying the report's `new` value into the entry's
+`pinned`.
 
 ### How spec version flows into rendering
 
