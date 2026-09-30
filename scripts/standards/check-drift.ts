@@ -1,0 +1,290 @@
+#!/usr/bin/env bun
+// Compare every source pinned in src/data/standards/watch.yaml against its
+// live upstream value and print a JSON drift report on stdout.
+//
+// Usage: bun scripts/standards/check-drift.ts
+//
+// Exit codes:
+//   0  every source matches its pin
+//   1  at least one source drifted (report.drifted lists each with old and new)
+//   2  at least one source could not be checked, or the manifest is invalid
+//      (report.errors); drift found in the same run is still listed
+//
+// Pinned file hashes are `sha256:<hex>` over the canonical form named by the
+// entry's `canonicalization`: `json` parses the document and re-serializes it
+// with object keys sorted recursively and no whitespace; `none` hashes the
+// bytes as served. Structured values (PR state, draft revision, status code,
+// JSON field) compare by the same sorted-key serialization on both sides, so
+// the manifest's key order never matters. Re-pinning a reviewed change means
+// copying the report's `new` value into the entry's `pinned`.
+
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import * as yaml from 'js-yaml';
+
+export const TIERS = ['rfc', 'spec', 'draft', 'proposal', 'convention'] as const;
+export const SOURCE_TYPES = ['github-pr', 'github-file', 'url-status', 'ietf-draft', 'json-field'] as const;
+const CANONICALIZATIONS = ['json', 'none'] as const;
+
+export const MANIFEST_PATH = join(import.meta.dir, '..', '..', 'src', 'data', 'standards', 'watch.yaml');
+const SELF_COMMAND = 'bun scripts/standards/check-drift.ts';
+
+type Tier = (typeof TIERS)[number];
+type SourceType = (typeof SOURCE_TYPES)[number];
+type Canonicalization = (typeof CANONICALIZATIONS)[number];
+
+export type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>;
+
+export interface WatchEntry {
+  id: string;
+  tier: Tier;
+  type: SourceType;
+  url: string;
+  canonicalization: Canonicalization;
+  pinned: unknown;
+  pointer?: string;
+}
+
+interface DriftEntry {
+  id: string;
+  tier: Tier;
+  type: SourceType;
+  url: string;
+  old: unknown;
+  new: unknown;
+}
+
+type ErrorReason = 'fetch-failed' | 'http-status' | 'parse-failed' | 'manifest-invalid';
+
+interface NextStep {
+  action: 'retry' | 'fix-manifest';
+  command: string;
+  docs: string | null;
+}
+
+interface SourceError {
+  id: string;
+  tier: Tier;
+  type: SourceType;
+  url: string;
+  reason: ErrorReason;
+  message: string;
+  next_step: NextStep;
+}
+
+export interface DriftReport {
+  status: 'clean' | 'drift' | 'error';
+  exit_code: 0 | 1 | 2;
+  checked: number;
+  drifted: DriftEntry[];
+  errors: SourceError[];
+}
+
+class SourceCheckError extends Error {
+  constructor(
+    readonly reason: Exclude<ErrorReason, 'manifest-invalid'>,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+const GITHUB_PR_URL = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)$/;
+const GITHUB_BLOB_URL = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/(.+)$/;
+const IETF_DRAFT_URL = /^https:\/\/datatracker\.ietf\.org\/doc\/(draft-[a-z0-9-]+)\/$/;
+const HTTPS_URL = /^https:\/\/\S+$/;
+
+const URL_SHAPE: Record<SourceType, RegExp> = {
+  'github-pr': GITHUB_PR_URL,
+  'github-file': GITHUB_BLOB_URL,
+  'url-status': HTTPS_URL,
+  'ietf-draft': IETF_DRAFT_URL,
+  'json-field': HTTPS_URL,
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function isOneOf<T extends string>(set: readonly T[], value: unknown): value is T {
+  return typeof value === 'string' && (set as readonly string[]).includes(value);
+}
+
+export function parseManifest(text: string): WatchEntry[] {
+  const doc: unknown = yaml.load(text);
+  if (!isRecord(doc) || !Array.isArray(doc.sources)) {
+    throw new Error('watch manifest: expected a top-level "sources" list');
+  }
+  const seen = new Set<string>();
+  return doc.sources.map((raw: unknown, index): WatchEntry => {
+    const where = `watch manifest: sources[${index}]`;
+    if (!isRecord(raw)) throw new Error(`${where}: expected a mapping`);
+    const { id, tier, type, url, canonicalization, pinned, pointer } = raw;
+    if (typeof id !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(id)) {
+      throw new Error(`${where}: id must be kebab-case, got ${JSON.stringify(id)}`);
+    }
+    if (seen.has(id)) throw new Error(`${where}: duplicate id "${id}"`);
+    seen.add(id);
+    if (!isOneOf(TIERS, tier)) throw new Error(`${where} (${id}): unknown tier ${JSON.stringify(tier)}`);
+    if (!isOneOf(SOURCE_TYPES, type)) throw new Error(`${where} (${id}): unknown type ${JSON.stringify(type)}`);
+    if (typeof url !== 'string' || !URL_SHAPE[type].test(url)) {
+      throw new Error(`${where} (${id}): url ${JSON.stringify(url)} does not fit type ${type}`);
+    }
+    if (!isOneOf(CANONICALIZATIONS, canonicalization)) {
+      throw new Error(`${where} (${id}): unknown canonicalization ${JSON.stringify(canonicalization)}`);
+    }
+    if (canonicalization === 'none' && type !== 'github-file') {
+      throw new Error(`${where} (${id}): canonicalization "none" applies only to github-file`);
+    }
+    if (pinned === undefined || pinned === null) throw new Error(`${where} (${id}): pinned value is missing`);
+    if (type === 'json-field' && (typeof pointer !== 'string' || !pointer.startsWith('/'))) {
+      throw new Error(`${where} (${id}): json-field needs a JSON Pointer starting with "/"`);
+    }
+    const entry: WatchEntry = { id, tier, type, url, canonicalization, pinned };
+    if (typeof pointer === 'string') entry.pointer = pointer;
+    return entry;
+  });
+}
+
+function sortKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortKeys);
+  if (isRecord(value)) {
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(value).sort()) sorted[key] = sortKeys(value[key]);
+    return sorted;
+  }
+  return value;
+}
+
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(sortKeys(value));
+}
+
+function parseJson(text: string, what: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    throw new SourceCheckError('parse-failed', `${what} is not JSON: ${messageOf(err)}`);
+  }
+}
+
+function canonicalize(body: string, rule: Canonicalization): string {
+  return rule === 'json' ? canonicalJson(parseJson(body, 'file body')) : body;
+}
+
+function sha256(text: string): string {
+  return `sha256:${createHash('sha256').update(text).digest('hex')}`;
+}
+
+async function request(fetchImpl: FetchImpl, url: string, headers: Record<string, string>): Promise<Response> {
+  try {
+    return await fetchImpl(url, { headers });
+  } catch (err) {
+    throw new SourceCheckError('fetch-failed', `GET ${url} failed: ${messageOf(err)}`);
+  }
+}
+
+async function okBody(fetchImpl: FetchImpl, url: string, headers: Record<string, string>): Promise<string> {
+  const res = await request(fetchImpl, url, headers);
+  const body = await res.text();
+  if (!res.ok) throw new SourceCheckError('http-status', `GET ${url} returned HTTP ${res.status}`);
+  return body;
+}
+
+function field(doc: unknown, key: string, what: string): unknown {
+  if (!isRecord(doc) || !(key in doc)) throw new SourceCheckError('parse-failed', `${what} has no "${key}" field`);
+  return doc[key];
+}
+
+function resolvePointer(doc: unknown, pointer: string): unknown {
+  let node = doc;
+  for (const raw of pointer.slice(1).split('/')) {
+    const token = raw.replaceAll('~1', '/').replaceAll('~0', '~');
+    if (Array.isArray(node) && /^\d+$/.test(token)) node = node[Number(token)];
+    else if (isRecord(node) && Object.hasOwn(node, token)) node = node[token];
+    else return null;
+  }
+  return node ?? null;
+}
+
+const GITHUB_JSON = { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' };
+const GITHUB_RAW = { accept: 'application/vnd.github.raw', 'x-github-api-version': '2022-11-28' };
+
+type Fetcher = (entry: WatchEntry, fetchImpl: FetchImpl) => Promise<unknown>;
+
+const FETCHERS: Record<SourceType, Fetcher> = {
+  'github-pr': async (entry, fetchImpl) => {
+    const [, owner, repo, number] = GITHUB_PR_URL.exec(entry.url) ?? [];
+    const api = `https://api.github.com/repos/${owner}/${repo}/pulls/${number}`;
+    const pr = parseJson(await okBody(fetchImpl, api, GITHUB_JSON), 'pull request');
+    return {
+      state: field(pr, 'state', 'pull request'),
+      merged: field(pr, 'merged', 'pull request'),
+      head_sha: field(field(pr, 'head', 'pull request'), 'sha', 'pull request head'),
+    };
+  },
+  'github-file': async (entry, fetchImpl) => {
+    const [, owner, repo, ref, path] = GITHUB_BLOB_URL.exec(entry.url) ?? [];
+    const api = `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${ref}`;
+    return sha256(canonicalize(await okBody(fetchImpl, api, GITHUB_RAW), entry.canonicalization));
+  },
+  'url-status': async (entry, fetchImpl) => {
+    const res = await request(fetchImpl, entry.url, {});
+    await res.body?.cancel();
+    return res.status;
+  },
+  'ietf-draft': async (entry, fetchImpl) => {
+    const doc = parseJson(await okBody(fetchImpl, `${entry.url}doc.json`, { accept: 'application/json' }), 'draft');
+    return { rev: field(doc, 'rev', 'draft'), state: field(doc, 'state', 'draft') };
+  },
+  'json-field': async (entry, fetchImpl) => {
+    const doc = parseJson(await okBody(fetchImpl, entry.url, { accept: 'application/json' }), 'document');
+    return resolvePointer(doc, entry.pointer ?? '');
+  },
+};
+
+type Outcome = { kind: 'match' } | { kind: 'drift'; drift: DriftEntry } | { kind: 'error'; error: SourceError };
+
+async function checkEntry(entry: WatchEntry, fetchImpl: FetchImpl): Promise<Outcome> {
+  const { id, tier, type, url } = entry;
+  try {
+    const observed = await FETCHERS[type](entry, fetchImpl);
+    if (canonicalJson(observed) === canonicalJson(entry.pinned)) return { kind: 'match' };
+    return { kind: 'drift', drift: { id, tier, type, url, old: entry.pinned, new: observed } };
+  } catch (err) {
+    const reason = err instanceof SourceCheckError ? err.reason : 'fetch-failed';
+    const next_step: NextStep = { action: 'retry', command: SELF_COMMAND, docs: null };
+    return { kind: 'error', error: { id, tier, type, url, reason, message: messageOf(err), next_step } };
+  }
+}
+
+export async function checkDrift(entries: WatchEntry[], fetchImpl: FetchImpl): Promise<DriftReport> {
+  const outcomes = await Promise.all(entries.map((entry) => checkEntry(entry, fetchImpl)));
+  const drifted = outcomes.flatMap((o) => (o.kind === 'drift' ? [o.drift] : []));
+  const errors = outcomes.flatMap((o) => (o.kind === 'error' ? [o.error] : []));
+  const status = errors.length > 0 ? 'error' : drifted.length > 0 ? 'drift' : 'clean';
+  const exit_code = status === 'error' ? 2 : status === 'drift' ? 1 : 0;
+  return { status, exit_code, checked: entries.length, drifted, errors };
+}
+
+async function main(): Promise<number> {
+  let entries: WatchEntry[];
+  try {
+    entries = parseManifest(readFileSync(MANIFEST_PATH, 'utf8'));
+  } catch (err) {
+    const next_step: NextStep = { action: 'fix-manifest', command: SELF_COMMAND, docs: null };
+    const error = { reason: 'manifest-invalid', message: messageOf(err), path: MANIFEST_PATH, next_step };
+    console.log(JSON.stringify({ status: 'error', exit_code: 2, checked: 0, drifted: [], errors: [error] }, null, 2));
+    return 2;
+  }
+  const report = await checkDrift(entries, fetch);
+  console.log(JSON.stringify(report, null, 2));
+  return report.exit_code;
+}
+
+if (import.meta.main) process.exit(await main());
