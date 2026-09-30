@@ -36,8 +36,12 @@ execution: code
   schema before U13 lands (re-cut U13 against the merged text).
 - **Tail ownership:** the implementer owns build, unit, integration, and staging verification per unit, including the
   failing-first proof for each new test and the conformance corpus regeneration in every unit that changes engine output
-  (KTD22). Brett owns the production release cut, the secret creation step and the reflow observation in the Rollout
-  section, and the sibling-repo doc edits under Deferred to Follow-Up Work.
+  (KTD22). When it has the access, the implementer also owns the tail: creating the `WEB_AUDIT_FOLLOW_ENABLED`
+  production secret before the release that reads it, cutting each phase's `release/*` branch and PR to `main` with its
+  preflight, the Rollout section's pre- and post-deploy checks including the reflow observation, and the sibling-repo
+  doc edit under Deferred to Follow-Up Work (the stability-tier solutions doc, committed with `sd-commit-doc`). Every
+  merge to `dev` or `main` waits for Brett's explicit approval, and a step the implementer lacks access for goes back to
+  Brett with the exact command to run.
 
 ---
 
