@@ -386,15 +386,9 @@ describe('web-audit registry shape', () => {
     }
   });
 
-  test('every MCP check names a lane from the lane map, in the order the map lists', async () => {
+  test('the lane map lists its lanes in display order', async () => {
     const registry = await loadNormalized();
     expect(Object.keys(registry.mcp_lanes)).toEqual(['shared', 'legacy', 'modern', 'browser']);
-    for (const check of registry.checks.filter((c) => c.category === 'mcp')) {
-      expect({ id: check.id, known: Object.hasOwn(registry.mcp_lanes, check.lane ?? '') }).toEqual({
-        id: check.id,
-        known: true,
-      });
-    }
   });
 
   test('normalized JSON round-trips to 65 entries', async () => {

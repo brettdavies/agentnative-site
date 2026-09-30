@@ -15,7 +15,7 @@
 import type { McpLaneSpec } from './registry';
 import type { WebRemediationResource } from './remediation';
 import { assembleRemediation, isFixableStatus, resultLine, type WebRemediationCatalog } from './remediation';
-import { categoryRollups } from './score';
+import { SCORED_STATUSES } from './score';
 import type { NaReason, ScorecardStatus } from './scorecard';
 
 export type WebScorecardRow = {
@@ -191,6 +191,18 @@ function summaryRow(row: WebScorecardRow, catalog: WebRemediationCatalog, origin
   };
 }
 
+/** Each lane-filed check's lane and its position in registry order, by check id. */
+type LanePlacement = Map<string, { lane: string; index: number }>;
+
+function lanePlacement(registry: SummaryRegistry | undefined): LanePlacement {
+  const placement: LanePlacement = new Map();
+  const lanes = registry?.mcp_lanes ?? {};
+  registry?.checks.forEach((check, index) => {
+    if (check.lane && Object.hasOwn(lanes, check.lane)) placement.set(check.id, { lane: check.lane, index });
+  });
+  return placement;
+}
+
 /**
  * Split a category's rows into the registry's lanes, in lane-map order, with
  * rows in registry order inside each lane. Stored rows sit in the order their
@@ -198,36 +210,31 @@ function summaryRow(row: WebScorecardRow, catalog: WebRemediationCatalog, origin
  * registry no longer carries lands in the first lane, after the known rows. A
  * category none of whose rows the registry files under a lane gets none.
  */
-function laneBlocks(rows: readonly SummaryRow[], registry: SummaryRegistry | undefined): SummaryLane[] | undefined {
-  const lanes = registry?.mcp_lanes ?? {};
+function laneBlocks(
+  rows: readonly SummaryRow[],
+  lanes: Record<string, McpLaneSpec>,
+  placement: LanePlacement,
+): SummaryLane[] | undefined {
+  if (!rows.some((row) => placement.has(row.id))) return undefined;
   const laneIds = Object.keys(lanes);
-  if (laneIds.length === 0) return undefined;
-  const position = new Map<string, { lane: string; index: number }>();
-  registry?.checks.forEach((check, index) => {
-    if (check.lane && Object.hasOwn(lanes, check.lane)) position.set(check.id, { lane: check.lane, index });
-  });
-  if (!rows.some((row) => position.has(row.id))) return undefined;
-
-  const laneOf = (row: SummaryRow) => position.get(row.id)?.lane ?? laneIds[0];
-  const ordered = [...rows].sort(
-    (a, b) =>
-      (position.get(a.id)?.index ?? Number.MAX_SAFE_INTEGER) - (position.get(b.id)?.index ?? Number.MAX_SAFE_INTEGER),
-  );
-  const rollups = categoryRollups(
-    ordered.map((row) => ({ category: laneOf(row), status: row.status })),
-    laneIds,
-    {},
-  );
-  return rollups
-    .map(({ id, passed, counted }) => ({
-      id,
-      label: lanes[id].label,
-      note: lanes[id].note,
-      passed,
-      counted,
-      rows: ordered.filter((row) => laneOf(row) === id),
-    }))
-    .filter((lane) => lane.rows.length > 0);
+  const byLane = new Map<string, SummaryRow[]>(laneIds.map((id) => [id, []]));
+  const positionOf = (row: SummaryRow) => placement.get(row.id)?.index ?? 0;
+  const known = rows.filter((row) => placement.has(row.id)).sort((a, b) => positionOf(a) - positionOf(b));
+  for (const row of known) byLane.get(placement.get(row.id)?.lane ?? laneIds[0])?.push(row);
+  byLane.get(laneIds[0])?.push(...rows.filter((row) => !placement.has(row.id)));
+  return [...byLane]
+    .filter(([, laneRows]) => laneRows.length > 0)
+    .map(([id, laneRows]) => {
+      const counted = laneRows.filter((row) => SCORED_STATUSES.has(row.status));
+      return {
+        id,
+        label: lanes[id].label,
+        note: lanes[id].note,
+        passed: counted.filter((row) => row.status === 'pass').length,
+        counted: counted.length,
+        rows: laneRows,
+      };
+    });
 }
 
 /**
@@ -241,6 +248,8 @@ export function webSummaryModel(input: WebSummaryModelInput): WebSummaryModel {
   const catalog = input.remediation ?? {};
   const rows = sc.results ?? [];
   const { relative, global: globalScore } = scoresOf(sc);
+  const lanes = input.registry?.mcp_lanes ?? {};
+  const placement = lanePlacement(input.registry);
 
   const byCategory = new Map<string, SummaryRow[]>();
   for (const row of rows) {
@@ -258,8 +267,8 @@ export function webSummaryModel(input: WebSummaryModelInput): WebSummaryModel {
     counts: countsOf(rows),
     categories: (sc.categories ?? []).map((category) => {
       const categoryRows = byCategory.get(category.id) ?? [];
-      const lanes = laneBlocks(categoryRows, input.registry);
-      return { ...category, rows: categoryRows, ...(lanes ? { lanes } : {}) };
+      const laneRows = laneBlocks(categoryRows, lanes, placement);
+      return { ...category, rows: categoryRows, ...(laneRows ? { lanes: laneRows } : {}) };
     }),
   };
 }
