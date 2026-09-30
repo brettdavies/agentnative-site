@@ -271,6 +271,53 @@ describe('buildWebScorecard (schema 0.4)', () => {
     ]);
   });
 
+  test('a row carries the distinct hosts its evidence was requested from, and host only when there is one', () => {
+    const built = buildWebScorecard(
+      [
+        engineRow({
+          id: 'one-host',
+          raw_evidence: [{ url: 'https://example.com/llms.txt' }, { url: 'https://example.com/llms-full.txt' }],
+        }),
+        engineRow({
+          id: 'two-hosts',
+          raw_evidence: [
+            { url: 'https://api.example.com/v1/nope' },
+            { url: 'https://example.com/openapi.json' },
+            { url: 'https://api.example.com/v1/also-nope' },
+          ],
+        }),
+        engineRow({
+          id: 'no-request',
+          status: 'n_a',
+          na_reason: 'antecedent-unmet',
+          raw_evidence: [{ why: ['no API surface detected'] }],
+        }),
+        engineRow({
+          id: 'guard-refused',
+          raw_evidence: [
+            { url: 'http://10.0.0.5/docs', blocked: 'blocked: ipv4 10.0.0.5 is in blocked range 10.0.0.0/8' },
+            { url: 'https://example.com/docs' },
+          ],
+        }),
+      ],
+      {
+        targetUrl: 'https://example.com/',
+        domain: 'example.com',
+        mcpEndpoint: null,
+        discoveryEvidence: [],
+        specVersion: '0.5.0',
+        registry,
+      },
+    );
+    const row = (id: string) => built.results.find((r) => r.id === id) ?? {};
+    expect(row('one-host')).toMatchObject({ hosts: [{ host: 'example.com' }], host: 'example.com' });
+    expect(row('two-hosts')).toMatchObject({ hosts: [{ host: 'api.example.com' }, { host: 'example.com' }] });
+    expect('host' in row('two-hosts')).toBe(false);
+    expect(row('no-request')).toMatchObject({ hosts: [] });
+    expect('host' in row('no-request')).toBe(false);
+    expect(row('guard-refused')).toMatchObject({ hosts: [{ host: 'example.com' }], host: 'example.com' });
+  });
+
   test('rows carry category + hidden principle + na_reason where set', () => {
     const naRow = scorecard.results.find((r) => r.id === 'c');
     expect(naRow?.na_reason).toBe('optional-absent');

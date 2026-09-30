@@ -12,6 +12,14 @@
 // rather than repeating the list, so a status added there reaches the labels,
 // the marks, the counts, and the machine context together.
 
+import {
+  type DeclaredHostEntry,
+  type FollowState,
+  type RowHost,
+  readDeclaredHosts,
+  readFollowState,
+  readRegistryFingerprint,
+} from './provenance';
 import type { McpLaneSpec } from './registry';
 import type { WebRemediationResource } from './remediation';
 import { assembleRemediation, isFixableStatus, resultLine, type WebRemediationCatalog } from './remediation';
@@ -28,12 +36,17 @@ export type WebScorecardRow = {
   na_reason?: NaReason;
   unprobed?: true;
   evidence: string | null;
+  hosts?: RowHost[];
+  host?: string;
 };
 
 export type WebScorecardShape = {
   spec_version?: string;
   target_url?: string;
   tool?: { name?: string; url?: string };
+  follow_declarations?: unknown;
+  declared_hosts?: unknown;
+  registry_fingerprint?: unknown;
   score_pct?: number;
   score?: { relative?: number; global?: number };
   categories?: Array<{ id: string; name: string; passed: number; counted: number }>;
@@ -139,6 +152,11 @@ export type WebSummaryModel = {
   global: number;
   counts: Record<ScorecardStatus, number>;
   categories: SummaryCategory[];
+  followDeclarations: FollowState;
+  /** Null when the scorecard recorded no trail, which is not the same as an empty one. */
+  declaredHosts: DeclaredHostEntry[] | null;
+  /** Null when the registry version the score was computed under is unknown. */
+  registryFingerprint: string | null;
 };
 
 export interface WebSummaryModelInput {
@@ -270,5 +288,8 @@ export function webSummaryModel(input: WebSummaryModelInput): WebSummaryModel {
       const laneRows = laneBlocks(categoryRows, lanes, placement);
       return { ...category, rows: categoryRows, ...(laneRows ? { lanes: laneRows } : {}) };
     }),
+    followDeclarations: readFollowState(sc.follow_declarations),
+    declaredHosts: readDeclaredHosts(sc.declared_hosts),
+    registryFingerprint: readRegistryFingerprint(sc.registry_fingerprint),
   };
 }

@@ -10,6 +10,7 @@
 // path; the category-grouped web renderer replaces that consumer.
 
 import type { EvidenceItem, NaReason } from './handlers/types';
+import { type DeclaredHostEntry, type RowHost, rowHostFields } from './provenance';
 import type { WebAuditRegistry, WebCheckKeyword, WebCheckTier, WebSiteType } from './registry';
 import {
   type CategoryRollup,
@@ -66,6 +67,10 @@ export interface WebScorecardResultRow {
    */
   unprobed?: true;
   evidence: string | null;
+  /** The distinct hosts the row's evidence was requested from, in evidence order. */
+  hosts: RowHost[];
+  /** Present only when `hosts` holds exactly one entry. */
+  host?: string;
 }
 
 export interface WebCoverageLevel {
@@ -89,6 +94,12 @@ export interface WebScorecard {
   public_listing?: boolean;
   /** The declared site type this audit ran under; null = ran everything. */
   site_type: WebSiteType | null;
+  /** Whether the audit followed the hosts the target declares; absent reads as not evaluated. */
+  follow_declarations?: boolean;
+  /** The declared-hosts trail; absent reads as no trail, which is not an empty one. */
+  declared_hosts?: DeclaredHostEntry[];
+  /** The registry fingerprint prefix the score was computed under; never set by the engine. */
+  registry_fingerprint?: string;
   summary: Record<ScorecardStatus, number>;
   coverage_summary: { must: WebCoverageLevel; should: WebCoverageLevel; may: WebCoverageLevel };
   score_pct: number;
@@ -151,6 +162,7 @@ export function buildWebScorecard(results: EngineResult[], meta: WebScorecardMet
       ...(r.na_reason !== undefined ? { na_reason: r.na_reason } : {}),
       ...(r.unprobed === true ? { unprobed: true as const } : {}),
       evidence: r.evidence === '' ? null : r.evidence,
+      ...rowHostFields(r.raw_evidence),
     });
   }
 

@@ -316,3 +316,48 @@ describe('attachInlineRemediation', () => {
     expect(out.results[0].remediation?.prompt).toContain('--- begin evidence ---\nmissing\n--- end evidence ---');
   });
 });
+
+describe('provenance on stored scorecards', () => {
+  type ProvenanceShape = {
+    results: Array<{ id: string; hosts?: Array<{ host: string }>; host?: string }>;
+  } & Record<string, unknown>;
+
+  test('a row carrying neither hosts nor host reads as the audited host; a row carrying them keeps its own', () => {
+    const stored = {
+      target_url: 'https://example.com/',
+      results: [
+        { id: 'openapi', status: 'pass', evidence: 'openapi -> 200' },
+        {
+          id: 'json-schemas',
+          status: 'absent',
+          evidence: 'json-schemas -> 404',
+          hosts: [{ host: 'api.example.com' }],
+          host: 'api.example.com',
+        },
+        { id: 'mcp-tools-list', status: 'n_a', na_reason: 'antecedent-unmet', evidence: null, hosts: [] },
+      ],
+    };
+    const out = enrichWebScorecardForDisplay(stored, {
+      registry: SPLIT_REGISTRY,
+      catalog: CATALOG,
+      origin: 'https://anc.dev',
+    }) as ProvenanceShape;
+    const byId = new Map(out.results.map((r) => [r.id, r]));
+    expect(byId.get('openapi')).toMatchObject({ hosts: [{ host: 'example.com' }], host: 'example.com' });
+    expect(byId.get('json-schemas')).toMatchObject({ hosts: [{ host: 'api.example.com' }], host: 'api.example.com' });
+    expect(byId.get('mcp-tools-list')?.hosts).toEqual([]);
+    expect('host' in (byId.get('mcp-tools-list') ?? {})).toBe(false);
+  });
+
+  test('a scorecard missing every provenance field enriches without a follow state, a trail, or a fingerprint', () => {
+    const out = enrichWebScorecardForDisplay(oldShapeStored(), {
+      registry: SPLIT_REGISTRY,
+      catalog: CATALOG,
+      origin: 'https://anc.dev',
+    }) as ProvenanceShape;
+    expect('follow_declarations' in out).toBe(false);
+    expect('declared_hosts' in out).toBe(false);
+    expect('registry_fingerprint' in out).toBe(false);
+    for (const row of out.results) expect(row).toMatchObject({ hosts: [{ host: 'example.com' }], host: 'example.com' });
+  });
+});
