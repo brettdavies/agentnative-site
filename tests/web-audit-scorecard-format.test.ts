@@ -849,9 +849,11 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
   });
 
   test('a scorecard missing a documented required field fails conformance loudly', () => {
+    const required = DOCUMENTED_TOP_LEVEL.filter((field) => !OPTIONAL_TOP_LEVEL.includes(field)).sort();
+    expect(Object.keys(produced).sort()).toEqual(required);
     const broken = { ...produced } as Record<string, unknown>;
     delete broken.score_pct;
-    expect(Object.keys(broken).sort()).not.toEqual([...DOCUMENTED_TOP_LEVEL].sort());
+    expect(Object.keys(broken).sort()).not.toEqual(required);
   });
 });
 
