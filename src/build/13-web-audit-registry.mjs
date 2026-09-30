@@ -15,6 +15,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { PROBE_UA_TOKENS } from '../shared/user-agents.ts';
+import { RETAINED_DOCUMENT_KEYS } from '../shared/web-audit-documents.ts';
 
 export const KEYWORD_BY_TIER = Object.freeze({
   required: 'must',
@@ -52,7 +53,7 @@ export const WEB_AUDIT_ANTECEDENTS = new Set([
   'robots-present',
   'auth-present',
 ]);
-export const WEB_AUDIT_EVAL_RULES = new Set(['legacy-alias-redirects', 'scoped-discovery']);
+export const WEB_AUDIT_EVAL_RULES = new Set(['legacy-alias-redirects', 'scoped-discovery', 'retained-document']);
 export const CORS_SURFACES = new Set(['preflight', 'actual']);
 
 /**
@@ -223,6 +224,11 @@ export function normalizeWebAuditRegistry(doc) {
     // `error`, which the scorer excludes from both scores while the run
     // still terminates complete and caches — a silently short scorecard.
     // Required per-handler `with` fields are therefore build-time gates.
+    if (check.eval === 'retained-document' && !RETAINED_DOCUMENT_KEYS.includes(check.with.retained)) {
+      throw new Error(
+        `web-audit registry: check "${id}" declares retained-document, so with.retained must name a document discovery keeps (${RETAINED_DOCUMENT_KEYS.join(', ')}), got ${JSON.stringify(check.with.retained)}`,
+      );
+    }
     if (check.handler === 'cors-preflight' && !CORS_SURFACES.has(check.with.surface)) {
       throw new Error(
         `web-audit registry: check "${id}" needs with.surface "preflight" or "actual" (got ${JSON.stringify(check.with.surface)})`,

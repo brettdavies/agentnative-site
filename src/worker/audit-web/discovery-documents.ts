@@ -110,6 +110,15 @@ export interface McpDeclaration {
   not_followed?: 'templated-url';
 }
 
+/** A document discovery read and keeps for later checks. */
+export interface RetainedDocument {
+  /** Where it was read; an inline catalog card is the catalog URL with a JSON Pointer fragment. */
+  url: string;
+  response: ProbeResponse;
+  /** Server cards only. */
+  shape?: CardShape;
+}
+
 /** A card discovery read, with the endpoint it declares. */
 export interface CardRead {
   source: string;

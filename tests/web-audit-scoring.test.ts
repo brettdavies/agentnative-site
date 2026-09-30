@@ -144,6 +144,13 @@ describe('web-audit registry shape', () => {
     expect(aliases?.weight).toBe(1);
   });
 
+  test('the api-catalog check scores the API catalog discovery keeps', async () => {
+    const registry = await loadNormalized();
+    const apiCatalog = registry.checks.find((c) => c.id === 'api-catalog');
+    expect(apiCatalog?.eval).toBe('retained-document');
+    expect(apiCatalog?.with).toEqual({ retained: 'api-catalog', expect: { status: [200], body_regex: 'linkset' } });
+  });
+
   test('keyword is derived mechanically from tier for every check', async () => {
     const registry = await loadNormalized();
     for (const check of registry.checks) {
@@ -322,6 +329,17 @@ describe('web-audit registry shape', () => {
     expect(() => normalizeWebAuditRegistry({ ...abortBase, checks: [{ ...abortCheck, eval: 'not-a-rule' }] })).toThrow(
       /unknown eval rule/,
     );
+  });
+
+  test('a retained-document check must name a document discovery keeps', () => {
+    const retained = { ...abortCheck, eval: 'retained-document', with: { expect: { status: [200] } } };
+    expect(() => normalizeWebAuditRegistry({ ...abortBase, checks: [retained] })).toThrow(/with\.retained/);
+    expect(() =>
+      normalizeWebAuditRegistry({ ...abortBase, checks: [{ ...retained, with: { retained: 'openapi' } }] }),
+    ).toThrow(/with\.retained/);
+    expect(() =>
+      normalizeWebAuditRegistry({ ...abortBase, checks: [{ ...retained, with: { retained: 'api-catalog' } }] }),
+    ).not.toThrow();
   });
 
   test('a missing or invalid site_types aborts normalization', () => {

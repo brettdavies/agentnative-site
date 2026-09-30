@@ -4,6 +4,7 @@
 // web-audit-antecedents-<group> files; this asserts the gating end to end.
 
 import { describe, expect, test } from 'bun:test';
+import { WAVE1_CHECK_IDS } from '../src/worker/audit-web/antecedents';
 import { type AuditEvent, antecedentGate, runWebAudit } from '../src/worker/audit-web/engine';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
 import { stubFetch } from './helpers/stub-fetch';
@@ -372,5 +373,44 @@ describe('the antecedent gate stamps the reason a resolution carries', () => {
   test('a resolution carrying no reason still stamps antecedent-unmet', () => {
     expect(antecedentGate(check, 'n_a')).toMatchObject({ status: 'n_a', na_reason: 'antecedent-unmet' });
     expect(antecedentGate(check, 'apply')).toBeNull();
+  });
+});
+
+describe('runWebAudit retained documents', () => {
+  test('the api-catalog row scores the catalog discovery read, its only request, outside wave 1', async () => {
+    let catalogReads = 0;
+    const fetchImpl = stubFetch((url) => {
+      if (url === 'https://example.com/.well-known/api-catalog') {
+        catalogReads += 1;
+        return new Response('{"linkset":[]}', { headers: { 'content-type': 'application/linkset+json' } });
+      }
+      if (url === 'https://example.com/')
+        return new Response('<html></html>', { headers: { 'content-type': 'text/html' } });
+      return new Response('not found', { status: 404 });
+    });
+    const apiCatalog = makeCheck({
+      id: 'api-catalog',
+      category: 'api',
+      tier: 'optional',
+      keyword: 'may',
+      site_types: ['api'],
+      antecedent: 'api-surface',
+      eval: 'retained-document',
+      with: { retained: 'api-catalog', expect: { status: [200], body_regex: 'linkset' } },
+    });
+    const events = await collect(
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf([apiCatalog]),
+        siteType: 'api',
+        fetchOptions: { fetchImpl },
+      }),
+    );
+    expect(WAVE1_CHECK_IDS.has('api-catalog')).toBe(false);
+    expect(catalogReads).toBe(1);
+    expect(resultsOf(events).find((r) => r.id === 'api-catalog')).toMatchObject({
+      status: 'pass',
+      evidence: 'https://example.com/.well-known/api-catalog -> 200',
+    });
   });
 });

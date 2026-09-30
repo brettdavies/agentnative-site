@@ -27,7 +27,6 @@ import {
   aiCatalogShape,
   apiCatalogShape,
   type CardRead,
-  type CardShape,
   cardDeclaresAuth,
   cardItem,
   cardShape,
@@ -37,6 +36,7 @@ import {
   type McpDeclaration,
   parseJsonObject,
   preferredCard,
+  type RetainedDocument,
   readCard,
   sameOrigin,
 } from './discovery-documents';
@@ -53,14 +53,6 @@ export interface DiscoveryOptions {
   deadlineAt?: number;
   /** Injectable clock, matching the engine's deterministic deadline tests. */
   now?: () => number;
-}
-
-export interface RetainedDocument {
-  /** Where it was read; an inline catalog card is the catalog URL with a JSON Pointer fragment. */
-  url: string;
-  response: ProbeResponse;
-  /** Server cards only. */
-  shape?: CardShape;
 }
 
 export interface DiscoveryResult {
