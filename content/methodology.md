@@ -263,9 +263,15 @@ are four probe types:
   misconfigured CORS fails.
 - **DNS-over-HTTPS** — SVCB lookups for DNS-AID records under the `_agents` namespace.
 
-The audit first discovers the MCP endpoint from the site's well-known cards, then falls back to probing common paths
-with `initialize`, then with a modern header-routed `tools/list`, so a modern-only server is still discovered. MCP-shape
-checks apply only when an endpoint is found; on a site without one they are marked `n_a` and excluded from the score.
+The audit first discovers the MCP endpoint from declared cards. One concurrent round reads the SEP-1649 well-known
+server cards, the AI catalog (`/.well-known/ai-catalog.json`), and the API catalog (`/.well-known/api-catalog`). The
+catalog's first MCP server-card entries (type `application/mcp-server-card+json`, at most four) are read next: an inline
+card in place, and a card URL on the audited origin by fetch. A card URL on another origin is recorded and never
+requested. An endpoint on the audited origin named by a card, catalog cards first, is the endpoint. A card endpoint on
+another origin, or written as a URL template, is recorded and never probed. With no such endpoint, a legacy `initialize`
+and a modern header-routed `tools/list` go to the common paths together, and a legacy answer wins, so a modern-only
+server is still discovered. MCP-shape checks apply only when an endpoint is found; on a site without one they are marked
+`n_a` and excluded from the score.
 The headline score is credit-weighted over the MUST and SHOULD checks that apply, with MAY checks informational, the
 same model the CLI score uses. Each check maps onto one of P1 through P8, so a web scorecard is isomorphic with a CLI
 scorecard and renders through the same presentation. Web results carry no badge; they live at a shareable
