@@ -2392,6 +2392,38 @@ main .remediation__body {
   overflow-wrap: anywhere;
 }
 
+/* Protocol lanes: the MCP category's checks grouped by the protocol lane each
+ * exercises, every lane with its own rollup and a line saying what it covers. */
+.web-lane + .web-lane {
+  margin-top: var(--space-5);
+}
+.web-lane__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  padding: 0 var(--space-5);
+}
+.web-lane__title {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--fg-heading);
+}
+.web-lane__count {
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: 0.82rem;
+  font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
+  color: var(--fg-secondary);
+  white-space: nowrap;
+}
+.web-lane__note {
+  margin: var(--space-1) 0 0;
+  padding: 0 var(--space-5) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 0.85rem;
+  color: var(--fg-secondary);
+}
+
 /* The scoring page's header. */
 .scorecard-header {
   padding-bottom: 1.5rem;

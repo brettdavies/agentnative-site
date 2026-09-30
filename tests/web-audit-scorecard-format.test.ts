@@ -4,14 +4,18 @@
 // leaderboard sorts by GLOBAL with a RELATIVE column.
 
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import * as yaml from 'js-yaml';
+import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import { WEB_AUDIT_STALE_AFTER_MS } from '../src/worker/audit-web/cache';
 import {
   buildFrontpageBoardRows,
   rankWebEntries,
   type WebBoardEntry,
 } from '../src/worker/audit-web/leaderboard-render';
+import type { WebAuditRegistry } from '../src/worker/audit-web/registry';
 import { assembleRemediation } from '../src/worker/audit-web/remediation';
 import {
   buildWebScorecard,
@@ -893,5 +897,157 @@ describe('website category rows carry a status pill from their rollup', () => {
       ['c', 'fail', 'fail'],
       ['d', 'na', 'n/a'],
     ]);
+  });
+});
+
+describe('MCP rows group into protocol lanes in registry order', () => {
+  const registry = normalizeWebAuditRegistry(
+    yaml.load(
+      readFileSync(join(new URL('..', import.meta.url).pathname, 'src/data/web-audit/registry.yaml'), 'utf8'),
+    ) as object,
+  ) as unknown as WebAuditRegistry;
+
+  // anc.dev's MCP rows in the order its production scorecard stores them,
+  // which is probe-completion order rather than registry order.
+  const ANC_DEV_MCP: ReadonlyArray<[string, ScorecardStatus]> = [
+    ['mcp-initialize', 'pass'],
+    ['mcp-server-discover', 'pass'],
+    ['mcp-capabilities', 'pass'],
+    ['mcp-modern-tools-list', 'pass'],
+    ['mcp-resources-list', 'pass'],
+    ['mcp-tools-list', 'pass'],
+    ['mcp-unknown-method', 'pass'],
+    ['mcp-malformed-body', 'pass'],
+    ['mcp-batch-reject', 'pass'],
+    ['mcp-unknown-tool', 'pass'],
+    ['mcp-modern-clientcaps', 'pass'],
+    ['mcp-modern-unknown-method', 'pass'],
+    ['mcp-modern-header-mismatch', 'pass'],
+    ['mcp-modern-version-reject', 'pass'],
+    ['mcp-accept-json', 'pass'],
+    ['mcp-modern-resources-miss', 'pass'],
+    ['mcp-accept-unsatisfiable', 'pass'],
+    ['mcp-get-fast-fail', 'pass'],
+    ['webmcp', 'pass'],
+    ['mcp-cors-preflight', 'n_a'],
+    ['well-known-mcp-card', 'pass'],
+    ['mcp-cors-actual', 'n_a'],
+    ['mcp-usage-doc', 'pass'],
+    ['mcp-card-legacy-aliases', 'pass'],
+  ];
+  const MODERN_IDS = new Set(registry.checks.filter((check) => check.lane === 'modern').map((check) => check.id));
+  // A legacy-only server: wave 1 evidenced no modern lane, so every modern
+  // row lands as an unprobed absence.
+  const LEGACY_ONLY_MCP: ReadonlyArray<[string, ScorecardStatus]> = ANC_DEV_MCP.map(([id, status]) => [
+    id,
+    MODERN_IDS.has(id) ? 'absent' : status,
+  ]);
+
+  function mcpScorecard(rows: ReadonlyArray<[string, ScorecardStatus]>) {
+    const scored = rows.filter(([, status]) => status !== 'n_a');
+    return {
+      ...webScorecard(),
+      categories: [
+        {
+          id: 'mcp',
+          name: 'MCP',
+          passed: scored.filter(([, status]) => status === 'pass').length,
+          counted: scored.length,
+        },
+      ],
+      results: rows.map(([id, status]) => ({
+        id,
+        label: registry.checks.find((check) => check.id === id)?.title ?? id,
+        category: 'mcp',
+        keyword: 'should',
+        tier: 'recommended',
+        status,
+        evidence: null,
+        ...(status === 'absent' && MODERN_IDS.has(id) ? { unprobed: true as const } : {}),
+      })),
+    };
+  }
+
+  const input = (rows: ReadonlyArray<[string, ScorecardStatus]>) => ({
+    scorecard: mcpScorecard(rows),
+    domain: 'anc.dev',
+    targetUrl: 'https://anc.dev/',
+    origin: 'https://anc.dev',
+    registry,
+  });
+
+  /** Each lane block's heading, count, and row ids, in page order. */
+  function lanesOf(html: string): Array<{ lane: string; label: string; count: string; ids: string[] }> {
+    return html
+      .split('<div class="web-lane" ')
+      .slice(1)
+      .map((block) => ({
+        lane: /^data-lane="([^"]+)"/.exec(block)?.[1] ?? '',
+        label: /<h4 class="web-lane__title">([^<]*)<\/h4>/.exec(block)?.[1] ?? '',
+        count: /<span class="web-lane__count">([^<]*)<\/span>/.exec(block)?.[1] ?? '',
+        ids: [...block.matchAll(/<details class="web-check[^"]*"[^>]* data-id="([^"]+)"/g)].map((m) => m[1]),
+      }));
+  }
+
+  const registryOrder = (lane: string) =>
+    registry.checks.filter((check) => check.lane === lane).map((check) => check.id);
+
+  test('a dual-stack server renders four lane blocks with their own counts', () => {
+    const lanes = lanesOf(buildWebSummaryBody(input(ANC_DEV_MCP)));
+    expect(lanes.map(({ lane, label, count }) => ({ lane, label, count }))).toEqual([
+      { lane: 'shared', label: 'Every MCP server', count: '4 / 4 pass' },
+      { lane: 'legacy', label: 'Legacy lane · 2025-06-18', count: '10 / 10 pass' },
+      { lane: 'modern', label: 'Modern lane · 2026-07-28', count: '7 / 7 pass' },
+      { lane: 'browser', label: 'In-page tools · WebMCP', count: '1 / 1 pass' },
+    ]);
+  });
+
+  test('rows stored in completion order render in registry order within each lane', () => {
+    const lanes = lanesOf(buildWebSummaryBody(input(ANC_DEV_MCP)));
+    expect(lanes.map(({ lane, ids }) => ({ lane, ids }))).toEqual(
+      ['shared', 'legacy', 'modern', 'browser'].map((lane) => ({ lane, ids: registryOrder(lane) })),
+    );
+  });
+
+  test('each lane carries its one-line explanation under an h4 inside the category', () => {
+    const html = buildWebSummaryBody(input(ANC_DEV_MCP));
+    expect(html).toContain('<p class="web-lane__note">header-routed and stateless; no initialize or session</p>');
+    expect(html.indexOf('<h3 class="spec__title audit-group__title">MCP</h3>')).toBeLessThan(
+      html.indexOf('<h4 class="web-lane__title">'),
+    );
+  });
+
+  test('a legacy-only server keeps the modern block with its absent rows and a 0 / 7 count', () => {
+    const modern = lanesOf(buildWebSummaryBody(input(LEGACY_ONLY_MCP))).find(({ lane }) => lane === 'modern');
+    expect(modern?.count).toBe('0 / 7 pass');
+    expect(modern?.ids).toEqual(registryOrder('modern'));
+  });
+
+  test('a lane with nothing counted renders no pass count', () => {
+    const shared = lanesOf(
+      buildWebSummaryBody(
+        input(ANC_DEV_MCP.map(([id, status]) => [id, registryOrder('shared').includes(id) ? 'n_a' : status])),
+      ),
+    ).find(({ lane }) => lane === 'shared');
+    expect(shared?.count).toBe('');
+  });
+
+  test('a row whose id the registry no longer carries falls to Every MCP server', () => {
+    const lanes = lanesOf(buildWebSummaryBody(input([...ANC_DEV_MCP, ['mcp-retired-probe', 'pass']])));
+    expect(lanes[0].lane).toBe('shared');
+    expect(lanes[0].ids.at(-1)).toBe('mcp-retired-probe');
+  });
+
+  test('the markdown twin carries the four lane sub-headings with counts, rows in registry order', () => {
+    const md = buildWebSummaryMarkdown(input(ANC_DEV_MCP));
+    expect(md.match(/^### .*$/gm)).toEqual([
+      '### Every MCP server (4/4)',
+      '### Legacy lane · 2025-06-18 (10/10)',
+      '### Modern lane · 2026-07-28 (7/7)',
+      '### In-page tools · WebMCP (1/1)',
+    ]);
+    const modernSection = md.slice(md.indexOf('### Modern lane'), md.indexOf('### In-page tools'));
+    const titles = [...modernSection.matchAll(/^#### PASS — (.*)$/gm)].map((m) => m[1]);
+    expect(titles).toEqual(registry.checks.filter((check) => check.lane === 'modern').map((check) => check.title));
   });
 });

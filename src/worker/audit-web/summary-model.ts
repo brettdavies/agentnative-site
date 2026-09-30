@@ -12,8 +12,10 @@
 // rather than repeating the list, so a status added there reaches the labels,
 // the marks, the counts, and the machine context together.
 
+import type { McpLaneSpec } from './registry';
 import type { WebRemediationResource } from './remediation';
 import { assembleRemediation, isFixableStatus, resultLine, type WebRemediationCatalog } from './remediation';
+import { categoryRollups } from './score';
 import type { NaReason, ScorecardStatus } from './scorecard';
 
 export type WebScorecardRow = {
@@ -104,13 +106,31 @@ export type SummaryRow = {
   resources: WebRemediationResource[];
 };
 
+/** One protocol lane's rows inside a category, with its own rollup. */
+export type SummaryLane = {
+  id: string;
+  label: string;
+  note: string;
+  passed: number;
+  counted: number;
+  rows: SummaryRow[];
+};
+
 export type SummaryCategory = {
   id: string;
   name: string;
   passed: number;
   counted: number;
   rows: SummaryRow[];
+  /** Present when the registry files this category's checks under lanes; rows then render by lane. */
+  lanes?: SummaryLane[];
 };
+
+/** The registry fields lane grouping reads; a full registry satisfies it. */
+export interface SummaryRegistry {
+  mcp_lanes?: Record<string, McpLaneSpec>;
+  checks: ReadonlyArray<{ id: string; lane?: string }>;
+}
 
 export type WebSummaryModel = {
   name: string;
@@ -127,6 +147,8 @@ export interface WebSummaryModelInput {
   targetUrl: string;
   name?: string;
   remediation?: WebRemediationCatalog;
+  /** The live registry, whose lanes group stored rows regardless of when they were scored. */
+  registry?: SummaryRegistry;
   origin: string;
 }
 
@@ -170,6 +192,45 @@ function summaryRow(row: WebScorecardRow, catalog: WebRemediationCatalog, origin
 }
 
 /**
+ * Split a category's rows into the registry's lanes, in lane-map order, with
+ * rows in registry order inside each lane. Stored rows sit in the order their
+ * probes completed, which says nothing a reader can use. A row whose id the
+ * registry no longer carries lands in the first lane, after the known rows. A
+ * category none of whose rows the registry files under a lane gets none.
+ */
+function laneBlocks(rows: readonly SummaryRow[], registry: SummaryRegistry | undefined): SummaryLane[] | undefined {
+  const lanes = registry?.mcp_lanes ?? {};
+  const laneIds = Object.keys(lanes);
+  if (laneIds.length === 0) return undefined;
+  const position = new Map<string, { lane: string; index: number }>();
+  registry?.checks.forEach((check, index) => {
+    if (check.lane && Object.hasOwn(lanes, check.lane)) position.set(check.id, { lane: check.lane, index });
+  });
+  if (!rows.some((row) => position.has(row.id))) return undefined;
+
+  const laneOf = (row: SummaryRow) => position.get(row.id)?.lane ?? laneIds[0];
+  const ordered = [...rows].sort(
+    (a, b) =>
+      (position.get(a.id)?.index ?? Number.MAX_SAFE_INTEGER) - (position.get(b.id)?.index ?? Number.MAX_SAFE_INTEGER),
+  );
+  const rollups = categoryRollups(
+    ordered.map((row) => ({ category: laneOf(row), status: row.status })),
+    laneIds,
+    {},
+  );
+  return rollups
+    .map(({ id, passed, counted }) => ({
+      id,
+      label: lanes[id].label,
+      note: lanes[id].note,
+      passed,
+      counted,
+      rows: ordered.filter((row) => laneOf(row) === id),
+    }))
+    .filter((lane) => lane.rows.length > 0);
+}
+
+/**
  * Resolve one stored scorecard into the record both renderers read. Rows are
  * grouped by the category order the scorecard carries; a category with no
  * matching rows still appears, because an empty category is a rendered state
@@ -195,9 +256,10 @@ export function webSummaryModel(input: WebSummaryModelInput): WebSummaryModel {
     relative,
     global: globalScore,
     counts: countsOf(rows),
-    categories: (sc.categories ?? []).map((category) => ({
-      ...category,
-      rows: byCategory.get(category.id) ?? [],
-    })),
+    categories: (sc.categories ?? []).map((category) => {
+      const categoryRows = byCategory.get(category.id) ?? [];
+      const lanes = laneBlocks(categoryRows, input.registry);
+      return { ...category, rows: categoryRows, ...(lanes ? { lanes } : {}) };
+    }),
   };
 }

@@ -25,6 +25,7 @@ import {
   RELATIVE_SUBLABEL,
   STATUS_ORDER,
   type SummaryCategory,
+  type SummaryLane,
   type SummaryRow,
   statusLabel,
   statusMark,
@@ -107,7 +108,11 @@ ${auditContextEl(model, freshness)}
     if (empty) html += `        <p class="audit-group__note">No checks in this category apply to this site.</p>\n`;
     if (category.rows.length > 0) {
       html += `        <div class="pscore__checks">\n`;
-      for (const row of category.rows) html += renderCheck(row);
+      if (category.lanes) {
+        for (const lane of category.lanes) html += renderLane(lane);
+      } else {
+        for (const row of category.rows) html += renderCheck(row);
+      }
       html += `        </div>\n`;
     }
     html += `      </div>
@@ -123,6 +128,23 @@ ${auditContextEl(model, freshness)}
 </section>
 <script defer src="/js/webmcp.js"></script>
 </article>`;
+  return html;
+}
+
+/**
+ * One protocol lane: its heading, its own rollup, the line saying what the
+ * lane covers, then its rows. A lane with nothing counted shows no rollup,
+ * since "0 / 0" would read as a lane that failed.
+ */
+function renderLane(lane: SummaryLane): string {
+  const count = lane.counted > 0 ? `<span class="web-lane__count">${lane.passed} / ${lane.counted} pass</span>` : '';
+  let html = `    <div class="web-lane" data-lane="${escHtml(lane.id)}">
+      <div class="web-lane__head"><h4 class="web-lane__title">${escHtml(lane.label)}</h4>${count}</div>
+      <p class="web-lane__note">${escHtml(lane.note)}</p>
+`;
+  for (const row of lane.rows) html += renderCheck(row);
+  html += `    </div>
+`;
   return html;
 }
 

@@ -376,6 +376,19 @@ describe('runWebRescore', () => {
       expect(await fpOf(registryWith({ breadcrumb: 'A different label' }))).toBe(base);
     });
 
+    test('a lane or the lane map changing does not reflow the corpus', async () => {
+      // Lanes group MCP rows on the result page, read from the live registry
+      // at render time. No stored scorecard carries one, so a relabelled or
+      // reassigned lane cannot make a cached scorecard stale.
+      const laned = (lane: string, label: string) => ({
+        ...registryWith({ category: 'mcp', lane }),
+        mcp_lanes: { shared: { label, note: 'n' }, legacy: { label: 'L', note: 'n' } },
+      });
+      const base = await fpOf(laned('shared', 'Every MCP server'));
+      expect(await fpOf(laned('legacy', 'Every MCP server'))).toBe(base);
+      expect(await fpOf(laned('shared', 'Any MCP server'))).toBe(base);
+    });
+
     test('anything the audit or a stored row carries still reflows', async () => {
       const base = await fpOf(registryWith({}));
       for (const [field, value] of [
