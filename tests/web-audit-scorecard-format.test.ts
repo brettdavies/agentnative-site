@@ -982,7 +982,7 @@ describe('MCP rows group into protocol lanes in registry order', () => {
       .split('<div class="web-lane" ')
       .slice(1)
       .map((block) => ({
-        lane: /^data-lane="([^"]+)"/.exec(block)?.[1] ?? '',
+        lane: /^data-mcp-lane="([^"]+)"/.exec(block)?.[1] ?? '',
         label: /<h4 class="web-lane__title">([^<]*)<\/h4>/.exec(block)?.[1] ?? '',
         count: /<span class="web-lane__count">([^<]*)<\/span>/.exec(block)?.[1] ?? '',
         ids: [...block.matchAll(/<details class="web-check[^"]*"[^>]* data-id="([^"]+)"/g)].map((m) => m[1]),

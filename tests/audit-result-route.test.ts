@@ -469,7 +469,7 @@ describe('website records', () => {
     };
     const env = await seededEnv({ cache: { [await webKeyFor('https://anc.dev/', SPEC_VERSION)]: record } });
     const page = await (await route('/score/anc.dev', env)).text();
-    const lanes = [...page.matchAll(/<div class="web-lane" data-lane="([a-z]+)">/g)].map((m) => m[1]);
+    const lanes = [...page.matchAll(/<div class="web-lane" data-mcp-lane="([a-z]+)">/g)].map((m) => m[1]);
     expect(lanes).toEqual(['shared', 'legacy', 'modern', 'browser']);
     const twin = await (await route('/score/anc.dev/md', env)).text();
     expect(twin).toContain('### Legacy lane · 2025-06-18 (1/1)');

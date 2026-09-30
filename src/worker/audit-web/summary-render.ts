@@ -138,7 +138,7 @@ ${auditContextEl(model, freshness)}
  */
 function renderLane(lane: SummaryLane): string {
   const count = lane.counted > 0 ? `<span class="web-lane__count">${lane.passed} / ${lane.counted} pass</span>` : '';
-  let html = `    <div class="web-lane" data-lane="${escHtml(lane.id)}">
+  let html = `    <div class="web-lane" data-mcp-lane="${escHtml(lane.id)}">
       <div class="web-lane__head"><h4 class="web-lane__title">${escHtml(lane.label)}</h4>${count}</div>
       <p class="web-lane__note">${escHtml(lane.note)}</p>
 `;
