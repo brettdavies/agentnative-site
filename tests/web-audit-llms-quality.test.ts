@@ -5,6 +5,7 @@ import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
 import { runLlmsTxtQuality } from '../src/worker/audit-web/handlers/llms-txt-quality';
 import type { HandlerContext } from '../src/worker/audit-web/handlers/types';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
+import { stubFetch } from './helpers/stub-fetch';
 
 function makeCheck(partial: Partial<WebCheck> & { id: string }): WebCheck {
   return {
@@ -66,16 +67,9 @@ Use the MCP when you need to search the catalog.
 - [Guide](https://example.com/guide.md)
 `;
 
-function siteFetch(handler: (url: string) => Response): typeof fetch {
-  return (async (input: RequestInfo | URL) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-    return handler(url);
-  }) as typeof fetch;
-}
-
 describe('llms.txt quality trio', () => {
   test('presence passes and format fails as two distinct rows', async () => {
-    const fetchImpl = siteFetch((url) => {
+    const fetchImpl = stubFetch((url) => {
       if (url.endsWith('/llms.txt')) return new Response('# Only a heading\n', { status: 200 });
       return new Response('html', { status: 200, headers: { 'content-type': 'text/html' } });
     });
@@ -88,7 +82,7 @@ describe('llms.txt quality trio', () => {
   });
 
   test('format passes and a broken link misses llms-txt-links', async () => {
-    const fetchImpl = siteFetch((url) => {
+    const fetchImpl = stubFetch((url) => {
       if (url.endsWith('/llms.txt')) return new Response(FORMATTED, { status: 200 });
       if (url.endsWith('/guide.md')) return new Response('gone', { status: 404 });
       return new Response('html', { status: 200, headers: { 'content-type': 'text/html' } });
@@ -103,12 +97,12 @@ describe('llms.txt quality trio', () => {
   });
 
   test('when-to-use heading present vs absent', async () => {
-    const withHeading = siteFetch((url) => {
+    const withHeading = stubFetch((url) => {
       if (url.endsWith('/llms.txt')) return new Response(FORMATTED, { status: 200 });
       if (url.endsWith('/guide.md')) return new Response('# Guide\n\nBody.\n', { status: 200 });
       return new Response('html', { status: 200, headers: { 'content-type': 'text/html' } });
     });
-    const withoutHeading = siteFetch((url) => {
+    const withoutHeading = stubFetch((url) => {
       if (url.endsWith('/llms.txt')) {
         return new Response('# Site\n\n> Summary\n\n- [Guide](https://example.com/guide.md)\n', { status: 200 });
       }
@@ -138,7 +132,7 @@ describe('llms.txt quality trio', () => {
   });
 
   test('all three quality rows are n_a when root llms.txt is absent', async () => {
-    const fetchImpl = siteFetch((url) => {
+    const fetchImpl = stubFetch((url) => {
       if (url.endsWith('/llms.txt')) return new Response('nope', { status: 404 });
       return new Response('html', { status: 200, headers: { 'content-type': 'text/html' } });
     });

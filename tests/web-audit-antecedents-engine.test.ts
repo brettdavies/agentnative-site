@@ -6,6 +6,7 @@
 import { describe, expect, test } from 'bun:test';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
+import { stubFetch } from './helpers/stub-fetch';
 
 function makeCheck(partial: Partial<WebCheck> & { id: string }): WebCheck {
   return {
@@ -49,13 +50,6 @@ async function collect(gen: AsyncGenerator<AuditEvent>): Promise<AuditEvent[]> {
 
 function resultsOf(events: AuditEvent[]) {
   return events.flatMap((e) => (e.type === 'result' ? [e.result] : []));
-}
-
-function stubFetch(handler: (url: string, init?: RequestInit) => Response): typeof fetch {
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-    return handler(url, init);
-  }) as typeof fetch;
 }
 
 describe('runWebAudit two-wave evaluation', () => {

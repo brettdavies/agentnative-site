@@ -5,6 +5,7 @@ import { discoverMcpEndpoint } from '../src/worker/audit-web/discovery';
 import { runWebAudit } from '../src/worker/audit-web/engine';
 import type { WebAuditRegistry } from '../src/worker/audit-web/registry';
 import { isModernProbe } from './helpers/mcp-modern';
+import { stubFetch } from './helpers/stub-fetch';
 
 function modernToolsResponse(): Response {
   return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [{ name: 'a', inputSchema: {} }] } }), {
@@ -18,13 +19,6 @@ function legacyRejectResponse(code = -32022): Response {
     status: 200,
     headers: { 'content-type': 'application/json' },
   });
-}
-
-function stubFetch(handler: (url: string, init?: RequestInit) => Response): typeof fetch {
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-    return handler(url, init);
-  }) as typeof fetch;
 }
 
 const DISCOVERY = {

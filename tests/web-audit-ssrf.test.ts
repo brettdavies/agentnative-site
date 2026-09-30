@@ -12,13 +12,7 @@ import {
   STATUS_ONLY_BODY_BYTES,
   validatePublicUrl,
 } from '../src/worker/audit-web/ssrf';
-
-function stubFetch(handler: (url: string, init?: RequestInit) => Response | Promise<Response>): typeof fetch {
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-    return handler(url, init);
-  }) as typeof fetch;
-}
+import { stubFetch } from './helpers/stub-fetch';
 
 describe('validatePublicUrl', () => {
   test('allows a public https URL', () => {
