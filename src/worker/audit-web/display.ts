@@ -22,7 +22,7 @@
 // stored, so a scorecard without a follow state, trail, or registry
 // fingerprint still reads as not evaluated rather than as an empty record.
 
-import { entryHostOf, type RowHost, rowHostOf } from './provenance';
+import { entryHostOf, type RowHost, recordsRowHosts, rowHostOf } from './provenance';
 import { assembleRemediation, isFixableStatus, resultLine, type WebRemediationCatalog } from './remediation';
 import { categoryRollups } from './score';
 import type { NaReason, ScorecardStatus } from './scorecard';
@@ -98,9 +98,9 @@ export function normalizeScorecardCategories(stored: unknown, registry: DisplayR
 }
 
 /**
- * Give each row that carries neither `hosts` nor `host` the audited host,
- * the reading every surface applies to a row stored before provenance. A
- * payload without a parseable target URL passes through unchanged.
+ * Give each row that recorded no hosts the audited host, the reading every
+ * surface applies to a row stored before provenance. A payload without a
+ * parseable target URL passes through unchanged.
  */
 export function attachDefaultRowHosts(scorecard: unknown): unknown {
   if (!hasResults(scorecard)) return scorecard;
@@ -109,9 +109,7 @@ export function attachDefaultRowHosts(scorecard: unknown): unknown {
   return {
     ...scorecard,
     results: scorecard.results.map((row) =>
-      row.hosts === undefined && row.host === undefined
-        ? { ...row, hosts: [{ host: entryHost }], host: entryHost }
-        : row,
+      recordsRowHosts(row) ? row : { ...row, hosts: [{ host: entryHost }], host: entryHost },
     ),
   };
 }

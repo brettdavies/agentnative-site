@@ -349,6 +349,25 @@ describe('provenance on stored scorecards', () => {
     expect('host' in (byId.get('mcp-tools-list') ?? {})).toBe(false);
   });
 
+  test('a row with a malformed hosts value reads as the audited host in its fields and its result line alike', () => {
+    const stored = {
+      target_url: 'https://example.com/',
+      results: [
+        { id: 'mcp-initialize', status: 'n_a', na_reason: 'declared-host-unreachable', evidence: null, hosts: null },
+      ],
+    };
+    const out = enrichWebScorecardForDisplay(stored, {
+      registry: SPLIT_REGISTRY,
+      catalog: CATALOG,
+      origin: 'https://anc.dev',
+    }) as { results: Array<{ hosts?: unknown; host?: string; result?: string }> };
+    expect(out.results[0]).toMatchObject({
+      hosts: [{ host: 'example.com' }],
+      host: 'example.com',
+      result: 'Not evaluated: example.com did not answer',
+    });
+  });
+
   test("a declared-host reason's result line names the row host, or the audited host for a row without provenance", () => {
     const stored = {
       target_url: 'https://example.com/',

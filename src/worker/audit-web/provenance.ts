@@ -47,7 +47,16 @@ export function entryHostOf(targetUrl: unknown): string | null {
   return typeof targetUrl === 'string' ? hostOf(targetUrl) : null;
 }
 
-/** A row's hosts. A row carrying neither `hosts` nor `host` reads as evaluated at the audited host. */
+/**
+ * Whether a row recorded where its evidence came from. One that did not,
+ * whether the fields are missing or malformed, reads as evaluated at the
+ * audited host on every surface.
+ */
+export function recordsRowHosts(row: { hosts?: unknown; host?: unknown }): boolean {
+  return Array.isArray(row.hosts) || typeof row.host === 'string';
+}
+
+/** A row's hosts, or the audited host for a row that recorded none. */
 function readRowHosts(row: { hosts?: unknown; host?: unknown }, entryHost: string | null): string[] {
   if (Array.isArray(row.hosts)) {
     return row.hosts.flatMap((entry) => (isRecord(entry) && typeof entry.host === 'string' ? [entry.host] : []));
