@@ -34,8 +34,9 @@ execution: code
   slice at the KTD2 values, or if the SEP-2127 PR merges with a card shape that differs from the vendored extension
   schema before U13 lands (re-cut U13 against the merged text).
 - **Tail ownership:** the implementer owns build, unit, integration, and staging verification per unit, including the
-  failing-first proof for each new test. Brett owns the production release cut, the secret creation step and the reflow
-  observation in the Rollout section, and the sibling-repo doc edits under Deferred to Follow-Up Work.
+  failing-first proof for each new test and the conformance corpus regeneration in every unit that changes engine output
+  (KTD22). Brett owns the production release cut, the secret creation step and the reflow observation in the Rollout
+  section, and the sibling-repo doc edits under Deferred to Follow-Up Work.
 
 ---
 
@@ -83,9 +84,10 @@ encodes has moved.
 - KD6. **The spec-drift poll is a GitHub Actions cron over a checked-in manifest that opens issues** (session-settled:
   user-approved — chosen over a Worker cron with a freshness page: no runtime coupling, PR-reviewed manifest). Governs
   R28, R29, R30, R31.
-- KD7. **Engine-first and independent of the unified audit funnel plan, with provenance as additive fields**
-  (session-settled: user-approved — chosen over sequencing after that plan or folding into it: fairness fixes ship
-  without waiting on a four-phase migration). Governs R8, R33.
+- KD7. **Engine-first, with provenance as additive fields the unified audit funnel's shared surfaces carry**
+  (session-settled: user-approved — chosen over folding into the funnel plan: fairness fixes ship as engine changes, and
+  the funnel's envelope, event union, transact endpoint, and progress page take the new fields without a shape change).
+  Governs R8, R33.
 - KD8. **Curated seeds re-score on release; other cached audits refresh lazily with a registry marker**
   (session-settled: user-approved — chosen over a full backfill and over no rescore: bounded cost, honest boards).
   Governs R32, R33, R34.
@@ -216,12 +218,12 @@ encodes has moved.
 
 **Controls**
 
-- R35. A follow-declarations flag, default on, exists on the MCP tool, the audit route body, the web form, the WebMCP
-  tool, and the local runner; the effective value after the kill switch is stored in the scorecard and on the run
-  record.
-- R36. An opted-out run bypasses the serve-cached path, streams and returns its result without a share URL, rejects a
-  public-listing change, writes nothing to storage, rebuilds no aggregate, and never appears on a board. Telemetry still
-  records the run with its effective flag.
+- R35. A follow-declarations flag, default on, exists on the MCP tool, the transact endpoint body, the web form, and the
+  local runner, and the WebMCP page state reports the form's choice; the effective value after the kill switch is stored
+  in the scorecard and on the run record.
+- R36. An opted-out run bypasses the serve-cached path, never joins or hosts a shared in-flight run, streams and returns
+  its result with no result URLs, rejects a public-listing change, writes nothing to storage, rebuilds no aggregate, and
+  never appears on a board. Telemetry still records the run with its effective flag.
 - R37. The MCP tool description and the server instructions disclose that a default-on audit probes third-party hosts a
   site declares, distinguishing MCP endpoints (wire-probed only after the target's own artifact names them) from API
   anchor hosts (document fetches and one nonsense-path GET on the entry site's declaration alone), name the caps, and
@@ -251,17 +253,27 @@ encodes has moved.
 - Wire probes reach an off-origin MCP endpoint only when its host publishes a SEP-2127 card or RFC 9728 metadata naming
   it; an open server that publishes neither is recorded reciprocity-refused with remediation (R24), not evaluated.
 - Robots.txt is not consulted for any probe in this plan (KD12).
-- The unified audit funnel plan's URL and envelope changes stay in that plan; this plan adds fields both envelopes can
-  render (KD7).
+- The unified audit funnel's routes, envelope shape, and event union stay as that plan built them; this plan adds
+  optional fields to them and no funnel route (KD7).
 
-#### Contract for the unified audit funnel
+#### Surfaces on the unified audit funnel
 
-The funnel plan absorbs the result page, deletes the live scoring client, and rewrites the WebMCP result client and MCP
-tools. To keep the second lander's work mechanical, this plan commits to: the streamed check event gains optional `host`
-and `na_reason`; the row model gains `hosts[]` and `host` (KTD4); the scorecard gains `declared_hosts[]`,
-`follow_declarations`, and `registry_fingerprint`; the fingerprint renders inside the funnel's freshness object once
-that exists, with the pre-funnel placement in the freshness line; and the funnel's cross-surface fixtures pin
-`WEB_SCHEMA_VERSION` 0.5.
+The funnel's shared surfaces carry this plan's fields, and the units edit them in place:
+
+- Streamed check event: the `check` variant of the shared event union in `src/shared/audit-events.ts` gains optional
+  `host` and `na_reason`, and the web core's `checkEvent` mapping copies both from the engine result instead of dropping
+  the reason (U6). Only the web lane emits check events.
+- Rows and scorecard: rows gain `hosts[]` and `host` (KTD4); the scorecard gains `declared_hosts[]`,
+  `follow_declarations`, and `registry_fingerprint`. The shared envelope carries them inside `scorecard` with no
+  envelope change (U1).
+- Freshness: the fingerprint prefix renders in the web freshness sentence and markdown line from `summary-freshness.ts`,
+  which fill the result spine's freshness slot on `/score/<target>` and the twin; the envelope's `freshness` object
+  stays lane-neutral, and JSON readers read the value from the scorecard (U12).
+- Transient results: an opted-out run ends in an envelope with null result URLs, the shape the CLI lane already returns
+  for curated names, and the progress page's null-URL branch renders it in place (KTD23, U5).
+- Single-flight: an opted-out request neither reads the in-flight flags nor claims an `AuditJob`, so it never joins a
+  followed run and no followed request joins it (KTD23, U5).
+- The funnel's cross-surface fixtures pin `WEB_SCHEMA_VERSION` 0.5 from U1 on.
 
 #### Deferred to Follow-Up Work
 
@@ -275,6 +287,7 @@ that exists, with the pre-funnel placement in the freshness line; and the funnel
   re-pointing the legacy-alias check's canonical target to the SEP-2127 location, and dropping SEP-1649 parsing.
 - A repo test that scans every workflow's `uses:` lines for full SHAs, generalized from the U11 scanner.
 - Sibling-repo edits: the stability-tier solutions doc naming SEP-1649 as the MCP card.
+- The Rust web-audit port in `agentnative-cli` reproducing each regenerated conformance golden (KTD22).
 
 ### Acceptance Examples
 
@@ -291,8 +304,9 @@ that exists, with the pre-funnel placement in the freshness line; and the funnel
   - **Covers:** R35, R36, R12
   - **Given:** the same site, with a cached followed scorecard less than a minute old
   - **When:** audited with following off
-  - **Then:** the cached scorecard is not served, MCP and API hygiene rows read follow-disabled, the result streams
-    without a share URL, no Cloudflare R2 object or aggregate is written, and the board is unchanged
+  - **Then:** the cached scorecard is not served, MCP and API hygiene rows read follow-disabled, the result streams with
+    no result URLs and renders in place, no in-flight flag or audit job is claimed, no Cloudflare R2 object or aggregate
+    is written, and the board is unchanged
 - AE3. Reciprocity refused
   - **Covers:** R3, R4, R11
   - **Given:** a card naming an off-origin URL that answers GET with 405 and `Allow: POST` but publishes no card and no
@@ -331,7 +345,7 @@ that exists, with the pre-funnel placement in the freshness line; and the funnel
 ### Sources
 
 - Audit evidence: the vault note `projects/brettdavies-agentnative/2026-09-10-stripe-surface-audits.md` and the hosted
-  scorecards at `https://anc.dev/web/stripe.dev` and `https://anc.dev/web/docs.stripe.com`.
+  scorecards at `https://anc.dev/score/stripe.dev` and `https://anc.dev/score/docs.stripe.com`.
 - SEP-2127 PR and branch text: `https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2127`; extension repo
   with `schema.json`, `schema.ts`, `docs/discovery.md`, and examples:
   `https://github.com/modelcontextprotocol/experimental-ext-server-card`. Status at planning: PR open, extension labeled
@@ -358,9 +372,10 @@ that exists, with the pre-funnel placement in the freshness line; and the funnel
   `docs/solutions/conventions/verify-the-real-implementation-when-a-di-seam-sits-above-the-risk.md`,
   `docs/solutions/conventions/registry-walk-coverage-tests-prevent-silent-omission.md`,
   `docs/solutions/developer-experience/cloudflare-workers-same-account-fetch-reachability-dev-vs-prod-2026-07-20.md`.
-- Related plans: `docs/plans/2026-09-09-1123-feat-unified-audit-funnel-plan.md` (envelope and URL migration this plan
-  stays independent of), `docs/plans/2026-08-26-001-feat-mcp-baseline-adoption-plan.md` (the `na_reason` schema bump
-  precedent), `docs/plans/2026-08-07-001-feat-web-public-listing-opt-in-plan.md` (additive-field precedent).
+- Related plans: `docs/plans/2026-09-09-1123-feat-unified-audit-funnel-plan.md` (the envelope, event union, transact
+  endpoint, and progress page this plan's inputs and readers extend),
+  `docs/plans/2026-08-26-001-feat-mcp-baseline-adoption-plan.md` (the `na_reason` schema bump precedent),
+  `docs/plans/2026-08-07-001-feat-web-public-listing-opt-in-plan.md` (additive-field precedent).
 
 ---
 
@@ -387,14 +402,15 @@ that exists, with the pre-funnel placement in the freshness line; and the funnel
   row resolves budget-exceeded with the domain-budget cause before wave 1, so no handler ever consults the budget. A
   rate-limit binding keyed by the same domain is the 60-second burst floor on that same reservation call, because KV
   alone is get-then-put on an eventually consistent store. The budget is injected into the engine as a port so the
-  route, the MCP tool, and the rescore Workflow all supply it and tests supply memory. Exhaustion of any cap resolves
-  dependent rows to not-applicable with the matching R12 reason and never sets the incomplete flag. Values are the
-  implementer's to tune against the curated seeds within the stop condition. Instantiates R4, R6.
+  transact core, the MCP tool, and the rescore Workflow all supply it, and tests, the local runner, and the conformance
+  runner supply memory. Exhaustion of any cap resolves dependent rows to not-applicable with the matching R12 reason and
+  never sets the incomplete flag. Values are the implementer's to tune against the curated seeds within the stop
+  condition. Instantiates R4, R6.
 - KTD3. **Every evidence item carries a `host` field, and follow evidence lives in its own structure.** Discovery
   evidence stays entry-origin, so the reachability predicate is untouched and R5 holds by construction. The host field
   exists for provenance derivation (KTD4). Instantiates R5, R8.
 - KTD4. **Provenance rides as additive fields derived from evidence; new reasons bump the schema version.** Each stored
-  row gains `hosts[]` derived from the distinct evidence hosts in evaluation order (per-entry status only on
+  row gains `hosts[]` derived from the distinct evidence hosts in declaration order (per-entry status only on
   multi-target rows) and `host` as a convenience when exactly one host was evaluated; a row missing both reads as the
   entry host. The scorecard gains `declared_hosts[]` (R11), `follow_declarations`, and `registry_fingerprint`. Fields
   are additive with no bump, following the `public_listing` precedent. The five new `na_reason` values bump
@@ -470,11 +486,14 @@ that exists, with the pre-funnel placement in the freshness line; and the funnel
   Scheduled and dispatched runs resolve from `main`, so the R31 proof runs after the workflow ships, with `--ref`
   pointing at a forced-drift branch. Instantiates KD6 (R29, R30, R31).
 - KTD13. **The registry fingerprint hashes the registry plus a follow-policy version constant; the switch is recorded
-  beside it.** The fingerprint helper moves to the registry module so the route, the MCP tool, and the rescore Workflow
-  stamp the same value. The rescore gate compares the fingerprint and a separately recorded normalized switch boolean,
+  beside it.** The fingerprint helper moves to the registry module with its exclusion of site-only registry fields
+  intact, so the transact core, the MCP tool, and the rescore Workflow stamp the same value. The write paths stamp it
+  after the engine returns and the engine never does, so conformance goldens carry no fingerprint and the CLI port needs
+  no registry hash. The rescore gate compares the fingerprint and a separately recorded normalized switch boolean,
   forcing a reflow on its next trigger when either moves; hashing the live secret would make staging and production
-  disagree and mint a reflow for `TRUE` versus `true`. The stored prefix is the first 12 characters, written by the
-  single board-metadata writer as well as into the scorecard. Instantiates R32, R34.
+  disagree and mint a reflow for `TRUE` versus `true`. The stored prefix is the first 12 characters, written into the
+  scorecard and read from it by the single board-metadata writer, so listing patches and the backfill carry it forward.
+  Instantiates R32, R34.
 - KTD14. **`WEB_AUDIT_FOLLOW_ENABLED` is a surgical kill switch** with the same shape as `WEB_AUDIT_ENABLED`: a `vars`
   binding on staging, a secret in production created before the code that reads it ships, absent reads as off, bound in
   the Worker env and the rescore Workflow env, and stored as the effective follow state. Instantiates R7, R35.
@@ -521,6 +540,25 @@ that exists, with the pre-funnel placement in the freshness line; and the funnel
   retained body in wave 2 with no request. `api-catalog` and `mcp-server-card` use it; `openapi` uses it for an
   off-origin description. This removes the double fetch of the card and the wave-1 dependency that would otherwise sit
   between the follow slice and the API category. Instantiates R17, R20, R22.
+- KTD22. **Every unit that changes engine output regenerates the conformance corpus in the same PR.**
+  `tests/web-audit-conformance-corpus.test.ts` pins the engine for the CLI's Rust port on every PR: the committed corpus
+  under `tests/fixtures/web-audit-conformance/` must equal a fresh `bun scripts/web-audit/gen-fixtures.ts` run byte for
+  byte, two generations must be identical, every registry check id must be some scenario's subject, and no registry
+  pattern may use lookaround or a backreference. U1, U13, U2, U3, U4, and U8 each regenerate it and add scenarios for
+  what they introduce. Scenarios reach declared hosts through ordinary exchanges, since matching is by full URL. The
+  conformance runner is an engine caller: it reads an optional `follow_declarations` input from `scenario.json` (default
+  true, documented in the corpus README) and supplies an always-admit memory budget, so no budget state reaches a
+  golden. New ordered output (the trail, `hosts[]`) follows declaration order, never completion order, because the
+  two-generation gate and the port both need determinism.
+- KTD23. **An opted-out run stays outside single-flight and returns through the null-URL path.** For a request with
+  `follow_declarations: false`, the transact endpoint skips the in-flight read, the `AuditJob` claim, and the flag
+  marks, extending the explicit-listing no-attach rule so neither an opted-out nor a followed request receives the
+  other's run, and the job log holds nothing for it. The serve tier and the disabled-with-cache stale serve both step
+  aside: an opted-out request is never answered from a stored followed scorecard, and with audits disabled it receives
+  the disabled error. The web envelope builder gains a transient variant with null result URLs and `summary_html` from
+  the web summary renderer, so the progress page's existing null-URL branch renders the result in place. The MCP tool
+  applies the same rules on its inline path: no in-flight wait, no fresh-window serve, no stale serve. Instantiates KD11
+  (R36).
 
 ### High-Level Technical Design
 
@@ -605,7 +643,7 @@ depends only on U10 and has no code dependency on Phases A and B beyond it.
 - Rate limits stay keyed by caller IP; the per-domain budget is a new dimension, injected into the engine so the rescore
   Workflow honors it, with its own rate-limit binding for the burst floor.
 - The schema bump touches the schema doc, its drift-guard test, the Python scoring parity model, and every `na_reason`
-  copy site in the renderers and the WebMCP client.
+  copy site, which U1 gathers into one shared phrase table the worker renderers and the progress page both read.
 - Followed-host findings publish under the entry domain's `public_listing`. An MCP endpoint is wire-probed only after
   its own host published an artifact naming it; API anchor hosts receive document fetches and one nonsense-path GET each
   on the entry site's declaration alone, bounded by the KTD2 caps, and the tool description states both.
@@ -617,6 +655,9 @@ depends only on U10 and has no code dependency on Phases A and B beyond it.
   new id, so the id replacement moves no score.
 - Board metadata gains the fingerprint prefix through its single writer; the board ranks 0.4 and 0.5 objects together
   until seeds reflow and user objects refresh.
+- Every engine change reaches the CLI's Rust port through the conformance corpus; a unit that changes engine output
+  without regenerating it fails the PR gate (KTD22).
+- The shared `check` event gains optional fields; only the web lane emits it, so the CLI lane's stream is unchanged.
 
 ### Risks & Dependencies
 
@@ -633,24 +674,27 @@ depends only on U10 and has no code dependency on Phases A and B beyond it.
 - Seeds that share a declared host drain that domain's budget when they reflow together; the reflow does not persist a
   seed whose rows carry a domain-budget-caused budget-exceeded, and the hourly ceiling bounds how many same-domain seeds
   can reflow in one hour.
+- The CLI port trails the corpus: each regenerated golden is parity work in `agentnative-cli` until its Rust engine
+  reproduces it, and the corpus README's scenario format changes once, when `scenario.json` gains `follow_declarations`.
 
 ### Rollout
 
 Standing facts: a Cloudflare rollback fires no deploy hook, so a post-rollback reflow is triggered by hand through the
-rescore route; a switch flip changes the recorded state but reflows only on the next rescore trigger; staging can audit
-public third parties but cannot audit itself or reproduce production egress; 53 curated seeds include anc.dev,
-docs.stripe.com, and stripe.dev (added in U12), so the reflow itself yields the self-audit and the AE1 observation on
-stripe.dev, which appears on the public board like every seed; docs.stripe.com declares no hosts.
+`POST /api/web-rescore` hook; a switch flip changes the recorded state but reflows only on the next rescore trigger;
+staging can audit public third parties but cannot audit itself or reproduce production egress; 53 curated seeds include
+anc.dev, docs.stripe.com, and stripe.dev (added in U12), so the reflow itself yields the self-audit and the AE1
+observation on stripe.dev, which appears on the public board like every seed; docs.stripe.com declares no hosts.
 
 Phase A:
 
 - Pre-deploy: the four local gates green; the wrangler dry run green with the new var declared on staging only, pinned
   by the wrangler-config test; a staging audit of stripe.dev whose terminal scorecard carries a non-empty trail, MCP
-  rows hosted at mcp.stripe.com, and a 12-character fingerprint; an opted-out staging audit that streams, is not served
-  from cache on an immediate repeat, and leaves the board unchanged; the local runner against production anc.dev content
-  scoring 100; a recorded baseline of the incomplete count and elapsed p95 from the last weekly rescore's run records; a
-  render check that the currently deployed build renders a 0.5 fixture without throwing, since the rollback window
-  serves 0.5 objects to 0.4 readers.
+  rows hosted at mcp.stripe.com, and a 12-character fingerprint; an opted-out staging audit from the `/audit` form that
+  streams, renders in place on `/scoring`, runs beside a concurrent followed audit of the same site without joining it,
+  is not served from cache on an immediate repeat, and leaves the board unchanged; the local runner against production
+  anc.dev content scoring 100; a recorded baseline of the incomplete count and elapsed p95 from the last weekly
+  rescore's run records; a render check that the currently deployed build renders a 0.5 fixture without throwing, since
+  the rollback window serves 0.5 objects to 0.4 readers.
 - Deploy: record the last-good deployment id; create the production secret before the release merges (an unset secret
   reads as off, and a name shared with a var is rejected); cut the release branch, run the release preflight, merge, and
   watch the run to completion including the production-smoke job's own conclusion.
@@ -691,13 +735,14 @@ Phase C:
 ### Documentation / Operational Notes
 
 - `AGENTS.md` discovery-siblings, kill-switches, and spec-revision-drift-gate paragraphs, `content/mcp-skill.md`,
-  `content/web-audit.md`, `content/web-scorecard-schema.md`, and `docs/runbooks/web-audit-operations.md` change with
-  their units.
+  `content/_audit-web.md` (the web lane of `/audit`), `content/web-scorecard-schema.md`, and
+  `docs/runbooks/web-audit-operations.md` change with their units.
 - `docs/runbooks/mcp-operator.md` gains the follow kill switch beside the existing four.
 - A new `docs/runbooks/spec-drift-poll.md` describes the manifest fields, how to re-pin after a reviewed change, the
   forced-drift proof, and the `main`-only execution rule.
 - `CONCEPTS.md` carries entries for declared host, follow phase, reciprocity, endpoint of record, the declared-hosts
   trail, the registry fingerprint, and watched source; its server-card entry moves to the SEP-2127 model in U9.
+- `tests/fixtures/web-audit-conformance/README.md` documents the `follow_declarations` scenario input when U2 adds it.
 
 ---
 
@@ -706,15 +751,15 @@ Phase C:
 | U-ID | Title                                                    | Key files                                                                                                                                                            | Depends on  |
 | ---- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
 | U10  | Drift manifest and compare script                        | `src/data/standards/watch.yaml`, `scripts/standards/check-drift.ts`                                                                                                  | none        |
-| U1   | Scorecard fields, reasons, resolver reasons, schema bump | `scorecard.ts`, `handlers/types.ts`, `antecedents/index.ts`, `engine.ts`, `content/web-scorecard-schema.md`, `scripts/scoring/score_model.py`                        | none        |
+| U1   | Scorecard fields, reasons, resolver reasons, schema bump | `scorecard.ts`, `handlers/types.ts`, `antecedents/index.ts`, `engine.ts`, `shared/web-audit-findings.ts`, `content/web-scorecard-schema.md`, `scripts/scoring/score_model.py` | none        |
 | U13  | SEP-2127 discovery order, parser, retained documents     | `discovery.ts`, `registry.ts`, `13-web-audit-registry.mjs`, `handlers/http.ts`, `assert.ts`                                                                          | U1          |
 | U2   | Follow module with control-bound reciprocity             | `follow.ts` (new), `discovery.ts`, `engine.ts`, `ssrf.ts`, `assert.ts`, `antecedents/context.ts`                                                                     | U1, U13     |
 | U3   | Auth-aware MCP presence and check split                  | `handlers/mcp.ts`, `antecedents/mcp.ts`, `registry.yaml`, `remediation.yaml`                                                                                         | U1, U2      |
 | U4   | API category on catalog anchors                          | `antecedents/api.ts`, `handlers/api-hygiene.ts`, `registry.yaml`                                                                                                     | U1, U2, U13 |
-| U5   | Follow flag, opt-out mode, kill switch, disclosure       | `mcp/tools/web-audit.ts`, `route.ts`, `07-subpages.mjs`, `webmcp-audit.ts`, `scripts/web-audit/audit.ts`, `wrangler.jsonc`, `worker/index.ts`, `rescore-workflow.ts` | U1, U2      |
-| U6   | Provenance in every reader                               | `summary-model.ts`, `summary-markdown.ts`, `summary-render.ts`, `display.ts`, `remediation.ts`, `mcp/tools/web-remediation.ts`, `route.ts`                           | U1          |
-| U7   | Per-domain budget port, self-target handling, logging    | `limiter.ts`, `engine.ts`, `follow.ts`, `audit-log.ts`, `wrangler.jsonc`                                                                                             | U2          |
-| U12  | Release: fingerprint helper, marker, reflow rules        | `registry.ts`, `rescore-workflow.ts`, `cache.ts`, `summary-freshness.ts`, `route.ts`, `mcp/tools/web-audit.ts`                                                       | U1, U5      |
+| U5   | Follow flag, opt-out mode, kill switch, disclosure       | `mcp/tools/web-audit.ts`, `audit/api.ts`, `audit-web/core.ts`, `audit-form.mjs`, `audit-stash.ts`, `scoring.ts`, `scripts/web-audit/audit.ts`, `wrangler.jsonc`, `rescore-workflow.ts` | U1, U2      |
+| U6   | Provenance in every reader                               | `summary-model.ts`, `summary-markdown.ts`, `summary-render.ts`, `display.ts`, `remediation.ts`, `core.ts`, `scoring-view.ts`, `mcp/tools/web-remediation.ts`         | U1          |
+| U7   | Per-domain budget port, self-target handling, logging    | `limiter.ts`, `engine.ts`, `follow.ts`, `core.ts`, `audit-log.ts`, `wrangler.jsonc`                                                                                  | U2          |
+| U12  | Release: fingerprint helper, marker, reflow rules        | `registry.ts`, `rescore-workflow.ts`, `cache.ts`, `summary-freshness.ts`, `core.ts`, `mcp/tools/web-audit.ts`                                                        | U1, U5      |
 | U8   | Card scoring and the retired card id                     | `registry.yaml`, `remediation.yaml`, `13-web-audit-registry.mjs`, `15-web-audit-skills.mjs`, `display.ts`, `engine.ts`, `assert.ts`, `handlers/http.ts`              | U13, U6     |
 | U9   | anc.dev's own card and catalog                           | `11a-discovery-emit.mjs`, `worker/index.ts`, `mcp/descriptor-paths.ts`, `AGENTS.md`, `content/mcp-skill.md`, `CONCEPTS.md`                                           | U8          |
 | U11  | Drift workflow and issue upsert                          | `.github/workflows/spec-drift.yml`, `docs/runbooks/spec-drift-poll.md`                                                                                               | U10         |
@@ -730,20 +775,25 @@ Phase C:
 - **Files:** `src/worker/audit-web/scorecard.ts`, `src/worker/audit-web/handlers/types.ts`,
   `src/worker/audit-web/antecedents/index.ts`, `src/worker/audit-web/engine.ts`, `src/worker/audit-web/cache.ts`,
   `src/worker/audit-web/display.ts`, `src/worker/audit-web/summary-model.ts`, `src/worker/audit-web/remediation.ts`,
-  `content/web-scorecard-schema.md`, `scripts/scoring/score_model.py`, `tests/fixtures/web-audit-score-parity.json`,
-  `tests/helpers/stub-fetch.ts` (new, extracted), `tests/web-audit-scorecard-format.test.ts`,
-  `tests/web-audit-display-enrich.test.ts`, `tests/web-audit-two-score.test.ts`.
+  `src/shared/web-audit-findings.ts`, `content/web-scorecard-schema.md`, `scripts/scoring/score_model.py`,
+  `tests/fixtures/web-audit-score-parity.json`, `scripts/web-audit/conformance-scenarios.ts`,
+  `tests/fixtures/web-audit-conformance/`, `tests/helpers/stub-fetch.ts` (new, extracted),
+  `tests/web-audit-scorecard-format.test.ts`, `tests/web-audit-display-enrich.test.ts`,
+  `tests/web-audit-two-score.test.ts`, `tests/web-audit-remediation-assembly.test.ts`.
 - **Approach:**
   1. Add `hosts[]` and `host` per KTD4 to the stored row type and to the compact-row builder, deriving them from
      evidence hosts.
   2. Add `declared_hosts[]`, `follow_declarations`, and `registry_fingerprint` at the top level; add them to the
      documented top-level set the drift guard pins, and to the schema doc's example.
-  3. Widen `NaReason` with the five R12 values, add one result-line arm per value, and bump `WEB_SCHEMA_VERSION` to 0.5
-     with the doc's version literal.
+  3. Widen `NaReason` with the five R12 values and move the union and its phrase table into
+     `src/shared/web-audit-findings.ts`, so `resultLine` and the progress page (U6) read one table; bump
+     `WEB_SCHEMA_VERSION` to 0.5 with the doc's version literal.
   4. Widen the antecedent resolution to carry an optional reason and make the gate stamp it (KTD20).
   5. Apply the KTD4 coercions in the display enrichment, the summary model, and the remediation result line; the scoring
      input shape does not change, so the Python parity model gets an assertion, not a change.
   6. Extract the shared `stubFetch` helper from the existing suites (KTD18).
+  7. Regenerate the conformance corpus (KTD22) so every golden carries the 0.5 literal and any new field the engine
+     emits.
 - **Patterns to follow:** the `public_listing` additive-field change; the `na_reason` widening in the MCP baseline
   adoption plan; the `unprobed` field's path through the five hops; the registry-walk coverage convention for closed
   unions.
@@ -754,12 +804,13 @@ Phase C:
     trail, and an unknown marker; no reader throws.
   - The schema doc's version literal and documented top-level set match the code after the bump; the drift guard fails
     when one of the three new top-level fields is removed from the doc example.
-  - A registry-walk test over the `NaReason` union proves every value has a result-line arm and none falls through to
-    the generic line.
+  - A registry-walk test over the `NaReason` union proves every value has an entry in the shared phrase table and none
+    falls through to the generic line.
   - A resolver returning a reason produces a row whose `na_reason` is that reason, and a resolver returning none still
     stamps antecedent-unmet.
+  - The corpus gate passes against the regenerated goldens.
 - **Verification:** the scorecard-format, display-enrich, and two-score suites pass; the schema doc shows 0.5 and the
-  new fields; the parity model test asserts no scoring-input change.
+  new fields; the parity model test asserts no scoring-input change; the corpus gate passes.
 
 ### U13. SEP-2127 discovery order, parser, retained documents
 
@@ -770,8 +821,9 @@ Phase C:
 - **Files:** `src/worker/audit-web/discovery.ts`, `src/worker/audit-web/registry.ts`, `src/worker/audit-web/engine.ts`,
   `src/worker/audit-web/handlers/http.ts`, `src/worker/audit-web/assert.ts`, `src/build/13-web-audit-registry.mjs`,
   `src/data/web-audit/registry.yaml`, `src/data/web-audit/server-card.schema.json` (vendored, new),
-  `scripts/sync-server-card-schema.sh` (new), `scripts/SYNCS.md`, `tests/web-audit-discovery.test.ts`,
-  `tests/web-audit-mcp-tools.test.ts`, `tests/web-audit-rescore-workflow.test.ts`.
+  `scripts/sync-server-card-schema.sh` (new), `scripts/SYNCS.md`, `scripts/web-audit/conformance-scenarios.ts`,
+  `tests/fixtures/web-audit-conformance/`, `tests/web-audit-discovery.test.ts`, `tests/web-audit-mcp-tools.test.ts`,
+  `tests/web-audit-rescore-workflow.test.ts`.
 - **Approach:**
   1. Add `ai_catalog` and `card_suffix` to the discovery config with build validation, and add them to every fixture
      that carries the config.
@@ -782,6 +834,9 @@ Phase C:
      `transport`, `mcp_endpoint`, or `url` as SEP-1649-shaped.
   4. Add the `retained-document` eval rule to the registry vocabulary and the engine (KTD21).
   5. Vendor the extension `schema.json` with a sync script and list it in the syncs index.
+  6. Add the requests the new discovery order makes (the ai-catalog read and the `<endpoint>/server-card` probe) to
+     every scenario that disallows unmatched requests, add scenarios for the catalog, suffix, and legacy card paths, and
+     regenerate the corpus (KTD22); the new registry entries use no lookaround or backreference.
 - **Execution note:** Pin the vendored schema's commit in the drift manifest (U10) so the poll flags a shape change.
 - **Patterns to follow:** the discovery config validation in the registry build step; `scripts/sync-spec.sh` for the
   pinned-SHA sync convention; `retain_body` handling for retained bodies.
@@ -798,8 +853,9 @@ Phase C:
   - The api-catalog is retained during discovery and is absent from wave 1.
   - The registry build rejects a check declaring `retained-document` without a retained key, and rejects a discovery
     config missing the two new keys.
+  - The corpus gate passes with one scenario per card generation.
 - **Verification:** the discovery suite covers all three generations and the catalog paths; the registry builds; the
-  MCP-tool and rescore fixtures carry the new config keys.
+  MCP-tool and rescore fixtures carry the new config keys; the corpus gate passes.
 
 ### U2. Follow module with control-bound reciprocity
 
@@ -812,7 +868,9 @@ Phase C:
   `src/worker/audit-web/antecedents/context.ts`, `src/worker/audit-web/handlers/shared.ts`,
   `src/worker/audit-web/handlers/types.ts`, `src/worker/audit-web/handlers/mcp.ts`,
   `src/worker/audit-web/handlers/cors-preflight.ts`, `src/worker/audit-web/handlers/http.ts`,
-  `tests/web-audit-discovery.test.ts`, `tests/web-audit-ssrf.test.ts`, `tests/web-audit-follow.test.ts` (new).
+  `tests/web-audit-discovery.test.ts`, `tests/web-audit-ssrf.test.ts`, `tests/web-audit-follow.test.ts` (new),
+  `scripts/web-audit/conformance-corpus.ts`, `scripts/web-audit/conformance-scenarios.ts`,
+  `tests/fixtures/web-audit-conformance/`.
 - **Approach:**
   1. Extract discovery's budget, concurrent-probe, and exhaustion idioms into the follow module and have discovery
      import them, so neither the engine nor discovery grows.
@@ -829,6 +887,9 @@ Phase C:
   6. Choose the endpoint of record per R10 and populate the trail per R11; add a `follow` result to the antecedent
      context so resolvers can stamp the R12 reasons.
   7. Thread the follow flag from the engine input so a false value skips the slice.
+  8. Emit the trail in declaration order; teach the conformance runner the optional `follow_declarations` scenario input
+     and document it in the corpus README; add scenarios for a reciprocity admit, a collapse case, a redirect hop, the
+     host cap, and follow-disabled; and regenerate the corpus (KTD22).
 - **Execution note:** Start with a failing test that a card pointing off-origin, with a card at the target naming that
   endpoint, yields an endpoint of record; observe today's drop first.
 - **Patterns to follow:** the fail-closed proof-of-control pattern in `docs/solutions/design-patterns/`; `guardedFetch`
@@ -865,8 +926,9 @@ Phase C:
     reason; a third-party `workers.dev` host is followed.
   - IPv4 and IPv6 literal endpoints are never fetched and are recorded blocked.
   - With the follow flag false, no off-origin request is made and dependent rows carry follow-disabled.
-- **Verification:** the discovery and SSRF suites pass with the inverted drop expectation; the new follow suite passes;
-  the curated seeds still complete under the local runner within the deadline.
+  - Two generations of the follow scenarios are byte-identical even though the slice probes hosts concurrently.
+- **Verification:** the discovery and SSRF suites pass with the inverted drop expectation; the new follow suite and the
+  corpus gate pass; the curated seeds still complete under the local runner within the deadline.
 
 ### U3. Auth-aware MCP presence and check split
 
@@ -878,7 +940,8 @@ Phase C:
   `src/worker/audit-web/antecedents/index.ts`, `src/worker/audit-web/antecedents/context.ts`,
   `src/worker/audit-web/registry.ts`, `src/build/13-web-audit-registry.mjs`, `src/data/web-audit/registry.yaml`,
   `src/data/web-audit/remediation.yaml`, `tests/web-audit-handlers.test.ts`, `tests/web-audit-antecedents-mcp.test.ts`,
-  `tests/web-audit-auth-aware.test.ts` (new).
+  `tests/web-audit-auth-aware.test.ts` (new), `scripts/web-audit/conformance-scenarios.ts`,
+  `tests/fixtures/web-audit-conformance/`.
 - **Approach:**
   1. Consume the U2 metadata resolver to establish presence with auth required, including the differential control from
      KTD5.
@@ -892,6 +955,8 @@ Phase C:
      the discriminating, negotiation, and no-JSON-RPC arms, so a 401 on an endpoint with established auth-required
      presence resolves not-applicable and `server/discover` answering 401 leaves the modern lane unknown; leave the
      typed-refusal status set unchanged, since the conformance rows' accept probe shares it.
+  6. Add corpus scenarios for a protected endpoint and an open one so each new check id is some scenario's subject, and
+     regenerate (KTD22).
 - **Patterns to follow:** the existing `mcp-auth` resolver and challenge helper; the MCP op table; the typed-refusal
   vocabulary; the registry sync rule.
 - **Test scenarios:**
@@ -911,8 +976,9 @@ Phase C:
   - A protected endpoint leaves `mcp-modern-version-reject` probed rather than absent-unprobed, and a 401 answering the
     malformed-body probe reads auth-required, not pass.
   - Every new check id has a remediation entry; the build fails when one is missing.
+  - The corpus gate passes with each new check id covered.
 - **Verification:** the handler, antecedent, and new auth-aware suites pass; the registry build validates the new
-  antecedent.
+  antecedent; the corpus gate passes.
 
 ### U4. API category on catalog anchors
 
@@ -922,7 +988,8 @@ Phase C:
 - **Files:** `src/worker/audit-web/antecedents/api.ts`, `src/worker/audit-web/handlers/api-hygiene.ts`,
   `src/worker/audit-web/handlers/shared.ts`, `src/data/web-audit/registry.yaml`,
   `tests/web-audit-antecedents-api.test.ts`, `tests/web-audit-antecedents-waves.test.ts`,
-  `tests/web-audit-api-hygiene.test.ts` (new).
+  `tests/web-audit-api-hygiene.test.ts` (new), `scripts/web-audit/conformance-scenarios.ts`,
+  `tests/fixtures/web-audit-conformance/`.
 - **Approach:**
   1. Extend the api-surface antecedent to hold when the retained linkset has API anchors, through a linkset-parsing
      helper shared with the handler that yields only anchors carrying a non-MCP `service-desc` (mirroring the existing
@@ -931,6 +998,8 @@ Phase C:
   3. Derive one hygiene probe URL per API anchor host; remove the entry-origin fallback when all anchors are off-origin
      and update the handler's same-origin header comment; write per-anchor outcomes into `hosts[]` and aggregate the
      row.
+  4. Add a Stripe-shaped two-anchor scenario with `hosts[]` in anchor declaration order, and regenerate the corpus
+     (KTD22).
 - **Patterns to follow:** the existing OpenAPI-derived probe URL logic; KTD4 per-host list; the wave-1 pin test.
 - **Test scenarios:**
   - A catalog with one off-origin anchor and an off-origin JSON OpenAPI: `openapi` passes with the OpenAPI host as
@@ -944,88 +1013,115 @@ Phase C:
     no hygiene probe; a catalog with an OpenAPI-bearing anchor plus an anchor without a `service-desc` probes only the
     former and records the other not-followed.
   - The wave-1 pin test shows `api-catalog` absent from wave 1.
+  - The corpus gate passes with the two-anchor scenario.
 - **Verification:** the antecedent and handler suites pass; a fixture shaped like stripe.dev produces a passing
-  `json-errors` and a missing `rate-limit-headers` at the anchor host.
+  `json-errors` and a missing `rate-limit-headers` at the anchor host; the corpus gate passes.
 
 ### U5. Follow flag, opt-out mode, kill switch, disclosure
 
-- **Goal:** Expose the follow flag on every input surface, make an opted-out run transient, add the kill switch, and
-  disclose third-party probing to agents.
-- **Requirements:** R7, R35, R36, R37; KTD14.
+- **Goal:** Expose the follow flag on every input surface, make an opted-out run transient and keep it outside
+  single-flight, add the kill switch, and disclose third-party probing to agents.
+- **Requirements:** R7, R35, R36, R37; KTD14, KTD23.
 - **Dependencies:** U1, U2.
-- **Files:** `src/worker/mcp/tools/web-audit.ts`, `src/worker/mcp/instructions.ts`, `src/worker/audit-web/route.ts`,
-  `src/worker/audit-web/engine.ts`, `src/worker/audit-web/rescore-workflow.ts`, `src/worker/index.ts`,
-  `src/build/07-subpages.mjs`, `src/client/web-audit-listing.ts`, `src/client/web-audit-scoring.ts`,
-  `src/client/webmcp-audit.ts`, `scripts/web-audit/audit.ts`, `wrangler.jsonc`, `content/mcp-skill.md`, `AGENTS.md`,
-  `docs/runbooks/mcp-operator.md`,
-  `tests/wrangler-config.test.ts`, `tests/web-audit-mcp-tools.test.ts`, `tests/web-audit-routes.test.ts`,
-  `tests/webmcp.test.ts`.
+- **Files:** `src/worker/mcp/tools/web-audit.ts`, `src/worker/mcp/instructions.ts`, `src/worker/audit/api.ts`,
+  `src/worker/audit-web/core.ts`, `src/worker/audit-web/engine.ts`, `src/worker/audit-web/rescore-workflow.ts`,
+  `src/worker/index.ts`, `src/shared/audit-events.ts`, `src/shared/audit-envelope.ts`, `src/build/audit-form.mjs`,
+  `src/client/audit-entry.ts`, `src/client/audit-start.ts`, `src/client/audit-stash.ts`, `src/client/scoring.ts`,
+  `src/client/webmcp-lib.ts`, `scripts/web-audit/audit.ts`, `wrangler.jsonc`, `content/_audit-web.md`,
+  `content/mcp-skill.md`, `AGENTS.md`, `docs/runbooks/mcp-operator.md`, `tests/wrangler-config.test.ts`,
+  `tests/web-audit-mcp-tools.test.ts`, `tests/audit-api.test.ts`, `tests/audit-job-attach.test.ts`,
+  `tests/audit-stash.test.ts`, `tests/audit-form.test.ts`, `tests/webmcp.test.ts`, `tests/e2e/scoring.e2e.ts`.
 - **Approach:**
-  1. Add `follow_declarations` (boolean, default true) to the tool schema, the route body with a per-field 400, the form
-     checkbox with the existing session-storage stash, the WebMCP tool, and the local runner.
+  1. Add `follow_declarations` (boolean, default true) to the `audit_website` input schema; to the transact body parser,
+     with a per-field 400 under a new shared code in the error union and message table of `audit-events.ts`, following
+     `invalid_public_listing`; to the entry form's checkbox and the stash, where `buildScoreBody` sends the field only
+     when the visitor opted out; and to the local runner's arguments. The WebMCP `get_page_state` tool reports the
+     checkbox beside the listing checkbox; no WebMCP tool starts an audit, and the source guard keeps it that way.
   2. Bind `WEB_AUDIT_FOLLOW_ENABLED` in the Worker env and the rescore Workflow env; read it per request with absent as
-     off; store the effective value in the scorecard and on the run record.
-  3. When the request flag is false: bypass the serve-cached and stale-serve branches, reject a public-listing change,
-     run the engine, stream and return the result without a share URL, and skip the cache write and the aggregate
-     rebuild (R36). In the scoring client, a `complete` event with a null share URL is a terminal in-place state: the
-     headline score stays on the page above the streamed rows with a notice that the result was not saved and that the
-     page's own link starts a fresh audit, mirroring the `incomplete` handling; the client never navigates.
-  4. Update the tool description, the server instructions, the client skill doc, and the kill-switch paragraph.
-- **Patterns to follow:** the `public_listing` inbound plumbing across the six surfaces; `WEB_AUDIT_ENABLED` handling;
-  the wrangler-config test's vars pins; the TOOL_COUNT drift gate if a tool description changes shape.
+     off; pass the effective value into the engine input and store it in the scorecard and on the run record.
+  3. When the request flag is false, apply KTD23 in `handleWeb` and the web core: skip the serve tier, the
+     disabled-with-cache stale serve, the in-flight read, the job claim, and the flag marks; reject a `public_listing`
+     that differs from the stored choice; run the engine; skip `put`, the purge queue, and the aggregate rebuild; and
+     end with the transient envelope. The MCP tool applies the same rules on its inline path.
+  4. On the progress page, a web `complete` with null result URLs takes the existing `inline()` branch with web-lane
+     copy: the result was not saved, and Run again starts a fresh audit that carries the same opt-out from the stash.
+     The client never navigates.
+  5. Update the tool description, the server instructions, the client skill doc, the tool signature in the web lane of
+     `/audit`, and the kill-switch paragraph.
+- **Patterns to follow:** the `public_listing` inbound plumbing through the MCP schema, the transact parser, and the
+  form-to-stash chain; the explicit-listing no-attach rule in `handleWeb`; the CLI lane's null-URL envelope;
+  `WEB_AUDIT_ENABLED` handling; the wrangler-config test's vars pins; the TOOL_COUNT drift gate if a tool description
+  changes shape.
 - **Test scenarios:**
-  - `audit_website` with `follow_declarations: false` returns a scorecard with `follow_declarations: false` and no share
-    URL; the fake R2 records zero puts on the domain key and both aggregate keys; the purge queue is empty; the run
-    record shows the effective flag.
-  - An opted-out request arriving inside the one-minute serve-cached window is not served the cached followed scorecard.
-  - An opted-out request carrying a differing `public_listing` is rejected.
-  - The route rejects a non-boolean value with a 400 naming the field.
+  - `audit_website` with `follow_declarations: false` returns a scorecard with `follow_declarations: false` and null
+    result URLs; the fake R2 records zero puts on the domain key and both aggregate keys; the purge queue is empty; the
+    run record shows the effective flag.
+  - An opted-out transact request inside the one-minute serve window is not served the cached followed scorecard; with
+    audits disabled it gets the disabled error, not the stale followed scorecard.
+  - An opted-out transact request while a followed run of the same site is in flight runs its own audit and claims no
+    job; a followed request while an opted-out run is in flight finds no flag and claims its own job; the opted-out run
+    leaves no job log.
+  - An opted-out request carrying a `public_listing` that differs from the stored choice is rejected.
+  - The transact parser rejects a non-boolean value with a 400 naming the field and the new shared code; the MCP schema
+    rejects it through zod.
   - With the kill switch off and the flag true, the stored scorecard shows `follow_declarations: false` and the trail is
     empty; an absent switch reads as off.
-  - The form checkbox round-trips through the stash and the POST body.
-  - An opted-out form run ends in place with the not-saved notice and never navigates.
+  - The form checkbox round-trips through the stash and the POST body, and `buildScoreBody` omits the field when
+    following stays on.
+  - An opted-out form run ends in place on `/scoring` with the not-saved copy and never navigates; Run again resends the
+    opt-out.
+  - `get_page_state` reports the checkbox; the WebMCP source guard still passes.
   - The wrangler-config test pins the var on staging and its absence from the top-level vars.
   - The tool description contains the cap values and the third-party disclosure; the instructions test pins it.
-- **Verification:** the MCP-tool, route, WebMCP, and wrangler-config suites pass; staging serves the checkbox and the
-  tool description.
+- **Verification:** the MCP-tool, transact, job-attach, stash, form, WebMCP, and wrangler-config suites pass; the
+  scoring e2e covers the in-place transient result; staging serves the checkbox and the tool description.
 
 ### U6. Provenance in every reader
 
-- **Goal:** Show the host behind each row and the declared-hosts trail in the markdown twin, the HTML page, the live
-  scoring page, and the MCP read and remediation tools, concentrated in the model layer.
+- **Goal:** Show the host behind each row and the declared-hosts trail on the `/score/<target>` page and its markdown
+  twin, on the `/scoring` progress page, and in the MCP read and remediation tools, concentrated in the model layer,
+  with one reason phrase shared by the live and final pages.
 - **Requirements:** R8, R11, R12; KTD4.
 - **Dependencies:** U1.
 - **Files:** `src/worker/audit-web/summary-model.ts`, `src/worker/audit-web/summary-markdown.ts`,
   `src/worker/audit-web/summary-render.ts`, `src/worker/audit-web/display.ts`, `src/worker/audit-web/remediation.ts`,
-  `src/worker/audit-web/route.ts`, `src/worker/mcp/tools/web-remediation.ts`, `src/client/web-audit-scoring.ts`,
-  `src/client/webmcp-result.ts`, `tests/web-audit-display-enrich.test.ts`, `tests/web-audit-mcp-tools.test.ts`,
-  `tests/webmcp.test.ts`.
+  `src/worker/audit-web/core.ts`, `src/worker/mcp/tools/web-remediation.ts`, `src/shared/audit-events.ts`,
+  `src/client/scoring.ts`, `src/client/scoring-view.ts`, `src/client/webmcp-result.ts`,
+  `tests/web-audit-display-enrich.test.ts`, `tests/web-audit-scorecard-format.test.ts`,
+  `tests/web-audit-remediation-assembly.test.ts`, `tests/web-audit-mcp-tools.test.ts`,
+  `tests/audit-result-route.test.ts`, `tests/webmcp.test.ts`, `tests/e2e/scoring.e2e.ts`.
 - **Approach:**
   1. Carry `host` and `hosts[]` into the summary row once; render a host line in markdown and a single `data-host`
-     attribute plus a short "evaluated at" phrase in HTML; on multi-host rows render each host's own outcome inline
-     (for example `api.example.com: pass, api2.example.com: broken`) from the per-entry status; render a visible
+     attribute plus a short "evaluated at" phrase in HTML; on multi-host rows render each host's own outcome inline (for
+     example `api.example.com: pass, api2.example.com: broken`) from the per-entry status; render a visible
      declared-hosts section on the HTML page and an equivalent heading in the markdown twin listing each trail entry's
      declaring surface, declared URL, final URL when redirected, and outcome, only when the trail is non-empty, and keep
      a machine copy in the audit-context element, omitting the follow attribute rather than emitting a value when the
      field is absent.
-  2. Add `na_reason` and `host` to the streamed check event so the live page shows the reason mid-stream.
-  3. Add a `Host:` line to remediation built from the row, and an optional `host` argument to `get_web_remediation` so
+  2. Add optional `host` and `na_reason` to the shared `check` event, and have the web core's `checkEvent` copy both
+     from the engine result.
+  3. On the progress page, pass both through `scoring.ts` to the row view: the evidence paragraph carries the result
+     line built from the shared phrase table (U1), so a reason reads the same words live and on the final page, and a
+     row evaluated off the entry origin gains `data-host` and the same "evaluated at" phrase in its title cell. No new
+     cells.
+  4. Add a `Host:` line to remediation built from the row, and an optional `host` argument to `get_web_remediation` so
      the standalone prompt equals the inline one.
-  4. Keep the WebMCP result client reading the new attribute.
+  5. Teach `get_worksheet` in the WebMCP result client to read the row's `data-host`.
 - **Patterns to follow:** the `unprobed` field's path through the five hops; the remediation invariant that catalog text
-  is identical per check id and only evidence varies; the funnel contract under Scope Boundaries.
+  is identical per check id and only evidence varies; the funnel surfaces under Scope Boundaries; the browser-verify
+  rule in `AGENTS.md` for the new row phrase in both themes.
 - **Test scenarios:**
   - For one followed-host check, the markdown host line, the HTML `data-host`, the `get_website_audit` row, and the
     WebMCP worksheet item carry the same host and reason.
   - `get_web_remediation` with a host argument returns a prompt byte-equal to the inline prompt for that row.
   - A row with a two-entry `hosts[]` renders both hosts with their own outcomes in HTML, markdown, and the MCP read.
   - A non-empty trail renders a visible declared-hosts section on the page and the twin; an empty trail renders none.
-  - The check event for a refused host carries `na_reason: reciprocity-refused` and the scoring page renders it before
-    completion.
+  - A streamed check event for a refused host carries `na_reason: reciprocity-refused` and its host, and the progress
+    page shows the result line the final page shows for that row before completion.
   - A pre-change cached scorecard renders every surface with no host phrase, no trail, and the follow attribute omitted.
   - A card `name` containing markup renders escaped on every surface.
-- **Verification:** parity tests pass across the four surfaces (built with the build-before-test order the WebMCP suite
-  needs); a staging audit page shows hosts on followed rows.
+- **Verification:** parity tests pass across the five surfaces (built with the build-before-test order the WebMCP suite
+  needs); a staging audit's progress page and result page show hosts on followed rows in both themes.
 
 ### U7. Per-domain budget port, self-target handling, logging
 
@@ -1033,14 +1129,16 @@ Phase C:
 - **Requirements:** R6, R38; KTD2, KTD17, KTD19.
 - **Dependencies:** U2.
 - **Files:** `src/worker/audit-web/limiter.ts`, `src/worker/audit-web/engine.ts`, `src/worker/audit-web/follow.ts`,
-  `src/worker/audit-web/route.ts`, `src/worker/audit-web/rescore-workflow.ts`, `src/worker/mcp/tools/web-audit.ts`,
-  `src/worker/audit-web/audit-log.ts`, `wrangler.jsonc`, `package.json`, `bun.lock`, `tests/web-audit-follow.test.ts`,
+  `src/worker/audit-web/core.ts`, `src/worker/audit-web/rescore-workflow.ts`, `src/worker/mcp/tools/web-audit.ts`,
+  `src/worker/audit-web/audit-log.ts`, `scripts/web-audit/audit.ts`, `scripts/web-audit/conformance-corpus.ts`,
+  `wrangler.jsonc`, `package.json`, `bun.lock`, `tests/web-audit-follow.test.ts`,
   `tests/web-audit-observability.test.ts`.
 - **Approach:**
   1. Add a reservation wrapper over the limiter's existing hourly-bucket helper keyed by hashed registrable domain
      (derived with `tldts`, private suffixes enabled), and a rate-limit binding keyed the same way as the burst floor.
-  2. Inject the budget into the engine input as a port supplied by the route, the MCP tool, and the rescore Workflow,
-     with a memory implementation in tests; fail open when KV is missing, following the flip-limit precedent.
+  2. Inject the budget into the engine input as a port supplied by the transact core, the MCP tool, and the rescore
+     Workflow, with a memory implementation in tests and an always-admit one in the local runner and the conformance
+     runner (KTD22); fail open when KV is missing, following the flip-limit precedent.
   3. Reserve once per audit and domain in the follow slice: count the document fetches, the wave probes the endpoint
      of record will draw from the registry, and the notification, consume them in one read and put, and resolve every
      dependent row budget-exceeded with the domain-budget cause before wave 1 when the reservation fails; handlers never
@@ -1059,7 +1157,9 @@ Phase C:
   - An own-account `workers.dev` declared host produces unreachable and no broken row; a third-party `workers.dev` host
     is followed (pre-condition: one staging fetch of a known third-party Workers MCP endpoint, recorded in the PR).
   - The run log record lists follow outcome counts, request count, and elapsed time, captured through the emitter sink.
-- **Verification:** the follow and observability suites pass; the wrangler dry run accepts the new binding.
+  - Regenerating the conformance corpus after the port lands produces no diff.
+- **Verification:** the follow and observability suites pass; the wrangler dry run accepts the new binding; the corpus
+  regenerates with no diff.
 
 ### U12. Release: fingerprint helper, marker, reflow rules
 
@@ -1068,32 +1168,37 @@ Phase C:
 - **Requirements:** R32, R33, R34; KTD13.
 - **Dependencies:** U1, U5.
 - **Files:** `src/worker/audit-web/registry.ts`, `src/worker/audit-web/rescore-workflow.ts`,
-  `src/worker/audit-web/cache.ts`, `src/worker/audit-web/summary-freshness.ts`, `src/worker/audit-web/route.ts`,
-  `src/worker/mcp/tools/web-audit.ts`, `src/data/web-audit/seed.yaml`, `docs/runbooks/web-audit-operations.md`,
-  `tests/web-audit-rescore-workflow.test.ts`, `tests/web-audit-routes.test.ts`.
+  `src/worker/audit-web/cache.ts`, `src/worker/audit-web/summary-freshness.ts`, `src/worker/audit-web/core.ts`,
+  `src/worker/audit/result.ts`, `src/worker/mcp/tools/web-audit.ts`, `src/data/web-audit/seed.yaml`,
+  `docs/runbooks/web-audit-operations.md`, `tests/web-audit-rescore-workflow.test.ts`, `tests/audit-api.test.ts`,
+  `tests/web-audit-cache.test.ts`, `tests/audit-result-route.test.ts`.
 - **Approach:**
-  1. Hoist the fingerprint helper to the registry module and add the follow-policy version constant to its input; stamp
-     the prefix at every write path, including the rescore path, which carries `public_listing` forward as today, and
-     into board metadata through its single writer with a coercion to unknown on read.
+  1. Hoist the fingerprint helper to the registry module with its site-only field exclusion and add the follow-policy
+     version constant to its input; stamp the prefix after the engine returns at the three write paths (the transact
+     core's `put`, the MCP tool's `put`, and `auditDomainToCache`, which carries `public_listing` forward as today); the
+     single board-metadata writer reads it from the scorecard with a coercion to unknown, so listing patches and the
+     backfill carry it forward (KTD13).
   2. Record the normalized switch boolean beside the fingerprint in the rescore gate so either moving forces a reflow.
   3. Do not persist a seed whose rows carry a domain-budget-caused budget-exceeded, extending the complete-only rule
-     (slice and cap exhaustion persist as today); apply the same rule to the route and MCP write paths per R4, returning
-     the fresh result inline and keeping the prior object.
-  4. Render the prefix in the freshness line of the page and the twin; document the manual rescore trigger after a
-     switch flip or a rollback.
+     (slice and cap exhaustion persist as today); apply the same rule to the transact and MCP write paths per R4,
+     returning the fresh result inline and keeping the prior object.
+  4. Render the prefix in the web freshness sentence and markdown line (`summary-freshness.ts`), which fill the result
+     spine's freshness slot on `/score/<target>` and the twin's freshness line; document the manual rescore trigger
+     after a switch flip or a rollback.
   5. Add `stripe.dev` to the curated seeds so the reflow observes the Stripe-shaped case in production.
 - **Patterns to follow:** the registry-fingerprint gate; the carry-forward write-path pattern; the single board-metadata
   writer; the real-write-path test convention.
 - **Test scenarios:**
   - Three non-`true` switch values produce one recorded state; the fingerprint is byte-identical with the switch on and
     off; changing the policy constant changes it.
-  - A route audit whose rows carry the domain-budget cause returns the fresh result, keeps the prior object, and writes
-    nothing; a slice-caused budget-exceeded caches as today.
+  - A transact audit whose rows carry the domain-budget cause returns the fresh result, keeps the prior object, and
+    writes nothing; a slice-caused budget-exceeded caches as today.
   - A rescore of a curated seed through the real `auditDomainToCache` with fake fetch and fake Cloudflare R2 storage
-    writes the fingerprint prefix into the scorecard and the board metadata and keeps `public_listing` true; the route
-    and MCP write paths stamp the same prefix.
+    writes the fingerprint prefix into the scorecard and the board metadata and keeps `public_listing` true; the
+    transact and MCP write paths stamp the same prefix, and a listing patch keeps it.
   - A seed whose rows hit budget-exceeded is skipped by the reflow and its prior object stays.
   - A scorecard and a board row without a fingerprint render as unknown.
+  - No conformance golden carries a fingerprint.
 - **Verification:** the rescore suite passes against the real write path; the boards show the new fingerprint after the
   release-day reflow.
 
@@ -1110,7 +1215,8 @@ Phase C:
   `src/worker/audit-web/engine.ts`, `src/worker/audit-web/assert.ts`, `src/worker/audit-web/handlers/http.ts`,
   `src/worker/audit-web/display.ts`, `src/build/13-web-audit-registry.mjs`, `src/build/15-web-audit-skills.mjs`,
   `src/build/06-homepage.mjs`, `scripts/scoring/score_model.py`, `package.json`, `tests/web-audit-discovery.test.ts`,
-  `tests/web-audit-skills.test.ts`, `tests/web-audit-display-enrich.test.ts`.
+  `tests/web-audit-skills.test.ts`, `tests/web-audit-display-enrich.test.ts`,
+  `scripts/web-audit/conformance-scenarios.ts`, `tests/fixtures/web-audit-conformance/`.
 - **Approach:**
   1. Add the `mcp-server-card` check on the `retained-document` rule with a new handler that validates required fields
      through a hand-written schema mirroring the vendored `schema.json`, at `tier: recommended`, weight 3; register
@@ -1121,6 +1227,8 @@ Phase C:
   3. Leave `mcp-card-legacy-aliases`, its eval rule, and its helpers unchanged; add the JSON Schema validator as a
      devDependency for the build step and tests only.
   4. Update the homepage category copy and the remediation text per R24.
+  5. Move the corpus scenario that covers `well-known-mcp-card` to `mcp-server-card`, since the gate rejects a `covers`
+     entry that names no registry check, add a SEP-2127 card scenario, and regenerate (KTD22).
 - **Patterns to follow:** the handler three-way sync; the remediation one-to-one rule as amended; the `unprobed` skip
   rule for rows without remediation.
 - **Test scenarios:**
@@ -1133,8 +1241,9 @@ Phase C:
   - The vendored schema's `required` arrays (top level and `remotes` items) equal the mirror's, and the mirror rejects
     each required-field omission the vendored schema rejects.
   - The legacy-alias suite still passes unchanged; knip is clean with the dev-only validator.
+  - The corpus gate passes with `mcp-server-card` covered and no scenario naming the retired id.
 - **Verification:** the discovery, display-enrich, and skills suites pass; the registry builds; lint including knip is
-  clean.
+  clean; the corpus gate passes.
 
 ### U9. anc.dev's own card and catalog
 
@@ -1207,8 +1316,8 @@ Phase C:
      write` that runs only when the report lists drift.
   2. Upsert by listing open issues with the `spec-drift` label and matching a marker-owned title per source id; update
      the body with the diff when found, create otherwise.
-  3. Pin every action to a SHA with a version comment; set a concurrency group; no `continue-on-error`; the Node 24 env
-     the sibling workflows set.
+  3. Pin every action to the SHA and version comment the sibling workflows carry; set a concurrency group; no
+     `continue-on-error`; the Node 24 env the sibling workflows set.
   4. Document in the runbook: manifest fields, re-pin procedure, the forced-drift proof, and the `main`-only execution
      rule.
 - **Execution note:** The R31 proof runs after the workflow is on `main`: pin a deliberately wrong value on a branch,
@@ -1234,7 +1343,8 @@ Phase C:
 | Lint                 | `bun run lint`                                                             | every unit       | biome, markdownlint-cli2, and knip clean, including after the eval-rule removal in U8                  |
 | Typecheck            | `bun run typecheck`                                                        | every unit       | all three tsconfigs pass, including the antecedent and handler unions and the resolver result widening |
 | Unit and integration | `bun test`                                                                 | every unit       | suites named in each unit pass; each new test was observed failing first                               |
-| Browser e2e          | `bun run test:e2e`                                                         | U5, U6, U9       | discoverability and mcp-card suites pass against the built site                                        |
+| Conformance corpus   | `bun scripts/web-audit/gen-fixtures.ts`, then `bun test tests/web-audit-conformance-corpus.test.ts` | U1, U13, U2 to U4, U7, U8 | the committed corpus equals a fresh generation and every registry check id is covered                  |
+| Browser e2e          | `bun run test:e2e`                                                         | U5, U6, U9       | discoverability, mcp-card, and scoring suites pass against the built site                              |
 | Live web-audit suite | `ANC_STAGING_BASE_URL=<staging> bun x playwright test --project=web-audit` | U2 to U6, U8, U9 | followed-host rows and the opt-out path behave on staging                                              |
 | Stripe smoke         | local runner in `scripts/web-audit/audit.ts` against `https://stripe.dev`  | U2, U3, U4, U13  | AE1 outcomes observed; not CI-gated                                                                    |
 | Workflow lint        | `actionlint .github/workflows/spec-drift.yml`                              | U11              | clean                                                                                                  |
@@ -1247,6 +1357,7 @@ Phase C:
 Global:
 
 - Every unit's tests pass with the build-before-test order, and each new test's failing-first run is quoted in its PR.
+- Every unit that changes engine output ships its regenerated conformance corpus, and the corpus gate is green (KTD22).
 - anc.dev's own production audit scores 100 after each phase's release.
 - No abandoned-approach code remains in any diff; experiments that did not pan out are removed, not left behind.
 - The schema doc, the client skill doc, `AGENTS.md`, `CONCEPTS.md`, and the runbooks match the shipped behavior.
@@ -1257,29 +1368,16 @@ Per unit:
 
 | U-ID | Done when                                                                                                                                                                                            |
 | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| U1   | New fields survive the compact-row builder and enrichment; missing fields coerce to not evaluated; resolvers carry reasons; schema at 0.5 with the drift guard green                                 |
-| U13  | All three card generations and the catalog paths discover; documents are retained once; the retained-document rule builds                                                                            |
-| U2   | Control-bound reciprocity, the collapse fixtures, caps, slice, reachability, redirect, self-target, and opt-out scenarios pass; no wire probe without an artifact naming the endpoint in any test    |
-| U3   | A protected fixture is present, passes the enforcement checks, and has no broken row; an open fixture resolves them N/A                                                                             |
-| U4   | A stripe-shaped fixture evaluates the API category at the API anchor host and records non-API anchors not-followed; `api-catalog` is out of wave 1                                                                                                |
-| U5   | The flag exists on all five input surfaces; an opted-out run bypasses the cache, writes nothing, and rejects a listing change; the switch stores its effective state and the var is pinned           |
-| U6   | One followed-host check reads identically across markdown, HTML, MCP read, and WebMCP; markup in card fields renders escaped                                                                         |
+| U1   | New fields survive the compact-row builder and enrichment; missing fields coerce to not evaluated; resolvers carry reasons; schema at 0.5 with the drift guard and the corpus gate green             |
+| U13  | All three card generations and the catalog paths discover; documents are retained once; the retained-document rule builds; the corpus covers each generation                                         |
+| U2   | Control-bound reciprocity, the collapse fixtures, caps, slice, reachability, redirect, self-target, and opt-out scenarios pass; no wire probe without an artifact naming the endpoint in any test; the follow scenarios regenerate identically |
+| U3   | A protected fixture is present, passes the enforcement checks, and has no broken row; an open fixture resolves them N/A; the corpus covers the new checks                                           |
+| U4   | A stripe-shaped fixture evaluates the API category at the API anchor host and records non-API anchors not-followed; `api-catalog` is out of wave 1; the corpus carries the two-anchor scenario       |
+| U5   | The flag exists on all four input surfaces and the WebMCP page state reports it; an opted-out run bypasses the cache, claims no job, writes nothing, renders in place, and rejects a listing change; the switch stores its effective state and the var is pinned |
+| U6   | One followed-host check reads identically across markdown, HTML, the progress page, MCP read, and WebMCP; the live and final pages share one reason phrase; markup in card fields renders escaped    |
 | U7   | The per-domain budget refuses before sending across audits and variants; the run record carries the follow counts                                                                                    |
 | U12  | The fingerprint helper is shared by all write paths; the switch state is recorded beside it; the reflow and the write paths skip domain-budget-caused budget-exceeded seeds; markers render on pages and board rows |
-| U8   | Cards score per R22 from the retained document; the retired id renders with its successor; the alias check is untouched; knip is clean                                                            |
+| U8   | Cards score per R22 from the retained document; the retired id renders with its successor; the alias check is untouched; knip is clean; the corpus covers `mcp-server-card`                       |
 | U9   | The built card validates; the card path is routed; staging rewrites both new URLs; the legacy path keeps the smoke fields; the self-audit passes the new checks                                      |
 | U10  | Every source type has a passing fixture and the live run reports no drift on pin day                                                                                                                 |
 | U11  | A forced drift opens then updates one issue; every action is SHA-pinned; the runbook exists                                                                                                          |
-
-## Deferred / Open Questions
-
-### From 2026-09-10 review
-
-- **The live scoring page has no defined place or copy for the streamed host and reason** — U6 (provenance in every
-  reader) (P2, design-lens, confidence 75)
-
-  The mid-stream row renderer writes three fixed cells (status, label, evidence) with no slot for a host or reason and
-  no helper that turns a reason token into human copy, so the same reason could render as a raw token live and as a
-  phrase on the final page. The unit commits to streaming the reason and host without saying where they go or whether
-  they pass through the existing result-line mapping; the audit-funnel work in flight may replace this client, which
-  argues for settling the layout there.
