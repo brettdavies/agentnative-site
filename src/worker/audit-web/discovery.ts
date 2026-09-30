@@ -22,12 +22,12 @@
 // that never answers.
 
 import type { RetainedDocumentKey } from '../../shared/web-audit-documents';
-import { type ProbeResponse, parseJsonRpc } from './assert';
+import { parseJsonRpc } from './assert';
 import {
   aiCatalogShape,
   apiCatalogShape,
   type CardRead,
-  cardDeclaresAuth,
+  cardHasAuthField,
   cardItem,
   cardShape,
   catalogCardEntries,
@@ -172,7 +172,7 @@ export async function discoverMcpEndpoint(
       documents.set('server-card', { url: record.url, response: record.response, shape: cardShape(record.card) });
     }
     const item = (read: CardRead) =>
-      cardItem(read, read === record, read === winner && read.card !== null && cardDeclaresAuth(read.card));
+      cardItem(read, read === record, read === winner && read.card !== null && cardHasAuthField(read.card));
     const catalogItem = (slot: CatalogSlot): EvidenceItem => {
       if ('read' in slot) return item(slot.read);
       if ('declaration' in slot) {
@@ -239,43 +239,28 @@ export async function discoverMcpEndpoint(
   );
 
   // The catalog's card entries: inline in place, same-origin URLs fetched.
-  const entries = catalog === null ? [] : catalogCardEntries(catalog);
-  const cardUrls = entries.map((entry) => ('url' in entry ? resolveUrl(catalogUrl, entry.url) : ''));
-  const toFetch = entries.flatMap((entry, i) =>
-    !('data' in entry) && cardUrls[i] !== '' && sameOrigin(cardUrls[i], base) ? [i] : [],
-  );
-  const fetched = new Map<number, ProbeResponse>();
-  if (toFetch.length > 0) {
-    const cardPass = passBudget();
-    if (cardPass === null) return exhausted();
-    const responses = await Promise.all(toFetch.map((i) => readDocument(cardUrls[i], cardPass, CARD_REQUEST_HEADERS)));
-    for (const [k, i] of toFetch.entries()) fetched.set(i, responses[k]);
-  }
-  for (const [i, entry] of entries.entries()) {
+  const entries = (catalog === null ? [] : catalogCardEntries(catalog)).map((entry) => {
+    const url = 'url' in entry ? resolveUrl(catalogUrl, entry.url) : '';
+    return { entry, url: url === '' ? null : url };
+  });
+  const fetchesCard = entries.some(({ url }) => url !== null && sameOrigin(url, base));
+  const cardPass = fetchesCard ? passBudget() : 0;
+  if (cardPass === null) return exhausted();
+  const catalogSlot = async ({ entry, url }: (typeof entries)[number]): Promise<CatalogSlot> => {
     const pointer = `#/entries/${entry.index}`;
     if ('data' in entry) {
       const response = { ...catalogResp, body: JSON.stringify(entry.data) };
       const read = readCard(`${cfg.ai_catalog}${pointer}/data`, `${catalogUrl}${pointer}/data`, response, true, base);
-      catalogSlots.push({ index: entry.index, read });
-      continue;
+      return { index: entry.index, read };
     }
-    const response = fetched.get(i);
-    if (response !== undefined) {
-      catalogSlots.push({
-        index: entry.index,
-        read: readCard(pathOf(cardUrls[i]), cardUrls[i], response, false, base),
-      });
-    } else if (cardUrls[i] === '') {
-      catalogSlots.push({ index: entry.index });
-    } else {
-      const declaration: McpDeclaration = {
-        kind: 'card-document',
-        url: cardUrls[i],
-        source: `${cfg.ai_catalog}${pointer}`,
-      };
-      catalogSlots.push({ index: entry.index, declaration });
+    if (url === null) return { index: entry.index };
+    if (!sameOrigin(url, base)) {
+      return { index: entry.index, declaration: { kind: 'card-document', url, source: `${cfg.ai_catalog}${pointer}` } };
     }
-  }
+    const response = await readDocument(url, cardPass, CARD_REQUEST_HEADERS);
+    return { index: entry.index, read: readCard(pathOf(url), url, response, false, base) };
+  };
+  catalogSlots.push(...(await Promise.all(entries.map(catalogSlot))));
 
   // POST probing, only when no card named an endpoint on the audited origin.
   const candidates = cfg.common_paths

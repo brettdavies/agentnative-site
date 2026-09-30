@@ -59,7 +59,7 @@ export function apiCatalogShape(catalog: JsonObject | null): DocumentShape {
  * The endpoint a card declares, as written: a SEP-2127 card's first
  * `streamable-http` remote, else the first SEP-1649 endpoint field present.
  */
-export function cardEndpoint(card: JsonObject): string | null {
+function cardEndpoint(card: JsonObject): string | null {
   if (Array.isArray(card.remotes)) {
     for (const remote of card.remotes) {
       if (isJsonObject(remote) && remote.type === 'streamable-http' && typeof remote.url === 'string') {
@@ -76,12 +76,12 @@ export function cardEndpoint(card: JsonObject): string | null {
 }
 
 /** A card declares authentication the way SEP-1649 cards spell it. */
-export function cardDeclaresAuth(card: JsonObject): boolean {
+export function cardHasAuthField(card: JsonObject): boolean {
   return card.authentication !== undefined || card.auth !== undefined;
 }
 
 /** A URL carrying a `{variable}` needs values the auditor does not have, so it is never requested. */
-export function isTemplatedUrl(url: string): boolean {
+function isTemplatedUrl(url: string): boolean {
   return URL_TEMPLATE_VARIABLE.test(url);
 }
 
