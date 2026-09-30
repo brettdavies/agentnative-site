@@ -2966,7 +2966,7 @@ main .remediation__body {
   .pscore__row--category .pscore__body {
     display: contents;
   }
-  .pscore__row--category .pscore__body > * {
+  .pscore__row--category .pscore__body > :where(h3, p, div) {
     grid-column: 2 / -1;
   }
   .pscore__row--category > .spec__id,
