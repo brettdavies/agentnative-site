@@ -52,6 +52,25 @@ flowchart LR
 | `brettdavies/agentnative-cli` `Cargo.toml` `[package].version`                                                                                                                                                                                      | `scripts/sync-cli-version.sh` (manual; `gh api` against `CLI_REMOTE_URL`, falls back to local `CLI_ROOT` when offline; default resolves latest `v*` tag; `--ref <branch\|tag\|SHA>` or `CLI_REF` env var vendors any explicit ref)                                                | → `src/data/anc/VERSION` (one-line semver). Build-time emitter `00-spec-version-gen.mjs` reads it and emits `ANC_VERSION` into `src/worker/spec-version.gen.ts`. | After an agentnative-cli release. The default API query picks up new tags automatically; rerun with `--ref dev` (or a SHA) during cross-repo coordination of an in-flight cli release.                                                                                                                             | `tests/spec-version-gen.test.ts` (drift guard) fails CI if `spec-version.gen.ts` lags the vendored `src/data/anc/VERSION`. `tests/spec-version-hardcoding.test.ts` (red-team) fails CI if a test file carries `ANC_VERSION`-shaped string literals instead of importing the constant.                                                                                    |
 | `docker/score/` image: pre-installs the full ANC 100 toolset (`anc` + 96 scored binaries) inside a reproducible Ubuntu container; iterates `registry.yaml` and runs `anc audit --command <bin> [--audit-profile <category>] --output json` for each | `bash docker/score/build.sh --run` (default: brew-installs the latest `anc` from `brettdavies/tap/agentnative`; with `--from-source <cli-repo>` cargo-builds anc on the host and injects the binary into the image instead, bypassing brew)                                       | → `scorecards/<name>-v<version>.json` (96 files) + `docker/score/out/score-failures.txt` for any install/score failures                                          | After a new `anc` release, after registry changes, or to refresh the full leaderboard. Inject mode is also the way to score against an unreleased anc (feature branch in agentnative-cli before tag + bottle).                                                                                                     | Build-time schema 0.5 invariant validation in `src/build/scorecards.mjs`; auto-discovery picks the highest-versioned scorecard per slug, silently superseding stale ones. Filename's `-v<version>` suffix is the version anchor (registry no longer carries `version:` per entry post-U4). The container is the source of truth; host-side ad-hoc scoring is deprecated. |
 
+### Watched upstream specifications
+
+`src/data/standards/watch.yaml` pins the upstream specifications the web audit and the site's discovery documents track
+without vendoring them: the MCP Server Cards SEP (SEP-2127) and its extension repository, both Server Card `$schema`
+URLs, the MCP Registry's `server.json` schema version, the AI Catalog spec, and the IETF drafts behind the draft-tier
+checks (DNS-AID, Web Bot Auth, Content Signals). Each entry carries an id, a stability tier (`rfc`, `spec`, `draft`,
+`proposal`, `convention`), a source type (`github-pr`, `github-file`, `url-status`, `ietf-draft`, `json-field`), a
+canonicalization rule, and the value observed on the pin date. The file sits outside `src/data/web-audit/`, so neither
+the build nor the web-audit registry fingerprint reads it.
+
+`bun scripts/standards/check-drift.ts` fetches every source, canonicalizes both sides (sorted-key JSON, or bytes as
+served for text files) before comparing or hashing, and prints a JSON report on stdout. It exits 0 when every source
+matches its pin, 1 when any source drifted (each listed with its id, tier, type, URL, and old and new values), and 2
+when a source could not be checked; drift found in the same run is still listed. Each error names its next step:
+`retry` for a network failure, a timeout, a rate limit, or a server error, and `fix-manifest` when the watched file
+answers 404 or 410 or a JSON Pointer no longer resolves, since those need the entry re-pointed rather than re-pinned. It
+runs manually. After reviewing an upstream change, re-pin by copying the report's `new` value into the entry's
+`pinned`.
+
 ### How spec version flows into rendering
 
 ### How spec versions flow into rendering surfaces
@@ -163,6 +182,8 @@ The flows interact, but each is independently triggered:
   refs; `CLI_REMOTE_URL` / `CLI_ROOT` env vars; same `gh api` + local-fallback resolution shape as `sync-spec.sh`.
   Writes the resolved cli release version to `src/data/anc/VERSION`; consumed by `src/build/00-spec-version-gen.mjs` and
   re-exported as `ANC_VERSION` from `src/build/util.mjs` and `src/worker/spec-version.gen.ts`.
+- `scripts/standards/check-drift.ts`: header comment for usage, exit codes, and the canonicalization rules;
+  `src/data/standards/watch.yaml` header for the manifest fields.
 - `docker/score/README.md` + `docker/score/build.sh`: the canonical scoring pipeline. `build.sh --run` builds the image
   and runs `score-anc100.sh` inside the container, writing scorecards back to the host via bind mount. The container is
   the single source of truth for scoring; host-side `regen-scorecards.sh` is deprecated.

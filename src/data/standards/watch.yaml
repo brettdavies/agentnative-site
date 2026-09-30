@@ -1,0 +1,120 @@
+# Watched specification sources for the spec-drift poll.
+#
+# scripts/standards/check-drift.ts fetches each source and compares it with
+# `pinned`; any mismatch is drift for a human to review. After review, copy
+# the report's `new` value into `pinned`. Nothing in the site build or the
+# web-audit registry reads this file.
+#
+# Fields:
+#   id                kebab-case, unique; names the drift issue for this source
+#   tier              rfc | spec | draft | proposal | convention
+#   type              github-pr    PR state, merged flag, and head SHA
+#                     github-file  sha256 of the file at a branch (blob URL)
+#                     url-status   HTTP status of a GET, redirects followed
+#                     ietf-draft   datatracker revision and document state
+#                     json-field   value at a JSON Pointer in a JSON document
+#   url               the watched source, in the shape its type expects
+#   canonicalization  json: sorted-key, whitespace-free JSON before compare or hash
+#                     none: bytes as served (github-file only)
+#   pointer           JSON Pointer, json-field only
+#   pinned            the value observed when the entry was pinned
+
+sources:
+  # MCP Server Cards (SEP-2127): the extension-track SEP is an open PR; its
+  # normative wire format lives in the experimental extension repository.
+  - id: mcp-sep-2127-pr
+    tier: proposal
+    type: github-pr
+    url: https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2127
+    canonicalization: json
+    pinned:
+      state: "open"
+      merged: false
+      head_sha: "5c8483d511d60ef1f8ded5160c5290fd8213d19e"
+
+  - id: mcp-server-card-schema
+    tier: proposal
+    type: github-file
+    url: https://github.com/modelcontextprotocol/experimental-ext-server-card/blob/main/schema.json
+    canonicalization: json
+    pinned: "sha256:dd38311e545946e6e3805ed1a3b54c8182de3691b2dd75c8d278e1a13c07affd"
+
+  - id: mcp-server-card-discovery
+    tier: proposal
+    type: github-file
+    url: https://github.com/modelcontextprotocol/experimental-ext-server-card/blob/main/docs/discovery.md
+    canonicalization: none
+    pinned: "sha256:633dacfe5bcdbb3ed2f177be7dd7f9943ed2484a5fdd13bd2b742f43a14c2786"
+
+  # The `$schema` URL the extension schema requires; it resolves once the
+  # extension graduates.
+  - id: mcp-server-card-schema-url-v1
+    tier: proposal
+    type: url-status
+    url: https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json
+    canonicalization: json
+    pinned: 404
+
+  # The `$schema` URL src/build/11a-discovery-emit.mjs emits in anc.dev's card.
+  - id: mcp-server-card-schema-url-emitted
+    tier: proposal
+    type: url-status
+    url: https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json
+    canonicalization: json
+    pinned: 404
+
+  # The MCP Registry's current server.json schema, as its live OpenAPI
+  # document advertises it.
+  - id: mcp-registry-server-schema
+    tier: spec
+    type: json-field
+    url: https://registry.modelcontextprotocol.io/openapi.json
+    pointer: /components/schemas/ServerJSON/properties/$schema/examples/0
+    canonicalization: json
+    pinned: "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
+
+  # AI Catalog (Agentic Resource Discovery).
+  - id: ai-catalog-spec
+    tier: proposal
+    type: github-file
+    url: https://github.com/Agent-Card/ai-catalog/blob/main/specification/ai-catalog.md
+    canonicalization: none
+    pinned: "sha256:b5ad5b6abcaf69e5ee87f8e4fd42e2b4399da70c6097f5d589e6a8cb02f4e45a"
+
+  - id: ai-catalog-spec-version
+    tier: proposal
+    type: json-field
+    url: https://raw.githubusercontent.com/Agent-Card/ai-catalog/main/specification/examples/ai-catalog.json
+    pointer: /specVersion
+    canonicalization: json
+    pinned: "1.0"
+
+  # IETF Internet-Drafts behind the draft-tier web-audit checks.
+  - id: ietf-dns-aid
+    tier: draft
+    type: ietf-draft
+    url: https://datatracker.ietf.org/doc/draft-mozleywilliams-dnsop-dnsaid/
+    canonicalization: json
+    pinned:
+      rev: "02"
+      state: "Active"
+
+  # The webbotauth working-group draft that defines the key directory and its
+  # well-known URI.
+  - id: ietf-web-bot-auth
+    tier: draft
+    type: ietf-draft
+    url: https://datatracker.ietf.org/doc/draft-ietf-webbotauth-httpsig-protocol/
+    canonicalization: json
+    pinned:
+      rev: "00"
+      state: "Active"
+
+  - id: ietf-content-signals
+    tier: draft
+    type: ietf-draft
+    url: https://datatracker.ietf.org/doc/draft-romm-aipref-contentsignals/
+    canonicalization: json
+    pinned:
+      rev: "00"
+      state: "Expired"
