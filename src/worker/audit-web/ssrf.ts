@@ -339,6 +339,8 @@ export async function guardedFetch(
 export const STATUS_ONLY_BODY_BYTES = 0;
 /** Cap for probes that inspect a short body (JSON errors, twin text). */
 export const AUDIT_PROBE_MAX_BODY_BYTES = 64 * 1024;
+/** Cap for a discovery document the audit keeps: a server card, the AI catalog, the API catalog. */
+export const DOCUMENT_MAX_BODY_BYTES = 256 * 1024;
 
 type BodyRead = { body: string; truncated: boolean };
 

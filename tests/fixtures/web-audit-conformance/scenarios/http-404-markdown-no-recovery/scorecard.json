@@ -5,6 +5,24 @@
   "mcp_endpoint": null,
   "mcp_discovery": [
     {
+      "source": "/.well-known/mcp.json",
+      "status": 404
+    },
+    {
+      "source": "/.well-known/mcp/server-card.json",
+      "status": 404
+    },
+    {
+      "source": "/.well-known/ai-catalog.json",
+      "document": "ai-catalog",
+      "status": 404
+    },
+    {
+      "source": "/.well-known/api-catalog",
+      "document": "api-catalog",
+      "status": 404
+    },
+    {
       "source": "/mcp",
       "status": 404,
       "probed": "initialize (no serverInfo)"

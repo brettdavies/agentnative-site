@@ -6,8 +6,33 @@
   "mcp_discovery": [
     {
       "source": "/.well-known/mcp.json",
+      "document": "server-card",
+      "status": 200,
+      "shape": "sep-1649",
       "endpoint": "https://example.com/mcp",
       "authentication": true
+    },
+    {
+      "source": "/.well-known/mcp/server-card.json",
+      "status": 200,
+      "shape": "sep-1649",
+      "endpoint": "https://example.com/mcp"
+    },
+    {
+      "source": "/.well-known/ai-catalog.json",
+      "document": "ai-catalog",
+      "status": 200,
+      "shape": "ai-catalog"
+    },
+    {
+      "source": "/.well-known/api-catalog",
+      "document": "api-catalog",
+      "status": 200,
+      "shape": "linkset"
+    },
+    {
+      "source": "/mcp/server-card",
+      "status": 404
     }
   ],
   "tool": {

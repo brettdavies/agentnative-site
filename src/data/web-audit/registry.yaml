@@ -43,7 +43,12 @@
 
 version: 1
 
-# Endpoint discovery: first candidate that answers `initialize` wins.
+# Endpoint discovery, SEP-2127 first: the MCP server-card entries of the
+# ai_catalog, then the well_known SEP-1649 cards; a card's endpoint on the
+# audited origin wins. Without one, the common_paths take legacy
+# `initialize` and modern `tools/list` POSTs together, and a legacy answer
+# wins. The card at <endpoint> + card_suffix outranks a SEP-1649 card as
+# the card of record.
 mcp_discovery:
   ai_catalog: /.well-known/ai-catalog.json
   card_suffix: /server-card

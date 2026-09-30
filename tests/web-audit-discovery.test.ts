@@ -110,15 +110,12 @@ describe('discoverMcpEndpoint', () => {
     );
   });
 
-  test('the legacy initialize pass still wins on a dual-stack server; no modern probe is issued', async () => {
+  test('both lanes are probed together on every common path, and legacy evidence wins when both answer', async () => {
     let modernProbes = 0;
     const fetchImpl = stubFetch((url, init) => {
+      if (init?.method === 'POST' && isModernProbe(init)) modernProbes++;
       if (url.endsWith('/mcp') && init?.method === 'POST') {
-        if (isModernProbe(init)) {
-          modernProbes++;
-          return modernToolsResponse();
-        }
-        return initializeResponse();
+        return isModernProbe(init) ? modernToolsResponse() : initializeResponse();
       }
       return new Response('not found', { status: 404 });
     });
@@ -127,8 +124,9 @@ describe('discoverMcpEndpoint', () => {
       timeoutMs: 5000,
     });
     expect(endpoint).toBe('https://example.com/mcp');
-    expect(evidence.some((e) => e.probed === 'initialize')).toBe(true);
-    expect(modernProbes).toBe(0);
+    expect(modernProbes).toBe(DISCOVERY.common_paths.length);
+    const postEvidence = evidence.filter((e) => typeof e.probed === 'string');
+    expect(postEvidence).toEqual([{ source: '/mcp', endpoint: 'https://example.com/mcp', probed: 'initialize' }]);
   });
 
   test('an off-origin endpoint declared by a card is recorded and never probed', async () => {
@@ -143,12 +141,15 @@ describe('discoverMcpEndpoint', () => {
       }
       return new Response('not found', { status: 404 });
     });
-    const { endpoint, evidence } = await discoverMcpEndpoint('https://example.com/', DISCOVERY, {
+    const { endpoint, evidence, declarations } = await discoverMcpEndpoint('https://example.com/', DISCOVERY, {
       fetchOptions: { fetchImpl },
       timeoutMs: 5000,
     });
     expect(endpoint).toBeNull();
     expect(evidence.some((e) => e.blocked === 'off-origin endpoint declaration')).toBe(true);
+    expect(declarations).toEqual([
+      { kind: 'mcp-endpoint', url: 'https://victim.example/mcp', source: '/.well-known/mcp.json' },
+    ]);
     expect(probed.some((url) => url.includes('victim.example'))).toBe(false);
   });
 
@@ -167,10 +168,10 @@ describe('discoverMcpEndpoint', () => {
       now: () => clock,
     });
     expect(endpoint).toBeNull();
-    // The 12s discovery budget affords the concurrent well-known pass (two
-    // hops, whose stubbed clock advances past the budget); the legacy and
-    // modern passes never launch.
-    expect(hops).toBe(2);
+    // The 12s discovery budget affords the concurrent document reads (two
+    // well-known cards, the AI catalog, the API catalog), whose stubbed
+    // clock advances past the budget; the POST probing never launches.
+    expect(hops).toBe(DISCOVERY.well_known.length + 2);
     expect(evidence.some((e) => e.note === 'per-audit deadline exceeded during discovery')).toBe(true);
   });
 
@@ -190,10 +191,11 @@ describe('discoverMcpEndpoint', () => {
     });
     const elapsed = Date.now() - started;
     expect(endpoint).toBeNull();
-    // Three sequential passes of concurrent probes: ~3 pass timeouts, not
-    // 6 per-path timeouts. Generous ceiling to keep CI unflaky.
+    // Two passes of concurrent requests (the document reads, then both POST
+    // lanes together): ~2 pass timeouts, not one per request. Generous
+    // ceiling to keep CI unflaky.
     expect(elapsed).toBeLessThan(2_000);
-    expect(launched).toBe(6);
+    expect(launched).toBe(DISCOVERY.well_known.length + 2 + 2 * DISCOVERY.common_paths.length);
     expect(evidence.every((e) => typeof e.status !== 'number')).toBe(true);
   });
 
@@ -209,6 +211,344 @@ describe('discoverMcpEndpoint', () => {
       timeoutMs: 5000,
     });
     expect(endpoint).toBeNull();
+  });
+});
+
+const MCP_CARD_TYPE = 'application/mcp-server-card+json';
+const CATALOG_URL = 'https://example.com/.well-known/ai-catalog.json';
+const DOCUMENT_CAP = 256 * 1024;
+
+function jsonResponse(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
+}
+
+function sep2127Card(...remotes: Array<{ type: string; url: string }>) {
+  return {
+    $schema: 'https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json',
+    name: 'com.example/weather',
+    version: '1.0.0',
+    description: 'Weather lookups',
+    remotes,
+  };
+}
+
+type SeenRequest = { method: string; url: string; accept: string | null };
+
+/** Answers `METHOD url` routes and 404s everything else, recording every request. */
+function routedFetch(routes: Record<string, () => Response>, seen: SeenRequest[]): typeof fetch {
+  return stubFetch((url, init) => {
+    const method = init?.method ?? 'GET';
+    seen.push({ method, url, accept: new Headers(init?.headers).get('accept') });
+    const route = routes[`${method} ${url}`];
+    return route ? route() : new Response('not found', { status: 404 });
+  });
+}
+
+function discover(fetchImpl: typeof fetch) {
+  return discoverMcpEndpoint('https://example.com/', DISCOVERY, { fetchOptions: { fetchImpl }, timeoutMs: 5000 });
+}
+
+describe('discoverMcpEndpoint: SEP-2127 order and retained documents', () => {
+  const OFF_ORIGIN_REMOTE = { type: 'streamable-http', url: 'https://mcp.example.net/mcp' };
+
+  test("an AI catalog entry by URL declares its card's first streamable-http remote", async () => {
+    const seen: SeenRequest[] = [];
+    const card = sep2127Card({ type: 'sse', url: 'https://example.com/sse' }, OFF_ORIGIN_REMOTE, {
+      type: 'streamable-http',
+      url: 'https://mcp.example.net/v2',
+    });
+    const result = await discover(
+      routedFetch(
+        {
+          [`GET ${CATALOG_URL}`]: () =>
+            jsonResponse({
+              specVersion: '1.0',
+              entries: [{ identifier: 'urn:air:example.com:mcp:weather', type: MCP_CARD_TYPE, url: '/cards/weather' }],
+            }),
+          'GET https://example.com/cards/weather': () => jsonResponse(card),
+        },
+        seen,
+      ),
+    );
+    expect(result.declarations).toEqual([
+      { kind: 'mcp-endpoint', url: 'https://mcp.example.net/mcp', source: '/cards/weather' },
+    ]);
+    expect(result.documents.get('server-card')).toMatchObject({
+      url: 'https://example.com/cards/weather',
+      shape: 'sep-2127',
+    });
+    expect(seen.find((r) => r.url === 'https://example.com/cards/weather')?.accept).toBe(MCP_CARD_TYPE);
+    expect(seen.some((r) => r.url.startsWith('https://mcp.example.net'))).toBe(false);
+  });
+
+  test('an inline catalog card declares the same remote with no card request, and the catalog is kept whole', async () => {
+    const seen: SeenRequest[] = [];
+    const result = await discover(
+      routedFetch(
+        {
+          [`GET ${CATALOG_URL}`]: () =>
+            jsonResponse({
+              specVersion: '1.0',
+              entries: [
+                {
+                  identifier: 'urn:air:example.com:mcp:weather',
+                  type: MCP_CARD_TYPE,
+                  data: sep2127Card(OFF_ORIGIN_REMOTE),
+                },
+              ],
+            }),
+        },
+        seen,
+      ),
+    );
+    const source = '/.well-known/ai-catalog.json#/entries/0/data';
+    expect(result.declarations).toEqual([{ kind: 'mcp-endpoint', url: 'https://mcp.example.net/mcp', source }]);
+    expect(result.documents.get('server-card')).toMatchObject({
+      url: `${CATALOG_URL}#/entries/0/data`,
+      shape: 'sep-2127',
+    });
+    const catalog = result.documents.get('ai-catalog');
+    expect(catalog?.response.status).toBe(200);
+    expect(catalog?.response.truncated).toBeUndefined();
+    expect(result.evidence.find((e) => e.document === 'ai-catalog')).toEqual({
+      source: '/.well-known/ai-catalog.json',
+      document: 'ai-catalog',
+      status: 200,
+      shape: 'ai-catalog',
+    });
+    const gets = seen.filter((r) => r.method === 'GET').map((r) => r.url);
+    expect(gets.sort()).toEqual(
+      [
+        'https://example.com/.well-known/mcp.json',
+        'https://example.com/.well-known/mcp/server-card.json',
+        CATALOG_URL,
+        'https://example.com/.well-known/api-catalog',
+      ].sort(),
+    );
+  });
+
+  test('a same-origin remote in a catalog card is the endpoint, and no common path is POSTed', async () => {
+    const seen: SeenRequest[] = [];
+    const result = await discover(
+      routedFetch(
+        {
+          [`GET ${CATALOG_URL}`]: () =>
+            jsonResponse({
+              specVersion: '1.0',
+              entries: [
+                {
+                  identifier: 'w',
+                  type: MCP_CARD_TYPE,
+                  data: sep2127Card({ type: 'streamable-http', url: 'https://example.com/rpc' }),
+                },
+              ],
+            }),
+        },
+        seen,
+      ),
+    );
+    expect(result.endpoint).toBe('https://example.com/rpc');
+    expect(seen.some((r) => r.method === 'POST')).toBe(false);
+  });
+
+  test('with no catalog card, the card at <endpoint>/server-card is the SEP-2127 card of record', async () => {
+    const seen: SeenRequest[] = [];
+    const result = await discover(
+      routedFetch(
+        {
+          'POST https://example.com/mcp': () => initializeResponse(),
+          'GET https://example.com/mcp/server-card': () =>
+            jsonResponse(sep2127Card({ type: 'streamable-http', url: 'https://example.com/mcp' })),
+        },
+        seen,
+      ),
+    );
+    expect(result.endpoint).toBe('https://example.com/mcp');
+    expect(result.documents.get('server-card')).toMatchObject({
+      url: 'https://example.com/mcp/server-card',
+      shape: 'sep-2127',
+    });
+    expect(seen.find((r) => r.url === 'https://example.com/mcp/server-card')?.accept).toBe(MCP_CARD_TYPE);
+  });
+
+  test('a SEP-1649 card alone at the well-known path is the card of record and names the endpoint', async () => {
+    const seen: SeenRequest[] = [];
+    const result = await discover(
+      routedFetch(
+        {
+          'GET https://example.com/.well-known/mcp/server-card.json': () =>
+            jsonResponse({ name: 'example', mcp_endpoint: 'https://example.com/mcp' }),
+        },
+        seen,
+      ),
+    );
+    expect(result.endpoint).toBe('https://example.com/mcp');
+    expect(result.documents.get('server-card')).toMatchObject({
+      url: 'https://example.com/.well-known/mcp/server-card.json',
+      shape: 'sep-1649',
+    });
+    expect(seen.some((r) => r.method === 'POST')).toBe(false);
+  });
+
+  test('a card with transport.url, the Stripe shape, yields a declaration and the SEP-1649 classification', async () => {
+    const seen: SeenRequest[] = [];
+    const result = await discover(
+      routedFetch(
+        {
+          'GET https://example.com/.well-known/mcp/server-card.json': () =>
+            jsonResponse({
+              name: 'stripe',
+              transport: { type: 'streamable-http', url: 'https://mcp.stripe.example/' },
+            }),
+        },
+        seen,
+      ),
+    );
+    expect(result.declarations).toEqual([
+      { kind: 'mcp-endpoint', url: 'https://mcp.stripe.example/', source: '/.well-known/mcp/server-card.json' },
+    ]);
+    expect(result.documents.get('server-card')?.shape).toBe('sep-1649');
+    expect(seen.some((r) => r.url.startsWith('https://mcp.stripe.example'))).toBe(false);
+  });
+
+  test('a templated remote URL is declared not-followed and never fetched', async () => {
+    const seen: SeenRequest[] = [];
+    const templated = 'https://{tenant}.example.com/mcp';
+    const result = await discover(
+      routedFetch(
+        {
+          [`GET ${CATALOG_URL}`]: () =>
+            jsonResponse({
+              specVersion: '1.0',
+              entries: [
+                {
+                  identifier: 't',
+                  type: MCP_CARD_TYPE,
+                  data: sep2127Card({ type: 'streamable-http', url: templated }),
+                },
+              ],
+            }),
+        },
+        seen,
+      ),
+    );
+    expect(result.declarations).toEqual([
+      {
+        kind: 'mcp-endpoint',
+        url: templated,
+        source: '/.well-known/ai-catalog.json#/entries/0/data',
+        not_followed: 'templated-url',
+      },
+    ]);
+    expect(result.endpoint).toBeNull();
+    expect(seen.some((r) => r.url.includes('tenant') || r.url.includes('%7B'))).toBe(false);
+  });
+
+  test('an off-origin catalog card URL is a card-document declaration with no request; only four MCP entries are read', async () => {
+    const seen: SeenRequest[] = [];
+    const entry = (identifier: string, url: string) => ({ identifier, type: MCP_CARD_TYPE, url });
+    const result = await discover(
+      routedFetch(
+        {
+          [`GET ${CATALOG_URL}`]: () =>
+            jsonResponse({
+              specVersion: '1.0',
+              entries: [
+                { identifier: 'agent', type: 'application/a2a-agent-card+json', url: '/agent.json' },
+                entry('b', 'https://cards.example.net/b'),
+                entry('c', '/cards/c'),
+                entry('d', '/cards/d'),
+                entry('e', '/cards/e'),
+                entry('f', '/cards/f'),
+                entry('g', '/cards/g'),
+              ],
+            }),
+        },
+        seen,
+      ),
+    );
+    expect(result.declarations).toEqual([
+      { kind: 'card-document', url: 'https://cards.example.net/b', source: '/.well-known/ai-catalog.json#/entries/1' },
+    ]);
+    const cardReads = seen.filter((r) => r.url.includes('/cards/') || r.url.includes('agent.json')).map((r) => r.url);
+    expect(cardReads.sort()).toEqual([
+      'https://example.com/cards/c',
+      'https://example.com/cards/d',
+      'https://example.com/cards/e',
+    ]);
+  });
+
+  test('the API catalog is read and retained during discovery', async () => {
+    const linkset = {
+      linkset: [
+        { anchor: 'https://api.example.com/', 'service-desc': [{ href: 'https://api.example.com/openapi.json' }] },
+      ],
+    };
+    const seen: SeenRequest[] = [];
+    const result = await discover(
+      routedFetch(
+        {
+          'GET https://example.com/.well-known/api-catalog': () =>
+            new Response(JSON.stringify(linkset), { headers: { 'content-type': 'application/linkset+json' } }),
+        },
+        seen,
+      ),
+    );
+    const apiCatalog = result.documents.get('api-catalog');
+    expect(apiCatalog?.url).toBe('https://example.com/.well-known/api-catalog');
+    expect(apiCatalog?.response.status).toBe(200);
+    expect(JSON.parse(apiCatalog?.response.body ?? '')).toEqual(linkset);
+    expect(result.evidence.find((e) => e.document === 'api-catalog')).toEqual({
+      source: '/.well-known/api-catalog',
+      document: 'api-catalog',
+      status: 200,
+      shape: 'linkset',
+    });
+    expect(seen.filter((r) => r.url === 'https://example.com/.well-known/api-catalog')).toHaveLength(1);
+  });
+
+  test('an AI catalog over its cap is read to 256 KiB, recorded truncated, and treated as unparseable', async () => {
+    const inline = { identifier: 'w', type: MCP_CARD_TYPE, data: sep2127Card(OFF_ORIGIN_REMOTE) };
+    const body = JSON.stringify({ specVersion: '1.0', entries: [inline], padding: 'x'.repeat(2 * 1024 * 1024) });
+    const result = await discover(
+      routedFetch(
+        { [`GET ${CATALOG_URL}`]: () => new Response(body, { headers: { 'content-type': 'application/json' } }) },
+        [],
+      ),
+    );
+    const catalog = result.documents.get('ai-catalog');
+    expect(catalog?.response.body.length).toBe(DOCUMENT_CAP);
+    expect(catalog?.response.truncated).toBe(true);
+    expect(result.evidence.find((e) => e.document === 'ai-catalog')).toEqual({
+      source: '/.well-known/ai-catalog.json',
+      document: 'ai-catalog',
+      status: 200,
+      truncated: true,
+      shape: 'unparseable',
+    });
+    expect(result.declarations).toEqual([]);
+  });
+
+  test('with every common path hanging, both POST lanes are in flight together and share one timeout', async () => {
+    let launched = 0;
+    let launchedAtFirstAbort = null as number | null;
+    const fetchImpl = ((_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method !== 'POST') return Promise.resolve(new Response('not found', { status: 404 }));
+      launched += 1;
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          launchedAtFirstAbort ??= launched;
+          reject(new DOMException('The operation was aborted.', 'AbortError'));
+        });
+      });
+    }) as typeof fetch;
+    const { endpoint } = await discoverMcpEndpoint('https://example.com/', DISCOVERY, {
+      fetchOptions: { fetchImpl },
+      timeoutMs: 100,
+    });
+    expect(endpoint).toBeNull();
+    expect(launched).toBe(2 * DISCOVERY.common_paths.length);
+    expect(launchedAtFirstAbort).toBe(2 * DISCOVERY.common_paths.length);
   });
 });
 

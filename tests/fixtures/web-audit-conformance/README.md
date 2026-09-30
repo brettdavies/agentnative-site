@@ -103,6 +103,11 @@ the first two, `im` for the body patterns) and `results[i] = new RegExp(pattern,
 | `cors-preflight-500-with-acao` | Allow-Origin on a failing preflight is misconfigured: preflight broken, actual classifies from its own POST | `mcp-cors-preflight`, `mcp-cors-actual` |
 | `cors-preflight-only` | the preflight declares CORS but the POST omits Allow-Origin: preflight pass, actual broken | `mcp-cors-preflight`, `mcp-cors-actual` |
 | `cors-preflight-transport-failure` | a transport failure on the preflight suppresses only the preflight row; the actual row classifies from its POST | `mcp-cors-preflight`, `mcp-cors-actual` |
+| `discovery-catalog-card` | an AI catalog entry names a SEP-2127 card on the audited origin; its streamable-http remote is the endpoint, so no common path is POSTed | `ai-catalog`, `mcp-initialize` |
+| `discovery-catalog-declarations` | catalog cards off the audited origin or behind a URL template are declared, never requested; discovery falls through to initialize | `mcp-initialize` |
+| `discovery-catalog-inline-card` | an AI catalog entry carries its SEP-2127 card inline; the card is read in place and its remote is the endpoint | `ai-catalog`, `mcp-initialize` |
+| `discovery-legacy-card` | a SEP-1649 card at the well-known path names the endpoint in transport.url; no common path is POSTed and the card suffix answers 404 | `well-known-mcp-card`, `mcp-initialize` |
+| `discovery-suffix-card` | no catalog and no well-known card: initialize finds the endpoint, and the SEP-2127 card under the endpoint at /mcp/server-card is the card of record | `mcp-initialize` |
 | `dns-aid-nxdomain` | every name resolves NXDOMAIN: absent, which a MAY finalizes as optional-absent | `dns-aid` |
 | `dns-aid-pass` | the first resolver answers Status 0 with a record for the index name | `dns-aid` |
 | `dns-aid-resolver-fallback` | the first resolver fails at the resolver level and the second answers | `dns-aid` |
