@@ -8,6 +8,7 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { NA_REASONS } from '../src/shared/web-audit-findings';
 import {
   categoryRollups,
   DEFAULT_BROKEN_FACTOR,
@@ -26,6 +27,7 @@ const PY_TOOL = join(REPO_ROOT, 'scripts', 'scoring', 'score_model.py');
 type TierOutcome = [keyof ScoreWeights, 'pass' | 'noncompliant' | 'broken' | 'absent' | 'n_a'];
 
 interface ParityFixture {
+  scoring_input: string[];
   weights: ScoreWeights;
   broken_factor: number;
   noncompliant_credit: number;
@@ -157,6 +159,31 @@ describe('score_model.py parity (shared fixture)', () => {
       brokenFactor: fixture.broken_factor,
       noncompliantCredit: fixture.noncompliant_credit,
     });
+    expect({ relative: score.relative, global: score.global }).toEqual(fixture.expected);
+  });
+
+  // Provenance and n_a reasons ride on every row, so they must never reach
+  // a score; the Python model checks the same declared input list.
+  test('the engine scorer reads only the declared scoring input: hosts and n_a reasons never move a score', () => {
+    expect(fixture.scoring_input).toEqual(['keyword', 'status']);
+    const universeMax = universeMaxOf(
+      fixture.universe_tiers.map((keyword) => ({ keyword })),
+      { weights: fixture.weights },
+    );
+    const config = {
+      weights: fixture.weights,
+      brokenFactor: fixture.broken_factor,
+      noncompliantCredit: fixture.noncompliant_credit,
+    };
+    const decorated = fixture.rows.map(([keyword, status], i) => ({
+      keyword,
+      status,
+      hosts: [{ host: `h${i}.example` }, { host: 'api.example' }],
+      host: `h${i}.example`,
+      ...(status === 'n_a' ? { na_reason: NA_REASONS[i % NA_REASONS.length] } : {}),
+    }));
+    const score = scoreWebAudit(decorated, universeMax, config);
+    expect(score).toEqual(scoreWebAudit(rowsToResults(fixture.rows), universeMax, config));
     expect({ relative: score.relative, global: score.global }).toEqual(fixture.expected);
   });
 

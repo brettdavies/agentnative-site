@@ -60,6 +60,11 @@ TIERS = ("must", "should", "may")
 # Statuses that occupy a slot in either score; everything else is excluded.
 SCORED_STATUSES = ("pass", "noncompliant", "broken", "absent")
 
+# The row fields a score is computed from (the parity fixture declares the
+# same list for the engine's scorer). Provenance, n_a reasons, and every
+# other row field ride beside the score and never enter it.
+SCORING_INPUT = ("keyword", "status")
+
 
 def round_half_up(x: float) -> int:
     """Half-up rounding, mirroring the engine's Math.round (Python's
@@ -157,6 +162,12 @@ def from_fixture(path: str) -> tuple[Model, Rows]:
     broken factor, the noncompliant credit, an explicit universe_max, and
     (tier, outcome) rows."""
     data = json.load(open(path))
+    declared = tuple(data.get("scoring_input", ()))
+    if declared != SCORING_INPUT:
+        raise SystemExit(
+            f"parity fixture scoring_input {list(declared)} differs from this model's {list(SCORING_INPUT)}: "
+            "the engine's scoring input changed, so update this model before trusting parity"
+        )
     weights = {t: float(data["weights"][t]) for t in TIERS}
     model = Model(
         weight=weights,
