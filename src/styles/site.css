@@ -3004,7 +3004,7 @@ main .remediation__body {
     grid-column: 3;
     margin-left: 0;
   }
-  .web-check__label + .audit__status {
+  .web-check summary .web-check__label + .audit__status {
     grid-column: 2 / -1;
   }
   .web-check__goal,
