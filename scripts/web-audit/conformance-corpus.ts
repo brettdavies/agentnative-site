@@ -13,7 +13,7 @@ import { normalizeWebAuditRegistry } from '../../src/build/13-web-audit-registry
 import type { ExpectBlock } from '../../src/worker/audit-web/assert';
 import { runWebAudit } from '../../src/worker/audit-web/engine';
 import type { WebAuditRegistry, WebSiteType } from '../../src/worker/audit-web/registry';
-import type { WebScorecard } from '../../src/worker/audit-web/scorecard';
+import type { NaReason, ScorecardStatus, WebScorecard } from '../../src/worker/audit-web/scorecard';
 import { SCENARIOS } from './conformance-scenarios';
 
 export const REPO_ROOT = join(import.meta.dir, '..', '..');
@@ -362,7 +362,7 @@ export function regexParityFixture(registry: WebAuditRegistry): RegexParityFixtu
 // scores.json
 // ---------------------------------------------------------------------------
 
-type ScoreIndexRow = { id: string; status: string; na_reason?: string };
+type ScoreIndexRow = { id: string; status: ScorecardStatus; na_reason?: NaReason };
 
 type ScoreIndexEntry =
   | { unreachable: true }

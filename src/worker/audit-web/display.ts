@@ -129,7 +129,7 @@ export function attachInlineRemediation(scorecard: unknown, catalog: WebRemediat
   return {
     ...scorecard,
     results: scorecard.results.map((row) => {
-      const result = resultLine(row.status, row.evidence ?? null, row.na_reason, rowHostOf(row, entryHost) ?? '');
+      const result = resultLine(row.status, row.evidence ?? null, row.na_reason, rowHostOf(row, entryHost));
       if (row.unprobed !== true && isFixableStatus(row.status)) {
         const remediation = assembleRemediation(catalog[row.id], {
           checkId: row.id,

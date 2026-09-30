@@ -48,7 +48,7 @@ export function entryHostOf(targetUrl: unknown): string | null {
 }
 
 /** A row's hosts. A row carrying neither `hosts` nor `host` reads as evaluated at the audited host. */
-export function readRowHosts(row: { hosts?: unknown; host?: unknown }, entryHost: string | null): string[] {
+function readRowHosts(row: { hosts?: unknown; host?: unknown }, entryHost: string | null): string[] {
   if (Array.isArray(row.hosts)) {
     return row.hosts.flatMap((entry) => (isRecord(entry) && typeof entry.host === 'string' ? [entry.host] : []));
   }
@@ -56,9 +56,9 @@ export function readRowHosts(row: { hosts?: unknown; host?: unknown }, entryHost
   return entryHost === null ? [] : [entryHost];
 }
 
-/** The host a row's result line names: its first host, else the audited host. */
-export function rowHostOf(row: { hosts?: unknown; host?: unknown }, entryHost: string | null): string | null {
-  return readRowHosts(row, entryHost)[0] ?? entryHost;
+/** The host a row's result line names: its first host, else the audited host, else empty. */
+export function rowHostOf(row: { hosts?: unknown; host?: unknown }, entryHost: string | null): string {
+  return readRowHosts(row, entryHost)[0] ?? entryHost ?? '';
 }
 
 /** Only a recorded `true` reads as on; a missing or malformed value was never evaluated. */

@@ -207,7 +207,7 @@ function summaryRow(
     status: row.status,
     unprobed: row.unprobed === true,
     fixable: isFixable(row),
-    result: resultLine(row.status, row.evidence, row.na_reason, rowHostOf(row, entryHost) ?? entryHost),
+    result: resultLine(row.status, row.evidence, row.na_reason, rowHostOf(row, entryHost)),
     goal: entry?.goal ?? assembled.goal,
     fix: assembled.fix,
     prompt: assembled.prompt,
