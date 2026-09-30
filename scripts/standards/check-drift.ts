@@ -23,7 +23,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 
-export const TIERS = ['rfc', 'spec', 'draft', 'proposal', 'convention'] as const;
+const TIERS = ['rfc', 'spec', 'draft', 'proposal', 'convention'] as const;
 export const SOURCE_TYPES = ['github-pr', 'github-file', 'url-status', 'ietf-draft', 'json-field'] as const;
 const CANONICALIZATIONS = ['json', 'none'] as const;
 
@@ -55,7 +55,7 @@ interface DriftEntry {
   new: unknown;
 }
 
-type ErrorReason = 'fetch-failed' | 'http-status' | 'parse-failed' | 'manifest-invalid';
+type SourceErrorReason = 'fetch-failed' | 'http-status' | 'parse-failed';
 
 interface NextStep {
   action: 'retry' | 'fix-manifest';
@@ -68,22 +68,38 @@ interface SourceError {
   tier: Tier;
   type: SourceType;
   url: string;
-  reason: ErrorReason;
+  reason: SourceErrorReason;
   message: string;
   next_step: NextStep;
 }
 
+interface ManifestError {
+  reason: 'manifest-invalid';
+  message: string;
+  path: string;
+  next_step: NextStep;
+}
+
+type ReportStatus = 'clean' | 'drift' | 'error';
+
+const EXIT_CODE = { clean: 0, drift: 1, error: 2 } as const;
+
 export interface DriftReport {
-  status: 'clean' | 'drift' | 'error';
-  exit_code: 0 | 1 | 2;
+  status: ReportStatus;
+  exit_code: (typeof EXIT_CODE)[ReportStatus];
   checked: number;
   drifted: DriftEntry[];
-  errors: SourceError[];
+  errors: Array<SourceError | ManifestError>;
+}
+
+function buildReport(checked: number, drifted: DriftEntry[], errors: DriftReport['errors']): DriftReport {
+  const status: ReportStatus = errors.length > 0 ? 'error' : drifted.length > 0 ? 'drift' : 'clean';
+  return { status, exit_code: EXIT_CODE[status], checked, drifted, errors };
 }
 
 class SourceCheckError extends Error {
   constructor(
-    readonly reason: Exclude<ErrorReason, 'manifest-invalid'>,
+    readonly reason: SourceErrorReason,
     message: string,
   ) {
     super(message);
@@ -191,9 +207,11 @@ async function request(fetchImpl: FetchImpl, url: string, headers: Record<string
 
 async function okBody(fetchImpl: FetchImpl, url: string, headers: Record<string, string>): Promise<string> {
   const res = await request(fetchImpl, url, headers);
-  const body = await res.text();
-  if (!res.ok) throw new SourceCheckError('http-status', `GET ${url} returned HTTP ${res.status}`);
-  return body;
+  if (!res.ok) {
+    await res.body?.cancel();
+    throw new SourceCheckError('http-status', `GET ${url} returned HTTP ${res.status}`);
+  }
+  return res.text();
 }
 
 function field(doc: unknown, key: string, what: string): unknown {
@@ -267,9 +285,7 @@ export async function checkDrift(entries: WatchEntry[], fetchImpl: FetchImpl): P
   const outcomes = await Promise.all(entries.map((entry) => checkEntry(entry, fetchImpl)));
   const drifted = outcomes.flatMap((o) => (o.kind === 'drift' ? [o.drift] : []));
   const errors = outcomes.flatMap((o) => (o.kind === 'error' ? [o.error] : []));
-  const status = errors.length > 0 ? 'error' : drifted.length > 0 ? 'drift' : 'clean';
-  const exit_code = status === 'error' ? 2 : status === 'drift' ? 1 : 0;
-  return { status, exit_code, checked: entries.length, drifted, errors };
+  return buildReport(entries.length, drifted, errors);
 }
 
 async function main(): Promise<number> {
@@ -278,9 +294,10 @@ async function main(): Promise<number> {
     entries = parseManifest(readFileSync(MANIFEST_PATH, 'utf8'));
   } catch (err) {
     const next_step: NextStep = { action: 'fix-manifest', command: SELF_COMMAND, docs: null };
-    const error = { reason: 'manifest-invalid', message: messageOf(err), path: MANIFEST_PATH, next_step };
-    console.log(JSON.stringify({ status: 'error', exit_code: 2, checked: 0, drifted: [], errors: [error] }, null, 2));
-    return 2;
+    const error: ManifestError = { reason: 'manifest-invalid', message: messageOf(err), path: MANIFEST_PATH, next_step };
+    const report = buildReport(0, [], [error]);
+    console.log(JSON.stringify(report, null, 2));
+    return report.exit_code;
   }
   const report = await checkDrift(entries, fetch);
   console.log(JSON.stringify(report, null, 2));

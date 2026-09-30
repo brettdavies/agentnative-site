@@ -17,9 +17,7 @@
 #   canonicalization  json: sorted-key, whitespace-free JSON before compare or hash
 #                     none: bytes as served (github-file only)
 #   pointer           JSON Pointer, json-field only
-#   pinned            the value observed on the pin date
-#
-# Pinned 2026-09-30.
+#   pinned            the value observed when the entry was pinned
 
 sources:
   # MCP Server Cards (SEP-2127): the extension-track SEP is an open PR; its

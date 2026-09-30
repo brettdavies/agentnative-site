@@ -11,7 +11,6 @@ import {
   MANIFEST_PATH,
   parseManifest,
   SOURCE_TYPES,
-  TIERS,
 } from '../scripts/standards/check-drift';
 
 const sha256 = (text: string): string => `sha256:${createHash('sha256').update(text).digest('hex')}`;
@@ -197,7 +196,7 @@ describe('fetch failures are reported apart from drift', () => {
     expect(report.drifted).toEqual([]);
     expect(report.status).toBe('error');
     expect(report.exit_code).toBe(2);
-    expect(report.errors.map((e) => [e.id, e.reason])).toEqual([
+    expect(report.errors.map((e) => ['id' in e ? e.id : null, e.reason])).toEqual([
       ['acme-schema', 'http-status'],
       ['acme-draft', 'fetch-failed'],
     ]);
@@ -205,13 +204,8 @@ describe('fetch failures are reported apart from drift', () => {
 });
 
 describe('the committed manifest', () => {
-  test('parses, and every entry carries a known tier and source type', () => {
-    const entries = parseManifest(readFileSync(MANIFEST_PATH, 'utf8'));
-    expect(entries.length).toBeGreaterThan(0);
-    for (const entry of entries) {
-      expect(TIERS).toContain(entry.tier);
-      expect(SOURCE_TYPES).toContain(entry.type);
-    }
+  test('parses into at least one entry', () => {
+    expect(parseManifest(readFileSync(MANIFEST_PATH, 'utf8')).length).toBeGreaterThan(0);
   });
 
   test('an unknown tier or source type is rejected', () => {
