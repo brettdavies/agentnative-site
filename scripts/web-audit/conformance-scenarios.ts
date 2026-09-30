@@ -995,6 +995,18 @@ export const SCENARIOS: Record<string, Scenario> = {
       ...legacyOnlyMcp(),
     ],
   ),
+  'discovery-card-generations-auth': scenario(
+    'an inline SEP-2127 catalog card and a SEP-1649 card declaring authentication name one endpoint that never answers 401; the catalog card wins the endpoint and the SEP-1649 declaration still satisfies the auth antecedents, so the OAuth rows are scored',
+    ['oauth-protected-resource', 'auth-md'],
+    [
+      ...baseline(),
+      get('/.well-known/ai-catalog.json', aiCatalog(cardEntry({ data: SEP_2127_CARD }))),
+      get(CARD_PATH, json(SERVER_CARD_WITH_AUTH)),
+      ...legacyOnlyMcp(),
+      get('/.well-known/oauth-protected-resource', json({ resource: 'https://example.com/mcp', authorization_servers: ['https://example.com'] })),
+      get('/.well-known/auth.md', md('# Auth\n\nRegister at /signup, then send a bearer token.\n')),
+    ],
+  ),
 
   // ---- dns-doh ---------------------------------------------------------------
   'dns-aid-pass': scenario('the first resolver answers Status 0 with a record for the index name', ['dns-aid'], [

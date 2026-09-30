@@ -14,12 +14,12 @@
 // probed from discovery, the same way scoped-llms restricts llms.txt hrefs.
 //
 // The card of record is the first card that parses in SEP-2127 order: a
-// catalog card, then the card at <endpoint> + card_suffix, then a SEP-1649
-// well-known card. It, the AI catalog, and the API catalog are kept for
-// later checks, each read under DOCUMENT_MAX_BODY_BYTES. Every pass is
-// bounded by both the per-audit deadline and the discovery budget, so the
-// passes together cannot outrun the audit budget even against a target
-// that never answers.
+// catalog card, then the card at <endpoint> + card_suffix when it has a
+// card's shape, then a SEP-1649 well-known card. It, the AI catalog, and
+// the API catalog are kept for later checks, each read under
+// DOCUMENT_MAX_BODY_BYTES. Every pass is bounded by both the per-audit
+// deadline and the discovery budget, so the passes together cannot outrun
+// the audit budget even against a target that never answers.
 
 import type { RetainedDocumentKey } from '../../shared/web-audit-documents';
 import { parseJsonRpc } from './assert';
@@ -166,13 +166,23 @@ export async function discoverMcpEndpoint(
     catalogReads().find((r) => r.endpoint !== null) ?? wellKnown.find((r) => r.endpoint !== null) ?? null;
 
   const finish = (): DiscoveryResult => {
-    const winner = cardWinner();
-    const record = preferredCard(catalogReads()) ?? (suffix?.card ? suffix : null) ?? preferredCard(wellKnown);
+    const endpoint = cardWinner()?.endpoint ?? postEndpoint;
+    // The suffix URL is a guess the site never published, and an MCP
+    // handler can answer it with any JSON object, a JSON-RPC error included.
+    const suffixCard = suffix?.shape === 'sep-2127' || suffix?.shape === 'sep-1649' ? suffix : null;
+    const record = preferredCard(catalogReads()) ?? suffixCard ?? preferredCard(wellKnown);
     if (record !== null) {
       documents.set('server-card', { url: record.url, response: record.response, shape: cardShape(record.card) });
     }
-    const item = (read: CardRead) =>
-      cardItem(read, read === record, read === winner && read.card !== null && cardHasAuthField(read.card));
+    // SEP-2127 cards carry no auth field, so the declaration comes from
+    // whichever card of either generation names the discovered endpoint.
+    const authCard =
+      endpoint === null
+        ? null
+        : ([...catalogReads(), ...(suffix !== null ? [suffix] : []), ...wellKnown].find(
+            (r) => r.endpoint === endpoint && r.card !== null && cardHasAuthField(r.card),
+          ) ?? null);
+    const item = (read: CardRead) => cardItem(read, read === record, read === authCard);
     const catalogItem = (slot: CatalogSlot): EvidenceItem => {
       if ('read' in slot) return item(slot.read);
       if ('declaration' in slot) {
@@ -199,7 +209,7 @@ export async function discoverMcpEndpoint(
       suffix?.declaration ?? null,
       ...wellKnown.map((r) => r.declaration),
     ].filter((d): d is McpDeclaration => d !== null);
-    return { endpoint: winner?.endpoint ?? postEndpoint, evidence, declarations, documents };
+    return { endpoint, evidence, declarations, documents };
   };
   const exhausted = (): DiscoveryResult => {
     deadlineHit = true;

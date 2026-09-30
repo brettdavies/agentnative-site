@@ -552,6 +552,83 @@ describe('discoverMcpEndpoint: SEP-2127 order and retained documents', () => {
   });
 });
 
+describe('discoverMcpEndpoint: several card sources for one endpoint', () => {
+  const MCP_URL = 'https://example.com/mcp';
+  const SUFFIX_URL = 'https://example.com/mcp/server-card';
+  const WELL_KNOWN_CARD = '/.well-known/mcp/server-card.json';
+  const WELL_KNOWN_CARD_URL = `https://example.com${WELL_KNOWN_CARD}`;
+  const inlineCatalog = () =>
+    jsonResponse({
+      specVersion: '1.0',
+      entries: [{ identifier: 'w', type: MCP_CARD_TYPE, data: sep2127Card({ type: 'streamable-http', url: MCP_URL }) }],
+    });
+  const legacyCard = (fields: Record<string, unknown> = {}) =>
+    jsonResponse({ name: 'example', version: '1.0.0', mcp_endpoint: MCP_URL, ...fields });
+
+  test('a catalog card winning the endpoint keeps the auth a SEP-1649 card declares for it', async () => {
+    const result = await discover(
+      routedFetch(
+        {
+          [`GET ${CATALOG_URL}`]: inlineCatalog,
+          [`GET ${WELL_KNOWN_CARD_URL}`]: () => legacyCard({ authentication: { type: 'oauth2' } }),
+          [`POST ${MCP_URL}`]: () => initializeResponse(),
+        },
+        [],
+      ),
+    );
+    expect(result.endpoint).toBe(MCP_URL);
+    const declaringAuth = result.evidence.filter((e) => e.authentication === true);
+    expect(declaringAuth.map((e) => e.source)).toEqual([WELL_KNOWN_CARD]);
+  });
+
+  test('a suffix answer that is not a card never displaces the SEP-1649 card of record', async () => {
+    const seen: SeenRequest[] = [];
+    const result = await discover(
+      routedFetch(
+        {
+          [`GET ${WELL_KNOWN_CARD_URL}`]: () => legacyCard(),
+          [`GET ${SUFFIX_URL}`]: () =>
+            jsonResponse({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } }),
+        },
+        seen,
+      ),
+    );
+    expect(result.endpoint).toBe(MCP_URL);
+    expect(seen.some((r) => r.url === SUFFIX_URL)).toBe(true);
+    expect(result.documents.get('server-card')).toMatchObject({ url: WELL_KNOWN_CARD_URL, shape: 'sep-1649' });
+  });
+
+  test('a catalog card is the card of record over a suffix card and a SEP-1649 card', async () => {
+    const result = await discover(
+      routedFetch(
+        {
+          [`GET ${CATALOG_URL}`]: inlineCatalog,
+          [`GET ${SUFFIX_URL}`]: () => jsonResponse(sep2127Card({ type: 'streamable-http', url: MCP_URL })),
+          [`GET ${WELL_KNOWN_CARD_URL}`]: () => legacyCard(),
+        },
+        [],
+      ),
+    );
+    expect(result.documents.get('server-card')).toMatchObject({
+      url: `${CATALOG_URL}#/entries/0/data`,
+      shape: 'sep-2127',
+    });
+  });
+
+  test('with no catalog card, a SEP-2127 suffix card is the card of record over a SEP-1649 card', async () => {
+    const result = await discover(
+      routedFetch(
+        {
+          [`GET ${SUFFIX_URL}`]: () => jsonResponse(sep2127Card({ type: 'streamable-http', url: MCP_URL })),
+          [`GET ${WELL_KNOWN_CARD_URL}`]: () => legacyCard(),
+        },
+        [],
+      ),
+    );
+    expect(result.documents.get('server-card')).toMatchObject({ url: SUFFIX_URL, shape: 'sep-2127' });
+  });
+});
+
 function tinyRegistry(): WebAuditRegistry {
   return {
     version: 1,

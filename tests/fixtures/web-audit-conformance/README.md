@@ -103,6 +103,7 @@ the first two, `im` for the body patterns) and `results[i] = new RegExp(pattern,
 | `cors-preflight-500-with-acao` | Allow-Origin on a failing preflight is misconfigured: preflight broken, actual classifies from its own POST | `mcp-cors-preflight`, `mcp-cors-actual` |
 | `cors-preflight-only` | the preflight declares CORS but the POST omits Allow-Origin: preflight pass, actual broken | `mcp-cors-preflight`, `mcp-cors-actual` |
 | `cors-preflight-transport-failure` | a transport failure on the preflight suppresses only the preflight row; the actual row classifies from its POST | `mcp-cors-preflight`, `mcp-cors-actual` |
+| `discovery-card-generations-auth` | an inline SEP-2127 catalog card and a SEP-1649 card declaring authentication name one endpoint that never answers 401; the catalog card wins the endpoint and the SEP-1649 declaration still satisfies the auth antecedents, so the OAuth rows are scored | `oauth-protected-resource`, `auth-md` |
 | `discovery-catalog-card` | an AI catalog entry names a SEP-2127 card on the audited origin; its streamable-http remote is the endpoint, so no common path is POSTed | `ai-catalog`, `mcp-initialize` |
 | `discovery-catalog-declarations` | catalog cards off the audited origin or behind a URL template are declared, never requested; discovery falls through to initialize | `mcp-initialize` |
 | `discovery-catalog-inline-card` | an AI catalog entry carries its SEP-2127 card inline; the card is read in place and its remote is the endpoint | `ai-catalog`, `mcp-initialize` |
