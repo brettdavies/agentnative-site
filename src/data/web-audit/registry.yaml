@@ -45,6 +45,8 @@ version: 1
 
 # Endpoint discovery: first candidate that answers `initialize` wins.
 mcp_discovery:
+  ai_catalog: /.well-known/ai-catalog.json
+  card_suffix: /server-card
   well_known:
     - /.well-known/mcp.json
     - /.well-known/mcp/server-card.json

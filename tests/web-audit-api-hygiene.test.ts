@@ -93,7 +93,13 @@ const CHECKS: WebCheck[] = [
 function registryOf(checks: WebCheck[]): WebAuditRegistry {
   return {
     version: 1,
-    mcp_discovery: { well_known: ['/.well-known/mcp.json'], common_paths: ['/mcp'], protocol_version: '2025-06-18' },
+    mcp_discovery: {
+      ai_catalog: '/.well-known/ai-catalog.json',
+      card_suffix: '/server-card',
+      well_known: ['/.well-known/mcp.json'],
+      common_paths: ['/mcp'],
+      protocol_version: '2025-06-18',
+    },
     category_order: ['api', 'mcp', 'agent-discovery-auth'],
     categories: { api: 'API', mcp: 'MCP', 'agent-discovery-auth': 'Agent discovery & auth' },
     checks,

@@ -102,6 +102,14 @@ export function normalizeWebAuditRegistry(doc) {
   ) {
     throw new Error('web-audit registry: mcp_discovery must carry well_known[], common_paths[], protocol_version');
   }
+  for (const key of ['ai_catalog', 'card_suffix']) {
+    const value = discovery[key];
+    if (typeof value !== 'string' || !value.startsWith('/')) {
+      throw new Error(
+        `web-audit registry: mcp_discovery.${key} must be a path starting with "/" (got ${JSON.stringify(value)})`,
+      );
+    }
+  }
   const categories = doc.categories;
   if (!categories || typeof categories !== 'object') {
     throw new Error('web-audit registry: expected a top-level "categories" mapping');
@@ -243,6 +251,8 @@ export function normalizeWebAuditRegistry(doc) {
   return {
     version: doc.version ?? 1,
     mcp_discovery: {
+      ai_catalog: discovery.ai_catalog,
+      card_suffix: discovery.card_suffix,
       well_known: discovery.well_known,
       common_paths: discovery.common_paths,
       protocol_version: discovery.protocol_version,

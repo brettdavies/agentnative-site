@@ -1629,7 +1629,13 @@ describe('mcp-resources antecedent resolves era-neutrally (engine)', () => {
 
   const registry: WebAuditRegistry = {
     version: 1,
-    mcp_discovery: { well_known: ['/.well-known/mcp.json'], common_paths: ['/mcp'], protocol_version: '2025-06-18' },
+    mcp_discovery: {
+      ai_catalog: '/.well-known/ai-catalog.json',
+      card_suffix: '/server-card',
+      well_known: ['/.well-known/mcp.json'],
+      common_paths: ['/mcp'],
+      protocol_version: '2025-06-18',
+    },
     category_order: ['mcp'],
     categories: { mcp: 'MCP' },
     checks: [
@@ -1757,7 +1763,13 @@ describe('era lanes resolved across a whole audit (engine)', () => {
 
   const registry: WebAuditRegistry = {
     version: 1,
-    mcp_discovery: { well_known: ['/.well-known/mcp.json'], common_paths: ['/mcp'], protocol_version: '2025-06-18' },
+    mcp_discovery: {
+      ai_catalog: '/.well-known/ai-catalog.json',
+      card_suffix: '/server-card',
+      well_known: ['/.well-known/mcp.json'],
+      common_paths: ['/mcp'],
+      protocol_version: '2025-06-18',
+    },
     category_order: ['mcp'],
     categories: { mcp: 'MCP' },
     checks: (
@@ -2688,7 +2700,13 @@ describe('evidence lines name the fact that decided the verdict', () => {
   function registryOf(checks: WebCheck[]): WebAuditRegistry {
     return {
       version: 1,
-      mcp_discovery: { well_known: [], common_paths: [], protocol_version: '2025-06-18' },
+      mcp_discovery: {
+        ai_catalog: '/.well-known/ai-catalog.json',
+        card_suffix: '/server-card',
+        well_known: [],
+        common_paths: [],
+        protocol_version: '2025-06-18',
+      },
       category_order: ['mcp'],
       categories: { mcp: 'MCP' },
       checks,
@@ -2795,7 +2813,13 @@ describe('mcp-card-legacy-aliases (MAY, one correct redirect is enough)', () => 
       url: BASE,
       registry: {
         version: 1,
-        mcp_discovery: { well_known: [], common_paths: [], protocol_version: '2025-06-18' },
+        mcp_discovery: {
+          ai_catalog: '/.well-known/ai-catalog.json',
+          card_suffix: '/server-card',
+          well_known: [],
+          common_paths: [],
+          protocol_version: '2025-06-18',
+        },
         category_order: ['mcp'],
         categories: { mcp: 'MCP' },
         checks: [aliasCheck],

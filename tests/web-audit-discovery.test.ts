@@ -22,6 +22,8 @@ function legacyRejectResponse(code = -32022): Response {
 }
 
 const DISCOVERY = {
+  ai_catalog: '/.well-known/ai-catalog.json',
+  card_suffix: '/server-card',
   well_known: ['/.well-known/mcp.json', '/.well-known/mcp/server-card.json'],
   common_paths: ['/mcp', '/sse'],
   protocol_version: '2025-06-18',
