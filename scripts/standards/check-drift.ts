@@ -101,9 +101,25 @@ class SourceCheckError extends Error {
   constructor(
     readonly reason: SourceErrorReason,
     message: string,
+    readonly action: NextStep['action'] = 'retry',
   ) {
     super(message);
   }
+}
+
+// A hung upstream would otherwise hold the whole Promise.all open until the
+// CI job's own timeout, and the run would print no report for the healthy
+// sources.
+const REQUEST_TIMEOUT_MS = 20_000;
+
+// A watched path that answers 404 or 410 has moved or been removed: retrying
+// cannot fix it, re-pointing the manifest entry can.
+const GONE_STATUSES: ReadonlySet<number> = new Set([404, 410]);
+
+// Rate-limit and server errors say nothing about the watched resource, so a
+// url-status source must not read them as a changed status.
+function isTransientStatus(status: number): boolean {
+  return status === 429 || status >= 500;
 }
 
 const GITHUB_PR_URL = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)$/;
@@ -199,7 +215,7 @@ function sha256(text: string): string {
 
 async function request(fetchImpl: FetchImpl, url: string, headers: Record<string, string>): Promise<Response> {
   try {
-    return await fetchImpl(url, { headers });
+    return await fetchImpl(url, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   } catch (err) {
     throw new SourceCheckError('fetch-failed', `GET ${url} failed: ${messageOf(err)}`);
   }
@@ -209,7 +225,8 @@ async function okBody(fetchImpl: FetchImpl, url: string, headers: Record<string,
   const res = await request(fetchImpl, url, headers);
   if (!res.ok) {
     await res.body?.cancel();
-    throw new SourceCheckError('http-status', `GET ${url} returned HTTP ${res.status}`);
+    const action = GONE_STATUSES.has(res.status) ? 'fix-manifest' : 'retry';
+    throw new SourceCheckError('http-status', `GET ${url} returned HTTP ${res.status}`, action);
   }
   return res.text();
 }
@@ -225,9 +242,9 @@ function resolvePointer(doc: unknown, pointer: string): unknown {
     const token = raw.replaceAll('~1', '/').replaceAll('~0', '~');
     if (Array.isArray(node) && /^\d+$/.test(token)) node = node[Number(token)];
     else if (isRecord(node) && Object.hasOwn(node, token)) node = node[token];
-    else return null;
+    else throw new SourceCheckError('parse-failed', `document has no value at ${pointer}`, 'fix-manifest');
   }
-  return node ?? null;
+  return node;
 }
 
 const GITHUB_JSON = { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' };
@@ -254,6 +271,9 @@ const FETCHERS: Record<SourceType, Fetcher> = {
   'url-status': async (entry, fetchImpl) => {
     const res = await request(fetchImpl, entry.url, {});
     await res.body?.cancel();
+    if (res.status !== entry.pinned && isTransientStatus(res.status)) {
+      throw new SourceCheckError('http-status', `GET ${entry.url} returned HTTP ${res.status}`);
+    }
     return res.status;
   },
   'ietf-draft': async (entry, fetchImpl) => {
@@ -276,7 +296,8 @@ async function checkEntry(entry: WatchEntry, fetchImpl: FetchImpl): Promise<Outc
     return { kind: 'drift', drift: { id, tier, type, url, old: entry.pinned, new: observed } };
   } catch (err) {
     const reason = err instanceof SourceCheckError ? err.reason : 'fetch-failed';
-    const next_step: NextStep = { action: 'retry', command: SELF_COMMAND, docs: null };
+    const action = err instanceof SourceCheckError ? err.action : 'retry';
+    const next_step: NextStep = { action, command: SELF_COMMAND, docs: null };
     return { kind: 'error', error: { id, tier, type, url, reason, message: messageOf(err), next_step } };
   }
 }

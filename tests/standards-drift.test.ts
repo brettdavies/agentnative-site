@@ -203,6 +203,58 @@ describe('fetch failures are reported apart from drift', () => {
   });
 });
 
+describe('a moved or missing source routes to the right next step', () => {
+  const errorsOf = (report: Awaited<ReturnType<typeof checkDrift>>) =>
+    report.errors.map((e) => ({ id: 'id' in e ? e.id : null, reason: e.reason, action: e.next_step.action }));
+
+  test('drift found alongside an error is still listed, and the run reports the error', async () => {
+    const routes = cleanRoutes();
+    routes[PR_API] = () => json({ number: 7, state: 'open', merged: false, head: { sha: 'b'.repeat(40) } });
+    routes[DRAFT_API] = () => new Response('upstream down', { status: 503 });
+    const report = await checkDrift(manifest(), fakeFetch(routes));
+    expect(report.status).toBe('error');
+    expect(report.exit_code).toBe(2);
+    expect(report.drifted.map((d) => d.id)).toEqual(['acme-pr']);
+    expect(errorsOf(report)).toEqual([{ id: 'acme-draft', reason: 'http-status', action: 'retry' }]);
+  });
+
+  test('a watched URL answering 503 or 429 is a retryable error, not a changed status', async () => {
+    for (const status of [503, 429]) {
+      const routes = cleanRoutes();
+      routes[SCHEMA_URL] = () => new Response('busy', { status });
+      const report = await checkDrift(manifest(), fakeFetch(routes));
+      expect({ status, drifted: report.drifted }).toEqual({ status, drifted: [] });
+      expect(errorsOf(report)).toEqual([{ id: 'acme-schema-url', reason: 'http-status', action: 'retry' }]);
+    }
+  });
+
+  test('a watched file that no longer exists asks for the manifest entry to be re-pointed', async () => {
+    const routes = cleanRoutes();
+    routes[DOC_API] = () => new Response('Not Found', { status: 404 });
+    const report = await checkDrift(manifest(), fakeFetch(routes));
+    expect(report.drifted).toEqual([]);
+    expect(errorsOf(report)).toEqual([{ id: 'acme-discovery', reason: 'http-status', action: 'fix-manifest' }]);
+  });
+
+  test('a JSON Pointer whose path vanished asks for the pointer to be fixed rather than pinning null', async () => {
+    const routes = cleanRoutes();
+    routes[OPENAPI_URL] = () => json({ openapi: '3.2.0', components: { schemas: {} } });
+    const report = await checkDrift(manifest(), fakeFetch(routes));
+    expect(report.drifted).toEqual([]);
+    expect(errorsOf(report)).toEqual([{ id: 'acme-registry-schema', reason: 'parse-failed', action: 'fix-manifest' }]);
+  });
+
+  test('a changed value at a JSON Pointer reports one drifted entry', async () => {
+    const next = 'https://schemas.example.test/2026-03-01/server.schema.json';
+    const routes = cleanRoutes();
+    routes[OPENAPI_URL] = () =>
+      json({ components: { schemas: { Server: { properties: { $schema: { examples: [next] } } } } } });
+    const report = await checkDrift(manifest(), fakeFetch(routes));
+    expect(report.errors).toEqual([]);
+    expect(report.drifted.map((d) => [d.id, d.new])).toEqual([['acme-registry-schema', next]]);
+  });
+});
+
 describe('the committed manifest', () => {
   test('parses into at least one entry', () => {
     expect(parseManifest(readFileSync(MANIFEST_PATH, 'utf8')).length).toBeGreaterThan(0);
