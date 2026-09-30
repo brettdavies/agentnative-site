@@ -17,6 +17,7 @@
       "!src/worker-configuration.d.ts",
       "!src/styles/foundation.css",
       "!src/data/coverage-matrix.json",
+      "!tests/fixtures/web-audit-conformance",
       "!!**/.claude"
     ]
   },

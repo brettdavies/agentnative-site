@@ -87,7 +87,7 @@ const CHECK_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
  * error on any missing/invalid field so the build fails loudly.
  *
  * @param {object} doc — js-yaml load of src/data/web-audit/registry.yaml
- * @returns {{ version: number, mcp_discovery: object, categories: Record<string,string>, checks: Array<object> }}
+ * @returns {{ version: number, mcp_discovery: object, categories: Record<string,string>, mcp_lanes: Record<string,{label: string, note: string}>, checks: Array<object> }}
  */
 export function normalizeWebAuditRegistry(doc) {
   if (!doc || typeof doc !== 'object') {
@@ -117,6 +117,12 @@ export function normalizeWebAuditRegistry(doc) {
   const checks = doc.checks;
   if (!Array.isArray(checks) || checks.length === 0) {
     throw new Error('web-audit registry: expected a non-empty top-level "checks" array');
+  }
+  const mcpLanes = doc.mcp_lanes ?? {};
+  for (const [lane, spec] of Object.entries(mcpLanes)) {
+    if (typeof spec?.label !== 'string' || spec.label.length === 0 || typeof spec.note !== 'string') {
+      throw new Error(`web-audit registry: mcp_lanes entry "${lane}" needs a string label and note`);
+    }
   }
 
   const seen = new Set();
@@ -194,6 +200,11 @@ export function normalizeWebAuditRegistry(doc) {
         `web-audit registry: check "${id}" breadcrumb is ${check.breadcrumb.length} chars, over the ${BREADCRUMB_MAX} a trail fits`,
       );
     }
+    if (check.category === 'mcp' && !Object.hasOwn(mcpLanes, check.lane)) {
+      throw new Error(
+        `web-audit registry: check "${id}" needs a lane from mcp_lanes (${Object.keys(mcpLanes).join(', ')}), got ${JSON.stringify(check.lane)}`,
+      );
+    }
     if (!WEB_AUDIT_HANDLERS.has(check.handler)) {
       throw new Error(`web-audit registry: check "${id}" names unknown handler "${check.handler}"`);
     }
@@ -222,6 +233,7 @@ export function normalizeWebAuditRegistry(doc) {
       weight: check.weight,
       title: check.title,
       breadcrumb: check.breadcrumb,
+      ...(check.category === 'mcp' ? { lane: check.lane } : {}),
       hint: check.hint,
       handler: check.handler,
       with: expandProbeUserAgent(id, check.with),
@@ -237,6 +249,7 @@ export function normalizeWebAuditRegistry(doc) {
     },
     category_order: categoryOrder,
     categories,
+    mcp_lanes: mcpLanes,
     checks: normalized,
   };
 }

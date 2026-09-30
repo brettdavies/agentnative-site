@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import type { AuditEvent } from '../src/shared/audit-events';
 import { ndjsonValues } from '../src/shared/ndjson';
 import type { AuditJob } from '../src/worker/audit/job';
-import { _resetIndexCache } from '../src/worker/score/handler';
+import { _resetIndexCache } from '../src/worker/score/core';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
 import { ANC_VERSION } from '../src/worker/spec-version.gen';
 import { call, makeEnv, ndjson, newTracker, post, probeFetchFor } from './helpers/audit-api-env';

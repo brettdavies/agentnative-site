@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { KEYWORD_BY_TIER, normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import { AI_USER_FETCHER_PROBE_UA, CLI_PROBE_UA } from '../src/shared/user-agents';
+import { type McpOp, mcpOpEra } from '../src/worker/audit-web/handlers/mcp';
 import { universeMaxOf } from '../src/worker/audit-web/score';
 import { buildWebScorecard, type EngineResult } from '../src/worker/audit-web/scorecard';
 
@@ -29,6 +30,7 @@ interface NormalizedWebAuditCheck {
   title: string;
   hint: string;
   handler: string;
+  lane?: string;
   with: object;
 }
 
@@ -41,6 +43,7 @@ interface NormalizedWebAuditRegistry {
   };
   category_order: string[];
   categories: Record<string, string>;
+  mcp_lanes: Record<string, { label: string; note: string }>;
   checks: NormalizedWebAuditCheck[];
 }
 
@@ -339,10 +342,53 @@ describe('web-audit registry shape', () => {
     expect(() => normalizeWebAuditRegistry({ ...abortBase, checks: [longCrumb] })).toThrow(/over the 40/);
   });
 
+  const laneBase = {
+    ...abortBase,
+    category_order: ['mcp'],
+    categories: { mcp: 'MCP' },
+    mcp_lanes: { shared: { label: 'Every MCP server', note: 'n' } },
+  };
+  const mcpCheck = { ...abortCheck, category: 'mcp', lane: 'shared' };
+
+  test('an MCP check without a lane aborts normalization', () => {
+    const { lane: _omitted, ...noLane } = mcpCheck;
+    expect(() => normalizeWebAuditRegistry({ ...laneBase, checks: [noLane] })).toThrow(/needs a lane/);
+  });
+
+  test('an MCP check naming a lane the lane map lacks aborts normalization', () => {
+    expect(() => normalizeWebAuditRegistry({ ...laneBase, checks: [{ ...mcpCheck, lane: 'sideways' }] })).toThrow(
+      /needs a lane/,
+    );
+  });
+
+  test('a lane map entry without a label or note aborts normalization', () => {
+    expect(() =>
+      normalizeWebAuditRegistry({ ...laneBase, mcp_lanes: { shared: { label: 'x' } }, checks: [mcpCheck] }),
+    ).toThrow(/mcp_lanes/);
+  });
+
   test('duplicate check ids abort normalization', () => {
     expect(() => normalizeWebAuditRegistry({ ...abortBase, checks: [abortCheck, { ...abortCheck }] })).toThrow(
       /duplicate check id/,
     );
+  });
+
+  // A lane names the protocol era a row exercises, and the handler's op table
+  // is where that era is decided. An op row filed under the other lane would
+  // tell a reader the wrong era failed.
+  test("every MCP op row sits in its op's era lane", async () => {
+    const registry = await loadNormalized();
+    const opRows = registry.checks.filter((check) => check.handler === 'mcp' && 'op' in check.with);
+    expect(opRows.length).toBeGreaterThan(0);
+    for (const check of opRows) {
+      const op = (check.with as { op: McpOp }).op;
+      expect({ id: check.id, lane: check.lane }).toEqual({ id: check.id, lane: mcpOpEra(op) });
+    }
+  });
+
+  test('the lane map lists its lanes in display order', async () => {
+    const registry = await loadNormalized();
+    expect(Object.keys(registry.mcp_lanes)).toEqual(['shared', 'legacy', 'modern', 'browser']);
   });
 
   test('normalized JSON round-trips to 65 entries', async () => {

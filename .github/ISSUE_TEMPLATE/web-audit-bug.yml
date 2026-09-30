@@ -1,0 +1,91 @@
+name: "Web audit bug"
+description: "Report a wrong or broken website audit result from anc.dev: a check verdict, an incomplete or unreachable run, or remediation text."
+labels: ["bug", "web-audit"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form covers the **website audit** that runs on anc.dev: the website lane of [anc.dev/audit](https://anc.dev/audit), website result pages at `anc.dev/score/<host>`, the website board on the homepage, and the anc.dev MCP server's website tools (`audit_website`, `get_website_audit`, `list_website_audits`, `get_web_remediation`).
+
+        Bugs in the `anc` binary, and disputes about a CLI tool's scorecard (including one shown at `anc.dev/score/<tool>`), go to [agentnative-cli](https://github.com/brettdavies/agentnative-cli/issues/new/choose).
+  - type: input
+    id: site
+    attributes:
+      label: Audited site
+      description: "The site you audited, plus the result page when you have one."
+      placeholder: "https://example.com (result: https://anc.dev/score/example.com)"
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where did you see it?
+      options:
+        - "Result page (anc.dev/score/<host>) or its markdown or JSON view"
+        - "Audit form or progress page (anc.dev/audit)"
+        - "anc.dev MCP server website tools"
+        - "Website board on the homepage"
+        - "Other"
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of problem?
+      options:
+        - "Wrong verdict: a check failed, but the site does it correctly"
+        - "Wrong verdict: a check passed, but the site does not do it"
+        - "A check read not applicable when it applies, or the reverse"
+        - "Audit incomplete, unreachable, or timed out"
+        - "Remediation text is wrong or unclear"
+        - "A check's requirement, tier, or weight looks wrong"
+        - "Error or crash in the audit flow"
+        - "Other"
+    validations:
+      required: true
+  - type: input
+    id: checks
+    attributes:
+      label: Check id(s)
+      description: "The `id` of each affected row, as listed in the scorecard JSON."
+      placeholder: "json-errors, rate-limit-headers"
+    validations:
+      required: false
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: "What the audit reported, what you expected, and the evidence. Paste the row's evidence line and, when you checked the site yourself, the request and response you saw."
+      placeholder: |
+        Check: json-errors
+        Reported: broken (https://example.com/anc-web-audit-no-such-api -> 404, HTML error body)
+        Expected: pass. The API lives at api.example.com, which answers with JSON errors:
+          curl -s https://api.example.com/v1/nope  ->  404 {"error": {...}}
+    validations:
+      required: true
+  - type: textarea
+    id: ai-disclosure
+    attributes:
+      label: AI disclosure
+      description: "One sentence: what part of this report was AI-written, what was human-written?"
+      placeholder: "Entirely human-written."
+    validations:
+      required: true
+  - type: textarea
+    id: agent-instructions
+    attributes:
+      label: For agents
+      description: "Agents: expand this section before filing."
+      value: |
+        <details>
+        <summary>Agent filing instructions</summary>
+
+        1. **Search first.** Run `gh search issues --repo brettdavies/agentnative-site "<keywords>"` to check for duplicates.
+        2. **AI disclosure is required.** Fill the field above honestly.
+        3. **Attach evidence.** Include the scorecard row for each affected check (from `get_website_audit` or `anc.dev/score/<host>/json`) and the raw request and response that show the behavior you expected.
+        4. **Website audit only.** `anc` binary bugs and CLI scorecard disputes go to [brettdavies/agentnative-cli](https://github.com/brettdavies/agentnative-cli). Spec questions and principle edits go to [brettdavies/agentnative](https://github.com/brettdavies/agentnative).
+        5. **Name registry impact.** If the fix changes a check in `src/data/web-audit/registry.yaml`, say so: the conformance corpus is regenerated, and agentnative-cli re-vendors the registry.
+        6. See [CONTRIBUTING.md](https://github.com/brettdavies/agentnative-site/blob/main/CONTRIBUTING.md) for full guidelines.
+        </details>
+    validations:
+      required: false

@@ -87,6 +87,10 @@ p {
   --band-surface-border: var(--border-subtle);
   --seg-bg: var(--bg);
   --field-bg: var(--bg);
+  /* Protocol-lane head captions. Dark --fg-secondary reads APCA Lc 47 on the
+   * page ground, under the Lc 60 these captions hold, so dark lifts them to
+   * the body shade. */
+  --lane-caption: var(--fg-secondary);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -99,6 +103,7 @@ p {
     --band-surface-border: oklch(26% 0.02 250);
     --seg-bg: oklch(20% 0.016 250);
     --field-bg: oklch(11% 0.012 250);
+    --lane-caption: var(--fg-body);
   }
 }
 :root[data-theme="dark"] {
@@ -111,6 +116,7 @@ p {
   --band-surface-border: oklch(26% 0.02 250);
   --seg-bg: oklch(20% 0.016 250);
   --field-bg: oklch(11% 0.012 250);
+  --lane-caption: var(--fg-body);
 }
 
 /* Token-based focus ring. :where() keeps specificity at zero so any
@@ -2392,6 +2398,38 @@ main .remediation__body {
   overflow-wrap: anywhere;
 }
 
+/* Protocol lanes: the MCP category's checks grouped by the protocol lane each
+ * exercises, every lane with its own rollup and a line saying what it covers. */
+.web-lane + .web-lane {
+  margin-top: var(--space-5);
+}
+.web-lane__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  padding: 0 var(--space-5);
+}
+.web-lane__title {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--fg-heading);
+}
+.web-lane__count {
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: 0.82rem;
+  font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
+  color: var(--lane-caption);
+  white-space: nowrap;
+}
+.web-lane__note {
+  margin: var(--space-1) 0 0;
+  padding: 0 var(--space-5) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 0.85rem;
+  color: var(--lane-caption);
+}
+
 /* The scoring page's header. */
 .scorecard-header {
   padding-bottom: 1.5rem;
@@ -2913,6 +2951,74 @@ main .remediation__body {
 }
 .pscore__checks > .web-check {
   min-width: 0;
+}
+
+/* At phone width the category's number column and a summary's inline chip
+ * column leave a check label one word wide, so the pill joins the category
+ * title, the checks take the row's full width, and each summary stacks its
+ * label over its tier chip and status. */
+@media (max-width: 40rem) {
+  .pscore__row--category {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    column-gap: var(--space-3);
+    row-gap: 0;
+  }
+  .pscore__row--category .pscore__body {
+    display: contents;
+  }
+  .pscore__row--category .pscore__body > :where(h3, p, div) {
+    grid-column: 2 / -1;
+  }
+  .pscore__row--category > .spec__id,
+  .pscore__row--category .audit-group__title,
+  .pscore__row--category > .stpill {
+    grid-row: 1;
+    align-self: baseline;
+  }
+  .pscore__row--category .audit-group__title {
+    grid-column: 2;
+  }
+  .pscore__row--category > .stpill {
+    grid-column: 3;
+    justify-self: end;
+  }
+  .pscore__row--category .pscore__checks {
+    grid-column: 1 / -1;
+  }
+  .web-check summary {
+    display: grid;
+    grid-template-columns: 1.2em auto minmax(0, 1fr);
+    row-gap: var(--space-1);
+    padding-inline: var(--space-2);
+  }
+  .web-check__label {
+    grid-column: 2 / -1;
+  }
+  .web-check summary .tier {
+    grid-row: 2;
+    grid-column: 2;
+    justify-self: start;
+  }
+  .web-check summary .audit__status {
+    grid-row: 2;
+    grid-column: 3;
+    margin-left: 0;
+  }
+  .web-check summary .web-check__label + .audit__status {
+    grid-column: 2 / -1;
+  }
+  .web-check__goal,
+  .web-check__result,
+  .web-check__fix,
+  .web-check__resources,
+  .web-check__prompt-label,
+  .web-lane__head,
+  .web-lane__note {
+    padding-inline: var(--space-2);
+  }
+  .web-check pre {
+    margin-inline: var(--space-2);
+  }
 }
 
 /* The 404: one sentence, one prefilled audit link, a did-you-mean list. */
