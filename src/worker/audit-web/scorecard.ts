@@ -141,6 +141,9 @@ export interface WebScorecardMeta {
    * here means a first-ever audit and safely collapses to false.
    */
   publicListing?: boolean;
+  /** The effective follow state and the trail it produced; a build given neither records neither. */
+  followDeclarations?: boolean;
+  declaredHosts?: DeclaredHostEntry[];
   registry: Pick<WebAuditRegistry, 'category_order' | 'categories' | 'checks'>;
   scoreConfig?: ScoreConfig;
 }
@@ -181,6 +184,8 @@ export function buildWebScorecard(results: EngineResult[], meta: WebScorecardMet
     audit_profile: null,
     site_type: meta.siteType ?? null,
     public_listing: meta.publicListing ?? false,
+    ...(meta.followDeclarations !== undefined ? { follow_declarations: meta.followDeclarations } : {}),
+    ...(meta.declaredHosts !== undefined ? { declared_hosts: meta.declaredHosts } : {}),
     summary,
     coverage_summary: {
       must: coverageLevel(results, 'must'),

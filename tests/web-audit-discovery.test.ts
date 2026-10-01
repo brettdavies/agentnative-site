@@ -129,6 +129,82 @@ describe('discoverMcpEndpoint', () => {
     expect(postEvidence).toEqual([{ source: '/mcp', endpoint: 'https://example.com/mcp', probed: 'initialize' }]);
   });
 
+  test('a common path answering a POST with a redirect off the origin is recorded and declared, and nothing is sent there', async () => {
+    const sent: string[] = [];
+    const fetchImpl = stubFetch((url, init) => {
+      const method = init?.method ?? 'GET';
+      sent.push(`${method} ${url}`);
+      if (method === 'POST' && url === 'https://example.com/mcp') {
+        return new Response(null, { status: 307, headers: { location: 'https://Victim.example:443/hook' } });
+      }
+      if (method === 'POST' && url === 'https://example.com/sse') {
+        return new Response(null, { status: 302, headers: { location: '//cdn.example.net/sse' } });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    const { endpoint, evidence, declarations, redirected } = await discoverMcpEndpoint(
+      'https://example.com/',
+      DISCOVERY,
+      { fetchOptions: { fetchImpl }, timeoutMs: 5000 },
+    );
+    expect(endpoint).toBeNull();
+    expect(sent.filter((request) => !request.includes('//example.com/'))).toEqual([]);
+    expect(evidence.filter((e) => typeof e.probed === 'string')).toEqual([
+      {
+        source: '/mcp',
+        status: 307,
+        probed: 'initialize (off-origin redirect)',
+        redirect: 'https://victim.example/hook',
+      },
+      {
+        source: '/sse',
+        status: 302,
+        probed: 'initialize (off-origin redirect)',
+        redirect: 'https://cdn.example.net/sse',
+      },
+      {
+        source: '/mcp',
+        status: 307,
+        probed: 'modern-tools-list (off-origin redirect)',
+        redirect: 'https://victim.example/hook',
+      },
+      {
+        source: '/sse',
+        status: 302,
+        probed: 'modern-tools-list (off-origin redirect)',
+        redirect: 'https://cdn.example.net/sse',
+      },
+    ]);
+    expect(declarations).toEqual([]);
+    expect(redirected).toEqual([
+      { kind: 'mcp-endpoint', url: 'https://victim.example/hook', source: '/mcp' },
+      { kind: 'mcp-endpoint', url: 'https://cdn.example.net/sse', source: '/sse' },
+    ]);
+  });
+
+  test('where other common paths redirect is never followed once one of them answers', async () => {
+    const fetchImpl = stubFetch((url, init) => {
+      if (init?.method === 'POST' && url === 'https://example.com/mcp') {
+        return new Response(null, { status: 307, headers: { location: 'https://victim.example/hook' } });
+      }
+      if (init?.method === 'POST' && url === 'https://example.com/sse') return initializeResponse();
+      return new Response('not found', { status: 404 });
+    });
+    const { endpoint, redirected } = await discoverMcpEndpoint('https://example.com/', DISCOVERY, {
+      fetchOptions: { fetchImpl },
+      timeoutMs: 5000,
+    });
+    expect(endpoint).toBe('https://example.com/sse');
+    expect(redirected).toEqual([
+      {
+        kind: 'mcp-endpoint',
+        url: 'https://victim.example/hook',
+        source: '/mcp',
+        not_followed: 'beyond-endpoint-of-record',
+      },
+    ]);
+  });
+
   test('an off-origin endpoint declared by a card is recorded and never probed', async () => {
     const probed: string[] = [];
     const fetchImpl = stubFetch((url) => {
@@ -251,7 +327,7 @@ function discover(fetchImpl: typeof fetch) {
 describe('discoverMcpEndpoint: SEP-2127 order and retained documents', () => {
   const OFF_ORIGIN_REMOTE = { type: 'streamable-http', url: 'https://mcp.example.net/mcp' };
 
-  test("an AI catalog entry by URL declares its card's first streamable-http remote", async () => {
+  test("an AI catalog entry by URL declares its card's first streamable-http remote, and its other remotes as not followed", async () => {
     const seen: SeenRequest[] = [];
     const card = sep2127Card({ type: 'sse', url: 'https://example.com/sse' }, OFF_ORIGIN_REMOTE, {
       type: 'streamable-http',
@@ -272,6 +348,18 @@ describe('discoverMcpEndpoint: SEP-2127 order and retained documents', () => {
     );
     expect(result.declarations).toEqual([
       { kind: 'mcp-endpoint', url: 'https://mcp.example.net/mcp', source: '/cards/weather' },
+      {
+        kind: 'mcp-endpoint',
+        url: 'https://example.com/sse',
+        source: '/cards/weather',
+        not_followed: 'beyond-endpoint-of-record',
+      },
+      {
+        kind: 'mcp-endpoint',
+        url: 'https://mcp.example.net/v2',
+        source: '/cards/weather',
+        not_followed: 'beyond-endpoint-of-record',
+      },
     ]);
     expect(result.documents.get('server-card')).toMatchObject({
       url: 'https://example.com/cards/weather',

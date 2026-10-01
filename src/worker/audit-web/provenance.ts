@@ -15,7 +15,7 @@ export type DeclaredHostEntry = Record<string, unknown>;
 /** Whether an audit followed the hosts its target declares, as a reader sees it. */
 export type FollowState = 'on' | 'off' | 'not-evaluated';
 
-function hostOf(url: string): string | null {
+export function hostOf(url: string): string | null {
   try {
     return new URL(url).host;
   } catch {
@@ -27,16 +27,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** The host an item's URL names, else the host it records outright, else null. */
+function itemHost(item: EvidenceItem): string | null {
+  if (typeof item.url === 'string') return hostOf(item.url);
+  return typeof item.host === 'string' && item.host.length > 0 ? item.host : null;
+}
+
 /**
  * The distinct hosts a row's evidence was requested from, in evidence
  * order, plus `host` when there is exactly one. An item the SSRF guard
- * refused never reached its host, so it names none.
+ * refused never reached its host, so it names none. An item with no URL
+ * that names a `host` is a row a declared host kept from being evaluated,
+ * and it names that host.
  */
 export function rowHostFields(evidence: readonly EvidenceItem[]): { hosts: RowHost[]; host?: string } {
   const hosts: string[] = [];
   for (const item of evidence) {
-    if (typeof item.url !== 'string' || item.blocked !== undefined) continue;
-    const host = hostOf(item.url);
+    if (item.blocked !== undefined) continue;
+    const host = itemHost(item);
     if (host !== null && !hosts.includes(host)) hosts.push(host);
   }
   return { hosts: hosts.map((host) => ({ host })), ...(hosts.length === 1 ? { host: hosts[0] } : {}) };

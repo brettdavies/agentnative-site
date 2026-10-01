@@ -158,6 +158,9 @@ describe('resultLine', () => {
       'Not evaluated: mcp.example.com did not confirm this endpoint',
     );
     expect(naReasonPhrase('declared-host-unreachable', host)).toBe('Not evaluated: mcp.example.com did not answer');
+    expect(naReasonPhrase('declared-host-blocked', '10.0.0.1')).toBe(
+      'Not evaluated: 10.0.0.1 is a private or IP address',
+    );
     expect(naReasonPhrase('declared-host-budget-exceeded', host)).toBe(
       "Not evaluated: anc's hourly probe limit for mcp.example.com was reached",
     );

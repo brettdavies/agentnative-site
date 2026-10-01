@@ -1,6 +1,10 @@
-// Shared helpers for the probe handlers (plan U4): base-relative URL
-// resolution, `{mcp_endpoint}`/`{host}` substitution, and per-check
-// timeout derivation (registry `with.timeout` is in seconds).
+// Shared helpers for the probe handlers and the discovery and follow
+// phases: base-relative URL resolution, `{mcp_endpoint}`/`{host}`
+// substitution, per-check timeout derivation (registry `with.timeout` is
+// in seconds), redirect handling for probes of the MCP endpoint, and a
+// phase's share of the per-audit deadline.
+
+import type { GuardedFetchOptions } from '../ssrf';
 
 /** Join a path to the base, or pass an absolute URL through unchanged. */
 export function resolveUrl(base: string, pathOrUrl: string): string {
@@ -19,6 +23,25 @@ export function substituteEndpoint(value: string, mcpEndpoint: string | null): s
   return value.replaceAll('{mcp_endpoint}', mcpEndpoint ?? '');
 }
 
+type RedirectPolicy = Pick<GuardedFetchOptions, 'refuseRedirects' | 'crossOriginRedirects'>;
+
+/**
+ * Redirect handling for a request to the MCP endpoint. No probe of it
+ * reaches a host nothing confirmed: on a declared host no redirect is
+ * taken, and on the audited origin only hops that stay on it are. There,
+ * a GET gets the hop it may not take back as its answer, since a redirect
+ * is a valid answer to a GET; any other method fails on it.
+ */
+export function mcpEndpointRedirects(followed: boolean | undefined, method = 'POST'): RedirectPolicy {
+  if (followed === true) return { refuseRedirects: true };
+  return { crossOriginRedirects: method === 'GET' || method === 'HEAD' ? 'return' : 'refuse' };
+}
+
+/** Redirect handling for a probe of `rawPath`: the MCP endpoint's when the path targets it. */
+export function endpointRedirects(rawPath: string, followed: boolean | undefined, method?: string): RedirectPolicy {
+  return rawPath.includes('{mcp_endpoint}') ? mcpEndpointRedirects(followed, method) : {};
+}
+
 /** Replace the `{host}` token used by DoH record names. */
 export function substituteHost(value: string, host: string): string {
   return value.replaceAll('{host}', host);
@@ -32,6 +55,28 @@ export function timeoutMsFor(checkTimeoutSeconds: number | undefined, defaultTim
 /** Remaining nested-fetch budget; 0 means stop and do not issue another request. */
 export function remainingDeadlineMs(deadlineAtMs: number, nowMs = Date.now()): number {
   return Math.max(0, deadlineAtMs - nowMs);
+}
+
+/** A phase's share of the per-audit deadline, handed out one request timeout at a time. */
+export interface PhaseBudget {
+  readonly deadlineAt: number;
+  /** The next request's timeout: the per-request timeout or what is left, whichever is smaller; null once spent. */
+  slice(): number | null;
+}
+
+export function phaseBudget(
+  capMs: number,
+  timeoutMs: number,
+  clock: { deadlineAt?: number; now: () => number },
+): PhaseBudget {
+  const deadlineAt = Math.min(clock.deadlineAt ?? Number.POSITIVE_INFINITY, clock.now() + capMs);
+  return {
+    deadlineAt,
+    slice: () => {
+      const slice = Math.min(timeoutMs, remainingDeadlineMs(deadlineAt, clock.now()));
+      return slice > 0 ? slice : null;
+    },
+  };
 }
 
 const MARKDOWN_HREF_RE = /\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;

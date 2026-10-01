@@ -1,6 +1,7 @@
-// Web-audit orchestrator (plan U5, reworked per plan-003 KTD-2). Runs
-// MCP endpoint discovery and the single canonical root fetch, then
-// evaluates in two waves: wave 1 probes the antecedent-source checks
+// Web-audit orchestrator. Runs the single canonical root fetch and MCP
+// endpoint discovery, follows the hosts discovery's documents declare
+// while discovery's POSTs are in flight, settles the endpoint of record,
+// then evaluates in two waves: wave 1 probes the antecedent-source checks
 // (the WAVE1_CHECK_IDS set); wave 2 runs the dependent checks with
 // antecedents resolved from wave-1 results and the root fetch reused —
 // no duplicate `/` fetch. Each check finalizes to
@@ -24,7 +25,9 @@ import {
   WAVE1_CHECK_IDS,
 } from './antecedents';
 import type { ProbeResponse } from './assert';
-import { discoverMcpEndpoint } from './discovery';
+import { readDiscoveryDocuments } from './discovery';
+import { settleEndpointOfRecord } from './endpoint-of-record';
+import { ALWAYS_ADMIT_BUDGET, type DomainBudget } from './follow-requests';
 import { runApiHygiene } from './handlers/api-hygiene';
 import { runAuthMd } from './handlers/auth-md';
 import { runContentWithoutJs } from './handlers/content-without-js';
@@ -45,7 +48,7 @@ import type { EvidenceItem, HandlerContext, McpLaneEvidence, ProbeOutcome } from
 import { runWebMcp } from './handlers/webmcp';
 import type { WebAuditRegistry, WebCheck, WebSiteType } from './registry';
 import { buildWebScorecard, type EngineResult, type ScorecardStatus, type WebScorecard } from './scorecard';
-import { type GuardedFetchOptions, guardedFetch } from './ssrf';
+import { type GuardedFetchOptions, guardedFetch, isEdgeErrorStatus } from './ssrf';
 
 const DEFAULT_CONCURRENCY = 6;
 const DEFAULT_PER_CHECK_TIMEOUT_MS = 8_000;
@@ -67,6 +70,10 @@ export interface RunWebAuditInput {
   perCheckTimeoutMs?: number;
   perAuditDeadlineMs?: number;
   fetchOptions?: Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects'>;
+  /** Follow the hosts the site declares; absent means follow. */
+  followDeclarations?: boolean;
+  /** The per-domain hourly budget the follow slice draws on; absent admits every domain. */
+  domainBudget?: DomainBudget;
   /** Injectable clock for deterministic deadline tests. */
   now?: () => number;
 }
@@ -224,13 +231,16 @@ function toResult(check: WebCheck, outcome: ProbeOutcome): EngineResult {
   };
 }
 
-function naResult(check: WebCheck, naReason: NonNullable<EngineResult['na_reason']>, evidence: string): EngineResult {
+function naResult(
+  check: WebCheck,
+  na: { reason: NonNullable<EngineResult['na_reason']>; evidence: string; host?: string },
+): EngineResult {
   return {
     ...baseFields(check),
     status: 'n_a',
-    na_reason: naReason,
-    evidence,
-    raw_evidence: [{ why: [evidence] }],
+    na_reason: na.reason,
+    evidence: na.evidence,
+    raw_evidence: [{ why: [na.evidence], ...(na.host !== undefined ? { host: na.host } : {}) }],
   };
 }
 
@@ -247,19 +257,19 @@ function skipResult(check: WebCheck): EngineResult {
   };
 }
 
-// Cloudflare answers on the origin's behalf with these when the origin
-// never spoke: 52x for connection and timeout failures, 530 when the host
-// does not resolve. They carry the auditor's edge, not the target.
-function isEdgeErrorStatus(status: number | null): boolean {
-  return status !== null && (status === 530 || (status >= 520 && status <= 527));
+function answeredByTarget(status: unknown): boolean {
+  return typeof status === 'number' && !isEdgeErrorStatus(status);
 }
 
 /** The row a check settles to from its antecedent, or null when the check must be probed. */
 export function antecedentGate(check: WebCheck, resolution: AntecedentResolution): EngineResult | null {
   if (resolution === 'apply') return null;
   if (resolution === 'error') return errorResult(check, 'antecedent unresolvable: root fetch failed');
-  const reason = resolution === 'n_a' ? 'antecedent-unmet' : resolution.reason;
-  return naResult(check, reason, antecedentUnmetEvidence(check.antecedent));
+  if (resolution === 'n_a') {
+    return naResult(check, { reason: 'antecedent-unmet', evidence: antecedentUnmetEvidence(check.antecedent) });
+  }
+  const evidence = resolution.evidence ?? antecedentUnmetEvidence(check.antecedent);
+  return naResult(check, { reason: resolution.reason, evidence, host: resolution.host });
 }
 
 /** An applicable MAY that is simply absent is optional, not a miss (R3). */
@@ -316,24 +326,29 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const perCheckTimeoutMs =
     root === null ? Math.min(configuredTimeoutMs, DEGRADED_PER_CHECK_TIMEOUT_MS) : configuredTimeoutMs;
 
-  const discovery = await discoverMcpEndpoint(input.url, input.registry.mcp_discovery, {
-    timeoutMs: perCheckTimeoutMs,
-    deadlineAt: deadline,
-    now,
-    fetchOptions: input.fetchOptions,
+  const discoveryConfig = input.registry.mcp_discovery;
+  const phaseOptions = { timeoutMs: perCheckTimeoutMs, deadlineAt: deadline, now, fetchOptions: input.fetchOptions };
+  const documents = await readDiscoveryDocuments(input.url, discoveryConfig, phaseOptions);
+  const rootFromTarget = root !== null && !isEdgeErrorStatus(root.status);
+  const following = input.followDeclarations !== false;
+  const { discovery, declared } = await settleEndpointOfRecord(documents, {
+    base,
+    siteAnswered: rootFromTarget || documents.statuses.some(answeredByTarget),
+    enabled: following,
+    discovery: discoveryConfig,
+    budget: input.domainBudget ?? ALWAYS_ADMIT_BUDGET,
+    ...phaseOptions,
   });
-  yield { type: 'discovery', endpoint: discovery.endpoint, evidence: discovery.evidence };
+  yield { type: 'discovery', endpoint: declared.endpoint, evidence: discovery.evidence };
 
   // Nothing from the target itself answered: it is unreachable from the
   // auditor's vantage point. Any real response, even a 401 or 404, is
   // auditable evidence and keeps the run going. Silence is not, and neither
   // is a status the edge synthesised in the target's place: a host that
   // does not resolve or never answers comes back from the Worker's fetch as
-  // a 530 or 52x page, which says nothing about the site.
-  const rootFromTarget = root !== null && !isEdgeErrorStatus(root.status);
-  const anyTargetResponse = discovery.evidence.some(
-    (e) => typeof e.status === 'number' && !isEdgeErrorStatus(e.status),
-  );
+  // a 530 or 52x page, which says nothing about the site. A declared host's
+  // answer is not the site's, so only discovery's evidence counts.
+  const anyTargetResponse = discovery.evidence.some((e) => answeredByTarget(e.status));
   if (!rootFromTarget && discovery.endpoint === null && !anyTargetResponse) {
     const onlyEdgeErrors =
       root !== null || discovery.evidence.some((e) => typeof e.status === 'number' && isEdgeErrorStatus(e.status));
@@ -360,7 +375,8 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const handlerCtx = (): HandlerContext => ({
     base,
     host,
-    mcpEndpoint: discovery.endpoint,
+    mcpEndpoint: declared.endpoint,
+    mcpEndpointFollowed: declared.followed,
     protocolVersion: input.registry.mcp_discovery.protocol_version,
     defaultTimeoutMs: Math.min(perCheckTimeoutMs, Math.max(1, deadline - now())),
     root: root ?? undefined,
@@ -404,10 +420,11 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
 
   const actx: AntecedentContext = {
     siteType: input.siteType,
-    mcpEndpoint: discovery.endpoint,
+    mcpEndpoint: declared.endpoint,
     discoveryEvidence: discovery.evidence,
     root,
     sources,
+    follow: { unmet: declared.unmet },
   };
 
   // Section directories for the scoped-llms probes: the root llms.txt
@@ -423,10 +440,11 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     legacyAdvertised: advertisedCapabilities(sources.get('mcp-initialize')?.evidence ?? []),
     modernAdvertised: advertisedCapabilities(sources.get('mcp-server-discover')?.evidence ?? []),
   };
-  if (mcpSessionId && discovery.endpoint) {
-    await notifyMcpInitialized(discovery.endpoint, mcpSessionId, {
+  if (mcpSessionId && declared.endpoint) {
+    await notifyMcpInitialized(declared.endpoint, mcpSessionId, {
       timeoutMs: Math.min(perCheckTimeoutMs, Math.max(1, deadline - now())),
       fetchOptions: input.fetchOptions,
+      followed: declared.followed,
     });
     if (deadline - now() <= 0) incomplete = true;
   }
@@ -435,7 +453,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   // the n_a/error result when the check must not be scored.
   const gate = (check: WebCheck): EngineResult | null => {
     if (!siteTypeApplies(check.site_types, actx)) {
-      return naResult(check, 'antecedent-unmet', 'not applicable to the declared site type');
+      return naResult(check, { reason: 'antecedent-unmet', evidence: 'not applicable to the declared site type' });
     }
     return antecedentGate(check, resolveAntecedent(check.antecedent, actx));
   };
@@ -474,11 +492,13 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const scorecard = buildWebScorecard(results, {
     targetUrl: base,
     domain,
-    mcpEndpoint: discovery.endpoint,
+    mcpEndpoint: declared.endpoint,
     discoveryEvidence: discovery.evidence,
     specVersion: input.specVersion ?? '',
     siteType: input.siteType ?? null,
     publicListing: input.publicListing,
+    followDeclarations: following,
+    declaredHosts: declared.trail,
     registry: input.registry,
   });
   yield { type: 'complete', scorecard, complete: !incomplete };

@@ -23,7 +23,7 @@ export type CardShape = 'sep-2127' | 'sep-1649' | 'unrecognized' | 'unparseable'
 
 export type DocumentShape = CardShape | 'ai-catalog' | 'linkset';
 
-function isJsonObject(value: unknown): value is JsonObject {
+export function isJsonObject(value: unknown): value is JsonObject {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
@@ -55,16 +55,19 @@ export function apiCatalogShape(catalog: JsonObject | null): DocumentShape {
   return Array.isArray(catalog.linkset) ? 'linkset' : 'unrecognized';
 }
 
+/** A SEP-2127 remote `cardEndpoint` can take: streamable HTTP with a URL. */
+function isStreamableRemote(remote: unknown): remote is JsonObject & { url: string } {
+  return isJsonObject(remote) && remote.type === 'streamable-http' && typeof remote.url === 'string';
+}
+
 /**
  * The endpoint a card declares, as written: a SEP-2127 card's first
  * `streamable-http` remote, else the first SEP-1649 endpoint field present.
  */
-function cardEndpoint(card: JsonObject): string | null {
+export function cardEndpoint(card: JsonObject): string | null {
   if (Array.isArray(card.remotes)) {
     for (const remote of card.remotes) {
-      if (isJsonObject(remote) && remote.type === 'streamable-http' && typeof remote.url === 'string') {
-        return remote.url;
-      }
+      if (isStreamableRemote(remote)) return remote.url;
     }
     return null;
   }
@@ -81,8 +84,17 @@ export function cardHasAuthField(card: JsonObject): boolean {
 }
 
 /** A URL carrying a `{variable}` needs values the auditor does not have, so it is never requested. */
-function isTemplatedUrl(url: string): boolean {
+export function isTemplatedUrl(url: string): boolean {
   return URL_TEMPLATE_VARIABLE.test(url);
+}
+
+/** The card location the extension defines for an endpoint: its URL plus the suffix, query dropped. */
+export function cardSuffixUrl(endpoint: string, suffix: string): string {
+  const u = new URL(endpoint);
+  u.pathname = `${u.pathname.replace(/\/+$/, '')}${suffix}`;
+  u.search = '';
+  u.hash = '';
+  return u.toString();
 }
 
 export type CatalogCardEntry = { index: number; data: JsonObject } | { index: number; url: string } | { index: number };
@@ -107,7 +119,7 @@ export interface McpDeclaration {
   url: string;
   /** Where it was declared: a path on the audited origin, or an AI catalog entry as a JSON Pointer. */
   source: string;
-  not_followed?: 'templated-url';
+  not_followed?: 'templated-url' | 'beyond-endpoint-of-record';
 }
 
 /** A document discovery read and keeps for later checks. */
@@ -129,6 +141,8 @@ export interface CardRead {
   card: JsonObject | null;
   shape: CardShape | null;
   declaration: McpDeclaration | null;
+  /** The card's other remotes: one card names one endpoint of record, so these are never followed. */
+  others: McpDeclaration[];
   /** The declared endpoint when it is on the audited origin and not a template. */
   endpoint: string | null;
 }
@@ -139,6 +153,17 @@ export function sameOrigin(candidate: string, base: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** A SEP-2127 card's remotes other than the one `cardEndpoint` takes. */
+export function otherRemotes(card: JsonObject, source: string, base: string): McpDeclaration[] {
+  if (!Array.isArray(card.remotes)) return [];
+  const primary = card.remotes.findIndex(isStreamableRemote);
+  return card.remotes.flatMap((remote, index): McpDeclaration[] => {
+    if (index === primary || !isJsonObject(remote) || typeof remote.url !== 'string') return [];
+    const url = isTemplatedUrl(remote.url) ? remote.url : resolveUrl(base, remote.url);
+    return url === '' ? [] : [{ kind: 'mcp-endpoint', url, source, not_followed: 'beyond-endpoint-of-record' }];
+  });
 }
 
 export function readCard(
@@ -158,6 +183,7 @@ export function readCard(
     card,
     shape: answered ? cardShape(card) : null,
     declaration: null,
+    others: card === null ? [] : otherRemotes(card, source, base),
     endpoint: null,
   };
   const declared = card === null ? null : cardEndpoint(card);

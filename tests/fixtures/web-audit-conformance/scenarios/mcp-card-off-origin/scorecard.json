@@ -44,6 +44,16 @@
   "audit_profile": null,
   "site_type": null,
   "public_listing": false,
+  "follow_declarations": true,
+  "declared_hosts": [
+    {
+      "surface": "/.well-known/mcp/server-card.json",
+      "kind": "mcp-endpoint",
+      "url": "https://mcp.example.net/mcp",
+      "host": "mcp.example.net",
+      "outcome": "reciprocity-refused"
+    }
+  ],
   "summary": {
     "pass": 21,
     "noncompliant": 0,

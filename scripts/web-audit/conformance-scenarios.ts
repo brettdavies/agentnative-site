@@ -217,6 +217,8 @@ const ACAO = {
 };
 
 type McpOptions = {
+  /** Where the server answers; the audited site's /mcp unless a declared host serves it. */
+  endpoint?: string;
   session?: string;
   cors?: 'full' | 'none' | 'preflight-only' | 'post-only';
   toolsFraming?: 'json' | 'sse';
@@ -246,15 +248,17 @@ function modernMcp(): Exchange[] {
 }
 
 /** A server that does not serve the modern lane refuses every header-routed probe. */
-function noModernLane(): Exchange[] {
+function noModernLane(opts: McpOptions = {}): Exchange[] {
+  const at = opts.endpoint ?? MCP_PATH;
   return [
-    post(MCP_PATH, rpcError(-32601), { headers: { 'mcp-protocol-version': MODERN_PROTOCOL } }),
-    post(MCP_PATH, rpcError(-32601), { headers: { 'mcp-protocol-version': UNSUPPORTED_PROTOCOL } }),
+    post(at, rpcError(-32601), { headers: { 'mcp-protocol-version': MODERN_PROTOCOL } }),
+    post(at, rpcError(-32601), { headers: { 'mcp-protocol-version': UNSUPPORTED_PROTOCOL } }),
   ];
 }
 
 /** Legacy-lane (initialize + JSON-RPC) rules. */
 function legacyMcp(opts: McpOptions = {}): Exchange[] {
+  const at = opts.endpoint ?? MCP_PATH;
   const sessionHeaders: Record<string, string> =
     opts.session === undefined ? {} : { 'mcp-session-id': opts.session };
   const postAcao = opts.cors === 'full' || opts.cors === 'post-only' ? ACAO : {};
@@ -267,27 +271,28 @@ function legacyMcp(opts: McpOptions = {}): Exchange[] {
         )
       : rpcResult(TOOLS_RESULT);
   return [
-    post(MCP_PATH, rpcError(-32700, 400), { body_contains: 'not-json{{' }),
-    post(MCP_PATH, rpcError(-32600, 400), { body_contains: '[{' }),
-    post(MCP_PATH, rpcResult(TOOLS_RESULT), { headers: { accept: 'application/json' }, body_json_method: 'tools/list' }),
-    post(MCP_PATH, text('Not Acceptable', {}, 406), { headers: { accept: 'application/xml' } }),
-    post(MCP_PATH, rpcResult(opts.initializeResult ?? INITIALIZE_RESULT, sessionHeaders), {
+    post(at, rpcError(-32700, 400), { body_contains: 'not-json{{' }),
+    post(at, rpcError(-32600, 400), { body_contains: '[{' }),
+    post(at, rpcResult(TOOLS_RESULT), { headers: { accept: 'application/json' }, body_json_method: 'tools/list' }),
+    post(at, text('Not Acceptable', {}, 406), { headers: { accept: 'application/xml' } }),
+    post(at, rpcResult(opts.initializeResult ?? INITIALIZE_RESULT, sessionHeaders), {
       body_json_method: 'initialize',
     }),
-    post(MCP_PATH, res(202, {}, ''), { body_json_method: 'notifications/initialized' }),
-    post(MCP_PATH, rpcResult(TOOLS_RESULT, postAcao), { headers: { origin: CORS_ORIGIN }, body_json_method: 'tools/list' }),
-    post(MCP_PATH, toolsResponse, { body_json_method: 'tools/list' }),
-    post(MCP_PATH, rpcResult(RESOURCES_RESULT), { body_json_method: 'resources/list' }),
-    post(MCP_PATH, rpcError(-32602), { body_json_method: 'tools/call' }),
-    post(MCP_PATH, rpcError(-32601), { body_json_method: 'nonexistent/method' }),
+    post(at, res(202, {}, ''), { body_json_method: 'notifications/initialized' }),
+    post(at, rpcResult(TOOLS_RESULT, postAcao), { headers: { origin: CORS_ORIGIN }, body_json_method: 'tools/list' }),
+    post(at, toolsResponse, { body_json_method: 'tools/list' }),
+    post(at, rpcResult(RESOURCES_RESULT), { body_json_method: 'resources/list' }),
+    post(at, rpcError(-32602), { body_json_method: 'tools/call' }),
+    post(at, rpcError(-32601), { body_json_method: 'nonexistent/method' }),
   ];
 }
 
 /** The non-POST surfaces of an MCP endpoint: the preflight and the GET. */
 function mcpEdges(opts: McpOptions = {}): Exchange[] {
+  const at = opts.endpoint ?? MCP_PATH;
   const preflight =
     opts.cors === 'full' || opts.cors === 'preflight-only' ? res(204, ACAO, '') : res(204, {}, '');
-  return [options(MCP_PATH, preflight), get(MCP_PATH, text('Method Not Allowed', { allow: 'POST' }, 405))];
+  return [options(at, preflight), get(at, text('Method Not Allowed', { allow: 'POST' }, 405))];
 }
 
 function dualStackMcp(opts: McpOptions = {}): Exchange[] {
@@ -295,7 +300,7 @@ function dualStackMcp(opts: McpOptions = {}): Exchange[] {
 }
 
 function legacyOnlyMcp(opts: McpOptions = {}): Exchange[] {
-  return [...mcpEdges(opts), ...noModernLane(), ...legacyMcp(opts)];
+  return [...mcpEdges(opts), ...noModernLane(opts), ...legacyMcp(opts)];
 }
 
 function modernOnlyMcp(opts: McpOptions = {}): Exchange[] {
@@ -384,7 +389,12 @@ function scenario(
   description: string,
   covers: string[],
   exchanges: Exchange[],
-  opts: { site_type?: 'content' | 'api' | null; unmatched?: ExchangeResponse; allow_unmatched?: boolean } = {},
+  opts: {
+    site_type?: 'content' | 'api' | null;
+    unmatched?: ExchangeResponse;
+    allow_unmatched?: boolean;
+    follow_declarations?: boolean;
+  } = {},
 ): Scenario {
   return {
     description,
@@ -392,6 +402,7 @@ function scenario(
     target: BASE,
     site_type: opts.site_type ?? null,
     spec_version: SPEC_VERSION,
+    ...(opts.follow_declarations !== undefined ? { follow_declarations: opts.follow_declarations } : {}),
     unmatched: opts.unmatched ?? NOT_FOUND,
     allow_unmatched: opts.allow_unmatched ?? true,
     exchanges,
@@ -399,6 +410,14 @@ function scenario(
 }
 
 const baseline = (): Exchange[] => [get('/', html(rootHtml()))];
+
+// A declared host serving a legacy-lane MCP server at /mcp.
+const DECLARED_ENDPOINT = 'https://mcp.example.net/mcp';
+
+const REDIRECTED_ENDPOINT = 'https://mcp.example.org/mcp';
+const declaringCard = (endpoint: string): Exchange => get(CARD_PATH, json({ ...SERVER_CARD, mcp_endpoint: endpoint }));
+const selfNamingCard = (endpoint: string): Exchange => get(`${endpoint}/server-card`, cardDocument({ ...SEP_2127_CARD, remotes: [{ type: 'streamable-http', url: endpoint }] }));
+const FOLLOWED_IDS = ['mcp-initialize', 'mcp-tools-list', 'mcp-cors-preflight', 'mcp-cors-actual', 'mcp-get-fast-fail'];
 
 const MCP_IDS = [
   'mcp-initialize',
@@ -1006,6 +1025,81 @@ export const SCENARIOS: Record<string, Scenario> = {
       get('/.well-known/oauth-protected-resource', json({ resource: 'https://example.com/mcp', authorization_servers: ['https://example.com'] })),
       get('/.well-known/auth.md', md('# Auth\n\nRegister at /signup, then send a bearer token.\n')),
     ],
+  ),
+
+  // ---- declared-host follow ---------------------------------------------------
+  'follow-card-admit': scenario(
+    'the card names an endpoint on another host, whose own card at `<endpoint>/server-card` names it: the MCP rows are scored there',
+    FOLLOWED_IDS,
+    [
+      ...baseline(),
+      declaringCard(DECLARED_ENDPOINT),
+      selfNamingCard(DECLARED_ENDPOINT),
+      ...legacyOnlyMcp({ endpoint: DECLARED_ENDPOINT, cors: 'full' }),
+    ],
+  ),
+  'follow-reciprocity-refused': scenario(
+    'the declared endpoint answers GET with 405 and Allow: POST but publishes no card, catalog entry, or metadata naming it: no wire probe, and the MCP rows name the host that did not confirm it',
+    FOLLOWED_IDS,
+    [
+      ...baseline(),
+      declaringCard(DECLARED_ENDPOINT),
+      get(DECLARED_ENDPOINT, text('Method Not Allowed', { allow: 'POST' }, 405)),
+    ],
+  ),
+  'follow-redirect-hop': scenario(
+    'the declared endpoint redirects once to another public host whose card names the final URL: the final URL is the endpoint and the trail records both',
+    FOLLOWED_IDS,
+    [
+      ...baseline(),
+      declaringCard(DECLARED_ENDPOINT),
+      get(DECLARED_ENDPOINT, redirect(REDIRECTED_ENDPOINT, 302)),
+      selfNamingCard(REDIRECTED_ENDPOINT),
+      ...legacyOnlyMcp({ endpoint: REDIRECTED_ENDPOINT, cors: 'full' }),
+    ],
+  ),
+  'follow-own-redirect-admit': scenario(
+    "the audited site's /mcp answers the discovery POSTs with a 307 to another host whose card at `<endpoint>/server-card` names it: no POST follows the redirect, the target is confirmed like a declared endpoint, and the MCP rows are scored there",
+    FOLLOWED_IDS,
+    [
+      ...baseline(),
+      post(MCP_PATH, redirect(REDIRECTED_ENDPOINT, 307)),
+      selfNamingCard(REDIRECTED_ENDPOINT),
+      ...legacyOnlyMcp({ endpoint: REDIRECTED_ENDPOINT, cors: 'full' }),
+    ],
+  ),
+  'follow-own-redirect-refused': scenario(
+    "the audited site's /mcp answers the discovery POSTs with a 307 to another host that publishes nothing naming that URL: no POST or OPTIONS reaches the host, and the MCP rows name the host that did not confirm it",
+    FOLLOWED_IDS,
+    [...baseline(), post(MCP_PATH, redirect(DECLARED_ENDPOINT, 307))],
+  ),
+  'follow-host-cap': scenario(
+    'four declared hosts each redirect into a private range and are blocked; the fifth exceeds the per-audit host cap and is never requested',
+    ['mcp-initialize'],
+    [
+      ...baseline(),
+      get(
+        '/.well-known/ai-catalog.json',
+        aiCatalog(
+          ...[1, 2, 3, 4].map((n) =>
+            cardEntry({ data: { ...SEP_2127_CARD, remotes: [{ type: 'streamable-http', url: `https://h${n}.example.net/mcp` }] } }),
+          ),
+        ),
+      ),
+      declaringCard('https://h5.example.net/mcp'),
+      ...[1, 2, 3, 4].map((n) => get(`https://h${n}.example.net/mcp`, redirect('http://10.0.0.1/mcp', 302))),
+    ],
+  ),
+  'follow-disabled': scenario(
+    'the same declared endpoint as follow-card-admit with following off: nothing off the audited origin is requested and the MCP rows read follow-disabled',
+    FOLLOWED_IDS,
+    [
+      ...baseline(),
+      declaringCard(DECLARED_ENDPOINT),
+      selfNamingCard(DECLARED_ENDPOINT),
+      ...legacyOnlyMcp({ endpoint: DECLARED_ENDPOINT, cors: 'full' }),
+    ],
+    { follow_declarations: false },
   ),
 
   // ---- dns-doh ---------------------------------------------------------------

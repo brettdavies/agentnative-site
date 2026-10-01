@@ -5,6 +5,7 @@
 
 import type { NaReason } from '../../../shared/web-audit-findings';
 import type { ProbeResponse } from '../assert';
+import type { DeclaredHostReason } from '../endpoint-of-record';
 import type { EvidenceItem, ProbeOutcome } from '../handlers/types';
 import type { WebSiteType } from '../registry';
 
@@ -17,6 +18,8 @@ export interface AntecedentContext {
   root: ProbeResponse | null;
   /** Wave-1 probe outcomes keyed by check id. */
   sources: ReadonlyMap<string, ProbeOutcome>;
+  /** What following the declared hosts settled; absent when the audit followed none. */
+  follow?: { unmet: DeclaredHostReason | null };
 }
 
 /** Whether a check applies, does not, or cannot be decided because the root never answered. */
@@ -24,9 +27,14 @@ export type AntecedentOutcome = 'apply' | 'n_a' | 'error';
 
 /**
  * A resolver's result: a bare outcome, or an `n_a` that names its reason,
- * which the gate stamps on the row in place of `antecedent-unmet`.
+ * which the gate stamps on the row in place of `antecedent-unmet`. A reason
+ * about a declared host names that host, so the row reads as the host it
+ * could not be evaluated at rather than the audited one, with the declared
+ * URL as its evidence.
  */
-export type AntecedentResolution = AntecedentOutcome | { outcome: 'n_a'; reason: NaReason };
+export type AntecedentResolution =
+  | AntecedentOutcome
+  | { outcome: 'n_a'; reason: NaReason; host?: string; evidence?: string };
 
 /** Resolves one antecedent token against the wave-1 context. */
 export type AntecedentResolver = (ctx: AntecedentContext) => AntecedentResolution;
@@ -68,6 +76,13 @@ export function anyEvidenceStatus(items: EvidenceItem[], status: number): boolea
 /** A 401 or WWW-Authenticate challenge in a probe's evidence. */
 export function evidenceShowsAuthChallenge(items: EvidenceItem[]): boolean {
   return anyEvidenceStatus(items, 401) || items.some((item) => typeof item.www_authenticate === 'string');
+}
+
+/** `n_a` for a check that needs the MCP endpoint there is none of, naming the declared host behind that when one is. */
+export function noMcpEndpoint(ctx: AntecedentContext): AntecedentResolution {
+  const unmet = ctx.follow?.unmet;
+  if (unmet === null || unmet === undefined) return 'n_a';
+  return { outcome: 'n_a', reason: unmet.reason, host: unmet.host, evidence: unmet.url };
 }
 
 /** The discovery card declares authentication. */

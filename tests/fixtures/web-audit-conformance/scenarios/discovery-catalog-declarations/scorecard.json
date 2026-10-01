@@ -49,6 +49,24 @@
   "audit_profile": null,
   "site_type": null,
   "public_listing": false,
+  "follow_declarations": true,
+  "declared_hosts": [
+    {
+      "surface": "/.well-known/ai-catalog.json#/entries/0",
+      "kind": "card-document",
+      "url": "https://cards.example.net/example/server-card",
+      "host": "cards.example.net",
+      "outcome": "reciprocity-refused"
+    },
+    {
+      "surface": "/.well-known/ai-catalog.json#/entries/1/data",
+      "kind": "mcp-endpoint",
+      "url": "https://{tenant}.example.com/mcp",
+      "host": "{tenant}.example.com",
+      "outcome": "not-followed",
+      "reason": "templated-url"
+    }
+  ],
   "summary": {
     "pass": 21,
     "noncompliant": 0,

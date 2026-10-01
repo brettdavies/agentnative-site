@@ -71,6 +71,11 @@ export interface HandlerContext {
   host: string;
   /** Discovered MCP endpoint absolute URL, or null. */
   mcpEndpoint: string | null;
+  /**
+   * The endpoint is on a declared host, pinned when reciprocity admitted
+   * it, so no probe of it follows a redirect somewhere nothing confirmed.
+   */
+  mcpEndpointFollowed?: boolean;
   protocolVersion: string;
   /** Default per-request timeout in ms; a check's `with.timeout` (seconds) overrides. */
   defaultTimeoutMs: number;

@@ -41,7 +41,7 @@ The web scorecard is site-owned. Its `schema_version` is **0.5**, independent of
 | `schema_version`       | string              | engine  | Version of the web-scorecard envelope. Site-owned, independent of the CLI schema.                                                  |
 | `spec_version`         | string              | engine  | Version of the agentnative spec the run scored against. Same value the CLI scorecard carries.                                      |
 | `target_url`           | string              | engine  | The normalized audited URL: scheme, host, and a trailing slash. Web-specific.                                                      |
-| `mcp_endpoint`         | string \| null      | engine  | The discovered MCP endpoint, or `null` when none was found. Web-specific.                                                          |
+| `mcp_endpoint`         | string \| null      | engine  | The discovered MCP endpoint (on a followed declared host when the site serves none), or `null` when none was found. Web-specific.  |
 | `mcp_discovery`        | array               | engine  | The discovery trail: each document read (server cards, AI catalog, API catalog) and common-path probe, and what it returned.       |
 | `tool`                 | object              | engine  | Web identity: `{ name, url }`. No `binary`, `install`, `tier`, or `language`. See [tool](#tool).                                   |
 | `audience`             | null                | engine  | Always `null` for web targets; the audience classifier is a CLI concept.                                                           |
@@ -61,8 +61,9 @@ The web scorecard is site-owned. Its `schema_version` is **0.5**, independent of
 `follow_declarations`, `declared_hosts`, and `registry_fingerprint` are optional, and a reader treats a missing one as
 not evaluated rather than as a recorded value: a missing `follow_declarations` never reads as following on, a missing
 `declared_hosts` means no trail was recorded (an empty array is a recorded trail with nothing in it), and a missing
-`registry_fingerprint` means the registry version is unknown. The engine records none of the three for an audit that
-did not evaluate the hosts the site declares.
+`registry_fingerprint` means the registry version is unknown. The engine records `follow_declarations` and
+`declared_hosts` on every audit it completes, `false` with each declaration read as not followed when following was off,
+and never records `registry_fingerprint`.
 
 ## Response freshness
 
@@ -112,6 +113,55 @@ Web identity. The CLI-only header fields (`tier`, `language`, `repo`, `install`)
 | ------ | ------ | ---------------------------------------------------- |
 | `name` | string | The audited domain (host), used as the display name. |
 | `url`  | string | The normalized audited URL. Matches `target_url`.    |
+
+## `declared_hosts`
+
+One entry per URL the site's discovery documents declare off its own origin, in declaration order: the AI catalog's MCP
+server-card entries, the card under the discovered endpoint, then the well-known cards, with the endpoints a followed
+card document names right after that document. After them come the URLs the site's own MCP paths redirected the
+discovery POSTs to on another origin, in probe order. A URL declared twice keeps its first entry.
+
+```json
+{
+  "surface": "/.well-known/mcp/server-card.json",
+  "kind": "mcp-endpoint",
+  "url": "https://mcp.example.net/mcp",
+  "host": "mcp.example.net",
+  "outcome": "followed",
+  "admitted_by": "card"
+}
+```
+
+| Field         | Type             | Meaning                                                                                                                      |
+| ------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `surface`     | string           | Where the URL was declared: a path on the audited origin, an AI catalog entry as a JSON Pointer, or a followed card's URL.   |
+| `kind`        | string           | `mcp-endpoint` for an MCP server URL, `card-document` for a server card hosted off the audited origin.                       |
+| `url`         | string           | The declared URL.                                                                                                            |
+| `host`        | string, optional | The declared URL's host.                                                                                                     |
+| `final_url`   | string, optional | Where one redirect from the declared URL led, when it changed the URL, including a hop the audit refused.                    |
+| `outcome`     | string           | `followed`, `reciprocity-refused`, `not-followed`, `blocked`, `unreachable`, or `budget-exceeded`.                           |
+| `admitted_by` | string, optional | On a followed `mcp-endpoint`, what its own host publishes naming it: `card`, `ai-catalog`, or `metadata`.                    |
+| `cause`       | string, optional | On `budget-exceeded`, the limit reached: `per-audit-cap`, `slice`, or `domain-budget`.                                       |
+| `reason`      | string, optional | On `not-followed`, why: `templated-url`, `self-path`, `beyond-endpoint-of-record`, or `follow-disabled`.                     |
+
+An MCP endpoint on another host receives a wire probe only after that host confirms it: a SEP-2127 card at
+`<endpoint>/server-card`, an entry in the host's own `/.well-known/ai-catalog.json`, or RFC 9728 protected-resource
+metadata whose `resource` is the endpoint. Every way a host can fail to confirm reads `reciprocity-refused` and records
+nothing more. A `card-document` is read, not confirmed: it reads `unreachable` when its host gives no response at all (a
+refused connection, a DNS failure, a timeout), and `reciprocity-refused` when the answer names no endpoint. The first
+confirmed endpoint in declaration order is the endpoint of record unless the audited site serves its own; an endpoint or
+card document declared after it, or an endpoint confirmed while the site serves its own, reads `not-followed`. A URL the
+SSRF guard refuses, a private address or an IP literal, or a redirect hop to one, reads `blocked` and is never
+requested; its rows read `declared-host-blocked`. A URL anc cannot request at all, one that does not parse or whose
+scheme is not `http` or `https`, is never requested and reads `reciprocity-refused`.
+
+anc never re-sends a probe of the site's own MCP endpoint to another origin. When one of the site's MCP paths answers a
+discovery POST with a redirect to another origin, `mcp_discovery` records the probe's status and `redirect` target, and
+the target joins this trail as an `mcp-endpoint` whose `surface` is that path; like any declared endpoint, it receives
+no wire probe until its own host confirms it. A redirect that keeps the scheme, host, and port (`/mcp` to `/mcp/`) is
+followed. A later probe of the site's endpoint by any method other than GET or HEAD, answered with a redirect to another
+origin, is not followed and reads as an `error`; a GET or HEAD probe takes the redirect response itself as its answer. A
+row not evaluated because of a declared host names that host in `hosts` and `host`, or the host its redirect led to.
 
 ## The two-score model
 
@@ -199,22 +249,22 @@ One object per check.
 }
 ```
 
-| Field       | Type           | Meaning                                                                                                                                                                                                                                                                                         |
-| ----------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`        | string         | The check id from the registry (e.g. `llms-txt`, `mcp-initialize`, `mcp-modern-tools-list`). The remediation-catalog and fix-skill key.                                                                                                                                                         |
-| `label`     | string         | Human-readable check title.                                                                                                                                                                                                                                                                     |
-| `category`  | string         | The visible category slug (one of the `categories[].id` values). Drives the display grouping.                                                                                                                                                                                                   |
-| `group`     | string         | Mirrors `principle` for shared-renderer compatibility.                                                                                                                                                                                                                                          |
-| `layer`     | string         | Always `web` for a web scorecard row.                                                                                                                                                                                                                                                           |
-| `keyword`   | string         | `must`, `should`, or `may`, derived from the check's tier.                                                                                                                                                                                                                                      |
-| `tier`      | string         | `required`, `recommended`, or `optional` (the keyword's source).                                                                                                                                                                                                                                |
-| `principle` | string         | Internal principle tag `P1` through `P8`. Kept as data; web surfaces neither display nor link it.                                                                                                                                                                                               |
-| `status`    | string         | `pass`, `noncompliant`, `broken`, `absent`, `n_a`, `skip`, or `error`. `noncompliant` = works but violates a spec detail; `broken` = present but invalid; `absent` = not there. See [statuses](#statuses).                                                                                      |
-| `na_reason` | string         | Present only on `n_a` rows, one of a closed set. See [statuses](#statuses) for every value. Absent on handler-emitted `n_a` rows with nothing to probe.                                                                                                                                         |
-| `unprobed`  | boolean        | Present only when `true`: the row settled from an antecedent the audit did observe rather than from its own request, so the run holds no observation of the surface itself. It still scores, and it carries no `remediation` object, because a fix prompt would name a defect nothing observed. |
-| `evidence`  | string \| null | A compact human-readable summary of what the probe observed.                                                                                                                                                                                                                                    |
-| `hosts`     | array          | The distinct hosts the row's evidence was requested from, as `{ host }` objects in evidence order. Empty when the row settled without a request (an unmet antecedent, a skipped check) or its evidence names no URL; a URL the SSRF guard refused names no host.                                |
-| `host`      | string         | Present only when `hosts` has exactly one entry: that host. A row carrying neither `hosts` nor `host` reads as evaluated at the audited host.                                                                                                                                                   |
+| Field       | Type           | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ----------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`        | string         | The check id from the registry (e.g. `llms-txt`, `mcp-initialize`, `mcp-modern-tools-list`). The remediation-catalog and fix-skill key.                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `label`     | string         | Human-readable check title.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `category`  | string         | The visible category slug (one of the `categories[].id` values). Drives the display grouping.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `group`     | string         | Mirrors `principle` for shared-renderer compatibility.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `layer`     | string         | Always `web` for a web scorecard row.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `keyword`   | string         | `must`, `should`, or `may`, derived from the check's tier.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `tier`      | string         | `required`, `recommended`, or `optional` (the keyword's source).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `principle` | string         | Internal principle tag `P1` through `P8`. Kept as data; web surfaces neither display nor link it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `status`    | string         | `pass`, `noncompliant`, `broken`, `absent`, `n_a`, `skip`, or `error`. `noncompliant` = works but violates a spec detail; `broken` = present but invalid; `absent` = not there. See [statuses](#statuses).                                                                                                                                                                                                                                                                                                                                                                          |
+| `na_reason` | string         | Present only on `n_a` rows, one of a closed set. See [statuses](#statuses) for every value. Absent on handler-emitted `n_a` rows with nothing to probe.                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `unprobed`  | boolean        | Present only when `true`: the row settled from an antecedent the audit did observe rather than from its own request, so the run holds no observation of the surface itself. It still scores, and it carries no `remediation` object, because a fix prompt would name a defect nothing observed.                                                                                                                                                                                                                                                                                     |
+| `evidence`  | string \| null | A compact human-readable summary of what the probe observed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `hosts`     | array          | The distinct hosts the row's evidence was requested from, as `{ host }` objects in evidence order. Empty when the row settled without a request (an unmet antecedent, a skipped check) or its evidence names no URL; a URL the SSRF guard refused names no host. An `n_a` row whose reason names a declared host (`follow-disabled` through `declared-host-budget-exceeded`) names instead the declared host it could not be evaluated at, or where that host redirected, whether or not anc sent it a request; `follow-disabled` sends none.                                       |
+| `host`      | string         | Present only when `hosts` has exactly one entry: that host. A row carrying neither `hosts` nor `host` reads as evaluated at the audited host.                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 ### Statuses
 
@@ -234,13 +284,15 @@ One object per check.
     audit.
   - `reciprocity-refused`: the declared host did not confirm the endpoint the site named.
   - `declared-host-unreachable`: the declared host did not answer.
+  - `declared-host-blocked`: the declared host, or where it redirected, is a private address or an IP literal, which anc
+    never contacts.
   - `declared-host-budget-exceeded`: anc's hourly probe limit for the declared host was reached.
   - `auth-required`: the host requires sign-in before the check can run.
 - `skip` — the per-audit deadline passed before the check ran.
 - `error` — an operational failure (network error, timeout); never credited, never penalized.
 
 A handler with nothing to probe (no discovered MCP endpoint) emits `n_a` with no `na_reason`. The derived `result` line
-leads with the reason's own phrase, and the last five reasons begin "Not evaluated:", for example "Not evaluated:
+leads with the reason's own phrase, and the last six reasons begin "Not evaluated:", for example "Not evaluated:
 mcp.example.com requires sign-in".
 
 ## Remediation on the MCP surface
