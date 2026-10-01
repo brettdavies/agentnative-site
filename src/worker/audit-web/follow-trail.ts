@@ -3,7 +3,8 @@
 // the refusals settled before any request, which no response can change.
 
 import { CANONICAL_SITE_URL } from '../../shared/site-url';
-import { isTemplatedUrl, type McpDeclaration } from './discovery-documents';
+import { isTemplatedUrl, type McpDeclaration, sameOrigin } from './discovery-documents';
+import { hostOf } from './provenance';
 import { type AdmittedBy, normalizeEndpointUrl } from './reciprocity';
 import { parseIpv4Literal, validatePublicUrl } from './ssrf';
 
@@ -35,14 +36,6 @@ export type TrailEntry = {
 
 export type Settled = Pick<TrailEntry, 'final_url' | 'outcome' | 'admitted_by' | 'cause' | 'reason'>;
 
-export function hostOf(url: string): string | null {
-  try {
-    return new URL(url).host;
-  } catch {
-    return null;
-  }
-}
-
 /** One trail entry per declared URL: the key a declaration and its entry share. */
 export function declarationKey(declaration: Pick<McpDeclaration, 'kind' | 'url'>): string {
   return `${declaration.kind} ${normalizeEndpointUrl(declaration.url) ?? declaration.url}`;
@@ -50,11 +43,7 @@ export function declarationKey(declaration: Pick<McpDeclaration, 'kind' | 'url'>
 
 /** A declaration names a host other than the audited one: off its origin, or a template it cannot be placed on. */
 export function declaresHost(declaration: McpDeclaration, base: string): boolean {
-  try {
-    return new URL(declaration.url).origin !== new URL(base).origin;
-  } catch {
-    return true;
-  }
+  return !sameOrigin(declaration.url, base);
 }
 
 export function trailEntry(declaration: McpDeclaration, settled: Settled): TrailEntry {

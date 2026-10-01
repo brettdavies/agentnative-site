@@ -32,6 +32,7 @@ import {
   cardHasAuthField,
   cardItem,
   cardShape,
+  cardSuffixUrl,
   catalogCardEntries,
   documentItem,
   MCP_SERVER_CARD_TYPE,
@@ -42,11 +43,9 @@ import {
   readCard,
   sameOrigin,
 } from './discovery-documents';
-import { phaseBudget } from './follow';
 import { legacyInitializeBody, legacyProbeHeaders, modernProbeBody, modernProbeHeaders } from './handlers/mcp';
-import { resolveUrl } from './handlers/shared';
+import { phaseBudget, resolveUrl } from './handlers/shared';
 import type { EvidenceItem } from './handlers/types';
-import { cardSuffixUrl } from './reciprocity';
 import type { WebAuditDiscoveryConfig } from './registry';
 import { DOCUMENT_MAX_BODY_BYTES, type GuardedFetchInit, type GuardedFetchOptions, guardedFetch } from './ssrf';
 

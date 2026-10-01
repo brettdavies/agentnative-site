@@ -75,7 +75,7 @@ function hasHeader(headers: Record<string, string> | undefined, name: string): b
   const wanted = name.toLowerCase();
   return Object.keys(headers).some((k) => k.toLowerCase() === wanted);
 }
-const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+export const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
 
 // Blocked IPv4 ranges as [base, prefixBits]. The metadata IP
 // 169.254.169.254 sits inside 169.254.0.0/16.

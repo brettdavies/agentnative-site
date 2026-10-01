@@ -9,7 +9,8 @@ import type { NaReason } from '../../shared/web-audit-findings';
 import type { DiscoveryDocuments, DiscoveryResult } from './discovery';
 import type { McpDeclaration } from './discovery-documents';
 import { type FollowInput, type FollowResult, followDeclarations } from './follow';
-import { declarationKey, declaresHost, hostOf, type TrailEntry, type TrailOutcome, trailEntry } from './follow-trail';
+import { declarationKey, declaresHost, type TrailEntry, type TrailOutcome, trailEntry } from './follow-trail';
+import { hostOf } from './provenance';
 
 /** A declared host the rows that need an endpoint could not be evaluated at, and why. */
 export interface DeclaredHostReason {

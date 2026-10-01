@@ -1,6 +1,7 @@
-// Shared helpers for the probe handlers (plan U4): base-relative URL
-// resolution, `{mcp_endpoint}`/`{host}` substitution, and per-check
-// timeout derivation (registry `with.timeout` is in seconds).
+// Shared helpers for the probe handlers and the discovery and follow
+// phases: base-relative URL resolution, `{mcp_endpoint}`/`{host}`
+// substitution, per-check timeout derivation (registry `with.timeout` is
+// in seconds), and a phase's share of the per-audit deadline.
 
 /** Join a path to the base, or pass an absolute URL through unchanged. */
 export function resolveUrl(base: string, pathOrUrl: string): string {
@@ -19,9 +20,14 @@ export function substituteEndpoint(value: string, mcpEndpoint: string | null): s
   return value.replaceAll('{mcp_endpoint}', mcpEndpoint ?? '');
 }
 
+/** Redirect handling for a request to an MCP endpoint: refused when the endpoint is on a declared host. */
+export function followedRedirects(followed: boolean | undefined): { refuseRedirects?: true } {
+  return followed === true ? { refuseRedirects: true } : {};
+}
+
 /** Redirect handling for a probe of `rawPath`: refused when it targets an endpoint on a declared host. */
 export function endpointRedirects(rawPath: string, followed: boolean | undefined): { refuseRedirects?: true } {
-  return followed === true && rawPath.includes('{mcp_endpoint}') ? { refuseRedirects: true } : {};
+  return followedRedirects(followed === true && rawPath.includes('{mcp_endpoint}'));
 }
 
 /** Replace the `{host}` token used by DoH record names. */
@@ -37,6 +43,28 @@ export function timeoutMsFor(checkTimeoutSeconds: number | undefined, defaultTim
 /** Remaining nested-fetch budget; 0 means stop and do not issue another request. */
 export function remainingDeadlineMs(deadlineAtMs: number, nowMs = Date.now()): number {
   return Math.max(0, deadlineAtMs - nowMs);
+}
+
+/** A phase's share of the per-audit deadline, handed out one request timeout at a time. */
+export interface PhaseBudget {
+  readonly deadlineAt: number;
+  /** The next request's timeout: the per-request timeout or what is left, whichever is smaller; null once spent. */
+  slice(): number | null;
+}
+
+export function phaseBudget(
+  capMs: number,
+  timeoutMs: number,
+  clock: { deadlineAt?: number; now: () => number },
+): PhaseBudget {
+  const deadlineAt = Math.min(clock.deadlineAt ?? Number.POSITIVE_INFINITY, clock.now() + capMs);
+  return {
+    deadlineAt,
+    slice: () => {
+      const slice = Math.min(timeoutMs, remainingDeadlineMs(deadlineAt, clock.now()));
+      return slice > 0 ? slice : null;
+    },
+  };
 }
 
 const MARKDOWN_HREF_RE = /\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;

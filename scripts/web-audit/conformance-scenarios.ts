@@ -413,6 +413,7 @@ const baseline = (): Exchange[] => [get('/', html(rootHtml()))];
 
 // A declared host serving a legacy-lane MCP server at /mcp.
 const DECLARED_ENDPOINT = 'https://mcp.example.net/mcp';
+
 const REDIRECTED_ENDPOINT = 'https://mcp.example.org/mcp';
 const declaringCard = (endpoint: string): Exchange => get(CARD_PATH, json({ ...SERVER_CARD, mcp_endpoint: endpoint }));
 const selfNamingCard = (endpoint: string): Exchange => get(`${endpoint}/server-card`, cardDocument({ ...SEP_2127_CARD, remotes: [{ type: 'streamable-http', url: endpoint }] }));

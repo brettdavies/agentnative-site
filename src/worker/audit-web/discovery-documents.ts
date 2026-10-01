@@ -55,6 +55,11 @@ export function apiCatalogShape(catalog: JsonObject | null): DocumentShape {
   return Array.isArray(catalog.linkset) ? 'linkset' : 'unrecognized';
 }
 
+/** A SEP-2127 remote `cardEndpoint` can take: streamable HTTP with a URL. */
+function isStreamableRemote(remote: unknown): remote is JsonObject & { url: string } {
+  return isJsonObject(remote) && remote.type === 'streamable-http' && typeof remote.url === 'string';
+}
+
 /**
  * The endpoint a card declares, as written: a SEP-2127 card's first
  * `streamable-http` remote, else the first SEP-1649 endpoint field present.
@@ -62,9 +67,7 @@ export function apiCatalogShape(catalog: JsonObject | null): DocumentShape {
 export function cardEndpoint(card: JsonObject): string | null {
   if (Array.isArray(card.remotes)) {
     for (const remote of card.remotes) {
-      if (isJsonObject(remote) && remote.type === 'streamable-http' && typeof remote.url === 'string') {
-        return remote.url;
-      }
+      if (isStreamableRemote(remote)) return remote.url;
     }
     return null;
   }
@@ -83,6 +86,15 @@ export function cardHasAuthField(card: JsonObject): boolean {
 /** A URL carrying a `{variable}` needs values the auditor does not have, so it is never requested. */
 export function isTemplatedUrl(url: string): boolean {
   return URL_TEMPLATE_VARIABLE.test(url);
+}
+
+/** The card location the extension defines for an endpoint: its URL plus the suffix, query dropped. */
+export function cardSuffixUrl(endpoint: string, suffix: string): string {
+  const u = new URL(endpoint);
+  u.pathname = `${u.pathname.replace(/\/+$/, '')}${suffix}`;
+  u.search = '';
+  u.hash = '';
+  return u.toString();
 }
 
 export type CatalogCardEntry = { index: number; data: JsonObject } | { index: number; url: string } | { index: number };
@@ -146,9 +158,7 @@ export function sameOrigin(candidate: string, base: string): boolean {
 /** A SEP-2127 card's remotes other than the one `cardEndpoint` takes. */
 export function otherRemotes(card: JsonObject, source: string, base: string): McpDeclaration[] {
   if (!Array.isArray(card.remotes)) return [];
-  const primary = card.remotes.findIndex(
-    (remote) => isJsonObject(remote) && remote.type === 'streamable-http' && typeof remote.url === 'string',
-  );
+  const primary = card.remotes.findIndex(isStreamableRemote);
   return card.remotes.flatMap((remote, index): McpDeclaration[] => {
     if (index === primary || !isJsonObject(remote) || typeof remote.url !== 'string') return [];
     const url = isTemplatedUrl(remote.url) ? remote.url : resolveUrl(base, remote.url);

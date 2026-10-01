@@ -34,33 +34,17 @@ import {
   trailEntry,
   unique,
 } from './follow-trail';
-import { remainingDeadlineMs, resolveUrl } from './handlers/shared';
+import { phaseBudget, resolveUrl } from './handlers/shared';
 import type { EvidenceItem } from './handlers/types';
-import { type ArtifactSource, admittingArtifact, normalizeEndpointUrl } from './reciprocity';
+import { type ArtifactReadOptions, type ArtifactSource, admittingArtifact, normalizeEndpointUrl } from './reciprocity';
 import type { WebAuditDiscoveryConfig } from './registry';
-import { DOCUMENT_MAX_BODY_BYTES, type GuardedFetchOptions, guardedFetch, STATUS_ONLY_BODY_BYTES } from './ssrf';
-
-/** A phase's share of the per-audit deadline, handed out one request timeout at a time. */
-export interface PhaseBudget {
-  readonly deadlineAt: number;
-  /** The next request's timeout: the per-request timeout or what is left, whichever is smaller; null once spent. */
-  slice(): number | null;
-}
-
-export function phaseBudget(
-  capMs: number,
-  timeoutMs: number,
-  clock: { deadlineAt?: number; now: () => number },
-): PhaseBudget {
-  const deadlineAt = Math.min(clock.deadlineAt ?? Number.POSITIVE_INFINITY, clock.now() + capMs);
-  return {
-    deadlineAt,
-    slice: () => {
-      const slice = Math.min(timeoutMs, remainingDeadlineMs(deadlineAt, clock.now()));
-      return slice > 0 ? slice : null;
-    },
-  };
-}
+import {
+  DOCUMENT_MAX_BODY_BYTES,
+  type GuardedFetchOptions,
+  guardedFetch,
+  REDIRECT_STATUSES,
+  STATUS_ONLY_BODY_BYTES,
+} from './ssrf';
 
 const FOLLOW_SLICE_MS = 6_000;
 const MAX_FOLLOWED_HOSTS = 4;
@@ -69,7 +53,6 @@ const MAX_FOLLOW_REQUESTS = 12;
 // GET only looks for a redirect and a challenge, so a hang must not spend
 // the slice reciprocity needs.
 const ENDPOINT_GET_TIMEOUT_MS = 3_000;
-const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 /**
  * The hourly budget for each declared domain, drawn once per audit and
@@ -108,6 +91,8 @@ export interface FollowResult {
   requests: number;
 }
 
+type ReadOptions = ArtifactReadOptions & { timeoutCapMs?: number };
+
 class FollowStop extends Error {
   constructor(readonly budgetCause: BudgetCause) {
     super(budgetCause);
@@ -144,25 +129,22 @@ export async function followDeclarations(input: FollowInput): Promise<FollowResu
     if (!admitHost(hostname)) throw new FollowStop('per-audit-cap');
     if (!(await reserve(hostname))) throw new FollowStop('domain-budget');
   };
-  const fetched = new Map<string, Promise<ProbeResponse>>();
+  const responseCache = new Map<string, Promise<ProbeResponse>>();
   /**
    * One GET with redirects disabled, charged to the slice's request cap
    * and clock. A document read the same way twice (a card document that
    * is also the card under its own endpoint) is requested once.
    */
-  const get = (url: string, opts: { maxBodyBytes: number; accept?: string; timeoutCapMs?: number }) => {
+  const get = (url: string, opts: ReadOptions) => {
     const key = `${url} ${opts.maxBodyBytes} ${opts.accept ?? ''}`;
-    let response = fetched.get(key);
+    let response = responseCache.get(key);
     if (response === undefined) {
       response = request(url, opts);
-      fetched.set(key, response);
+      responseCache.set(key, response);
     }
     return response;
   };
-  const request = async (
-    url: string,
-    opts: { maxBodyBytes: number; accept?: string; timeoutCapMs?: number },
-  ): Promise<ProbeResponse> => {
+  const request = async (url: string, opts: ReadOptions): Promise<ProbeResponse> => {
     const slice = budget.slice();
     if (slice === null) throw new FollowStop('slice');
     if (requests >= MAX_FOLLOW_REQUESTS) throw new FollowStop('per-audit-cap');
@@ -183,7 +165,7 @@ export async function followDeclarations(input: FollowInput): Promise<FollowResu
     return response;
   };
   const source: ArtifactSource = {
-    get: (url, opts) => get(url, opts),
+    get,
     decline: (url, why) => evidence.push({ url, blocked: why }),
   };
 
@@ -194,7 +176,7 @@ export async function followDeclarations(input: FollowInput): Promise<FollowResu
    */
   const fetchDeclared = async (
     declaration: McpDeclaration,
-    opts: { maxBodyBytes: number; accept?: string; timeoutCapMs?: number },
+    opts: ReadOptions,
   ): Promise<{ url: string; response: ProbeResponse } | Settled> => {
     const first = await get(declaration.url, opts);
     const location = first.headers.location;
@@ -264,7 +246,7 @@ export async function followDeclarations(input: FollowInput): Promise<FollowResu
       if (upfront !== null) out.push(trailEntry(declaration, upfront));
       else if (endpoint !== null) {
         out.push(trailEntry(declaration, { outcome: 'not-followed', reason: 'beyond-endpoint-of-record' }));
-      } else out.push(trailEntry(declaration, await stopped(() => settleEndpoint(declaration))));
+      } else out.push(trailEntry(declaration, await stopped(() => settleEndpoint(declaration), budgetExceeded)));
     }
     return out;
   };
@@ -281,7 +263,10 @@ export async function followDeclarations(input: FollowInput): Promise<FollowResu
           const read =
             upfront !== null
               ? { entry: trailEntry(declaration, upfront), named: [] }
-              : await readStopped(declaration, readCardDocument);
+              : await stopped(
+                  () => readCardDocument(declaration),
+                  (cause) => ({ entry: trailEntry(declaration, budgetExceeded(cause)), named: [] }),
+                );
           return [declarationKey(declaration), read] as const;
         }),
     ),
@@ -309,26 +294,16 @@ export async function followDeclarations(input: FollowInput): Promise<FollowResu
 
 type CardDocumentRead = { entry: TrailEntry; named: McpDeclaration[] };
 
-/** Runs one declaration's requests, settling a cap or budget stop as budget-exceeded. */
-async function stopped(run: () => Promise<Settled>): Promise<Settled> {
+function budgetExceeded(cause: BudgetCause): Settled {
+  return { outcome: 'budget-exceeded', cause };
+}
+
+/** Runs one declaration's requests, settling a cap or budget stop through `onStop`. */
+async function stopped<T>(run: () => Promise<T>, onStop: (cause: BudgetCause) => T): Promise<T> {
   try {
     return await run();
   } catch (err) {
-    if (err instanceof FollowStop) return { outcome: 'budget-exceeded', cause: err.budgetCause };
-    throw err;
-  }
-}
-
-async function readStopped(
-  declaration: McpDeclaration,
-  read: (declaration: McpDeclaration) => Promise<CardDocumentRead>,
-): Promise<CardDocumentRead> {
-  try {
-    return await read(declaration);
-  } catch (err) {
-    if (err instanceof FollowStop) {
-      return { entry: trailEntry(declaration, { outcome: 'budget-exceeded', cause: err.budgetCause }), named: [] };
-    }
+    if (err instanceof FollowStop) return onStop(err.budgetCause);
     throw err;
   }
 }

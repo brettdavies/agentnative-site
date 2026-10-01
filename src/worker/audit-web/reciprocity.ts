@@ -14,6 +14,7 @@
 import type { ProbeResponse } from './assert';
 import {
   cardShape,
+  cardSuffixUrl,
   catalogCardEntries,
   isJsonObject,
   type JsonObject,
@@ -21,14 +22,20 @@ import {
   parseJsonObject,
 } from './discovery-documents';
 import { resolveUrl } from './handlers/shared';
+import { hostOf } from './provenance';
 import type { WebAuditDiscoveryConfig } from './registry';
 import { DOCUMENT_MAX_BODY_BYTES, METADATA_MAX_BODY_BYTES, validatePublicUrl } from './ssrf';
 
 export type AdmittedBy = 'card' | 'ai-catalog' | 'metadata';
 
+export interface ArtifactReadOptions {
+  maxBodyBytes: number;
+  accept?: string;
+}
+
 /** Where reciprocity reads its artifacts; the caller owns timeouts, caps, budgets, and redirects. */
 export interface ArtifactSource {
-  get(url: string, opts: { maxBodyBytes: number; accept?: string }): Promise<ProbeResponse>;
+  get(url: string, opts: ArtifactReadOptions): Promise<ProbeResponse>;
   /** Records a location the resolver will not request, with the reason. */
   decline(url: string, why: string): void;
 }
@@ -54,20 +61,8 @@ export function normalizeEndpointUrl(raw: string): string | null {
 }
 
 export function sameHost(a: string, b: string): boolean {
-  try {
-    return new URL(a).host === new URL(b).host;
-  } catch {
-    return false;
-  }
-}
-
-/** The card location the extension defines for an endpoint: its URL plus the suffix, query dropped. */
-export function cardSuffixUrl(endpoint: string, suffix: string): string {
-  const u = new URL(endpoint);
-  u.pathname = `${u.pathname.replace(/\/+$/, '')}${suffix}`;
-  u.search = '';
-  u.hash = '';
-  return u.toString();
+  const host = hostOf(a);
+  return host !== null && host === hostOf(b);
 }
 
 function cardNamesEndpoint(card: JsonObject | null, cardUrl: string, endpoint: string): boolean {

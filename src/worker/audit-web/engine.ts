@@ -233,16 +233,14 @@ function toResult(check: WebCheck, outcome: ProbeOutcome): EngineResult {
 
 function naResult(
   check: WebCheck,
-  naReason: NonNullable<EngineResult['na_reason']>,
-  evidence: string,
-  host?: string,
+  na: { reason: NonNullable<EngineResult['na_reason']>; evidence: string; host?: string },
 ): EngineResult {
   return {
     ...baseFields(check),
     status: 'n_a',
-    na_reason: naReason,
-    evidence,
-    raw_evidence: [{ why: [evidence], ...(host !== undefined ? { host } : {}) }],
+    na_reason: na.reason,
+    evidence: na.evidence,
+    raw_evidence: [{ why: [na.evidence], ...(na.host !== undefined ? { host: na.host } : {}) }],
   };
 }
 
@@ -274,9 +272,11 @@ function answeredByTarget(status: unknown): boolean {
 export function antecedentGate(check: WebCheck, resolution: AntecedentResolution): EngineResult | null {
   if (resolution === 'apply') return null;
   if (resolution === 'error') return errorResult(check, 'antecedent unresolvable: root fetch failed');
-  if (resolution === 'n_a') return naResult(check, 'antecedent-unmet', antecedentUnmetEvidence(check.antecedent));
+  if (resolution === 'n_a') {
+    return naResult(check, { reason: 'antecedent-unmet', evidence: antecedentUnmetEvidence(check.antecedent) });
+  }
   const evidence = resolution.evidence ?? antecedentUnmetEvidence(check.antecedent);
-  return naResult(check, resolution.reason, evidence, resolution.host);
+  return naResult(check, { reason: resolution.reason, evidence, host: resolution.host });
 }
 
 /** An applicable MAY that is simply absent is optional, not a miss (R3). */
@@ -334,12 +334,8 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     root === null ? Math.min(configuredTimeoutMs, DEGRADED_PER_CHECK_TIMEOUT_MS) : configuredTimeoutMs;
 
   const discoveryConfig = input.registry.mcp_discovery;
-  const documents = await readDiscoveryDocuments(input.url, discoveryConfig, {
-    timeoutMs: perCheckTimeoutMs,
-    deadlineAt: deadline,
-    now,
-    fetchOptions: input.fetchOptions,
-  });
+  const phaseOptions = { timeoutMs: perCheckTimeoutMs, deadlineAt: deadline, now, fetchOptions: input.fetchOptions };
+  const documents = await readDiscoveryDocuments(input.url, discoveryConfig, phaseOptions);
   const rootFromTarget = root !== null && !isEdgeErrorStatus(root.status);
   const following = input.followDeclarations !== false;
   const { discovery, declared } = await settleEndpointOfRecord(documents, {
@@ -348,10 +344,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     enabled: following,
     discovery: discoveryConfig,
     budget: input.domainBudget ?? ALWAYS_ADMIT_BUDGET,
-    timeoutMs: perCheckTimeoutMs,
-    deadlineAt: deadline,
-    now,
-    fetchOptions: input.fetchOptions,
+    ...phaseOptions,
   });
   yield { type: 'discovery', endpoint: declared.endpoint, evidence: discovery.evidence };
 
@@ -467,7 +460,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   // the n_a/error result when the check must not be scored.
   const gate = (check: WebCheck): EngineResult | null => {
     if (!siteTypeApplies(check.site_types, actx)) {
-      return naResult(check, 'antecedent-unmet', 'not applicable to the declared site type');
+      return naResult(check, { reason: 'antecedent-unmet', evidence: 'not applicable to the declared site type' });
     }
     return antecedentGate(check, resolveAntecedent(check.antecedent, actx));
   };
