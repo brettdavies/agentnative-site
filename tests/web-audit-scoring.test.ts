@@ -37,6 +37,8 @@ interface NormalizedWebAuditCheck {
 interface NormalizedWebAuditRegistry {
   version: number;
   mcp_discovery: {
+    ai_catalog: string;
+    card_suffix: string;
     well_known: string[];
     common_paths: string[];
     protocol_version: string;
@@ -142,6 +144,13 @@ describe('web-audit registry shape', () => {
     expect(aliases?.weight).toBe(1);
   });
 
+  test('the api-catalog check scores the API catalog discovery keeps', async () => {
+    const registry = await loadNormalized();
+    const apiCatalog = registry.checks.find((c) => c.id === 'api-catalog');
+    expect(apiCatalog?.eval).toBe('retained-document');
+    expect(apiCatalog?.with).toEqual({ retained: 'api-catalog', expect: { status: [200], body_regex: 'linkset' } });
+  });
+
   test('keyword is derived mechanically from tier for every check', async () => {
     const registry = await loadNormalized();
     for (const check of registry.checks) {
@@ -243,8 +252,10 @@ describe('web-audit registry shape', () => {
     expect(legacyErrorOp?.with).toEqual({ op: 'error', method: 'nonexistent/method', expect_code: -32601 });
   });
 
-  test('mcp_discovery carries well_known, common_paths, and the pinned protocol version', async () => {
+  test('mcp_discovery carries the SEP-2127 locations, well_known, common_paths, and the pinned protocol version', async () => {
     const registry = await loadNormalized();
+    expect(registry.mcp_discovery.ai_catalog).toBe('/.well-known/ai-catalog.json');
+    expect(registry.mcp_discovery.card_suffix).toBe('/server-card');
     expect(registry.mcp_discovery.well_known.length).toBeGreaterThan(0);
     expect(registry.mcp_discovery.common_paths.length).toBeGreaterThan(0);
     expect(registry.mcp_discovery.protocol_version).toBe('2025-06-18');
@@ -252,7 +263,13 @@ describe('web-audit registry shape', () => {
 
   const abortBase = {
     version: 1,
-    mcp_discovery: { well_known: ['/x'], common_paths: ['/mcp'], protocol_version: '2025-06-18' },
+    mcp_discovery: {
+      ai_catalog: '/.well-known/ai-catalog.json',
+      card_suffix: '/server-card',
+      well_known: ['/x'],
+      common_paths: ['/mcp'],
+      protocol_version: '2025-06-18',
+    },
     category_order: ['c'],
     categories: { c: 'c' },
   };
@@ -270,6 +287,21 @@ describe('web-audit registry shape', () => {
     handler: 'http',
     with: {},
   };
+
+  test('an mcp_discovery block without ai_catalog or card_suffix aborts normalization', () => {
+    const { ai_catalog: _aiCatalog, ...noCatalog } = abortBase.mcp_discovery;
+    expect(() => normalizeWebAuditRegistry({ ...abortBase, mcp_discovery: noCatalog, checks: [abortCheck] })).toThrow(
+      /ai_catalog/,
+    );
+    const { card_suffix: _cardSuffix, ...noSuffix } = abortBase.mcp_discovery;
+    expect(() => normalizeWebAuditRegistry({ ...abortBase, mcp_discovery: noSuffix, checks: [abortCheck] })).toThrow(
+      /card_suffix/,
+    );
+    const relativeSuffix = { ...abortBase.mcp_discovery, card_suffix: 'server-card' };
+    expect(() =>
+      normalizeWebAuditRegistry({ ...abortBase, mcp_discovery: relativeSuffix, checks: [abortCheck] }),
+    ).toThrow(/card_suffix/);
+  });
 
   test('a check missing principle aborts normalization with a named error', () => {
     const { principle: _principle, ...check } = abortCheck;
@@ -297,6 +329,17 @@ describe('web-audit registry shape', () => {
     expect(() => normalizeWebAuditRegistry({ ...abortBase, checks: [{ ...abortCheck, eval: 'not-a-rule' }] })).toThrow(
       /unknown eval rule/,
     );
+  });
+
+  test('a retained-document check must name a document discovery keeps', () => {
+    const retained = { ...abortCheck, eval: 'retained-document', with: { expect: { status: [200] } } };
+    expect(() => normalizeWebAuditRegistry({ ...abortBase, checks: [retained] })).toThrow(/with\.retained/);
+    expect(() =>
+      normalizeWebAuditRegistry({ ...abortBase, checks: [{ ...retained, with: { retained: 'openapi' } }] }),
+    ).toThrow(/with\.retained/);
+    expect(() =>
+      normalizeWebAuditRegistry({ ...abortBase, checks: [{ ...retained, with: { retained: 'api-catalog' } }] }),
+    ).not.toThrow();
   });
 
   test('a missing or invalid site_types aborts normalization', () => {

@@ -179,6 +179,23 @@ const SERVER_CARD = {
 const SERVER_CARD_WITH_AUTH = { ...SERVER_CARD, authentication: { type: 'oauth2' } };
 const CARD_PATH = '/.well-known/mcp/server-card.json';
 const CARD_ALIASES = ['/.well-known/mcp', '/.well-known/mcp.json', '/mcp.json'];
+const CARD_SUFFIX_PATH = `${MCP_PATH}/server-card`;
+
+const MCP_CARD_TYPE = 'application/mcp-server-card+json';
+const SEP_2127_CARD = {
+  $schema: 'https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json',
+  name: 'com.example/example',
+  version: '1.0.0',
+  description: 'Example MCP server',
+  remotes: [{ type: 'streamable-http', url: 'https://example.com/mcp' }],
+};
+const cardDocument = (card: unknown): ExchangeResponse => res(200, { 'content-type': MCP_CARD_TYPE }, JSON.stringify(card));
+const aiCatalog = (...entries: unknown[]): ExchangeResponse => json({ specVersion: '1.0', entries });
+const cardEntry = (fields: Record<string, unknown>) => ({
+  identifier: 'urn:air:example.com:mcp:example',
+  type: MCP_CARD_TYPE,
+  ...fields,
+});
 
 const TOOLS_RESULT = { tools: [{ name: 'search', description: 'Search', inputSchema: { type: 'object' } }, { name: 'ping' }] };
 const RESOURCES_RESULT = { resources: [{ uri: 'anc://registry', name: 'registry' }] };
@@ -356,6 +373,7 @@ function fullSite(): Exchange[] {
     ...contentSurface(),
     ...apiSurface(),
     ...cardSurface(SERVER_CARD_WITH_AUTH),
+    get(CARD_SUFFIX_PATH, NOT_FOUND),
     ...dualStackMcp({ cors: 'full' }),
     ...discoveryAndAuthSurface(),
     ...dnsAll((name) => (name.startsWith('_index') ? dohAnswer(name) : DOH_NXDOMAIN)),
@@ -931,6 +949,64 @@ export const SCENARIOS: Record<string, Scenario> = {
     ...noModernLane(),
     ...legacyMcp(),
   ]),
+
+  // ---- discovery order: SEP-2127 catalog, card suffix, SEP-1649 --------------
+  'discovery-catalog-card': scenario(
+    'an AI catalog entry names a SEP-2127 card on the audited origin; its streamable-http remote is the endpoint, so no common path is POSTed',
+    ['ai-catalog', 'mcp-initialize'],
+    [
+      ...baseline(),
+      get('/.well-known/ai-catalog.json', aiCatalog(cardEntry({ url: u(CARD_SUFFIX_PATH) }))),
+      get(CARD_SUFFIX_PATH, cardDocument(SEP_2127_CARD)),
+      ...legacyOnlyMcp(),
+    ],
+  ),
+  'discovery-catalog-inline-card': scenario(
+    'an AI catalog entry carries its SEP-2127 card inline; the card is read in place and its remote is the endpoint',
+    ['ai-catalog', 'mcp-initialize'],
+    [...baseline(), get('/.well-known/ai-catalog.json', aiCatalog(cardEntry({ data: SEP_2127_CARD }))), ...legacyOnlyMcp()],
+  ),
+  'discovery-catalog-declarations': scenario(
+    'catalog cards off the audited origin or behind a URL template are declared, never requested; discovery falls through to initialize',
+    ['mcp-initialize'],
+    [
+      ...baseline(),
+      get(
+        '/.well-known/ai-catalog.json',
+        aiCatalog(
+          cardEntry({ url: 'https://cards.example.net/example/server-card' }),
+          cardEntry({ data: { ...SEP_2127_CARD, remotes: [{ type: 'streamable-http', url: 'https://{tenant}.example.com/mcp' }] } }),
+        ),
+      ),
+      ...legacyOnlyMcp(),
+    ],
+  ),
+  'discovery-suffix-card': scenario(
+    'no catalog and no well-known card: initialize finds the endpoint, and the SEP-2127 card under the endpoint at /mcp/server-card is the card of record',
+    ['mcp-initialize'],
+    [...baseline(), get(CARD_SUFFIX_PATH, cardDocument(SEP_2127_CARD)), ...legacyOnlyMcp()],
+  ),
+  'discovery-legacy-card': scenario(
+    'a SEP-1649 card at the well-known path names the endpoint in transport.url; no common path is POSTed and the card suffix answers 404',
+    ['well-known-mcp-card', 'mcp-initialize'],
+    [
+      ...baseline(),
+      get(CARD_PATH, json({ name: 'example', transport: { type: 'streamable-http', url: 'https://example.com/mcp' } })),
+      ...legacyOnlyMcp(),
+    ],
+  ),
+  'discovery-card-generations-auth': scenario(
+    'an inline SEP-2127 catalog card and a SEP-1649 card declaring authentication name one endpoint that never answers 401; the catalog card wins the endpoint and the SEP-1649 declaration still satisfies the auth antecedents, so the OAuth rows are scored',
+    ['oauth-protected-resource', 'auth-md'],
+    [
+      ...baseline(),
+      get('/.well-known/ai-catalog.json', aiCatalog(cardEntry({ data: SEP_2127_CARD }))),
+      get(CARD_PATH, json(SERVER_CARD_WITH_AUTH)),
+      ...legacyOnlyMcp(),
+      get('/.well-known/oauth-protected-resource', json({ resource: 'https://example.com/mcp', authorization_servers: ['https://example.com'] })),
+      get('/.well-known/auth.md', md('# Auth\n\nRegister at /signup, then send a bearer token.\n')),
+    ],
+  ),
 
   // ---- dns-doh ---------------------------------------------------------------
   'dns-aid-pass': scenario('the first resolver answers Status 0 with a record for the index name', ['dns-aid'], [

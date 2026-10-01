@@ -78,7 +78,13 @@ const NEW_CHECK_IDS = [...MAY_CHECK_IDS, 'markdown-vary'] as const;
 function registryOf(checks: WebCheck[]): WebAuditRegistry {
   return {
     version: 1,
-    mcp_discovery: { well_known: ['/.well-known/mcp.json'], common_paths: ['/mcp'], protocol_version: '2025-06-18' },
+    mcp_discovery: {
+      ai_catalog: '/.well-known/ai-catalog.json',
+      card_suffix: '/server-card',
+      well_known: ['/.well-known/mcp.json'],
+      common_paths: ['/mcp'],
+      protocol_version: '2025-06-18',
+    },
     category_order: ['content-for-agents'],
     categories: { 'content-for-agents': 'Content for agents' },
     checks,

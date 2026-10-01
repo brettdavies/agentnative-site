@@ -3,11 +3,12 @@
 // headers under the check's timeout, and evaluates via assertHttp.
 // Every fetch flows through the SSRF guard.
 
-import { assertHttp, classifyAliasProbe, type ExpectBlock } from '../assert';
+import type { RetainedDocumentKey } from '../../../shared/web-audit-documents';
+import { assertHttp, classifyAliasProbe, type ExpectBlock, type ProbeResponse } from '../assert';
 import type { WebCheck } from '../registry';
 import { guardedFetch } from '../ssrf';
 import { resolveUrl, sameOriginRecoveryLink, substituteEndpoint, timeoutMsFor } from './shared';
-import type { HandlerContext, ProbeOutcome, ProbeStatus } from './types';
+import type { EvidenceItem, HandlerContext, ProbeOutcome, ProbeStatus } from './types';
 
 type HttpWith = {
   path?: string;
@@ -17,6 +18,8 @@ type HttpWith = {
   expect?: ExpectBlock;
   timeout?: number;
   retain_body?: boolean;
+  /** retained-document checks only: the document discovery kept that the check scores. */
+  retained?: RetainedDocumentKey;
 };
 
 /**
@@ -42,6 +45,35 @@ function classifyMiss(
   return hasStatusExpectation ? 'broken' : 'absent';
 }
 
+/** One response asserted against the check's expectations, as its evidence row. */
+function assessResponse(
+  url: string,
+  resp: ProbeResponse,
+  w: HttpWith,
+  base: string,
+): { ok: boolean; item: EvidenceItem } {
+  const expect = w.expect ?? {};
+  const asserted = assertHttp(expect, resp);
+  const recovery =
+    asserted.ok && expect.same_origin_recovery_link
+      ? sameOriginRecoveryLink(resp.body ?? '', base)
+      : { ok: true, why: '' };
+  const ok = asserted.ok && recovery.ok;
+  const reasons = recovery.why ? [...asserted.reasons, recovery.why] : asserted.reasons;
+  return {
+    ok,
+    item: {
+      url,
+      status: resp.status,
+      ok,
+      why: reasons,
+      elapsed_ms: resp.elapsed_ms,
+      error: resp.error,
+      ...(w.retain_body && ok ? { body: resp.body } : {}),
+    },
+  };
+}
+
 export async function runHttp(check: WebCheck, ctx: HandlerContext): Promise<ProbeOutcome> {
   const w = check.with as HttpWith;
   const paths = w.path_any ?? (w.path !== undefined ? [w.path] : []);
@@ -59,22 +91,8 @@ export async function runHttp(check: WebCheck, ctx: HandlerContext): Promise<Pro
     const resp = reuseRoot
       ? (ctx.root as NonNullable<HandlerContext['root']>)
       : await guardedFetch(url, { method, headers }, { ...ctx.fetchOptions, timeoutMs });
-    const asserted = assertHttp(expect, resp);
-    const recovery =
-      asserted.ok && expect.same_origin_recovery_link
-        ? sameOriginRecoveryLink(resp.body ?? '', ctx.base)
-        : { ok: true, why: '' };
-    const ok = asserted.ok && recovery.ok;
-    const reasons = recovery.why ? [...asserted.reasons, recovery.why] : asserted.reasons;
-    evidence.push({
-      url,
-      status: resp.status,
-      ok,
-      why: reasons,
-      elapsed_ms: resp.elapsed_ms,
-      error: resp.error,
-      ...(w.retain_body && ok ? { body: resp.body } : {}),
-    });
+    const { ok, item } = assessResponse(url, resp, w, ctx.base);
+    evidence.push(item);
     if (ok) return { status: 'pass', evidence };
     misses.push(classifyMiss(resp, expect, w.timeout !== undefined));
   }
@@ -85,6 +103,27 @@ export async function runHttp(check: WebCheck, ctx: HandlerContext): Promise<Pro
   // there and wrong); a definitive absence outranks an operational error.
   const status = misses.includes('broken') ? 'broken' : misses.includes('absent') ? 'absent' : 'error';
   return { status, evidence };
+}
+
+/**
+ * retained-document eval rule: score a document discovery already read
+ * against the check's `expect`, exactly as the same response fetched live
+ * would score, with no request of its own. Discovery keeps a server card
+ * only when it found one, so a document it did not keep is absent.
+ */
+export async function runRetainedDocument(check: WebCheck, ctx: HandlerContext): Promise<ProbeOutcome> {
+  const w = check.with as HttpWith & { retained: RetainedDocumentKey };
+  const doc = ctx.retainedDocuments?.get(w.retained);
+  if (doc === undefined) {
+    return {
+      status: 'absent',
+      evidence: [{ retained: w.retained, why: [`discovery kept no ${w.retained} document`] }],
+    };
+  }
+  const { ok, item } = assessResponse(doc.url, doc.response, w, ctx.base);
+  const evidence = [{ ...item, retained: w.retained }];
+  if (ok) return { status: 'pass', evidence };
+  return { status: classifyMiss(doc.response, w.expect ?? {}, w.timeout !== undefined), evidence };
 }
 
 type AliasSpec = string | { path: string; headers?: Record<string, string> };

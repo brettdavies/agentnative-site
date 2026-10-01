@@ -16,6 +16,8 @@ export type ProbeResponse = {
   error: string | null;
   /** Wall-clock milliseconds the request took (informational). */
   elapsed_ms?: number;
+  /** Present only when the body stopped at the caller's byte cap with more still unread. */
+  truncated?: true;
 };
 
 export type ExpectBlock = {

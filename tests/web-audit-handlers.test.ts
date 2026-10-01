@@ -4,13 +4,15 @@
 // fetch is the only network path).
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import type { RetainedDocumentKey } from '../src/shared/web-audit-documents';
+import type { RetainedDocument } from '../src/worker/audit-web/discovery-documents';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
 import { deriveApiProbeUrl, runApiHygiene } from '../src/worker/audit-web/handlers/api-hygiene';
 import { runAuthMd } from '../src/worker/audit-web/handlers/auth-md';
 import { runContentWithoutJs } from '../src/worker/audit-web/handlers/content-without-js';
 import { runCorsPreflight } from '../src/worker/audit-web/handlers/cors-preflight';
 import { runDnsDoh } from '../src/worker/audit-web/handlers/dns-doh';
-import { runHttp } from '../src/worker/audit-web/handlers/http';
+import { runHttp, runRetainedDocument } from '../src/worker/audit-web/handlers/http';
 import { runLlmsTxtQuality } from '../src/worker/audit-web/handlers/llms-txt-quality';
 import { runMarkdownFrontmatter } from '../src/worker/audit-web/handlers/markdown-frontmatter';
 import {
@@ -254,6 +256,57 @@ describe('runHttp', () => {
       ctx({ fetchImpl }),
     );
     expect(outcome.status).toBe('pass');
+  });
+});
+
+describe('runRetainedDocument', () => {
+  const noRequest = stubFetch(() => {
+    throw new Error('a retained-document check must not send a request');
+  });
+  const apiCatalogCheck = check({
+    id: 'api-catalog',
+    eval: 'retained-document',
+    with: { retained: 'api-catalog', expect: { status: [200], body_regex: 'linkset' } },
+  });
+  const kept = (status: number, body: string) =>
+    new Map<RetainedDocumentKey, RetainedDocument>([
+      [
+        'api-catalog',
+        {
+          url: 'https://example.com/.well-known/api-catalog',
+          response: { status, headers: { 'content-type': 'application/linkset+json' }, body, error: null },
+        },
+      ],
+    ]);
+
+  test('scores the document discovery kept, with no request of its own', async () => {
+    const outcome = await runRetainedDocument(
+      apiCatalogCheck,
+      ctx({ fetchImpl: noRequest, retainedDocuments: kept(200, '{"linkset":[]}') }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.evidence[0]).toMatchObject({
+      url: 'https://example.com/.well-known/api-catalog',
+      status: 200,
+      ok: true,
+      retained: 'api-catalog',
+    });
+  });
+
+  test('a kept 404 is absent, as the same response fetched live would be', async () => {
+    const outcome = await runRetainedDocument(
+      apiCatalogCheck,
+      ctx({ fetchImpl: noRequest, retainedDocuments: kept(404, 'not found') }),
+    );
+    expect(outcome.status).toBe('absent');
+  });
+
+  test('a document discovery did not keep is absent', async () => {
+    const outcome = await runRetainedDocument(
+      apiCatalogCheck,
+      ctx({ fetchImpl: noRequest, retainedDocuments: new Map() }),
+    );
+    expect(outcome.status).toBe('absent');
   });
 });
 
@@ -1629,7 +1682,13 @@ describe('mcp-resources antecedent resolves era-neutrally (engine)', () => {
 
   const registry: WebAuditRegistry = {
     version: 1,
-    mcp_discovery: { well_known: ['/.well-known/mcp.json'], common_paths: ['/mcp'], protocol_version: '2025-06-18' },
+    mcp_discovery: {
+      ai_catalog: '/.well-known/ai-catalog.json',
+      card_suffix: '/server-card',
+      well_known: ['/.well-known/mcp.json'],
+      common_paths: ['/mcp'],
+      protocol_version: '2025-06-18',
+    },
     category_order: ['mcp'],
     categories: { mcp: 'MCP' },
     checks: [
@@ -1757,7 +1816,13 @@ describe('era lanes resolved across a whole audit (engine)', () => {
 
   const registry: WebAuditRegistry = {
     version: 1,
-    mcp_discovery: { well_known: ['/.well-known/mcp.json'], common_paths: ['/mcp'], protocol_version: '2025-06-18' },
+    mcp_discovery: {
+      ai_catalog: '/.well-known/ai-catalog.json',
+      card_suffix: '/server-card',
+      well_known: ['/.well-known/mcp.json'],
+      common_paths: ['/mcp'],
+      protocol_version: '2025-06-18',
+    },
     category_order: ['mcp'],
     categories: { mcp: 'MCP' },
     checks: (
@@ -2688,7 +2753,13 @@ describe('evidence lines name the fact that decided the verdict', () => {
   function registryOf(checks: WebCheck[]): WebAuditRegistry {
     return {
       version: 1,
-      mcp_discovery: { well_known: [], common_paths: [], protocol_version: '2025-06-18' },
+      mcp_discovery: {
+        ai_catalog: '/.well-known/ai-catalog.json',
+        card_suffix: '/server-card',
+        well_known: [],
+        common_paths: [],
+        protocol_version: '2025-06-18',
+      },
       category_order: ['mcp'],
       categories: { mcp: 'MCP' },
       checks,
@@ -2795,7 +2866,13 @@ describe('mcp-card-legacy-aliases (MAY, one correct redirect is enough)', () => 
       url: BASE,
       registry: {
         version: 1,
-        mcp_discovery: { well_known: [], common_paths: [], protocol_version: '2025-06-18' },
+        mcp_discovery: {
+          ai_catalog: '/.well-known/ai-catalog.json',
+          card_suffix: '/server-card',
+          well_known: [],
+          common_paths: [],
+          protocol_version: '2025-06-18',
+        },
         category_order: ['mcp'],
         categories: { mcp: 'MCP' },
         checks: [aliasCheck],

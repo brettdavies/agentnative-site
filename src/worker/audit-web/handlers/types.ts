@@ -4,8 +4,10 @@
 // the SSRF guard (src/worker/audit-web/ssrf.ts); no handler calls fetch
 // directly.
 
+import type { RetainedDocumentKey } from '../../../shared/web-audit-documents';
 import type { NaReason } from '../../../shared/web-audit-findings';
 import type { ProbeResponse } from '../assert';
+import type { RetainedDocument } from '../discovery-documents';
 import type { GuardedFetchOptions } from '../ssrf';
 
 /**
@@ -92,6 +94,8 @@ export interface HandlerContext {
    * issuing a second fetch of the antecedent source.
    */
   retainedBodies?: ReadonlyMap<string, string>;
+  /** Documents discovery read and kept; a `retained-document` check scores one with no request. */
+  retainedDocuments?: ReadonlyMap<RetainedDocumentKey, RetainedDocument>;
   /**
    * Session id from wave-1 MCP initialize (`Mcp-Session-Id`), or null when
    * the server is stateless. Wave-2 MCP probes send it when present.

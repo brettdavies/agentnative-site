@@ -32,7 +32,8 @@
 #               regardless of the declared type; no declared type runs everything)
 #   antecedent  runtime gate that flips the check to n_a when unmet
 #               (resolution table in src/worker/audit-web/antecedents.ts)
-#   eval        optional non-standard evaluation rule
+#   eval        optional non-standard evaluation rule; retained-document scores
+#               the document discovery kept under with.retained, with no request
 #   lane        mcp checks only: the protocol lane (a key of mcp_lanes) the
 #               row groups under on the result page and its markdown twin
 #   weight      integer registry weight (scoring uses per-tier config weights;
@@ -43,8 +44,15 @@
 
 version: 1
 
-# Endpoint discovery: first candidate that answers `initialize` wins.
+# Endpoint discovery, SEP-2127 first: the MCP server-card entries of the
+# ai_catalog, then the well_known SEP-1649 cards; a card's endpoint on the
+# audited origin wins. Without one, the common_paths take legacy
+# `initialize` and modern `tools/list` POSTs together, and a legacy answer
+# wins. The card at <endpoint> + card_suffix outranks a SEP-1649 card as
+# the card of record.
 mcp_discovery:
+  ai_catalog: /.well-known/ai-catalog.json
+  card_suffix: /server-card
   well_known:
     - /.well-known/mcp.json
     - /.well-known/mcp/server-card.json
@@ -134,9 +142,10 @@ checks:
     weight: 2
     title: /.well-known/api-catalog published (RFC 9727)
     breadcrumb: API catalog
+    eval: retained-document
     handler: http
     with:
-      path: /.well-known/api-catalog
+      retained: api-catalog
       expect: { status: [200], body_regex: "linkset" }
     hint: Serve /.well-known/api-catalog as application/linkset+json with a linkset[] of anchor + service-desc entries.
 

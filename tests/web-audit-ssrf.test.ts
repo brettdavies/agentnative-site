@@ -179,6 +179,34 @@ describe('guardedFetch', () => {
     expect(capped.status).toBe(200);
     expect(capped.body.length).toBe(AUDIT_PROBE_MAX_BODY_BYTES);
   });
+
+  test('a body stopped at its cap is flagged truncated; one that fits is not', async () => {
+    const cap = 1024;
+    const streamOf = (...chunks: number[]) =>
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const size of chunks) controller.enqueue(new Uint8Array(size).fill(120));
+          controller.close();
+        },
+      });
+    const read = (body: ReadableStream<Uint8Array> | string) =>
+      guardedFetch('https://example.com/', {}, { fetchImpl: stubFetch(() => new Response(body)), maxBodyBytes: cap });
+
+    const oneChunkOver = await read('x'.repeat(cap + 1));
+    expect(oneChunkOver.body.length).toBe(cap);
+    expect(oneChunkOver.truncated).toBe(true);
+
+    const overAtChunkBoundary = await read(streamOf(cap, 16));
+    expect(overAtChunkBoundary.body.length).toBe(cap);
+    expect(overAtChunkBoundary.truncated).toBe(true);
+
+    const exactlyCap = await read(streamOf(cap / 2, cap / 2));
+    expect(exactlyCap.body.length).toBe(cap);
+    expect('truncated' in exactlyCap).toBe(false);
+
+    const underCap = await read('x'.repeat(cap - 1));
+    expect('truncated' in underCap).toBe(false);
+  });
 });
 
 describe('guardedFetch user-agent', () => {

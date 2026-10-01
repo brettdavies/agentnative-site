@@ -5,14 +5,35 @@
   "mcp_endpoint": "https://example.com/mcp",
   "mcp_discovery": [
     {
+      "source": "/.well-known/mcp.json",
+      "status": 404
+    },
+    {
       "source": "/.well-known/mcp/server-card.json",
+      "document": "server-card",
+      "status": 200,
+      "shape": "sep-1649",
       "endpoint": "https://mcp.example.net/mcp",
       "blocked": "off-origin endpoint declaration"
+    },
+    {
+      "source": "/.well-known/ai-catalog.json",
+      "document": "ai-catalog",
+      "status": 404
+    },
+    {
+      "source": "/.well-known/api-catalog",
+      "document": "api-catalog",
+      "status": 404
     },
     {
       "source": "/mcp",
       "endpoint": "https://example.com/mcp",
       "probed": "initialize"
+    },
+    {
+      "source": "/mcp/server-card",
+      "status": 404
     }
   ],
   "tool": {

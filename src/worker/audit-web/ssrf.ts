@@ -314,18 +314,19 @@ export async function guardedFetch(
       response.headers.forEach((value, name) => {
         headers[name.toLowerCase()] = value;
       });
-      let body = '';
+      let read: BodyRead;
       try {
-        body = await readBody(response, opts.maxBodyBytes);
+        read = await readBody(response, opts.maxBodyBytes);
       } catch (err) {
         return fail(errMsg(err));
       }
       return {
         status: response.status,
         headers,
-        body,
+        body: read.body,
         error: null,
         elapsed_ms: Date.now() - started,
+        ...(read.truncated ? { truncated: true as const } : {}),
       };
     }
     return fail(`redirect limit exceeded (${maxRedirects} hops)`);
@@ -338,8 +339,12 @@ export async function guardedFetch(
 export const STATUS_ONLY_BODY_BYTES = 0;
 /** Cap for probes that inspect a short body (JSON errors, twin text). */
 export const AUDIT_PROBE_MAX_BODY_BYTES = 64 * 1024;
+/** Cap for a discovery document the audit keeps: a server card, the AI catalog, the API catalog. */
+export const DOCUMENT_MAX_BODY_BYTES = 256 * 1024;
 
-async function readBody(response: Response, maxBodyBytes: number | undefined): Promise<string> {
+type BodyRead = { body: string; truncated: boolean };
+
+async function readBody(response: Response, maxBodyBytes: number | undefined): Promise<BodyRead> {
   if (maxBodyBytes === 0) {
     if (response.body) {
       try {
@@ -348,27 +353,30 @@ async function readBody(response: Response, maxBodyBytes: number | undefined): P
         // Already locked or closed.
       }
     }
-    return '';
+    return { body: '', truncated: false };
   }
   if (maxBodyBytes === undefined) {
-    return await response.text();
+    return { body: await response.text(), truncated: false };
   }
   const reader = response.body?.getReader();
-  if (!reader) return '';
+  if (!reader) return { body: '', truncated: false };
   const chunks: Uint8Array[] = [];
   let received = 0;
+  let truncated = false;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     if (!value) continue;
     const remaining = maxBodyBytes - received;
     if (remaining <= 0) {
+      truncated = true;
       await reader.cancel();
       break;
     }
     if (value.byteLength > remaining) {
       chunks.push(value.slice(0, remaining));
       received = maxBodyBytes;
+      truncated = true;
       await reader.cancel();
       break;
     }
@@ -383,7 +391,7 @@ async function readBody(response: Response, maxBodyBytes: number | undefined): P
     out.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return new TextDecoder().decode(out);
+  return { body: new TextDecoder().decode(out), truncated };
 }
 
 function errMsg(err: unknown): string {

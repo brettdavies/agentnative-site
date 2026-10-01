@@ -41,7 +41,7 @@ export type AntecedentToken =
   | 'robots-present'
   | 'auth-present';
 
-export type WebCheckEvalRule = 'legacy-alias-redirects' | 'scoped-discovery';
+export type WebCheckEvalRule = 'legacy-alias-redirects' | 'scoped-discovery' | 'retained-document';
 
 export interface WebCheck {
   id: string;
@@ -68,6 +68,10 @@ export interface McpLaneSpec {
 }
 
 export interface WebAuditDiscoveryConfig {
+  /** The AI catalog whose MCP server-card entries discovery reads first. */
+  ai_catalog: string;
+  /** Appended to a streamable-HTTP endpoint to locate that endpoint's own server card. */
+  card_suffix: string;
   well_known: string[];
   common_paths: string[];
   protocol_version: string;

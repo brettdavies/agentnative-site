@@ -30,7 +30,7 @@ import { runAuthMd } from './handlers/auth-md';
 import { runContentWithoutJs } from './handlers/content-without-js';
 import { runCorsPreflight } from './handlers/cors-preflight';
 import { runDnsDoh } from './handlers/dns-doh';
-import { runHttp, runLegacyAliasRedirects } from './handlers/http';
+import { runHttp, runLegacyAliasRedirects, runRetainedDocument } from './handlers/http';
 import { runLlmsTxtQuality } from './handlers/llms-txt-quality';
 import { runMarkdownFrontmatter } from './handlers/markdown-frontmatter';
 import {
@@ -82,20 +82,26 @@ export type AuditEvent =
   // tarpit), so the run ends here and nothing is cached.
   | { type: 'unreachable'; reason: string };
 
-const HANDLERS: Partial<Record<WebCheck['handler'], (check: WebCheck, ctx: HandlerContext) => Promise<ProbeOutcome>>> =
-  {
-    http: runHttp,
-    'cors-preflight': runCorsPreflight,
-    mcp: runMcp,
-    'dns-doh': runDnsDoh,
-    'auth-md': runAuthMd,
-    webmcp: runWebMcp,
-    'scoped-llms': runScopedLlms,
-    'markdown-frontmatter': runMarkdownFrontmatter,
-    'content-without-js': runContentWithoutJs,
-    'llms-txt-quality': runLlmsTxtQuality,
-    'api-hygiene': runApiHygiene,
-  };
+type Handler = (check: WebCheck, ctx: HandlerContext) => Promise<ProbeOutcome>;
+
+const HANDLERS: Partial<Record<WebCheck['handler'], Handler>> = {
+  http: runHttp,
+  'cors-preflight': runCorsPreflight,
+  mcp: runMcp,
+  'dns-doh': runDnsDoh,
+  'auth-md': runAuthMd,
+  webmcp: runWebMcp,
+  'scoped-llms': runScopedLlms,
+  'markdown-frontmatter': runMarkdownFrontmatter,
+  'content-without-js': runContentWithoutJs,
+  'llms-txt-quality': runLlmsTxtQuality,
+  'api-hygiene': runApiHygiene,
+};
+
+const EVAL_RULE_HANDLERS: Partial<Record<NonNullable<WebCheck['eval']>, Handler>> = {
+  'legacy-alias-redirects': runLegacyAliasRedirects,
+  'retained-document': runRetainedDocument,
+};
 
 function retainedBody(sources: ReadonlyMap<string, ProbeOutcome>, checkId: string): string {
   for (const item of sources.get(checkId)?.evidence ?? []) {
@@ -360,6 +366,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     root: root ?? undefined,
     scopedDirs,
     retainedBodies,
+    retainedDocuments: discovery.documents,
     fetchOptions: input.fetchOptions,
     mcpSessionId,
     mcpLanes,
@@ -373,7 +380,8 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
       return { check, outcome: null, result: skipResult(check) };
     }
     try {
-      const handler = check.eval === 'legacy-alias-redirects' ? runLegacyAliasRedirects : HANDLERS[check.handler];
+      const handler =
+        (check.eval !== undefined ? EVAL_RULE_HANDLERS[check.eval] : undefined) ?? HANDLERS[check.handler];
       if (!handler) throw new Error(`no handler registered for "${check.handler}"`);
       const outcome = await handler(check, handlerCtx());
       if (outcome.incomplete || deadline - now() <= 0) incomplete = true;

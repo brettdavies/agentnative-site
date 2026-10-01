@@ -32,6 +32,10 @@ sources:
       merged: false
       head_sha: "5c8483d511d60ef1f8ded5160c5290fd8213d19e"
 
+  # src/data/web-audit/server-card.schema.json vendors this file at commit
+  # 526201bbc80231daa40ffcdecfc9da4e54e5dc93 (scripts/sync-server-card-schema.sh),
+  # and `pinned` is that snapshot's hash, so any upstream change to the card
+  # shape reads as drift. tests/standards-drift.test.ts holds the two equal.
   - id: mcp-server-card-schema
     tier: proposal
     type: github-file

@@ -42,7 +42,7 @@ The web scorecard is site-owned. Its `schema_version` is **0.5**, independent of
 | `spec_version`         | string              | engine  | Version of the agentnative spec the run scored against. Same value the CLI scorecard carries.                                      |
 | `target_url`           | string              | engine  | The normalized audited URL: scheme, host, and a trailing slash. Web-specific.                                                      |
 | `mcp_endpoint`         | string \| null      | engine  | The discovered MCP endpoint, or `null` when none was found. Web-specific.                                                          |
-| `mcp_discovery`        | array               | engine  | The discovery trail: each well-known card or common-path probe attempted, and what it returned.                                    |
+| `mcp_discovery`        | array               | engine  | The discovery trail: each document read (server cards, AI catalog, API catalog) and common-path probe, and what it returned.       |
 | `tool`                 | object              | engine  | Web identity: `{ name, url }`. No `binary`, `install`, `tier`, or `language`. See [tool](#tool).                                   |
 | `audience`             | null                | engine  | Always `null` for web targets; the audience classifier is a CLI concept.                                                           |
 | `audit_profile`        | null                | engine  | Always `null` for web targets; audit profiles are a CLI concept.                                                                   |
