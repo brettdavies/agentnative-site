@@ -50,7 +50,7 @@
     "noncompliant": 0,
     "broken": 2,
     "absent": 2,
-    "n_a": 4,
+    "n_a": 7,
     "skip": 0,
     "error": 0
   },
@@ -71,7 +71,7 @@
   "score_pct": 93,
   "score": {
     "relative": 93,
-    "global": 86
+    "global": 85
   },
   "categories": [
     {
@@ -617,6 +617,48 @@
         }
       ],
       "host": "example.com"
+    },
+    {
+      "id": "mcp-auth-challenge",
+      "label": "a 401 names the RFC 9728 metadata in its WWW-Authenticate challenge",
+      "category": "mcp",
+      "group": "P1",
+      "layer": "web",
+      "keyword": "may",
+      "tier": "optional",
+      "principle": "P1",
+      "status": "n_a",
+      "na_reason": "antecedent-unmet",
+      "evidence": "MCP endpoint does not require sign-in",
+      "hosts": []
+    },
+    {
+      "id": "mcp-auth-servers",
+      "label": "protected-resource metadata lists public https authorization_servers",
+      "category": "mcp",
+      "group": "P1",
+      "layer": "web",
+      "keyword": "may",
+      "tier": "optional",
+      "principle": "P1",
+      "status": "n_a",
+      "na_reason": "antecedent-unmet",
+      "evidence": "MCP endpoint does not require sign-in",
+      "hosts": []
+    },
+    {
+      "id": "mcp-auth-enforced",
+      "label": "a tools/list without an access token is refused with 401",
+      "category": "mcp",
+      "group": "P1",
+      "layer": "web",
+      "keyword": "may",
+      "tier": "optional",
+      "principle": "P1",
+      "status": "n_a",
+      "na_reason": "antecedent-unmet",
+      "evidence": "MCP endpoint does not require sign-in",
+      "hosts": []
     },
     {
       "id": "webmcp",

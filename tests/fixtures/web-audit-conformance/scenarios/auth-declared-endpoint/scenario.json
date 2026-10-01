@@ -11,6 +11,9 @@
     "mcp-get-fast-fail",
     "mcp-cors-preflight",
     "mcp-cors-actual",
+    "mcp-auth-challenge",
+    "mcp-auth-servers",
+    "mcp-auth-enforced",
     "oauth-protected-resource"
   ],
   "target": "https://example.com/",

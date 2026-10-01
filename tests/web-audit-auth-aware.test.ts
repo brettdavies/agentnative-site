@@ -6,12 +6,18 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
-import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
+import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
+import { enrichWebScorecardForDisplay } from '../src/worker/audit-web/display';
 import { endpointRedirects } from '../src/worker/audit-web/handlers/shared';
 import type { AntecedentToken, WebAuditRegistry } from '../src/worker/audit-web/registry';
+import type { WebRemediationCatalog } from '../src/worker/audit-web/remediation';
+import type { ScorecardStatus, WebScorecard } from '../src/worker/audit-web/scorecard';
+import { buildWebSummaryMarkdown } from '../src/worker/audit-web/summary-markdown';
+import { buildWebSummaryBody } from '../src/worker/audit-web/summary-render';
 import {
   audit,
   cardDocument,
+  initializeResult,
   json,
   type Route,
   requestsTo,
@@ -20,10 +26,12 @@ import {
   type Seen,
   sep2127Card,
   siteDeclaring,
+  TARGET,
 } from './helpers/follow-fixtures';
 
+const DATA = join(import.meta.dir, '..', 'src', 'data', 'web-audit');
 const REGISTRY = normalizeWebAuditRegistry(
-  yaml.load(readFileSync(join(import.meta.dir, '..', 'src', 'data', 'web-audit', 'registry.yaml'), 'utf8')) as object,
+  yaml.load(readFileSync(join(DATA, 'registry.yaml'), 'utf8')) as object,
 ) as WebAuditRegistry;
 
 /** The real MCP rows plus the protected-resource metadata row, each scored exactly as a live audit scores it. */
@@ -77,6 +85,10 @@ type ServerOptions = {
   /** The malformed-body probe draws the 401 too, instead of being parsed before the token is checked. */
   challengeMalformed?: boolean;
   metadata?: unknown;
+  /** The WWW-Authenticate every 401 carries, in place of one naming the metadata. */
+  challenge?: string;
+  /** A legacy tools/list is served without a token while every other method is refused. */
+  servesToolsWithoutToken?: boolean;
 };
 
 /**
@@ -85,11 +97,22 @@ type ServerOptions = {
  * version claim, which it refuses before reading a token.
  */
 function protectedServer(endpoint: string, metadataUrl: string, opts: ServerOptions = {}): Record<string, Route> {
-  const challenge = bearer(metadataUrl);
+  const challenge = opts.challenge ?? bearer(metadataUrl);
   return {
     [`POST ${endpoint}`]: (init) => {
       const headers = new Headers(init?.headers);
       const body = String(init?.body ?? '');
+      if (
+        opts.servesToolsWithoutToken === true &&
+        body.includes('"tools/list"') &&
+        !headers.has('mcp-protocol-version')
+      ) {
+        return json({
+          jsonrpc: '2.0',
+          id: 1,
+          result: { tools: [{ name: 'search', inputSchema: { type: 'object' } }] },
+        });
+      }
       if (body.startsWith('not-json') && opts.challengeMalformed !== true) {
         return json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } }, 400);
       }
@@ -296,11 +319,202 @@ const MCP_ROW_CLASSES: Record<string, AntecedentToken> = {
   'mcp-accept-unsatisfiable': 'mcp-session',
   'mcp-resources-list': 'mcp-resources',
   'mcp-modern-resources-miss': 'mcp-resources',
+  'mcp-auth-challenge': 'mcp-auth-required',
+  'mcp-auth-servers': 'mcp-auth-required',
+  'mcp-auth-enforced': 'mcp-auth-required',
 };
 
 describe('the MCP rows declare what they need from a protected server', () => {
   test('every MCP row other than the in-page tools row is classified, and declares its class', () => {
     const rows = REGISTRY.checks.filter((c) => c.category === 'mcp' && c.antecedent !== 'html-root');
     expect(Object.fromEntries(rows.map((c) => [c.id, c.antecedent]))).toEqual(MCP_ROW_CLASSES);
+  });
+});
+
+const ENFORCEMENT_ROWS = ['mcp-auth-challenge', 'mcp-auth-servers', 'mcp-auth-enforced'];
+
+const readings = (scorecard: WebScorecard, ids: readonly string[]) =>
+  Object.fromEntries(ids.map((id) => [id, [row(scorecard, id).status, row(scorecard, id).na_reason ?? null]]));
+
+describe('auth enforcement rows', () => {
+  test('a correctly protected endpoint passes all three, scored at the endpoint host', async () => {
+    const { scorecard } = await audit(
+      router(
+        {
+          ...ROOT,
+          ...siteDeclaring(ENDPOINT),
+          ...protectedServer(ENDPOINT, `https://${NET}/.well-known/oauth-protected-resource`),
+        },
+        [],
+      ),
+      { registry: mcpRegistry() },
+    );
+    expect(readings(scorecard, ENFORCEMENT_ROWS)).toEqual({
+      'mcp-auth-challenge': ['pass', null],
+      'mcp-auth-servers': ['pass', null],
+      'mcp-auth-enforced': ['pass', null],
+    });
+    for (const id of ENFORCEMENT_ROWS) expect({ id, host: row(scorecard, id).host }).toEqual({ id, host: NET });
+  });
+
+  test('they apply on the audited origin too, to an endpoint found on a common path or declared by a card', async () => {
+    for (const [label, routes] of [
+      ['common path', { ...ROOT, ...protectedServer(SAME, SAME_METADATA) }],
+      ['card', { ...ROOT, ...siteDeclaring(SAME), ...protectedServer(SAME, SAME_METADATA) }],
+    ] as const) {
+      const { scorecard } = await audit(router(routes, []), { registry: mcpRegistry() });
+      expect({ label, readings: readings(scorecard, ENFORCEMENT_ROWS) }).toEqual({
+        label,
+        readings: {
+          'mcp-auth-challenge': ['pass', null],
+          'mcp-auth-servers': ['pass', null],
+          'mcp-auth-enforced': ['pass', null],
+        },
+      });
+    }
+  });
+
+  test('an open endpoint, including one whose card documents that no sign-in is required, reads all three n_a', async () => {
+    for (const card of [
+      { name: 'open', mcp_endpoint: SAME },
+      { name: 'open', mcp_endpoint: SAME, authentication: { required: false } },
+    ]) {
+      const { scorecard } = await audit(
+        router(
+          {
+            ...ROOT,
+            'GET https://example.com/.well-known/mcp.json': () => json(card),
+            [`POST ${SAME}`]: () => initializeResult(),
+          },
+          [],
+        ),
+        { registry: mcpRegistry() },
+      );
+      expect(readings(scorecard, ENFORCEMENT_ROWS)).toEqual({
+        'mcp-auth-challenge': ['n_a', 'antecedent-unmet'],
+        'mcp-auth-servers': ['n_a', 'antecedent-unmet'],
+        'mcp-auth-enforced': ['n_a', 'antecedent-unmet'],
+      });
+    }
+  });
+
+  test('a 401 whose challenge names no resource_metadata misses the challenge row and nothing else', async () => {
+    const { scorecard } = await audit(
+      router({ ...ROOT, ...protectedServer(SAME, SAME_METADATA, { challenge: 'Bearer realm="mcp"' }) }, []),
+      { registry: mcpRegistry() },
+    );
+    expect(readings(scorecard, ENFORCEMENT_ROWS)).toEqual({
+      'mcp-auth-challenge': ['noncompliant', null],
+      'mcp-auth-servers': ['pass', null],
+      'mcp-auth-enforced': ['pass', null],
+    });
+  });
+
+  test('authorization_servers with a non-https or private value fails the metadata row, and no value is ever requested', async () => {
+    for (const server of ['http://auth.example.net/', 'https://10.0.0.1/oauth']) {
+      const seen: Seen[] = [];
+      const { scorecard } = await audit(
+        router(
+          {
+            ...ROOT,
+            ...protectedServer(SAME, SAME_METADATA, { metadata: { resource: SAME, authorization_servers: [server] } }),
+          },
+          seen,
+        ),
+        { registry: mcpRegistry() },
+      );
+      expect({ server, status: row(scorecard, 'mcp-auth-servers').status }).toEqual({ server, status: 'broken' });
+      expect(requestsTo(seen, 'auth.example.net')).toEqual([]);
+      expect(requestsTo(seen, '10.0.0.1')).toEqual([]);
+    }
+  });
+
+  test('a protected endpoint whose unauthenticated tools/list returns tools fails the rejection row', async () => {
+    const { scorecard } = await audit(
+      router({ ...ROOT, ...protectedServer(SAME, SAME_METADATA, { servesToolsWithoutToken: true }) }, []),
+      { registry: mcpRegistry() },
+    );
+    expect(row(scorecard, 'mcp-auth-enforced')).toMatchObject({
+      status: 'noncompliant',
+      evidence: 'a request without a token was served a result',
+    });
+  });
+});
+
+describe('values the audited server chose reach every reader inert', () => {
+  test('authorization_servers carrying markup render escaped on the HTML page, in the markdown twin, and in the MCP read', async () => {
+    const remediation = normalizeWebRemediation(
+      yaml.load(readFileSync(join(DATA, 'remediation.yaml'), 'utf8')) as object,
+      REGISTRY.checks.map((c) => c.id),
+    ) as WebRemediationCatalog;
+    const cases: Array<{ value: string; status: ScorecardStatus; shown: string }> = [
+      {
+        value: 'https://auth.example.net/<script>alert(1)</script>',
+        status: 'pass',
+        shown: 'auth.example.net/%3Cscript%3E',
+      },
+      { value: '<img src=x onerror=alert(1)>', status: 'broken', shown: '%3Cimg%20src=x%20onerror=alert%281%29%3E' },
+    ];
+    for (const { value, status, shown } of cases) {
+      const { scorecard } = await audit(
+        router(
+          {
+            ...ROOT,
+            ...protectedServer(SAME, SAME_METADATA, { metadata: { resource: SAME, authorization_servers: [value] } }),
+          },
+          [],
+        ),
+        { registry: mcpRegistry() },
+      );
+      expect({ value, status: row(scorecard, 'mcp-auth-servers').status }).toEqual({ value, status });
+      const input = { scorecard, domain: 'example.com', targetUrl: TARGET, remediation, origin: 'https://anc.dev' };
+      const read = JSON.stringify(
+        enrichWebScorecardForDisplay(scorecard, {
+          registry: REGISTRY,
+          catalog: remediation,
+          origin: 'https://anc.dev',
+        }),
+        null,
+        2,
+      );
+      const surfaces = { html: buildWebSummaryBody(input), markdown: buildWebSummaryMarkdown(input), mcp: read };
+      const markup = Object.fromEntries(
+        Object.entries(surfaces).map(([surface, text]) => [surface, /<script>alert|<img src=x/i.test(text)]),
+      );
+      expect({ value, markup }).toEqual({ value, markup: { html: false, markdown: false, mcp: false } });
+      const named = Object.fromEntries(
+        Object.entries(surfaces).map(([surface, text]) => [surface, text.includes(shown)]),
+      );
+      expect({ value, named }).toEqual({ value, named: { html: true, markdown: true, mcp: true } });
+    }
+  });
+});
+
+describe('the enforcement rows are registered completely', () => {
+  test('each has a remediation entry, and the build fails without one', () => {
+    const doc = yaml.load(readFileSync(join(DATA, 'remediation.yaml'), 'utf8')) as {
+      remediation: Record<string, unknown>;
+    };
+    const ids = REGISTRY.checks.map((c) => c.id);
+    for (const id of ENFORCEMENT_ROWS) {
+      expect(ids).toContain(id);
+      const { [id]: _dropped, ...rest } = doc.remediation;
+      expect(() => normalizeWebRemediation({ remediation: rest }, ids)).toThrow(
+        `check "${id}" has no remediation entry`,
+      );
+    }
+  });
+
+  test('a protected-resource row must name an op its handler reads', () => {
+    const doc = yaml.load(readFileSync(join(DATA, 'registry.yaml'), 'utf8')) as {
+      checks: Array<Record<string, unknown>>;
+    };
+    const challenge = doc.checks.find((c) => c.id === 'mcp-auth-challenge');
+    expect(challenge?.with).toEqual({ op: 'challenge' });
+    const broken = {
+      ...doc,
+      checks: doc.checks.map((c) => (c === challenge ? { ...c, with: { op: 'nonsense' } } : c)),
+    };
+    expect(() => normalizeWebAuditRegistry(broken)).toThrow(/mcp-auth-challenge.*with\.op/);
   });
 });

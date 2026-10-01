@@ -450,6 +450,8 @@ function protectedMcp(endpoint: string, metadataUrl: string): Exchange[] {
   ];
 }
 
+const ENFORCEMENT_IDS = ['mcp-auth-challenge', 'mcp-auth-servers', 'mcp-auth-enforced'];
+
 const SIGN_IN_IDS = [
   'mcp-initialize',
   'mcp-capabilities',
@@ -953,7 +955,7 @@ export const SCENARIOS: Record<string, Scenario> = {
   ]),
   'mcp-www-authenticate': scenario(
     'an endpoint that answers legacy POSTs with a 401 whose challenge names no metadata, while root RFC 9728 metadata names it: it requires sign-in, so the rows those 401s answer read auth-required, its modern lane refuses without a token, and the challenge satisfies the mcp-auth antecedent',
-    ['mcp-initialize', 'oauth-protected-resource', 'auth-md'],
+    ['mcp-initialize', 'mcp-auth-challenge', 'oauth-protected-resource', 'auth-md'],
     [
       ...baseline(),
       ...cardSurface(),
@@ -1149,7 +1151,7 @@ export const SCENARIOS: Record<string, Scenario> = {
   // ---- endpoints that require sign-in ----------------------------------------
   'auth-own-endpoint': scenario(
     "the audited site's /mcp answers every POST with a 401 whose challenge names same-host RFC 9728 metadata naming it: the endpoint is found with sign-in required, rows that need no session are scored, and the rest read auth-required",
-    [...SIGN_IN_IDS, 'oauth-protected-resource'],
+    [...SIGN_IN_IDS, ...ENFORCEMENT_IDS, 'oauth-protected-resource'],
     [
       ...baseline(),
       ...protectedMcp(MCP_PATH, u(PROTECTED_RESOURCE_PATH)),
@@ -1158,7 +1160,7 @@ export const SCENARIOS: Record<string, Scenario> = {
   ),
   'auth-declared-endpoint': scenario(
     "the card names a root endpoint on another host that answers 401 and publishes metadata naming it without the trailing slash: the metadata admits it, and the MCP rows are scored there with sign-in required",
-    [...SIGN_IN_IDS, 'oauth-protected-resource'],
+    [...SIGN_IN_IDS, ...ENFORCEMENT_IDS, 'oauth-protected-resource'],
     [
       ...baseline(),
       declaringCard('https://mcp.example.net/'),
@@ -1168,6 +1170,22 @@ export const SCENARIOS: Record<string, Scenario> = {
         json({ resource: 'https://mcp.example.net', authorization_servers: [AUTH_SERVER] }),
       ),
     ],
+  ),
+  'auth-enforcement-defects': scenario(
+    "an endpoint that requires sign-in lists an http authorization server and serves a legacy tools/list without a token: the challenge row passes, the metadata row is broken, and the refusal row is noncompliant",
+    ENFORCEMENT_IDS,
+    [
+      ...baseline(),
+      post(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH)), { headers: { 'mcp-protocol-version': MODERN_PROTOCOL } }),
+      post(MCP_PATH, rpcResult(TOOLS_RESULT), { body_json_method: 'tools/list' }),
+      post(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH))),
+      get(PROTECTED_RESOURCE_PATH, json({ resource: u(MCP_PATH), authorization_servers: ['http://auth.example.com'] })),
+    ],
+  ),
+  'auth-open-endpoint': scenario(
+    'an open server whose card documents that no sign-in is required: no wire probe draws a 401, so the sign-in rows are `n_a`',
+    ENFORCEMENT_IDS,
+    [...baseline(), get(CARD_PATH, json({ ...SERVER_CARD, authentication: { required: false } })), ...legacyOnlyMcp()],
   ),
   'auth-bare-401': scenario(
     "the audited site's /mcp answers 401 with no challenge and no metadata names it: a bare 401 is refusal evidence, so no endpoint is found",

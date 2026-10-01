@@ -21,6 +21,7 @@
 #   content-without-js    SSR content floor with llms.txt twin softening
 #   llms-txt-quality      format / links / when-to-use ops on retained llms.txt
 #   api-hygiene           JSON error bodies / rate-limit headers from a safe GET
+#   protected-resource    sign-in challenge and RFC 9728 metadata an MCP endpoint served (no request)
 #
 # Fields:
 #   id          stable slug, also the remediation-doc key
@@ -528,6 +529,51 @@ checks:
       path_any: [/mcp-skill.md, /mcp.md, /.well-known/mcp/usage.md]
       expect: { status: [200] }
     hint: Link a short markdown usage doc (curl examples, tool list, auth, rate limits) from the card and llms.txt.
+
+  # Sign-in enforcement on an endpoint that requires it: scored only when a
+  # wire probe drew a 401 that RFC 9728 metadata on the endpoint's host
+  # backs, so an open server reads these not applicable.
+  - id: mcp-auth-challenge
+    category: mcp
+    lane: shared
+    tier: optional
+    principle: P1
+    site_types: [mcp]
+    antecedent: mcp-auth-required
+    weight: 1
+    title: a 401 names the RFC 9728 metadata in its WWW-Authenticate challenge
+    breadcrumb: MCP auth challenge
+    handler: protected-resource
+    with: { op: challenge }
+    hint: Answer an unauthenticated request with 401 and WWW-Authenticate Bearer resource_metadata="<metadata URL>" so a client finds the authorization server without guessing.
+
+  - id: mcp-auth-servers
+    category: mcp
+    lane: shared
+    tier: optional
+    principle: P1
+    site_types: [mcp]
+    antecedent: mcp-auth-required
+    weight: 1
+    title: protected-resource metadata lists public https authorization_servers
+    breadcrumb: MCP authorization servers
+    handler: protected-resource
+    with: { op: metadata }
+    hint: List at least one public https issuer URL in the authorization_servers array of the RFC 9728 metadata.
+
+  - id: mcp-auth-enforced
+    category: mcp
+    lane: shared
+    tier: optional
+    principle: P1
+    site_types: [mcp]
+    antecedent: mcp-auth-required
+    weight: 1
+    title: a tools/list without an access token is refused with 401
+    breadcrumb: MCP unauthenticated tools/list
+    handler: mcp
+    with: { op: unauthenticated-tools-list }
+    hint: Refuse every request that carries no access token with 401 and the same WWW-Authenticate challenge, tools/list included, never with a tools result.
 
   - id: webmcp
     category: mcp

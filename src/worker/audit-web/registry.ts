@@ -18,7 +18,8 @@ export type WebCheckHandler =
   | 'markdown-frontmatter'
   | 'content-without-js'
   | 'llms-txt-quality'
-  | 'api-hygiene';
+  | 'api-hygiene'
+  | 'protected-resource';
 
 /** Declared audit site type (the entry-point argument). */
 export type WebSiteType = 'content' | 'api';
@@ -32,6 +33,7 @@ export type AntecedentToken =
   | 'mcp-present'
   | 'mcp-auth'
   | 'mcp-session'
+  | 'mcp-auth-required'
   | 'mcp-resources'
   | 'api-surface'
   | 'schemas-ref'

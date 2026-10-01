@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { KEYWORD_BY_TIER, normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import { AI_USER_FETCHER_PROBE_UA, CLI_PROBE_UA } from '../src/shared/user-agents';
-import { type McpOp, mcpOpEra } from '../src/worker/audit-web/handlers/mcp';
+import { type McpOp, mcpOpLane } from '../src/worker/audit-web/handlers/mcp';
 import { universeMaxOf } from '../src/worker/audit-web/score';
 import { buildWebScorecard, type EngineResult } from '../src/worker/audit-web/scorecard';
 
@@ -55,9 +55,9 @@ async function loadNormalized(): Promise<NormalizedWebAuditRegistry> {
 }
 
 describe('web-audit registry shape', () => {
-  test('normalizes to exactly 65 checks', async () => {
+  test('normalizes to exactly 68 checks', async () => {
     const registry = await loadNormalized();
-    expect(registry.checks.length).toBe(65);
+    expect(registry.checks.length).toBe(68);
   });
 
   test('every check carries id/category/tier/principle/keyword/site_types/antecedent/handler/weight/title/hint', async () => {
@@ -80,6 +80,7 @@ describe('web-audit registry shape', () => {
         'content-without-js',
         'llms-txt-quality',
         'api-hygiene',
+        'protected-resource',
       ]).toContain(check.handler);
       expect(Array.isArray(check.site_types) && check.site_types.length > 0).toBe(true);
       for (const st of check.site_types) expect(['content', 'api', 'mcp', 'all']).toContain(st);
@@ -158,25 +159,25 @@ describe('web-audit registry shape', () => {
     }
   });
 
-  test('tier counts are exactly required 4 / recommended 37 / optional 24', async () => {
+  test('tier counts are exactly required 4 / recommended 37 / optional 27', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.tier] = (counts[check.tier] ?? 0) + 1;
-    expect(counts).toEqual({ required: 4, recommended: 37, optional: 24 });
+    expect(counts).toEqual({ required: 4, recommended: 37, optional: 27 });
   });
 
-  test('derived keyword counts match must 4 / should 37 / may 24', async () => {
+  test('derived keyword counts match must 4 / should 37 / may 27', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.keyword] = (counts[check.keyword] ?? 0) + 1;
-    expect(counts).toEqual({ must: 4, should: 37, may: 24 });
+    expect(counts).toEqual({ must: 4, should: 37, may: 27 });
   });
 
   test('principle distribution matches the plan mapping (P5 has zero web checks)', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.principle] = (counts[check.principle] ?? 0) + 1;
-    expect(counts).toEqual({ P1: 4, P2: 24, P3: 4, P4: 14, P6: 4, P7: 5, P8: 10 });
+    expect(counts).toEqual({ P1: 7, P2: 24, P3: 4, P4: 14, P6: 4, P7: 5, P8: 10 });
     expect(counts.P5).toBeUndefined();
   });
 
@@ -423,14 +424,15 @@ describe('web-audit registry shape', () => {
 
   // A lane names the protocol era a row exercises, and the handler's op table
   // is where that era is decided. An op row filed under the other lane would
-  // tell a reader the wrong era failed.
-  test("every MCP op row sits in its op's era lane", async () => {
+  // tell a reader the wrong era failed. A row every lane answers alike sits
+  // with the shared rows, which the op table also decides.
+  test("every MCP op row sits in its op's lane", async () => {
     const registry = await loadNormalized();
     const opRows = registry.checks.filter((check) => check.handler === 'mcp' && 'op' in check.with);
     expect(opRows.length).toBeGreaterThan(0);
     for (const check of opRows) {
       const op = (check.with as { op: McpOp }).op;
-      expect({ id: check.id, lane: check.lane }).toEqual({ id: check.id, lane: mcpOpEra(op) });
+      expect({ id: check.id, lane: check.lane }).toEqual({ id: check.id, lane: mcpOpLane(op) });
     }
   });
 
@@ -439,10 +441,10 @@ describe('web-audit registry shape', () => {
     expect(Object.keys(registry.mcp_lanes)).toEqual(['shared', 'legacy', 'modern', 'browser']);
   });
 
-  test('normalized JSON round-trips to 65 entries', async () => {
+  test('normalized JSON round-trips to 68 entries', async () => {
     const registry = await loadNormalized();
     const roundTripped = JSON.parse(JSON.stringify(registry));
-    expect(roundTripped.checks.length).toBe(65);
+    expect(roundTripped.checks.length).toBe(68);
   });
 });
 
@@ -538,13 +540,13 @@ describe('buildWebScorecard', () => {
 // status only, so a future edit that entangles a tier/weight change with a
 // re-categorization is caught here.
 describe('scoring invariance under the API/MCP category split', () => {
-  test('the real registry keeps its 4/37/24 tier distribution and universeMax under the split', async () => {
+  test('the real registry keeps its 4/37/27 tier distribution and universeMax under the split', async () => {
     const registry = await loadNormalized();
-    // 4 MUST x5 + 37 SHOULD x3 + 24 MAY x1 = 155.
+    // 4 MUST x5 + 37 SHOULD x3 + 27 MAY x1 = 158.
     const universeMax = universeMaxOf(
       registry.checks.map((c) => ({ keyword: c.keyword as 'must' | 'should' | 'may' })),
     );
-    expect(universeMax).toBe(155);
+    expect(universeMax).toBe(158);
   });
 
   test('the same outcomes score identically whether labeled mcp-api or split into api/mcp', () => {

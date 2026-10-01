@@ -77,7 +77,7 @@
     }
   ],
   "summary": {
-    "pass": 16,
+    "pass": 19,
     "noncompliant": 0,
     "broken": 1,
     "absent": 7,
@@ -95,14 +95,14 @@
       "verified": 12
     },
     "may": {
-      "total": 4,
-      "verified": 4
+      "total": 7,
+      "verified": 7
     }
   },
-  "score_pct": 66,
+  "score_pct": 68,
   "score": {
-    "relative": 66,
-    "global": 24
+    "relative": 68,
+    "global": 26
   },
   "categories": [
     {
@@ -132,8 +132,8 @@
     {
       "id": "mcp",
       "name": "MCP",
-      "passed": 7,
-      "counted": 7
+      "passed": 10,
+      "counted": 10
     },
     {
       "id": "agent-discovery-auth",
@@ -660,6 +660,60 @@
         }
       ],
       "host": "example.com"
+    },
+    {
+      "id": "mcp-auth-challenge",
+      "label": "a 401 names the RFC 9728 metadata in its WWW-Authenticate challenge",
+      "category": "mcp",
+      "group": "P1",
+      "layer": "web",
+      "keyword": "may",
+      "tier": "optional",
+      "principle": "P1",
+      "status": "pass",
+      "evidence": "resource_metadata names https://mcp.example.net/.well-known/oauth-protected-resource",
+      "hosts": [
+        {
+          "host": "mcp.example.net"
+        }
+      ],
+      "host": "mcp.example.net"
+    },
+    {
+      "id": "mcp-auth-servers",
+      "label": "protected-resource metadata lists public https authorization_servers",
+      "category": "mcp",
+      "group": "P1",
+      "layer": "web",
+      "keyword": "may",
+      "tier": "optional",
+      "principle": "P1",
+      "status": "pass",
+      "evidence": "authorization_servers: https://auth.example.com",
+      "hosts": [
+        {
+          "host": "mcp.example.net"
+        }
+      ],
+      "host": "mcp.example.net"
+    },
+    {
+      "id": "mcp-auth-enforced",
+      "label": "a tools/list without an access token is refused with 401",
+      "category": "mcp",
+      "group": "P1",
+      "layer": "web",
+      "keyword": "may",
+      "tier": "optional",
+      "principle": "P1",
+      "status": "pass",
+      "evidence": "refused with 401",
+      "hosts": [
+        {
+          "host": "mcp.example.net"
+        }
+      ],
+      "host": "mcp.example.net"
     },
     {
       "id": "webmcp",

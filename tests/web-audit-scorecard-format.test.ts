@@ -1035,6 +1035,9 @@ describe('MCP rows group into protocol lanes in registry order', () => {
     ['mcp-cors-actual', 'n_a'],
     ['mcp-usage-doc', 'pass'],
     ['mcp-card-legacy-aliases', 'pass'],
+    ['mcp-auth-challenge', 'n_a'],
+    ['mcp-auth-servers', 'n_a'],
+    ['mcp-auth-enforced', 'n_a'],
   ];
   const MODERN_IDS = new Set(registry.checks.filter((check) => check.lane === 'modern').map((check) => check.id));
   // A legacy-only server: wave 1 evidenced no modern lane, so every modern

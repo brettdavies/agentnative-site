@@ -1,6 +1,7 @@
 // MCP antecedents: whether an MCP endpoint was discovered, whether it
-// challenges for auth, and whether the rows that need a session can have
-// one. With no endpoint, a declared host that was not evaluated names why.
+// challenges for auth or requires sign-in, and whether the rows that need a
+// session can have one. With no endpoint, a declared host that was not
+// evaluated names why.
 
 import { advertisesResources } from '../handlers/mcp';
 import { hostOf } from '../provenance';
@@ -13,6 +14,8 @@ import {
   noMcpEndpoint,
   sourceEvidence,
 } from './context';
+
+const NO_ENDPOINT = 'no MCP endpoint discovered';
 
 const mcpPresent: AntecedentResolver = (ctx) => (ctx.mcpEndpoint !== null ? 'apply' : noMcpEndpoint(ctx));
 
@@ -43,6 +46,17 @@ const mcpSession: AntecedentResolver = (ctx) => {
   };
 };
 
+// Holds only on the endpoint's own answer, a 401 its RFC 9728 metadata
+// backs, so an open server reads its sign-in rows not applicable even when
+// its card documents authentication.
+const mcpAuthRequired: AntecedentResolver = (ctx) => {
+  if (ctx.mcpEndpoint === null) {
+    const unmet = noMcpEndpoint(ctx);
+    return unmet === 'n_a' ? { outcome: 'n_a', reason: 'antecedent-unmet', evidence: NO_ENDPOINT } : unmet;
+  }
+  return ctx.mcpAuth ? 'apply' : 'n_a';
+};
+
 // Era-neutral: legacy initialize capabilities evidence and the modern
 // server/discover capability advertisement both satisfy the token, so a
 // single-era server's resources-gated rows probe on the lane it offers.
@@ -61,12 +75,14 @@ export const mcpResolvers = {
   'mcp-present': mcpPresent,
   'mcp-auth': mcpAuth,
   'mcp-session': mcpSession,
+  'mcp-auth-required': mcpAuthRequired,
   'mcp-resources': mcpResources,
 } satisfies Partial<Record<AntecedentToken, AntecedentResolver>>;
 
 export const mcpEvidence = {
-  'mcp-present': 'no MCP endpoint discovered',
+  'mcp-present': NO_ENDPOINT,
   'mcp-auth': 'MCP endpoint does not challenge for auth',
-  'mcp-session': 'no MCP endpoint discovered',
+  'mcp-session': NO_ENDPOINT,
+  'mcp-auth-required': 'MCP endpoint does not require sign-in',
   'mcp-resources': 'neither initialize nor server/discover advertises capabilities.resources',
 } satisfies Partial<Record<AntecedentToken, string>>;

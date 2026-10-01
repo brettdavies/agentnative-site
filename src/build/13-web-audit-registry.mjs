@@ -35,6 +35,7 @@ export const WEB_AUDIT_HANDLERS = new Set([
   'content-without-js',
   'llms-txt-quality',
   'api-hygiene',
+  'protected-resource',
 ]);
 export const WEB_AUDIT_SITE_TYPES = new Set(['content', 'api', 'mcp', 'all']);
 export const WEB_AUDIT_ANTECEDENTS = new Set([
@@ -44,6 +45,7 @@ export const WEB_AUDIT_ANTECEDENTS = new Set([
   'mcp-present',
   'mcp-auth',
   'mcp-session',
+  'mcp-auth-required',
   'mcp-resources',
   'api-surface',
   'schemas-ref',
@@ -56,6 +58,7 @@ export const WEB_AUDIT_ANTECEDENTS = new Set([
 ]);
 export const WEB_AUDIT_EVAL_RULES = new Set(['legacy-alias-redirects', 'scoped-discovery', 'retained-document']);
 export const CORS_SURFACES = new Set(['preflight', 'actual']);
+const PROTECTED_RESOURCE_OPS = new Set(['challenge', 'metadata']);
 
 /**
  * Expand `{ua:...}` tokens in a check's `with.headers` User-Agent from the
@@ -233,6 +236,11 @@ export function normalizeWebAuditRegistry(doc) {
     if (check.handler === 'cors-preflight' && !CORS_SURFACES.has(check.with.surface)) {
       throw new Error(
         `web-audit registry: check "${id}" needs with.surface "preflight" or "actual" (got ${JSON.stringify(check.with.surface)})`,
+      );
+    }
+    if (check.handler === 'protected-resource' && !PROTECTED_RESOURCE_OPS.has(check.with.op)) {
+      throw new Error(
+        `web-audit registry: check "${id}" needs with.op "challenge" or "metadata" (got ${JSON.stringify(check.with.op)})`,
       );
     }
 

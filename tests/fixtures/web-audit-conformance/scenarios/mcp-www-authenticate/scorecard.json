@@ -43,8 +43,8 @@
   "follow_declarations": true,
   "declared_hosts": [],
   "summary": {
-    "pass": 14,
-    "noncompliant": 0,
+    "pass": 16,
+    "noncompliant": 1,
     "broken": 1,
     "absent": 13,
     "n_a": 36,
@@ -61,14 +61,14 @@
       "verified": 8
     },
     "may": {
-      "total": 6,
-      "verified": 6
+      "total": 9,
+      "verified": 8
     }
   },
-  "score_pct": 47,
+  "score_pct": 48,
   "score": {
-    "relative": 47,
-    "global": 18
+    "relative": 48,
+    "global": 19
   },
   "categories": [
     {
@@ -98,8 +98,8 @@
     {
       "id": "mcp",
       "name": "MCP",
-      "passed": 5,
-      "counted": 11
+      "passed": 7,
+      "counted": 14
     },
     {
       "id": "agent-discovery-auth",
@@ -611,6 +611,60 @@
       "principle": "P8",
       "status": "pass",
       "evidence": "https://example.com/mcp-skill.md -> 200",
+      "hosts": [
+        {
+          "host": "example.com"
+        }
+      ],
+      "host": "example.com"
+    },
+    {
+      "id": "mcp-auth-challenge",
+      "label": "a 401 names the RFC 9728 metadata in its WWW-Authenticate challenge",
+      "category": "mcp",
+      "group": "P1",
+      "layer": "web",
+      "keyword": "may",
+      "tier": "optional",
+      "principle": "P1",
+      "status": "noncompliant",
+      "evidence": "the Bearer challenge names no resource_metadata",
+      "hosts": [
+        {
+          "host": "example.com"
+        }
+      ],
+      "host": "example.com"
+    },
+    {
+      "id": "mcp-auth-servers",
+      "label": "protected-resource metadata lists public https authorization_servers",
+      "category": "mcp",
+      "group": "P1",
+      "layer": "web",
+      "keyword": "may",
+      "tier": "optional",
+      "principle": "P1",
+      "status": "pass",
+      "evidence": "authorization_servers: https://example.com",
+      "hosts": [
+        {
+          "host": "example.com"
+        }
+      ],
+      "host": "example.com"
+    },
+    {
+      "id": "mcp-auth-enforced",
+      "label": "a tools/list without an access token is refused with 401",
+      "category": "mcp",
+      "group": "P1",
+      "layer": "web",
+      "keyword": "may",
+      "tier": "optional",
+      "principle": "P1",
+      "status": "pass",
+      "evidence": "refused with 401",
       "hosts": [
         {
           "host": "example.com"

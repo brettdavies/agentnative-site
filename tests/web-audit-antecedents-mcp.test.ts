@@ -68,6 +68,23 @@ describe('resolveAntecedent: mcp', () => {
     expect(resolveAntecedent('mcp-session', ctx())).toBe('n_a');
   });
 
+  test('mcp-auth-required holds only when the endpoint requires sign-in, never on a card declaration alone', () => {
+    expect(
+      resolveAntecedent('mcp-auth-required', ctx({ mcpEndpoint: ENDPOINT, sources: challenged(), mcpAuth: SIGN_IN })),
+    ).toBe('apply');
+    expect(resolveAntecedent('mcp-auth-required', ctx({ mcpEndpoint: ENDPOINT }))).toBe('n_a');
+    const declaresAuth = ctx({
+      mcpEndpoint: ENDPOINT,
+      discoveryEvidence: [{ source: '/.well-known/mcp.json', authentication: true }],
+    });
+    expect(resolveAntecedent('mcp-auth-required', declaresAuth)).toBe('n_a');
+    expect(resolveAntecedent('mcp-auth-required', ctx())).toEqual({
+      outcome: 'n_a',
+      reason: 'antecedent-unmet',
+      evidence: 'no MCP endpoint discovered',
+    });
+  });
+
   test('mcp-resources reads auth-required, not an unadvertised capability, when the session is unavailable', () => {
     const resolution = resolveAntecedent(
       'mcp-resources',

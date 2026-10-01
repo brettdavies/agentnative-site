@@ -47,6 +47,7 @@ import {
   runMcp,
   signInRequiredOutcome,
 } from './handlers/mcp';
+import { runProtectedResource } from './handlers/protected-resource';
 import { enumerateScopedDirs, runScopedLlms } from './handlers/scoped-llms';
 import type { EvidenceItem, HandlerContext, McpAuthRequired, McpLaneEvidence, ProbeOutcome } from './handlers/types';
 import { runWebMcp } from './handlers/webmcp';
@@ -108,6 +109,7 @@ const HANDLERS: Partial<Record<WebCheck['handler'], Handler>> = {
   'content-without-js': runContentWithoutJs,
   'llms-txt-quality': runLlmsTxtQuality,
   'api-hygiene': runApiHygiene,
+  'protected-resource': runProtectedResource,
 };
 
 const EVAL_RULE_HANDLERS: Partial<Record<NonNullable<WebCheck['eval']>, Handler>> = {
@@ -137,16 +139,22 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
   const first = outcome.evidence[0] ?? {};
   if (outcome.status === 'na') return String((first.why as string[] | undefined)?.join('; ') ?? 'not applicable');
 
+  if (check.handler === 'protected-resource') return ((first.why as string[] | undefined) ?? []).join('; ');
+
   if (check.handler === 'mcp') {
     if (first.error) return `${first.url}: ${first.error}`;
+    const op = check.with ? (check.with as { op?: string }).op : undefined;
     // An era verdict and a conformance defect each state their reason in
     // `why`; the response fields describe the refusal, not the surface
     // the row is scoring. A bare `error code -32022` would read as the
     // wrong code on a row whose code was right and whose payload was not.
-    if ((outcome.status === 'absent' || outcome.status === 'noncompliant') && Array.isArray(first.why)) {
+    // An enforcement row's reason is its whole finding, whatever its status.
+    if (
+      (outcome.status === 'absent' || outcome.status === 'noncompliant' || op === 'unauthenticated-tools-list') &&
+      Array.isArray(first.why)
+    ) {
       return (first.why as string[]).join('; ');
     }
-    const op = check.with ? (check.with as { op?: string }).op : undefined;
     if (op === 'initialize') {
       const si = first.serverInfo as { name?: string } | null;
       return si?.name
