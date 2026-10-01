@@ -1077,8 +1077,11 @@ checks:
     title: OAuth Protected Resource Metadata published (RFC 9728)
     breadcrumb: OAuth protected resource
     handler: http
+    # RFC 9728 metadata belongs to the protected resource, so it is read on
+    # the MCP endpoint's host, which a declared endpoint does not share with
+    # the audited site.
     with:
-      path: /.well-known/oauth-protected-resource
+      path: "{mcp_origin}/.well-known/oauth-protected-resource"
       expect: { status: [200], content_type: "json", body_regex: "authorization_servers|resource" }
     hint: For an authenticated MCP server, publish /.well-known/oauth-protected-resource (RFC 9728); expected absent for open servers.
 
