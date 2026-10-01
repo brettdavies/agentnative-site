@@ -249,8 +249,10 @@ snapshots. Distinct from an on-demand audit of a single domain, which caches its
 ### Declared host
 
 A host the entry site names in one of its own machine-readable surfaces: the MCP server card's remote or transport URL,
-an api-catalog anchor, the catalog's service-desc target, or RFC 9728 protected-resource metadata. A declared host is
-evaluated for the entry site's scorecard and never receives a scorecard of its own from that audit.
+an api-catalog anchor, the catalog's service-desc target, or RFC 9728 protected-resource metadata. The target of a
+redirect to another origin, answered to a discovery POST on one of the entry site's own MCP paths, is a declared host
+too, and the POST is never re-sent there. A declared host is evaluated for the entry site's scorecard and never
+receives a scorecard of its own from that audit.
 
 ### Follow phase
 
@@ -260,9 +262,11 @@ distinct hosts and requests. Exhaustion resolves dependent rows to not-applicabl
 
 ### Reciprocity
 
-The proof required before the audit sends an MCP wire probe to a declared host off the entry origin: the target's own
-server card at the SEP-2127 location, its RFC 9728 protected-resource metadata, or an MCP-shaped answer to a GET. Every
-failure mode collapses into one outcome, reciprocity refused, so a caller cannot distinguish them.
+The proof required before the audit sends an MCP wire probe to a declared host off the entry origin: an artifact the
+endpoint's own host publishes naming that exact endpoint, either a SEP-2127 card at `<endpoint>/server-card`, an entry
+in that host's own AI catalog, or RFC 9728 protected-resource metadata whose `resource` is the endpoint. A 405, an
+`Allow` header, or a JSON-RPC envelope admits nothing, since any POST-only route answers that way. Every failure mode
+collapses into one outcome, reciprocity refused, so a caller cannot distinguish them.
 
 ### Endpoint of record
 
