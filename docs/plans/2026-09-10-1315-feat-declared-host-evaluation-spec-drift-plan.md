@@ -604,6 +604,16 @@ The funnel's shared surfaces carry this plan's fields, and the units edit them i
   `audit_website` fresh run claims the `AuditJob` and marks the in-flight flags as `handleWeb` does, keeping the
   explicit-listing no-attach rule, so MCP-initiated runs are single-flight hosts as well as consumers. Instantiates KD11
   (R36).
+- KTD24. **The global universe counts alternatives once.** `score.global` divides earned points by the most a single
+  site could earn: every registry check, except that checks forming alternatives (mutually exclusive outcomes of one
+  probe) count only the alternatives the site presents, or the larger alternative when it presents none. MCP access is
+  the one alternative group: `open` (the `mcp-session` and `mcp-resources` checks) and `protected` (the
+  `mcp-auth-required` checks). A site presents every alternative whose antecedent held, so a hybrid endpoint that
+  answers some probes without auth and others with a 401 counts both and can never earn more than its universe. Global
+  is capped at 100 and floored at 0. Every other check, `n_a` or not, stays in the global denominator, so global still
+  measures how much of the whole surface a site exposes, and relative stays the score that excludes `n_a`. The groups
+  are declared in the registry, so declaring or changing one moves the fingerprint; `universeMaxOf`, the dev-only
+  `score_model.py`, and the CLI's Rust port of the scorer change together. Instantiates KD4 (R16).
 
 ### High-Level Technical Design
 
@@ -757,9 +767,9 @@ depends only on U10 and has no code dependency on Phases A and B beyond it.
 - The Worker's descriptor rewrite gains a field; staging and production diverge if it is missed, and the deploy smoke
   must cover the new paths.
 - The legacy-alias eval rule and its helpers stay; a wide rename touches the engine and the assert module.
-- The three R15 checks join the universe at optional tier, weight 1, so universe max rises by 3 for MCP sites and no
-  site's relative score moves unless it actively fails enforcement; the card check keeps its tier and weight under its
-  new id, so the id replacement moves no score.
+- The three R15 checks join the protected alternative of the MCP access group (KTD24) at optional tier, weight 1, so
+  only a protected server's global denominator changes and no site's relative score moves unless it actively fails
+  enforcement; the card check keeps its tier and weight under its new id, so the id replacement moves no score.
 - Board metadata gains the fingerprint prefix through its single writer; the board ranks 0.4 and 0.5 objects together
   until seeds reflow and user objects refresh.
 - Every engine change reaches the CLI's Rust port through the conformance corpus; a unit that changes engine output
@@ -809,8 +819,8 @@ Phase A:
   the KV fingerprint equals the prefix the anc.dev twin shows; the twin scores 100; the stripe.dev read carries a
   followed mcp.stripe.com, auth-required rows, no broken MCP row, and the API category evaluated at api.stripe.com; the
   MCP sweep is green; zero audit errors across the reflow; every seed whose relative or global score moved from the
-  pre-deploy baseline is attributed to a followed host, an auth-required row, or an API anchor host, and any other move
-  is a stop.
+  pre-deploy baseline is attributed to a followed host, an auth-required row, an API anchor host, or a universe change
+  a unit's PR names, and any other move is a stop.
 - Rollback: the switch off, then a manual rescore trigger, reverts every off-origin behavior and reflows the seeds with
   following off; a code rollback plus a manual rescore reverts the rest, with the 0.5-under-0.4 window covered by the
   pre-deploy render check.
@@ -1115,6 +1125,9 @@ Phase C:
      typed-refusal status set unchanged, since the conformance rows' accept probe shares it.
   6. Add corpus scenarios for a protected endpoint and an open one so each new check id is some scenario's subject, and
      regenerate (KTD22).
+  7. Apply KTD24: declare the MCP access alternative group in the registry, make `universeMaxOf` count the alternatives
+     the site presents (or the larger when it presents none), and cap global at 100; open and non-MCP sites keep
+     today's universe, so their scores do not move.
 - **Patterns to follow:** the existing `mcp-auth` resolver and challenge helper; the MCP op table; the typed-refusal
   vocabulary; the registry sync rule.
 - **Test scenarios:**
@@ -2277,8 +2290,10 @@ committed files to a fresh generation, which a regeneration satisfies by constru
 all 94 goldens, so an unintended status or score change in an existing scenario ships inside a diff no reviewer reads.
 Behavior to preserve: for every pre-existing scenario, `score.relative`, `score.global`, `score_pct`, and each row's
 `status` and `na_reason`. Intentional changes: U1 `schema_version` and additive fields; U2 MCP rows on scenarios with
-off-origin declarations; U3 rows on protected endpoints; U4 API rows on scenarios with catalog anchors; U8 the
-`well-known-mcp-card` id replaced by `mcp-server-card` with the same status and credit.
+off-origin declarations; U3 rows on protected endpoints and protected endpoints' global denominators (KTD24); U4 API
+rows on scenarios with catalog anchors; U8 the `well-known-mcp-card` id replaced by `mcp-server-card` with the same
+status and credit. A unit that adds checks outside an alternative group shifts every global score by the published
+universe-growth rule; its PR names the shift.
 Comparison grid:
 
 | Choice | Current | A | B |
@@ -2537,6 +2552,24 @@ Actual answer: C) Build it in this plan, D16 answered 2026-09-30
 Accepted scope: KTD23 and U5 step 3a give `audit_website`'s followed fresh runs the `AuditJob` claim and in-flight flag
 marks, keeping the explicit-listing and opted-out no-attach rules; U5 adds the test that a transact request and a second
 `audit_website` call arriving mid-run both attach.
+History: none
+
+### R16: what the global score's maximum is when checks are alternatives
+
+Finding: surfaced while implementing U3. The three auth-enforcement checks and the session checks cannot both pass on
+one endpoint, so "every check in the registry" stopped describing a site any audit can reach: open MCP servers top out
+at 98 global, protected ones near 80, and no site reaches 100. Reviewer: Claude (ce-work, U3).
+Plan baseline: the global universe is the full registry (`content/web-scorecard-schema.md`, "a maximally agent-ready
+site (every check in the registry)"; the web-audit refinements plan's universe decision).
+Runtime evidence: `universeMaxOf` (`src/worker/audit-web/score.ts`) sums every registry check for every site; on the U3
+branch `run-all-pass` reads global 98 and stripe.dev reads relative 74, global 32. The website board ranks by relative,
+so global drives the board's tie-break, the secondary global number, and the agent list order.
+Options: A) every registry check, documenting the ceilings; B) the most one site could earn, alternatives counted once;
+C) a universe per declared site type; D) retire or demote the global score.
+State: approved
+Actual answer: B) the most one site could earn (KTD24), answered 2026-10-01. The scoring copy is corrected first in its
+own PR (relative excludes `n_a`; global excludes only alternatives; the board ranks by relative), then U3 implements
+KTD24.
 History: none
 
 Approval readiness: PASS. Checked R1 (D2 A), R2 (D3 A), R3 (D4 A), R4 (D5 A), R5 (D6 A), R6 (D7 A), R7 (D8 A), R8 (D9
