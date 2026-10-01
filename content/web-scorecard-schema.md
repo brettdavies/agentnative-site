@@ -61,8 +61,9 @@ The web scorecard is site-owned. Its `schema_version` is **0.5**, independent of
 `follow_declarations`, `declared_hosts`, and `registry_fingerprint` are optional, and a reader treats a missing one as
 not evaluated rather than as a recorded value: a missing `follow_declarations` never reads as following on, a missing
 `declared_hosts` means no trail was recorded (an empty array is a recorded trail with nothing in it), and a missing
-`registry_fingerprint` means the registry version is unknown. The engine records none of the three for an audit that
-did not evaluate the hosts the site declares.
+`registry_fingerprint` means the registry version is unknown. The engine records `follow_declarations` and
+`declared_hosts` on every audit it completes, `false` with each declaration read as not followed when following was off,
+and never records `registry_fingerprint`.
 
 ## Response freshness
 
@@ -112,6 +113,42 @@ Web identity. The CLI-only header fields (`tier`, `language`, `repo`, `install`)
 | ------ | ------ | ---------------------------------------------------- |
 | `name` | string | The audited domain (host), used as the display name. |
 | `url`  | string | The normalized audited URL. Matches `target_url`.    |
+
+## `declared_hosts`
+
+One entry per URL the site's discovery documents declare off its own origin, in declaration order: the AI catalog's MCP
+server-card entries, the card under the discovered endpoint, then the well-known cards, with the endpoints a followed
+card document names right after that document. A URL declared twice keeps its first entry.
+
+```json
+{
+  "surface": "/.well-known/mcp/server-card.json",
+  "kind": "mcp-endpoint",
+  "url": "https://mcp.example.net/mcp",
+  "host": "mcp.example.net",
+  "outcome": "followed",
+  "admitted_by": "card"
+}
+```
+
+| Field         | Type             | Meaning                                                                                                                      |
+| ------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `surface`     | string           | Where the URL was declared: a path on the audited origin, an AI catalog entry as a JSON Pointer, or a followed card's URL.   |
+| `kind`        | string           | `mcp-endpoint` for an MCP server URL, `card-document` for a server card hosted off the audited origin.                       |
+| `url`         | string           | The declared URL.                                                                                                            |
+| `host`        | string, optional | The declared URL's host.                                                                                                     |
+| `final_url`   | string, optional | Where one redirect from the declared URL led, when it changed the URL.                                                       |
+| `outcome`     | string           | `followed`, `reciprocity-refused`, `not-followed`, `blocked`, `unreachable`, or `budget-exceeded`.                           |
+| `admitted_by` | string, optional | On a followed `mcp-endpoint`, what its own host publishes naming it: `card`, `ai-catalog`, or `metadata`.                    |
+| `cause`       | string, optional | On `budget-exceeded`, the limit reached: `per-audit-cap`, `slice`, or `domain-budget`.                                       |
+| `reason`      | string, optional | On `not-followed`, why: `templated-url`, `self-path`, `beyond-endpoint-of-record`, or `follow-disabled`.                     |
+
+An MCP endpoint on another host receives a wire probe only after that host confirms it: a SEP-2127 card at
+`<endpoint>/server-card`, an entry in the host's own `/.well-known/ai-catalog.json`, or RFC 9728 protected-resource
+metadata whose `resource` is the endpoint. Every way a host can fail to confirm reads `reciprocity-refused` and records
+nothing more. The first confirmed endpoint in declaration order is the endpoint of record unless the audited site serves
+its own; an endpoint after it, or one confirmed while the site serves its own, reads `not-followed`. A row not evaluated
+because of a declared host names that host in `hosts` and `host`.
 
 ## The two-score model
 
