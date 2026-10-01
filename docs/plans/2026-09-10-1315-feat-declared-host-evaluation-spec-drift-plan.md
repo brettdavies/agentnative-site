@@ -153,7 +153,7 @@ encodes has moved.
   slice, or domain budget. A followed MCP entry also names how it was confirmed, `admitted_by`: card, ai-catalog, or
   metadata.
 - R12. New not-applicable reasons are closed values agents can branch on: follow-disabled, reciprocity-refused,
-  declared-host-unreachable, declared-host-budget-exceeded, auth-required.
+  declared-host-unreachable, declared-host-blocked, declared-host-budget-exceeded, auth-required.
 
 **OAuth-protected MCP**
 
@@ -531,8 +531,10 @@ The funnel's shared surfaces carry this plan's fields, and the units edit them i
   reservation, refuses with budget-exceeded or blocked when either fails, and only then issues the single further GET,
   again with redirects disabled. The final URL is pinned as the endpoint of record, reciprocity is attributed to the
   final host, and the declared URL is never re-traversed. The handler context carries a followed flag set by the engine
-  so the MCP, CORS-preflight, HTTP, and notification handlers pass no-redirect for a followed endpoint. Instantiates R3,
-  R11.
+  so the MCP, CORS-preflight, HTTP, and notification handlers pass no-redirect for a followed endpoint. Requests to an
+  endpoint on the audited origin follow same-origin hops only and never replay a method or body across origins: a
+  common path whose POST answers a cross-origin 3xx becomes a declaration of the redirect target, which reaches the
+  follow slice and passes reciprocity like any other declared endpoint. Instantiates R3, R11.
 - KTD16. **Reciprocity is control-bound** (session-settled: user-directed — chosen over keeping 405-with-Allow and
   JSON-RPC-envelope signals: security review showed those admit any POST-only route and any public RPC gateway). An
   endpoint is admitted only by a SEP-2127 card at `<endpoint>/server-card` or in the endpoint host's own
@@ -560,9 +562,9 @@ The funnel's shared surfaces carry this plan's fields, and the units edit them i
   read from the trail on the complete event, through the telemetry emitter; the domain budget key prefix is documented
   so hot hosts are listable. No new log scope. Instantiates R38.
 - KTD20. **Antecedent resolutions carry a reason.** The resolver result widens from a bare token to a token plus
-  optional reason, and the gate stamps that reason instead of always stamping antecedent-unmet. All five R12 reasons are
+  optional reason, and the gate stamps that reason instead of always stamping antecedent-unmet. All six R12 reasons are
   decided before a handler runs, so this one signature change is the mechanism for follow-disabled, reciprocity-refused,
-  declared-host-unreachable, declared-host-budget-exceeded, and auth-required. Instantiates R12.
+  declared-host-unreachable, declared-host-blocked, declared-host-budget-exceeded, and auth-required. Instantiates R12.
 - KTD21. **Every declared document is fetched once and scored from its retained body.** Discovery and the follow module
   retain the server card, the ai-catalog, the api-catalog, the OpenAPI description, and the RFC 9728 metadata under
   stable keys, with location and shape recorded in evidence. Every document GET carries a cap: 64 KiB for metadata,
@@ -896,12 +898,13 @@ Phase C:
      evidence hosts.
   2. Add `declared_hosts[]`, `follow_declarations`, and `registry_fingerprint` at the top level; add them to the
      documented top-level set the drift guard pins, and to the schema doc's example.
-  3. Widen `NaReason` with the five R12 values and move the union and its phrase table into
+  3. Widen `NaReason` with the six R12 values and move the union and its phrase table into
      `src/shared/web-audit-findings.ts`, so `resultLine` and the progress page (U6) read one table; bump
      `WEB_SCHEMA_VERSION` to 0.5 with the doc's version literal. The table takes the reason and the row's host and
      reads: follow-disabled "Not evaluated: declared hosts were not followed for this audit"; reciprocity-refused "Not
      evaluated: <host> did not confirm this endpoint"; declared-host-unreachable "Not evaluated: <host> did not
-     answer"; declared-host-budget-exceeded "Not evaluated: anc's hourly probe limit for <host> was reached";
+     answer"; declared-host-blocked "Not evaluated: <host> is a private or IP address"; declared-host-budget-exceeded
+     "Not evaluated: anc's hourly probe limit for <host> was reached";
      auth-required "Not evaluated: <host> requires sign-in". The U6 not-run group summary reuses the text after "Not
      evaluated: ".
   4. Widen the antecedent resolution to carry an optional reason and make the gate stamp it (KTD20).
@@ -1349,8 +1352,9 @@ Phase C:
      run.", true with an empty trail "Declared hosts: none declared."; keep
      a machine copy in the audit-context element, omitting the follow attribute rather than emitting a value when the
      field is absent.
-  1a. When 3 or more rows in the same block share one of the five declared-host reasons (follow-disabled,
-     reciprocity-refused, declared-host-unreachable, declared-host-budget-exceeded, auth-required), where a block is one
+  1a. When 3 or more rows in the same block share one of the six declared-host reasons (follow-disabled,
+     reciprocity-refused, declared-host-unreachable, declared-host-blocked, declared-host-budget-exceeded,
+     auth-required), where a block is one
      MCP lane (U14) or a whole category elsewhere, render them as one closed group whose summary reads "<N> checks not
      run: <host> requires sign-in" (the U1 phrase's why) and whose body holds each row as a closed nested
      `.web-check[data-id]`, so the fix-prompt assembler, WebMCP, and the counts still read every row. The
@@ -1363,10 +1367,10 @@ Phase C:
      Declared hosts)" linking to the Declared hosts section's `id`, and the closing note (`WEB_CTA_NOTE`) reads
      "...public agent-facing surface and the hosts it declares..."; the markdown twin carries both. Single-origin pages
      keep today's wording.
-  1c. When a category has rows N/A for one of the five declared-host reasons, its line reads "6 / 6 checks pass · 18 not
+  1c. When a category has rows N/A for one of the six declared-host reasons, its line reads "6 / 6 checks pass · 18 not
      run" (U14's lane counts use the same form) and the markdown heading reads "## MCP (6/6, 18 not run)"; the rollup
      and pill logic are unchanged, and optional-absent and other N/A rows are not counted as not run.
-  1d. When a category counts zero rows and most of its N/A rows share one of the five declared-host reasons, its note
+  1d. When a category counts zero rows and most of its N/A rows share one of the six declared-host reasons, its note
      reads "<U1 phrase>. See Declared hosts." linking to the section; otherwise it keeps "No checks in this category
      apply to this site." (`summary-render.ts:107`, `summary-markdown.ts:64`); the markdown twin matches.
   1e. Declared hosts rows render human labels in HTML and markdown while the scorecard JSON, the audit-context copy, and
