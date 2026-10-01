@@ -605,8 +605,9 @@ The funnel's shared surfaces carry this plan's fields, and the units edit them i
   explicit-listing no-attach rule, so MCP-initiated runs are single-flight hosts as well as consumers. Instantiates KD11
   (R36).
 - KTD24. **The global universe counts alternatives once.** `score.global` divides earned points by the most a single
-  site could earn: every registry check, except that checks forming alternatives (mutually exclusive outcomes of one
-  probe) count only the alternatives the site presents, or the larger alternative when it presents none. MCP access is
+  site could earn: every registry check, except that checks forming alternatives (outcomes of one probe that an
+  endpoint usually earns only one of) count only the alternatives the site presents, or the larger alternative when it
+  presents none. MCP access is
   the one alternative group: `open` (the `mcp-session` and `mcp-resources` checks) and `protected` (the
   `mcp-auth-required` checks). A site presents every alternative whose antecedent held, so a hybrid endpoint that
   answers some probes without auth and others with a 401 counts both and can never earn more than its universe. Global
