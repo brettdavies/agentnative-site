@@ -116,7 +116,10 @@ export function resourceMetadataFromChallenge(challenge: string | undefined): st
   return match ? (match[1] ?? match[2] ?? null) : null;
 }
 
-export type MetadataResolution = { matched: true; url: string; metadata: JsonObject } | { matched: false };
+/** RFC 9728 metadata naming an endpoint, and where it was read. */
+export type MetadataMatch = { url: string; metadata: JsonObject };
+
+export type MetadataResolution = ({ matched: true } & MetadataMatch) | { matched: false };
 
 async function readMetadata(source: ArtifactSource, url: string): Promise<JsonObject | null> {
   const response = await source.get(url, { maxBodyBytes: METADATA_MAX_BODY_BYTES });
@@ -179,6 +182,12 @@ export async function resolveProtectedResourceMetadata(
   return { matched: true, ...found };
 }
 
+/** The artifact that admitted an endpoint, and the metadata when metadata is what did. */
+export interface Admission {
+  by: AdmittedBy;
+  metadata: MetadataMatch | null;
+}
+
 /**
  * The artifact that admits `endpoint` (already normalized), checked in a
  * fixed order and stopping at the first that names it; null when none does.
@@ -188,9 +197,11 @@ export async function admittingArtifact(
   cfg: Pick<WebAuditDiscoveryConfig, 'ai_catalog' | 'card_suffix'>,
   source: ArtifactSource,
   challenge?: string,
-): Promise<AdmittedBy | null> {
-  if (await readsAsCardNaming(source, cardSuffixUrl(endpoint, cfg.card_suffix), endpoint)) return 'card';
-  if (await hostCatalogNames(source, endpoint, cfg.ai_catalog)) return 'ai-catalog';
-  if ((await resolveProtectedResourceMetadata(endpoint, source, challenge)).matched) return 'metadata';
-  return null;
+): Promise<Admission | null> {
+  if (await readsAsCardNaming(source, cardSuffixUrl(endpoint, cfg.card_suffix), endpoint)) {
+    return { by: 'card', metadata: null };
+  }
+  if (await hostCatalogNames(source, endpoint, cfg.ai_catalog)) return { by: 'ai-catalog', metadata: null };
+  const resolved = await resolveProtectedResourceMetadata(endpoint, source, challenge);
+  return resolved.matched ? { by: 'metadata', metadata: { url: resolved.url, metadata: resolved.metadata } } : null;
 }

@@ -4,13 +4,16 @@
 // then evaluates in two waves: wave 1 probes the antecedent-source checks
 // (the WAVE1_CHECK_IDS set); wave 2 runs the dependent checks with
 // antecedents resolved from wave-1 results and the root fetch reused —
-// no duplicate `/` fetch. Each check finalizes to
+// no duplicate `/` fetch. Between the waves it settles whether the MCP
+// endpoint requires sign-in (mcp-auth.ts), which wave 1's wire probes are
+// the first requests to show. Each check finalizes to
 // pass / noncompliant / broken / absent / n_a / skip / error; an
 // applicable MAY that comes back absent is re-tagged n_a with na_reason
 // 'optional-absent', an unmet antecedent yields the na_reason its
 // resolver named or else 'antecedent-unmet', and a handler-stated
-// na_reason (the CORS pair's 'posture-consistent') passes through to the
-// result row alongside the handler's `unprobed` marker.
+// na_reason (the CORS pair's 'posture-consistent', an endpoint's
+// 'auth-required') passes through to the result row alongside the
+// handler's `unprobed` marker.
 //
 // The engine yields each result as it finalizes (KTD-6: streaming
 // transport is the route's concern) and a terminal `complete` event
@@ -42,10 +45,12 @@ import {
   mcpSessionIdFrom,
   notifyMcpInitialized,
   runMcp,
+  signInRequiredOutcome,
 } from './handlers/mcp';
 import { enumerateScopedDirs, runScopedLlms } from './handlers/scoped-llms';
-import type { EvidenceItem, HandlerContext, McpLaneEvidence, ProbeOutcome } from './handlers/types';
+import type { EvidenceItem, HandlerContext, McpAuthRequired, McpLaneEvidence, ProbeOutcome } from './handlers/types';
 import { runWebMcp } from './handlers/webmcp';
+import { directArtifactSource, settleMcpAuth } from './mcp-auth';
 import type { WebAuditRegistry, WebCheck, WebSiteType } from './registry';
 import { buildWebScorecard, type EngineResult, type ScorecardStatus, type WebScorecard } from './scorecard';
 import { type GuardedFetchOptions, guardedFetch, isEdgeErrorStatus } from './ssrf';
@@ -371,6 +376,8 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const retainedBodies = new Map<string, string>();
   let mcpSessionId: string | null = null;
   let mcpLanes: McpLaneEvidence = { modern: 'unknown', legacyAdvertised: [], modernAdvertised: [] };
+  let mcpAuth: McpAuthRequired | null = null;
+  const requestTimeoutMs = (): number => Math.min(perCheckTimeoutMs, Math.max(1, deadline - now()));
 
   const handlerCtx = (): HandlerContext => ({
     base,
@@ -378,7 +385,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     mcpEndpoint: declared.endpoint,
     mcpEndpointFollowed: declared.followed,
     protocolVersion: input.registry.mcp_discovery.protocol_version,
-    defaultTimeoutMs: Math.min(perCheckTimeoutMs, Math.max(1, deadline - now())),
+    defaultTimeoutMs: requestTimeoutMs(),
     root: root ?? undefined,
     scopedDirs,
     retainedBodies,
@@ -386,6 +393,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     fetchOptions: input.fetchOptions,
     mcpSessionId,
     mcpLanes,
+    mcpAuth,
   });
 
   const probeOne = async (
@@ -418,6 +426,24 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     wave1Results.set(check.id, result);
   }
 
+  // Wave 1's wire probes are the first requests to the endpoint of record
+  // that could draw a 401, so whether it requires sign-in is settled here,
+  // and their own rows are read again the way every later MCP row is.
+  mcpAuth = await settleMcpAuth({
+    endpoint: declared.endpoint,
+    known: declared.metadata,
+    sources,
+    source: directArtifactSource(() => (deadline - now() > 0 ? requestTimeoutMs() : null), input.fetchOptions),
+  });
+  for (const check of mcpAuth === null ? [] : wave1Checks) {
+    const outcome = sources.get(check.id);
+    const reread = check.handler === 'mcp' && outcome !== undefined ? signInRequiredOutcome(outcome) : null;
+    if (reread !== null) {
+      sources.set(check.id, reread);
+      wave1Results.set(check.id, toResult(check, reread));
+    }
+  }
+
   const actx: AntecedentContext = {
     siteType: input.siteType,
     mcpEndpoint: declared.endpoint,
@@ -425,6 +451,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     root,
     sources,
     follow: { unmet: declared.unmet },
+    mcpAuth,
   };
 
   // Section directories for the scoped-llms probes: the root llms.txt
@@ -442,7 +469,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   };
   if (mcpSessionId && declared.endpoint) {
     await notifyMcpInitialized(declared.endpoint, mcpSessionId, {
-      timeoutMs: Math.min(perCheckTimeoutMs, Math.max(1, deadline - now())),
+      timeoutMs: requestTimeoutMs(),
       fetchOptions: input.fetchOptions,
       followed: declared.followed,
     });

@@ -43,6 +43,20 @@ export interface McpLaneEvidence {
   modernAdvertised: readonly string[];
 }
 
+/**
+ * The MCP endpoint of record requires sign-in: a wire probe drew a 401 and
+ * RFC 9728 metadata on the endpoint's own host names that endpoint as its
+ * protected resource.
+ */
+export interface McpAuthRequired {
+  endpoint: string;
+  /** The 401's WWW-Authenticate value; null when the 401 carried none. */
+  challenge: string | null;
+  /** Where the metadata naming the endpoint was read. */
+  metadataUrl: string;
+  metadata: Record<string, unknown>;
+}
+
 export interface ProbeOutcome {
   status: ProbeStatus;
   evidence: EvidenceItem[];
@@ -113,4 +127,6 @@ export interface HandlerContext {
    * advertisement.
    */
   mcpLanes?: McpLaneEvidence;
+  /** Set once the endpoint is known to require sign-in, so a 401 from it reads as that rather than as a defect. */
+  mcpAuth?: McpAuthRequired | null;
 }

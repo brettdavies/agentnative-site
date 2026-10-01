@@ -2,20 +2,19 @@
   "schema_version": "0.5",
   "spec_version": "0.0.0-corpus",
   "target_url": "https://example.com/",
-  "mcp_endpoint": "https://example.com/mcp",
+  "mcp_endpoint": "https://mcp.example.net/",
   "mcp_discovery": [
     {
       "source": "/.well-known/mcp.json",
-      "document": "server-card",
-      "status": 200,
-      "shape": "sep-1649",
-      "endpoint": "https://example.com/mcp"
+      "status": 404
     },
     {
       "source": "/.well-known/mcp/server-card.json",
+      "document": "server-card",
       "status": 200,
       "shape": "sep-1649",
-      "endpoint": "https://example.com/mcp"
+      "endpoint": "https://mcp.example.net/",
+      "blocked": "off-origin endpoint declaration"
     },
     {
       "source": "/.well-known/ai-catalog.json",
@@ -28,8 +27,34 @@
       "status": 404
     },
     {
-      "source": "/mcp/server-card",
-      "status": 404
+      "source": "/mcp",
+      "status": 404,
+      "probed": "initialize (no serverInfo)"
+    },
+    {
+      "source": "/sse",
+      "status": 404,
+      "probed": "initialize (no serverInfo)"
+    },
+    {
+      "source": "/message",
+      "status": 404,
+      "probed": "initialize (no serverInfo)"
+    },
+    {
+      "source": "/mcp",
+      "status": 404,
+      "probed": "modern-tools-list (no tools)"
+    },
+    {
+      "source": "/sse",
+      "status": 404,
+      "probed": "modern-tools-list (no tools)"
+    },
+    {
+      "source": "/message",
+      "status": 404,
+      "probed": "modern-tools-list (no tools)"
     }
   ],
   "tool": {
@@ -41,34 +66,43 @@
   "site_type": null,
   "public_listing": false,
   "follow_declarations": true,
-  "declared_hosts": [],
+  "declared_hosts": [
+    {
+      "surface": "/.well-known/mcp/server-card.json",
+      "kind": "mcp-endpoint",
+      "url": "https://mcp.example.net/",
+      "host": "mcp.example.net",
+      "outcome": "followed",
+      "admitted_by": "metadata"
+    }
+  ],
   "summary": {
-    "pass": 14,
+    "pass": 16,
     "noncompliant": 0,
     "broken": 1,
-    "absent": 13,
-    "n_a": 36,
+    "absent": 7,
+    "n_a": 40,
     "skip": 0,
     "error": 1
   },
   "coverage_summary": {
     "must": {
-      "total": 2,
+      "total": 1,
       "verified": 0
     },
     "should": {
-      "total": 20,
-      "verified": 8
+      "total": 19,
+      "verified": 12
     },
     "may": {
-      "total": 6,
-      "verified": 6
+      "total": 4,
+      "verified": 4
     }
   },
-  "score_pct": 47,
+  "score_pct": 66,
   "score": {
-    "relative": 47,
-    "global": 18
+    "relative": 66,
+    "global": 24
   },
   "categories": [
     {
@@ -98,8 +132,8 @@
     {
       "id": "mcp",
       "name": "MCP",
-      "passed": 5,
-      "counted": 11
+      "passed": 7,
+      "counted": 7
     },
     {
       "id": "agent-discovery-auth",
@@ -207,13 +241,13 @@
       "principle": "P2",
       "status": "n_a",
       "na_reason": "auth-required",
-      "evidence": "HTTP 401 from https://example.com/mcp",
+      "evidence": "HTTP 401 from https://mcp.example.net/",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.net"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.net"
     },
     {
       "id": "mcp-capabilities",
@@ -226,13 +260,13 @@
       "principle": "P2",
       "status": "n_a",
       "na_reason": "auth-required",
-      "evidence": "HTTP 401 from https://example.com/mcp",
+      "evidence": "https://mcp.example.net/",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.net"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.net"
     },
     {
       "id": "mcp-tools-list",
@@ -245,13 +279,13 @@
       "principle": "P2",
       "status": "n_a",
       "na_reason": "auth-required",
-      "evidence": "HTTP 401 from https://example.com/mcp",
+      "evidence": "https://mcp.example.net/",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.net"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.net"
     },
     {
       "id": "mcp-resources-list",
@@ -263,9 +297,14 @@
       "tier": "recommended",
       "principle": "P2",
       "status": "n_a",
-      "na_reason": "antecedent-unmet",
-      "evidence": "neither initialize nor server/discover advertises capabilities.resources",
-      "hosts": []
+      "na_reason": "auth-required",
+      "evidence": "https://mcp.example.net/",
+      "hosts": [
+        {
+          "host": "mcp.example.net"
+        }
+      ],
+      "host": "mcp.example.net"
     },
     {
       "id": "mcp-modern-tools-list",
@@ -276,15 +315,15 @@
       "keyword": "must",
       "tier": "required",
       "principle": "P2",
-      "status": "absent",
-      "unprobed": true,
-      "evidence": "no modern lane: server/discover returned no result",
+      "status": "n_a",
+      "na_reason": "auth-required",
+      "evidence": "https://mcp.example.net/",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.net"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.net"
     },
     {
       "id": "mcp-server-discover",
@@ -295,14 +334,15 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P2",
-      "status": "absent",
-      "evidence": "no modern lane: server/discover refused with code -32601",
+      "status": "n_a",
+      "na_reason": "auth-required",
+      "evidence": "https://mcp.example.net/",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.net"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.net"
     },
     {
       "id": "mcp-unknown-method",
@@ -315,13 +355,13 @@
       "principle": "P4",
       "status": "n_a",
       "na_reason": "auth-required",
-      "evidence": "HTTP 401 from https://example.com/mcp",
+      "evidence": "HTTP 401 from https://mcp.example.net/",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.net"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.net"
     },
     {
       "id": "mcp-malformed-body",
@@ -332,15 +372,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "auth-required",
-      "evidence": "HTTP 401 from https://example.com/mcp",
+      "status": "pass",
+      "evidence": "error code -32700",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.net"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.net"
     },
     {
       "id": "mcp-batch-reject",
@@ -353,13 +392,13 @@
       "principle": "P4",
       "status": "n_a",
       "na_reason": "auth-required",
-      "evidence": "HTTP 401 from https://example.com/mcp",
+      "evidence": "HTTP 401 from https://mcp.example.net/",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.net"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.net"
     },
     {
       "id": "mcp-unknown-tool",
@@ -372,13 +411,13 @@
       "principle": "P4",
       "status": "n_a",
       "na_reason": "auth-required",
-      "evidence": "HTTP 401 from https://example.com/mcp",
+      "evidence": "https://mcp.example.net/",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.net"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.net"
     },
     {
       "id": "mcp-modern-unknown-method",
@@ -389,15 +428,15 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "absent",
-      "unprobed": true,
-      "evidence": "no modern lane: server/discover returned no result",
+      "status": "n_a",
+      "na_reason": "auth-required",
+      "evidence": "HTTP 401 from https://mcp.example.net/",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.net"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.net"
     },
     {
       "id": "mcp-modern-clientcaps",
@@ -408,15 +447,15 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "absent",
-      "unprobed": true,
-      "evidence": "no modern lane: server/discover returned no result",
+      "status": "n_a",
+      "na_reason": "auth-required",
+      "evidence": "HTTP 401 from https://mcp.example.net/",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.net"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.net"
     },
     {
       "id": "mcp-modern-header-mismatch",
@@ -427,15 +466,15 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "absent",
-      "unprobed": true,
-      "evidence": "no modern lane: server/discover returned no result",
+      "status": "n_a",
+      "na_reason": "auth-required",
+      "evidence": "HTTP 401 from https://mcp.example.net/",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.net"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.net"
     },
     {
       "id": "mcp-modern-version-reject",
@@ -446,15 +485,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "absent",
-      "unprobed": true,
-      "evidence": "no modern lane: server/discover returned no result",
+      "status": "pass",
+      "evidence": "error code -32022",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.net"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.net"
     },
     {
       "id": "mcp-modern-resources-miss",
@@ -466,9 +504,14 @@
       "tier": "recommended",
       "principle": "P4",
       "status": "n_a",
-      "na_reason": "antecedent-unmet",
-      "evidence": "neither initialize nor server/discover advertises capabilities.resources",
-      "hosts": []
+      "na_reason": "auth-required",
+      "evidence": "https://mcp.example.net/",
+      "hosts": [
+        {
+          "host": "mcp.example.net"
+        }
+      ],
+      "host": "mcp.example.net"
     },
     {
       "id": "mcp-accept-json",
@@ -481,13 +524,13 @@
       "principle": "P4",
       "status": "n_a",
       "na_reason": "auth-required",
-      "evidence": "HTTP 401 from https://example.com/mcp",
+      "evidence": "https://mcp.example.net/",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.net"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.net"
     },
     {
       "id": "mcp-accept-unsatisfiable",
@@ -500,13 +543,13 @@
       "principle": "P4",
       "status": "n_a",
       "na_reason": "auth-required",
-      "evidence": "HTTP 401 from https://example.com/mcp",
+      "evidence": "https://mcp.example.net/",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.net"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.net"
     },
     {
       "id": "mcp-get-fast-fail",
@@ -518,13 +561,13 @@
       "tier": "recommended",
       "principle": "P4",
       "status": "pass",
-      "evidence": "https://example.com/mcp -> 405",
+      "evidence": "https://mcp.example.net/ -> 401",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.net"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.net"
     },
     {
       "id": "mcp-cors-preflight",
@@ -535,15 +578,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P6",
-      "status": "n_a",
-      "na_reason": "posture-consistent",
-      "evidence": "no Allow-Origin on the preflight or the POST: consistent no-CORS posture",
+      "status": "pass",
+      "evidence": "preflight 204 allow-origin *; post 401 allow-origin *",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.net"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.net"
     },
     {
       "id": "mcp-cors-actual",
@@ -554,15 +596,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P6",
-      "status": "n_a",
-      "na_reason": "posture-consistent",
-      "evidence": "no Allow-Origin on the preflight or the POST: consistent no-CORS posture",
+      "status": "pass",
+      "evidence": "preflight 204 allow-origin *; post 401 allow-origin *",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.net"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.net"
     },
     {
       "id": "well-known-mcp-card",
@@ -591,8 +632,9 @@
       "keyword": "may",
       "tier": "optional",
       "principle": "P8",
-      "status": "pass",
-      "evidence": "https://example.com/.well-known/mcp -> 301 (301 -> /.well-known/mcp/server-card.json)",
+      "status": "n_a",
+      "na_reason": "optional-absent",
+      "evidence": "https://example.com/.well-known/mcp -> 404 (404 alias not published)",
       "hosts": [
         {
           "host": "example.com"
@@ -609,8 +651,9 @@
       "keyword": "may",
       "tier": "optional",
       "principle": "P8",
-      "status": "pass",
-      "evidence": "https://example.com/mcp-skill.md -> 200",
+      "status": "n_a",
+      "na_reason": "optional-absent",
+      "evidence": "https://example.com/mcp-skill.md -> 404 (status 404 not in [200])",
       "hosts": [
         {
           "host": "example.com"
@@ -1208,13 +1251,13 @@
       "tier": "optional",
       "principle": "P1",
       "status": "pass",
-      "evidence": "https://example.com/.well-known/oauth-protected-resource -> 200",
+      "evidence": "https://mcp.example.net/.well-known/oauth-protected-resource -> 200",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.net"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.net"
     },
     {
       "id": "auth-md",

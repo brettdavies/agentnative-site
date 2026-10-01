@@ -43,4 +43,36 @@ describe('resolveAntecedent: mcp', () => {
     expect(resolveAntecedent('mcp-resources', ctx(base))).toBe('n_a');
     expect(resolveAntecedent('mcp-resources', ctx())).toBe('n_a');
   });
+
+  const ENDPOINT = 'https://x.dev/mcp';
+  const SIGN_IN = {
+    endpoint: ENDPOINT,
+    challenge: 'Bearer resource_metadata="https://x.dev/.well-known/oauth-protected-resource"',
+    metadataUrl: 'https://x.dev/.well-known/oauth-protected-resource',
+    metadata: { resource: ENDPOINT, authorization_servers: ['https://auth.x.dev'] },
+  };
+  const challenged = () => new Map([['mcp-initialize', outcome('na', [{ url: ENDPOINT, status: 401 }])]]);
+
+  test('mcp-session holds unless the endpoint requires sign-in and no wire probe answered without it', () => {
+    const base = { mcpEndpoint: ENDPOINT };
+    expect(resolveAntecedent('mcp-session', ctx(base))).toBe('apply');
+    expect(resolveAntecedent('mcp-session', ctx({ ...base, sources: challenged(), mcpAuth: SIGN_IN }))).toEqual({
+      outcome: 'n_a',
+      reason: 'auth-required',
+      host: 'x.dev',
+      evidence: ENDPOINT,
+    });
+    const answered = challenged();
+    answered.set('mcp-server-discover', outcome('pass', [{ url: ENDPOINT, status: 200 }]));
+    expect(resolveAntecedent('mcp-session', ctx({ ...base, sources: answered, mcpAuth: SIGN_IN }))).toBe('apply');
+    expect(resolveAntecedent('mcp-session', ctx())).toBe('n_a');
+  });
+
+  test('mcp-resources reads auth-required, not an unadvertised capability, when the session is unavailable', () => {
+    const resolution = resolveAntecedent(
+      'mcp-resources',
+      ctx({ mcpEndpoint: ENDPOINT, sources: challenged(), mcpAuth: SIGN_IN }),
+    );
+    expect(resolution).toEqual({ outcome: 'n_a', reason: 'auth-required', host: 'x.dev', evidence: ENDPOINT });
+  });
 });

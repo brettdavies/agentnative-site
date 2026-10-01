@@ -10,6 +10,7 @@ import type { DiscoveryDocuments, DiscoveryResult } from './discovery';
 import { type FollowInput, type FollowResult, openFollow } from './follow';
 import { declarationKey, declaresHost, type TrailEntry, type TrailOutcome, trailEntry } from './follow-trail';
 import { hostOf } from './provenance';
+import type { MetadataMatch } from './reciprocity';
 
 /** A declared host the rows that need an endpoint could not be evaluated at, and why. */
 export interface DeclaredHostReason {
@@ -22,6 +23,8 @@ export interface EndpointOfRecord {
   endpoint: string | null;
   /** The endpoint came from a declared host, whose URL was pinned when reciprocity admitted it. */
   followed: boolean;
+  /** RFC 9728 metadata naming the endpoint that finding or admitting it already read. */
+  metadata: MetadataMatch | null;
   trail: TrailEntry[];
   unmet: DeclaredHostReason | null;
 }
@@ -54,8 +57,8 @@ function unmetReason(trail: readonly TrailEntry[]): DeclaredHostReason | null {
 
 export function endpointOfRecord(
   base: string,
-  discovery: Pick<DiscoveryResult, 'endpoint' | 'declarations' | 'redirected'>,
-  follow: Pick<FollowResult, 'endpoint' | 'entries'>,
+  discovery: Pick<DiscoveryResult, 'endpoint' | 'endpointMetadata' | 'declarations' | 'redirected'>,
+  follow: Pick<FollowResult, 'endpoint' | 'endpointMetadata' | 'entries'>,
 ): EndpointOfRecord {
   const own = discovery.endpoint;
   const trail: TrailEntry[] = [];
@@ -80,6 +83,7 @@ export function endpointOfRecord(
   return {
     endpoint,
     followed: own === null && follow.endpoint !== null,
+    metadata: own !== null ? discovery.endpointMetadata : follow.endpointMetadata,
     trail,
     unmet: endpoint === null ? unmetReason(trail) : null,
   };

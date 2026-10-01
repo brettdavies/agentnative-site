@@ -206,7 +206,7 @@ describe('web-audit registry shape', () => {
       category: 'mcp',
       tier: 'required',
       keyword: 'must',
-      antecedent: 'mcp-present',
+      antecedent: 'mcp-session',
       site_types: ['mcp'],
       handler: 'mcp',
       with: { op: 'modern-tools-list' },
@@ -216,7 +216,7 @@ describe('web-audit registry shape', () => {
       category: 'mcp',
       tier: 'recommended',
       keyword: 'should',
-      antecedent: 'mcp-present',
+      antecedent: 'mcp-session',
       site_types: ['mcp'],
       handler: 'mcp',
       with: { op: 'server-discover' },
@@ -243,7 +243,12 @@ describe('web-audit registry shape', () => {
         keyword: 'should',
         principle: 'P4',
         site_types: ['mcp'],
-        antecedent: id === 'mcp-modern-resources-miss' ? 'mcp-resources' : 'mcp-present',
+        antecedent:
+          id === 'mcp-modern-resources-miss'
+            ? 'mcp-resources'
+            : id === 'mcp-unknown-tool'
+              ? 'mcp-session'
+              : 'mcp-present',
         handler: 'mcp',
         with: { op: id.replace(/^mcp-/, '') },
       });

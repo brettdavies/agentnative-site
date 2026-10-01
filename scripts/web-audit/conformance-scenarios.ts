@@ -419,6 +419,50 @@ const declaringCard = (endpoint: string): Exchange => get(CARD_PATH, json({ ...S
 const selfNamingCard = (endpoint: string): Exchange => get(`${endpoint}/server-card`, cardDocument({ ...SEP_2127_CARD, remotes: [{ type: 'streamable-http', url: endpoint }] }));
 const FOLLOWED_IDS = ['mcp-initialize', 'mcp-tools-list', 'mcp-cors-preflight', 'mcp-cors-actual', 'mcp-get-fast-fail'];
 
+const PROTECTED_RESOURCE_PATH = '/.well-known/oauth-protected-resource';
+const AUTH_SERVER = 'https://auth.example.com';
+const challenge401 = (metadataUrl: string | null, extra: Record<string, string> = {}): ExchangeResponse =>
+  res(
+    401,
+    {
+      'content-type': 'application/json',
+      ...(metadataUrl === null ? {} : { 'www-authenticate': `Bearer resource_metadata="${metadataUrl}"` }),
+      ...extra,
+    },
+    '{"error":"unauthorized"}',
+  );
+
+/**
+ * An MCP server behind OAuth at `endpoint`: every POST draws a 401 whose
+ * challenge names `metadataUrl`, apart from an unparseable body and an
+ * unsupported version claim, which it refuses before reading a token.
+ */
+function protectedMcp(endpoint: string, metadataUrl: string): Exchange[] {
+  return [
+    post(endpoint, rpcError(-32700, 400), { body_contains: 'not-json{{' }),
+    post(endpoint, rpcError(-32022, 400, { supported: [MODERN_PROTOCOL] }), {
+      headers: { 'mcp-protocol-version': UNSUPPORTED_PROTOCOL },
+    }),
+    post(endpoint, challenge401(metadataUrl, ACAO), { headers: { origin: CORS_ORIGIN } }),
+    post(endpoint, challenge401(metadataUrl)),
+    options(endpoint, res(204, ACAO, '')),
+    get(endpoint, challenge401(metadataUrl)),
+  ];
+}
+
+const SIGN_IN_IDS = [
+  'mcp-initialize',
+  'mcp-capabilities',
+  'mcp-tools-list',
+  'mcp-resources-list',
+  'mcp-server-discover',
+  'mcp-malformed-body',
+  'mcp-modern-version-reject',
+  'mcp-get-fast-fail',
+  'mcp-cors-preflight',
+  'mcp-cors-actual',
+];
+
 const MCP_IDS = [
   'mcp-initialize',
   'mcp-capabilities',
@@ -908,7 +952,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     post(MCP_PATH, rpcError(-32099)),
   ]),
   'mcp-www-authenticate': scenario(
-    'an endpoint that challenges initialize with 401 and WWW-Authenticate is broken and satisfies the mcp-auth antecedent',
+    'an endpoint that answers legacy POSTs with a 401 whose challenge names no metadata, while root RFC 9728 metadata names it: it requires sign-in, so the rows those 401s answer read auth-required, its modern lane refuses without a token, and the challenge satisfies the mcp-auth antecedent',
     ['mcp-initialize', 'oauth-protected-resource', 'auth-md'],
     [
       ...baseline(),
@@ -1100,6 +1144,48 @@ export const SCENARIOS: Record<string, Scenario> = {
       ...legacyOnlyMcp({ endpoint: DECLARED_ENDPOINT, cors: 'full' }),
     ],
     { follow_declarations: false },
+  ),
+
+  // ---- endpoints that require sign-in ----------------------------------------
+  'auth-own-endpoint': scenario(
+    "the audited site's /mcp answers every POST with a 401 whose challenge names same-host RFC 9728 metadata naming it: the endpoint is found with sign-in required, rows that need no session are scored, and the rest read auth-required",
+    [...SIGN_IN_IDS, 'oauth-protected-resource'],
+    [
+      ...baseline(),
+      ...protectedMcp(MCP_PATH, u(PROTECTED_RESOURCE_PATH)),
+      get(PROTECTED_RESOURCE_PATH, json({ resource: u(MCP_PATH), authorization_servers: [AUTH_SERVER] })),
+    ],
+  ),
+  'auth-declared-endpoint': scenario(
+    "the card names a root endpoint on another host that answers 401 and publishes metadata naming it without the trailing slash: the metadata admits it, and the MCP rows are scored there with sign-in required",
+    [...SIGN_IN_IDS, 'oauth-protected-resource'],
+    [
+      ...baseline(),
+      declaringCard('https://mcp.example.net/'),
+      ...protectedMcp('https://mcp.example.net/', `https://mcp.example.net${PROTECTED_RESOURCE_PATH}`),
+      get(
+        `https://mcp.example.net${PROTECTED_RESOURCE_PATH}`,
+        json({ resource: 'https://mcp.example.net', authorization_servers: [AUTH_SERVER] }),
+      ),
+    ],
+  ),
+  'auth-bare-401': scenario(
+    "the audited site's /mcp answers 401 with no challenge and no metadata names it: a bare 401 is refusal evidence, so no endpoint is found",
+    ['mcp-initialize'],
+    [...baseline(), post(MCP_PATH, challenge401(null))],
+  ),
+  'auth-echoing-gateway': scenario(
+    "the audited site's /mcp answers 401 naming path-suffixed metadata, but the host answers a nonsense path's metadata with that path as its resource too: the metadata confirms nothing, so no endpoint is found",
+    ['mcp-initialize'],
+    [
+      ...baseline(),
+      post(MCP_PATH, challenge401(u(`${PROTECTED_RESOURCE_PATH}${MCP_PATH}`))),
+      get(`${PROTECTED_RESOURCE_PATH}${MCP_PATH}`, json({ resource: u(MCP_PATH), authorization_servers: [AUTH_SERVER] })),
+      get(
+        `${PROTECTED_RESOURCE_PATH}/anc-web-audit-no-such-resource`,
+        json({ resource: u('/anc-web-audit-no-such-resource'), authorization_servers: [AUTH_SERVER] }),
+      ),
+    ],
   ),
 
   // ---- dns-doh ---------------------------------------------------------------

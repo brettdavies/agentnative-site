@@ -6,7 +6,8 @@
 // through the SSRF guard, parses JSON or SSE via parseJsonRpc, and
 // evaluates serverInfo / capabilities / tools / resources / discovery /
 // error-code / content-type. Returns n_a when no endpoint was discovered,
-// and an unprobed `absent` when wave 1 evidenced no modern lane.
+// n_a auth-required for a 401 from an endpoint that requires sign-in, and
+// an unprobed `absent` when wave 1 evidenced no modern lane.
 // CORS classification lives in the cors-preflight posture handler.
 
 import { parseJsonRpc } from '../assert';
@@ -593,6 +594,25 @@ function modernLaneRefused(status: number | null, code: number | null): boolean 
   return status !== null && TYPED_REFUSAL_STATUSES.includes(status);
 }
 
+/** A 401 from an endpoint that requires sign-in: the row needs a token the auditor does not hold. */
+function signInRequired(ev: EvidenceItem): ProbeOutcome {
+  return {
+    status: 'na',
+    na_reason: 'auth-required',
+    evidence: [{ ...ev, why: [`HTTP 401 from ${String(ev.url)}`] }],
+  };
+}
+
+/**
+ * A wave-1 outcome read again once the endpoint is known to require
+ * sign-in, through the arm `runMcp` applies to every later row; null when
+ * that arm would not reach it (a failed request or a rate-limit refusal).
+ */
+export function signInRequiredOutcome(outcome: ProbeOutcome): ProbeOutcome | null {
+  const first = outcome.evidence[0];
+  return outcome.status !== 'error' && first?.status === 401 ? signInRequired(first) : null;
+}
+
 export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<ProbeOutcome> {
   const endpoint = ctx.mcpEndpoint;
   if (!endpoint) {
@@ -682,6 +702,12 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     ev.why = ['rate limited by the target'];
     return { status: 'error', evidence: [ev] };
   }
+
+  // Settled ahead of every arm that reads the answer: a 401 from an
+  // endpoint known to require sign-in says nothing about the surface the
+  // row asks about, and the arms below would read it as a broken one or as
+  // an era the server does not serve.
+  if (ctx.mcpAuth && resp.status === 401) return signInRequired(ev);
 
   // Settled ahead of the arms below because a legacy server declines this
   // method both with an envelope and without one, and the arms that would

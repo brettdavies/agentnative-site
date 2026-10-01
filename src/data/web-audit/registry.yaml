@@ -196,7 +196,7 @@ checks:
     tier: recommended
     principle: P2
     site_types: [mcp]
-    antecedent: mcp-present
+    antecedent: mcp-session
     weight: 2
     title: initialize advertises capabilities (tools / resources / prompts)
     breadcrumb: MCP capabilities
@@ -210,7 +210,7 @@ checks:
     tier: required
     principle: P2
     site_types: [mcp]
-    antecedent: mcp-present
+    antecedent: mcp-session
     weight: 4
     title: tools/list returns a tools array with input schemas
     breadcrumb: MCP tools/list
@@ -238,7 +238,7 @@ checks:
     tier: required
     principle: P2
     site_types: [mcp]
-    antecedent: mcp-present
+    antecedent: mcp-session
     weight: 4
     title: header-routed tools/list (2026-07-28) returns tools without initialize
     breadcrumb: MCP tools/list (modern)
@@ -252,7 +252,7 @@ checks:
     tier: recommended
     principle: P2
     site_types: [mcp]
-    antecedent: mcp-present
+    antecedent: mcp-session
     weight: 3
     title: server/discover answers with server identity on the modern lane
     breadcrumb: MCP server discovery
@@ -312,7 +312,7 @@ checks:
     tier: recommended
     principle: P4
     site_types: [mcp]
-    antecedent: mcp-present
+    antecedent: mcp-session
     weight: 2
     title: tools/call with an unknown tool name returns -32602
     breadcrumb: MCP unknown tool
@@ -399,7 +399,7 @@ checks:
     tier: recommended
     principle: P4
     site_types: [mcp]
-    antecedent: mcp-present
+    antecedent: mcp-session
     weight: 3
     title: a JSON-only Accept is answered without SSE framing
     breadcrumb: MCP Accept JSON
@@ -413,7 +413,7 @@ checks:
     tier: recommended
     principle: P4
     site_types: [mcp]
-    antecedent: mcp-present
+    antecedent: mcp-session
     weight: 3
     title: an unsatisfiable Accept draws a 406 rather than an unasked-for type
     breadcrumb: MCP Accept unsatisfiable

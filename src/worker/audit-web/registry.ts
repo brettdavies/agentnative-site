@@ -31,6 +31,7 @@ export type AntecedentToken =
   | 'html-root'
   | 'mcp-present'
   | 'mcp-auth'
+  | 'mcp-session'
   | 'mcp-resources'
   | 'api-surface'
   | 'schemas-ref'

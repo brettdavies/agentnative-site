@@ -8,9 +8,11 @@
 // on the audited origin, catalog cards first, is the endpoint. Without one,
 // the endpoint probing that follows sends legacy `initialize` and modern
 // `tools/list` POSTs to the common paths together under one timeout, and a
-// legacy answer wins (discovery-posts.ts). The split lets the engine
-// follow the declarations the documents name while the POSTs are in
-// flight.
+// legacy answer wins (discovery-posts.ts). With no answer, a common path
+// that drew a 401 is the endpoint when RFC 9728 metadata on the audited
+// host names it, which is how an endpoint that requires sign-in is found
+// (mcp-auth.ts). The split lets the engine follow the declarations the
+// documents name while the POSTs are in flight.
 //
 // A card's endpoint is attacker-controlled, so one off the audited origin,
 // or one written as a URL template, is recorded as a declaration and never
@@ -47,6 +49,8 @@ import {
 import { probeCommonPaths } from './discovery-posts';
 import { phaseBudget, resolveUrl } from './handlers/shared';
 import type { EvidenceItem } from './handlers/types';
+import { directArtifactSource, signInEndpoint } from './mcp-auth';
+import type { MetadataMatch } from './reciprocity';
 import type { WebAuditDiscoveryConfig } from './registry';
 import { DOCUMENT_MAX_BODY_BYTES, type GuardedFetchOptions, guardedFetch } from './ssrf';
 
@@ -61,6 +65,8 @@ export interface DiscoveryOptions {
 
 export interface DiscoveryResult {
   endpoint: string | null;
+  /** The RFC 9728 metadata that made a common path answering 401 the endpoint; null otherwise. */
+  endpointMetadata: MetadataMatch | null;
   evidence: EvidenceItem[];
   /** In SEP-2127 order: the catalog's entries, the suffix card, then the well-known cards. */
   declarations: McpDeclaration[];
@@ -137,6 +143,7 @@ export async function readDiscoveryDocuments(
   let postItems: EvidenceItem[] = [];
   let postEndpoint: string | null = null;
   let postRedirected: McpDeclaration[] = [];
+  let postMetadata: MetadataMatch | null = null;
   let suffix: CardRead | null = null;
   let deadlineHit = false;
   const documents = new Map<RetainedDocumentKey, RetainedDocument>();
@@ -188,7 +195,8 @@ export async function readDiscoveryDocuments(
       endpoint === null
         ? postRedirected
         : postRedirected.map((d): McpDeclaration => ({ ...d, not_followed: 'beyond-endpoint-of-record' }));
-    return { endpoint, evidence, declarations: declared(), redirected, documents };
+    const endpointMetadata = endpoint !== null && endpoint === postEndpoint ? postMetadata : null;
+    return { endpoint, endpointMetadata, evidence, declarations: declared(), redirected, documents };
   };
   const declared = (): McpDeclaration[] => {
     const ofRead = (read: CardRead) => [read.declaration, ...read.others];
@@ -287,6 +295,17 @@ export async function readDiscoveryDocuments(
       postItems = probed.items;
       postEndpoint = probed.endpoint;
       postRedirected = probed.redirected;
+      const signIn = await signInEndpoint(probed.challenged, directArtifactSource(passBudget, opts.fetchOptions));
+      if (signIn !== null) {
+        postEndpoint = signIn.path.url;
+        postMetadata = signIn.metadata;
+        postItems.push({
+          source: signIn.path.path,
+          endpoint: signIn.path.url,
+          probed: `${signIn.path.probed} (auth required)`,
+          resource_metadata: signIn.metadata.url,
+        });
+      }
     }
 
     // With no catalog card, the endpoint's own card outranks a SEP-1649 card.

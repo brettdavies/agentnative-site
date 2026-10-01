@@ -6,7 +6,7 @@
 import type { NaReason } from '../../../shared/web-audit-findings';
 import type { ProbeResponse } from '../assert';
 import type { DeclaredHostReason } from '../endpoint-of-record';
-import type { EvidenceItem, ProbeOutcome } from '../handlers/types';
+import type { EvidenceItem, McpAuthRequired, ProbeOutcome } from '../handlers/types';
 import type { WebSiteType } from '../registry';
 
 export interface AntecedentContext {
@@ -20,6 +20,8 @@ export interface AntecedentContext {
   sources: ReadonlyMap<string, ProbeOutcome>;
   /** What following the declared hosts settled; absent when the audit followed none. */
   follow?: { unmet: DeclaredHostReason | null };
+  /** Set when the endpoint of record requires sign-in; absent or null when it does not. */
+  mcpAuth?: McpAuthRequired | null;
 }
 
 /** Whether a check applies, does not, or cannot be decided because the root never answered. */

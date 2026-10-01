@@ -1,5 +1,5 @@
 {
-  "description": "an endpoint that challenges initialize with 401 and WWW-Authenticate is broken and satisfies the mcp-auth antecedent",
+  "description": "an endpoint that answers legacy POSTs with a 401 whose challenge names no metadata, while root RFC 9728 metadata names it: it requires sign-in, so the rows those 401s answer read auth-required, its modern lane refuses without a token, and the challenge satisfies the mcp-auth antecedent",
   "covers": [
     "mcp-initialize",
     "oauth-protected-resource",
