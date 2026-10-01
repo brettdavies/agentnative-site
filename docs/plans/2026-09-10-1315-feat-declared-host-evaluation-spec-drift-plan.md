@@ -433,7 +433,7 @@ The funnel's shared surfaces carry this plan's fields, and the units edit them i
   row gains `hosts[]` derived from the distinct evidence hosts in declaration order (per-entry status only on
   multi-target rows) and `host` as a convenience when exactly one host was evaluated; a row missing both reads as the
   entry host. The scorecard gains `declared_hosts[]` (R11), `follow_declarations`, and `registry_fingerprint`. Fields
-  are additive with no bump, following the `public_listing` precedent. The five new `na_reason` values bump
+  are additive with no bump, following the `public_listing` precedent. The six new `na_reason` values bump
   `WEB_SCHEMA_VERSION` from 0.4 to 0.5, following the 0.2 to 0.3 precedent. Readers: a missing `follow_declarations`
   reads as not evaluated and is never rendered as on; a missing trail reads as no trail, with copy distinct from an
   empty trail; a missing fingerprint reads as unknown. The Cloudflare R2 object key keeps the spec version; adding the
