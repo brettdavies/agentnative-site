@@ -26,6 +26,7 @@ import {
   type WebScorecardMeta,
 } from '../src/worker/audit-web/scorecard';
 import { buildWebSummaryMarkdown } from '../src/worker/audit-web/summary-markdown';
+import { webSummaryModel } from '../src/worker/audit-web/summary-model';
 import { buildWebSummaryBody } from '../src/worker/audit-web/summary-render';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
@@ -365,7 +366,7 @@ describe('canonical row metadata on every row root (R1)', () => {
   }
 
   const metadataScorecard = {
-    schema_version: '0.4',
+    schema_version: '0.5',
     spec_version: SPEC_VERSION,
     target_url: 'https://example.com/',
     tool: { name: 'example.com', url: 'https://example.com/' },
@@ -405,7 +406,7 @@ describe('canonical row metadata on every row root (R1)', () => {
     return m === null ? null : m[1];
   }
 
-  test('every schema 0.4 status renders canonical root metadata', () => {
+  test('every web scorecard status renders canonical root metadata', () => {
     for (const status of ALL_STATUSES) {
       const tag = openTag(`check-${status}`);
       expect(attrOf(tag, 'data-status')).toBe(status);
@@ -717,6 +718,9 @@ const DOCUMENTED_TOP_LEVEL = [
   'audit_profile',
   'site_type',
   'public_listing',
+  'follow_declarations',
+  'declared_hosts',
+  'registry_fingerprint',
   'summary',
   'coverage_summary',
   'score_pct',
@@ -724,6 +728,11 @@ const DOCUMENTED_TOP_LEVEL = [
   'categories',
   'results',
 ];
+
+// Documented and optional: an engine build that evaluated no declared host
+// records no follow state and no trail, and the registry fingerprint is never
+// the engine's to set, so a fresh build carries none of the three.
+const OPTIONAL_TOP_LEVEL = ['follow_declarations', 'declared_hosts', 'registry_fingerprint'];
 
 // The web scorecard schema doc (content/web-scorecard-schema.md) is the
 // published contract. Pin an engine-produced scorecard to the documented
@@ -740,7 +749,7 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
       weight: 4,
       status: 'pass',
       evidence: 'https://example.com/llms.txt -> 200',
-      raw_evidence: [],
+      raw_evidence: [{ url: 'https://example.com/llms.txt', status: 200 }],
       ...partial,
     };
   }
@@ -750,7 +759,7 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
     engineRow({ status: 'absent' }),
     engineRow({ status: 'noncompliant' }),
     engineRow({ status: 'absent', unprobed: true }),
-    engineRow({ keyword: 'may', tier: 'optional', status: 'n_a', na_reason: 'optional-absent' }),
+    engineRow({ keyword: 'may', tier: 'optional', status: 'n_a', na_reason: 'optional-absent', raw_evidence: [] }),
   ];
 
   const BASE_META: WebScorecardMeta = {
@@ -769,12 +778,13 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
   const produced = buildWebScorecard(ENGINE_ROWS, BASE_META);
 
   test('carries exactly the documented top-level fields (no badge)', () => {
-    expect(Object.keys(produced).sort()).toEqual([...DOCUMENTED_TOP_LEVEL].sort());
+    const emitted = DOCUMENTED_TOP_LEVEL.filter((field) => !OPTIONAL_TOP_LEVEL.includes(field));
+    expect(Object.keys(produced).sort()).toEqual(emitted.sort());
     expect('badge' in produced).toBe(false);
   });
 
-  test('schema_version is the site-owned 0.4, independent of the CLI schema', () => {
-    expect(produced.schema_version).toBe('0.4');
+  test('schema_version is the site-owned 0.5, independent of the CLI schema', () => {
+    expect(produced.schema_version).toBe('0.5');
   });
 
   test('the web tool shape is { name, url } with no CLI fields', () => {
@@ -796,10 +806,10 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
     expect(produced.coverage_summary.may).toEqual({ total: 0, verified: 0 });
   });
 
-  test('public_listing round-trips an explicit meta value; schema_version stays 0.4', () => {
+  test('public_listing round-trips an explicit meta value; schema_version stays 0.5', () => {
     const listed = buildWebScorecard(ENGINE_ROWS, { ...BASE_META, publicListing: true });
     expect(listed.public_listing).toBe(true);
-    expect(listed.schema_version).toBe('0.4');
+    expect(listed.schema_version).toBe('0.5');
     expect(buildWebScorecard(ENGINE_ROWS, { ...BASE_META, publicListing: false }).public_listing).toBe(false);
   });
 
@@ -809,11 +819,12 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
     expect(typeof produced.score.global).toBe('number');
   });
 
-  test('every result row carries the documented fields (na_reason and unprobed only when set)', () => {
+  test('every result row carries the documented fields (na_reason, unprobed, and host only when set)', () => {
     const REQUIRED_ROW_FIELDS = [
       'category',
       'evidence',
       'group',
+      'hosts',
       'id',
       'keyword',
       'label',
@@ -827,18 +838,22 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
         ...REQUIRED_ROW_FIELDS,
         ...(row.status === 'n_a' ? ['na_reason'] : []),
         ...(row.unprobed === true ? ['unprobed'] : []),
+        ...(row.hosts.length === 1 ? ['host'] : []),
       ];
       expect(Object.keys(row).sort()).toEqual([...expected].sort());
       expect(row.layer).toBe('web');
     }
     expect(produced.results.filter((r) => r.unprobed === true).length).toBe(1);
     expect(produced.results.filter((r) => r.status === 'noncompliant').length).toBe(1);
+    expect(produced.results.filter((r) => r.host === 'example.com').length).toBe(4);
   });
 
   test('a scorecard missing a documented required field fails conformance loudly', () => {
+    const required = DOCUMENTED_TOP_LEVEL.filter((field) => !OPTIONAL_TOP_LEVEL.includes(field)).sort();
+    expect(Object.keys(produced).sort()).toEqual(required);
     const broken = { ...produced } as Record<string, unknown>;
     delete broken.score_pct;
-    expect(Object.keys(broken).sort()).not.toEqual([...DOCUMENTED_TOP_LEVEL].sort());
+    expect(Object.keys(broken).sort()).not.toEqual(required);
   });
 });
 
@@ -855,11 +870,97 @@ describe('web scorecard schema doc drift guard (U16)', () => {
     expect(doc).toContain(`"schema_version": "${WEB_SCHEMA_VERSION}"`);
   });
 
-  test('the doc top-level example carries exactly the emitted top-level fields', async () => {
+  test('the doc top-level example carries exactly the documented top-level fields', async () => {
     const doc = await readFile(DOC_PATH, 'utf8');
     const example = doc.slice(doc.indexOf('## Top-level fields'), doc.indexOf('| Field'));
     const documented = [...example.matchAll(/^\s*"([a-z_]+)":/gm)].map((m) => m[1]);
     expect(documented.sort()).toEqual([...DOCUMENTED_TOP_LEVEL].sort());
+  });
+});
+
+// A scorecard stored before provenance, the follow state, the trail, or the
+// registry marker existed must read as "not evaluated", never as an audit
+// that followed nothing or found nothing.
+describe('stored scorecards that predate provenance', () => {
+  const input = {
+    scorecard: webScorecard(),
+    domain: 'example.com',
+    targetUrl: 'https://example.com/',
+    remediation: REMEDIATION_FIXTURE,
+    origin: 'https://anc.dev',
+  };
+
+  test('the summary model reads the follow state as not evaluated, no trail, and an unknown registry version', () => {
+    const model = webSummaryModel(input);
+    expect(model.followDeclarations).toBe('not-evaluated');
+    expect(model.declaredHosts).toBeNull();
+    expect(model.registryFingerprint).toBeNull();
+  });
+
+  test('only a recorded true reads as following on', () => {
+    for (const value of [undefined, null, 'true', 1, {}]) {
+      const scorecard = { ...webScorecard(), follow_declarations: value } as ReturnType<typeof webScorecard>;
+      expect({ value, state: webSummaryModel({ ...input, scorecard }).followDeclarations }).toEqual({
+        value,
+        state: 'not-evaluated',
+      });
+    }
+    const on = { ...webScorecard(), follow_declarations: true };
+    const off = { ...webScorecard(), follow_declarations: false };
+    expect(webSummaryModel({ ...input, scorecard: on }).followDeclarations).toBe('on');
+    expect(webSummaryModel({ ...input, scorecard: off }).followDeclarations).toBe('off');
+  });
+
+  test('a recorded empty trail and a recorded fingerprint read back as recorded', () => {
+    const scorecard = { ...webScorecard(), declared_hosts: [], registry_fingerprint: '3f2a9c1b7e40' };
+    const model = webSummaryModel({ ...input, scorecard });
+    expect(model.declaredHosts).toEqual([]);
+    expect(model.registryFingerprint).toBe('3f2a9c1b7e40');
+  });
+
+  test("a declared-host reason's result line names the row host, or the audited host for a row without provenance", () => {
+    const base = webScorecard();
+    const scorecard = {
+      ...base,
+      results: [
+        ...base.results,
+        {
+          id: 'mcp-tools-list',
+          label: 'tools/list',
+          category: 'mcp',
+          group: 'P2',
+          principle: 'P2',
+          keyword: 'must',
+          tier: 'required',
+          status: 'n_a' as ScorecardStatus,
+          na_reason: 'auth-required' as NaReason,
+          evidence: null,
+          hosts: [{ host: 'mcp.example.com' }],
+          host: 'mcp.example.com',
+        },
+        {
+          id: 'mcp-capabilities',
+          label: 'capabilities',
+          category: 'mcp',
+          group: 'P2',
+          principle: 'P2',
+          keyword: 'should',
+          tier: 'recommended',
+          status: 'n_a' as ScorecardStatus,
+          na_reason: 'reciprocity-refused' as NaReason,
+          evidence: null,
+        },
+      ],
+    };
+    const rows = webSummaryModel({ ...input, scorecard }).categories.flatMap((c) => c.rows);
+    const byId = new Map(rows.map((row) => [row.id, row.result]));
+    expect(byId.get('mcp-tools-list')).toBe('Not evaluated: mcp.example.com requires sign-in');
+    expect(byId.get('mcp-capabilities')).toBe('Not evaluated: example.com did not confirm this endpoint');
+  });
+
+  test('both renderers render a scorecard missing every provenance field', () => {
+    expect(buildWebSummaryBody(input)).toContain('data-web-audit-context');
+    expect(buildWebSummaryMarkdown(input)).toContain('example.com');
   });
 });
 

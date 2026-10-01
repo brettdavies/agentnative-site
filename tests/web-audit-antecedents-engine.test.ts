@@ -4,8 +4,9 @@
 // web-audit-antecedents-<group> files; this asserts the gating end to end.
 
 import { describe, expect, test } from 'bun:test';
-import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
+import { type AuditEvent, antecedentGate, runWebAudit } from '../src/worker/audit-web/engine';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
+import { stubFetch } from './helpers/stub-fetch';
 
 function makeCheck(partial: Partial<WebCheck> & { id: string }): WebCheck {
   return {
@@ -49,13 +50,6 @@ async function collect(gen: AsyncGenerator<AuditEvent>): Promise<AuditEvent[]> {
 
 function resultsOf(events: AuditEvent[]) {
   return events.flatMap((e) => (e.type === 'result' ? [e.result] : []));
-}
-
-function stubFetch(handler: (url: string, init?: RequestInit) => Response): typeof fetch {
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-    return handler(url, init);
-  }) as typeof fetch;
 }
 
 describe('runWebAudit two-wave evaluation', () => {
@@ -355,5 +349,22 @@ describe('runWebAudit handler na_reason pass-through', () => {
       expect(row?.status).toBe('n_a');
       expect(row?.na_reason).toBe('posture-consistent');
     }
+  });
+});
+
+describe('the antecedent gate stamps the reason a resolution carries', () => {
+  const check = makeCheck({ id: 'mcp-tools-list', category: 'mcp', antecedent: 'mcp-present' });
+
+  test('a resolution carrying a reason settles the row n_a with that reason', () => {
+    expect(antecedentGate(check, { outcome: 'n_a', reason: 'auth-required' })).toMatchObject({
+      id: 'mcp-tools-list',
+      status: 'n_a',
+      na_reason: 'auth-required',
+    });
+  });
+
+  test('a resolution carrying no reason still stamps antecedent-unmet', () => {
+    expect(antecedentGate(check, 'n_a')).toMatchObject({ status: 'n_a', na_reason: 'antecedent-unmet' });
+    expect(antecedentGate(check, 'apply')).toBeNull();
   });
 });

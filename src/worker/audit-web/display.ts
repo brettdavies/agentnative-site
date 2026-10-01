@@ -4,7 +4,7 @@
 // reflects the current registry and remediation catalog regardless of
 // when it was cached.
 //
-// Two enrichments compose here and are the single source of truth the
+// Three enrichments compose here and are the single source of truth the
 // full-result surfaces share:
 //   - normalizeScorecardCategories re-derives each row's display category,
 //     normative keyword, and tier from the current registry (by check id)
@@ -12,12 +12,17 @@
 //     category split earns no points, so re-grouping cannot desync display
 //     from the stored score, and keyword/tier are presentation facts the
 //     registry owns rather than values the run computed.
+//   - attachDefaultRowHosts gives a row stored without provenance the
+//     audited host, so every surface reads that row the same way.
 //   - attachInlineRemediation adds a derived result line to every row and
 //     an inline remediation object to every non-passing row.
-// Both degrade gracefully: a payload without a results[] array passes
+// All degrade gracefully: a payload without a results[] array passes
 // through unchanged, and a row whose id is absent from the registry keeps
-// its stored category, keyword, and tier.
+// its stored category, keyword, and tier. Top-level fields pass through as
+// stored, so a scorecard without a follow state, trail, or registry
+// fingerprint still reads as not evaluated rather than as an empty record.
 
+import { entryHostOf, type RowHost, recordsRowHosts, rowHostOf } from './provenance';
 import { assembleRemediation, isFixableStatus, resultLine, type WebRemediationCatalog } from './remediation';
 import { categoryRollups } from './score';
 import type { NaReason, ScorecardStatus } from './scorecard';
@@ -38,6 +43,8 @@ type EnrichableRow = {
   evidence?: string | null;
   na_reason?: NaReason;
   unprobed?: true;
+  hosts?: RowHost[];
+  host?: string;
 };
 
 /**
@@ -45,7 +52,7 @@ type EnrichableRow = {
  * carries a results[] array. A minimal or malformed payload (no array)
  * passes through the enrichers unchanged.
  */
-function hasResults(value: unknown): value is { results: EnrichableRow[] } {
+function hasResults(value: unknown): value is { results: EnrichableRow[]; target_url?: unknown } {
   return typeof value === 'object' && value !== null && Array.isArray((value as { results?: unknown }).results);
 }
 
@@ -91,6 +98,23 @@ export function normalizeScorecardCategories(stored: unknown, registry: DisplayR
 }
 
 /**
+ * Give each row that recorded no hosts the audited host, the reading every
+ * surface applies to a row stored before provenance. A payload without a
+ * parseable target URL passes through unchanged.
+ */
+export function attachDefaultRowHosts(scorecard: unknown): unknown {
+  if (!hasResults(scorecard)) return scorecard;
+  const entryHost = entryHostOf(scorecard.target_url);
+  if (entryHost === null) return scorecard;
+  return {
+    ...scorecard,
+    results: scorecard.results.map((row) =>
+      recordsRowHosts(row) ? row : { ...row, hosts: [{ host: entryHost }], host: entryHost },
+    ),
+  };
+}
+
+/**
  * Add a derived result line to every row and an inline remediation object
  * to each non-passing (broken / noncompliant / absent) row. Passing,
  * n_a / skip, and unprobed rows carry a result line but no remediation: a
@@ -99,10 +123,11 @@ export function normalizeScorecardCategories(stored: unknown, registry: DisplayR
  */
 export function attachInlineRemediation(scorecard: unknown, catalog: WebRemediationCatalog, origin: string): unknown {
   if (!hasResults(scorecard)) return scorecard;
+  const entryHost = entryHostOf(scorecard.target_url);
   return {
     ...scorecard,
     results: scorecard.results.map((row) => {
-      const result = resultLine(row.status, row.evidence ?? null, row.na_reason);
+      const result = resultLine(row.status, row.evidence ?? null, row.na_reason, rowHostOf(row, entryHost));
       if (row.unprobed !== true && isFixableStatus(row.status)) {
         const remediation = assembleRemediation(catalog[row.id], {
           checkId: row.id,
@@ -117,15 +142,15 @@ export function attachInlineRemediation(scorecard: unknown, catalog: WebRemediat
 }
 
 /**
- * Full read-time enrichment for the MCP JSON surfaces: split categories
- * then per-row remediation. A null registry skips the category split (the
- * stored shape stands) but remediation is still attached, so a failed
- * registry load degrades the read rather than failing it.
+ * Full read-time enrichment for the MCP JSON surfaces: split categories,
+ * default row hosts, then per-row remediation. A null registry skips the
+ * category split (the stored shape stands) but the rest still applies, so a
+ * failed registry load degrades the read rather than failing it.
  */
 export function enrichWebScorecardForDisplay(
   stored: unknown,
   opts: { registry: DisplayRegistry | null; catalog: WebRemediationCatalog; origin: string },
 ): unknown {
   const normalized = opts.registry ? normalizeScorecardCategories(stored, opts.registry) : stored;
-  return attachInlineRemediation(normalized, opts.catalog, opts.origin);
+  return attachInlineRemediation(attachDefaultRowHosts(normalized), opts.catalog, opts.origin);
 }

@@ -6,7 +6,7 @@ is excluded rather than counted against it, a present-but-broken surface costs m
 that works while violating a spec detail earns partial credit rather than the full penalty. This page documents every
 field a web scorecard carries.
 
-The web scorecard is site-owned. Its `schema_version` is **0.4**, independent of the CLI scorecard schema (currently
+The web scorecard is site-owned. Its `schema_version` is **0.5**, independent of the CLI scorecard schema (currently
 0.7) and of the [agentnative spec](/principles) `spec_version`. The CLI scorecard schema is documented separately at
 [/scorecard-schema](/scorecard-schema).
 
@@ -14,7 +14,7 @@ The web scorecard is site-owned. Its `schema_version` is **0.4**, independent of
 
 ```json
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "spec_version": "...",
   "target_url": "https://example.com/",
   "mcp_endpoint": "https://example.com/mcp",
@@ -24,6 +24,9 @@ The web scorecard is site-owned. Its `schema_version` is **0.4**, independent of
   "audit_profile": null,
   "site_type": null,
   "public_listing": false,
+  "follow_declarations": true,
+  "declared_hosts": [ ... ],
+  "registry_fingerprint": "3f2a9c1b7e40",
   "summary": { ... },
   "coverage_summary": { ... },
   "score_pct": 81,
@@ -33,31 +36,40 @@ The web scorecard is site-owned. Its `schema_version` is **0.4**, independent of
 }
 ```
 
-| Field              | Type                | Source  | Meaning                                                                                           |
-| ------------------ | ------------------- | ------- | ------------------------------------------------------------------------------------------------- |
-| `schema_version`   | string              | engine  | Version of the web-scorecard envelope. Site-owned, independent of the CLI schema.                 |
-| `spec_version`     | string              | engine  | Version of the agentnative spec the run scored against. Same value the CLI scorecard carries.     |
-| `target_url`       | string              | engine  | The normalized audited URL: scheme, host, and a trailing slash. Web-specific.                     |
-| `mcp_endpoint`     | string \| null      | engine  | The discovered MCP endpoint, or `null` when none was found. Web-specific.                         |
-| `mcp_discovery`    | array               | engine  | The discovery trail: each well-known card or common-path probe attempted, and what it returned.   |
-| `tool`             | object              | engine  | Web identity: `{ name, url }`. No `binary`, `install`, `tier`, or `language`. See [tool](#tool).  |
-| `audience`         | null                | engine  | Always `null` for web targets; the audience classifier is a CLI concept.                          |
-| `audit_profile`    | null                | engine  | Always `null` for web targets; audit profiles are a CLI concept.                                  |
-| `site_type`        | string \| null      | engine  | The declared site type the run scoped to: `content`, `api`, or `null` (everything ran).           |
-| `public_listing`   | boolean             | engine  | The submitter's opt-in to the public board listing. `false` unless explicitly set.                |
-| `summary`          | object              | derived | Tally of check outcomes by status. See [summary](#summary).                                       |
-| `coverage_summary` | object              | derived | MUST / SHOULD / MAY totals and how many were verified. See [coverage_summary](#coverage_summary). |
-| `score_pct`        | integer             | derived | The headline RELATIVE score, 0-100. Equals `score.relative`. See [scoring](#the-two-score-model). |
-| `score`            | object              | derived | The two-score pair `{ relative, global }`. See [scoring](#the-two-score-model).                   |
-| `categories`       | array               | derived | Per-category `passed/counted` rollups in display order. See [categories](#categories).            |
-| `results`          | array of result obj | engine  | One entry per check. See [results](#results).                                                     |
+| Field                  | Type                | Source  | Meaning                                                                                                                            |
+| ---------------------- | ------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `schema_version`       | string              | engine  | Version of the web-scorecard envelope. Site-owned, independent of the CLI schema.                                                  |
+| `spec_version`         | string              | engine  | Version of the agentnative spec the run scored against. Same value the CLI scorecard carries.                                      |
+| `target_url`           | string              | engine  | The normalized audited URL: scheme, host, and a trailing slash. Web-specific.                                                      |
+| `mcp_endpoint`         | string \| null      | engine  | The discovered MCP endpoint, or `null` when none was found. Web-specific.                                                          |
+| `mcp_discovery`        | array               | engine  | The discovery trail: each well-known card or common-path probe attempted, and what it returned.                                    |
+| `tool`                 | object              | engine  | Web identity: `{ name, url }`. No `binary`, `install`, `tier`, or `language`. See [tool](#tool).                                   |
+| `audience`             | null                | engine  | Always `null` for web targets; the audience classifier is a CLI concept.                                                           |
+| `audit_profile`        | null                | engine  | Always `null` for web targets; audit profiles are a CLI concept.                                                                   |
+| `site_type`            | string \| null      | engine  | The declared site type the run scoped to: `content`, `api`, or `null` (everything ran).                                            |
+| `public_listing`       | boolean             | engine  | The submitter's opt-in to the public board listing. `false` unless explicitly set.                                                 |
+| `follow_declarations`  | boolean, optional   | engine  | Whether the audit followed the hosts the site declares (its MCP server, its API host). Absent means no follow state was recorded.  |
+| `declared_hosts`       | array, optional     | engine  | The declared-hosts trail: one entry per host the site declares, with how the audit treated it. Absent means no trail was recorded. |
+| `registry_fingerprint` | string, optional    | stored  | The first 12 characters of the fingerprint of the check registry the score was computed under. The engine never sets it.           |
+| `summary`              | object              | derived | Tally of check outcomes by status. See [summary](#summary).                                                                        |
+| `coverage_summary`     | object              | derived | MUST / SHOULD / MAY totals and how many were verified. See [coverage_summary](#coverage_summary).                                  |
+| `score_pct`            | integer             | derived | The headline RELATIVE score, 0-100. Equals `score.relative`. See [scoring](#the-two-score-model).                                  |
+| `score`                | object              | derived | The two-score pair `{ relative, global }`. See [scoring](#the-two-score-model).                                                    |
+| `categories`           | array               | derived | Per-category `passed/counted` rollups in display order. See [categories](#categories).                                             |
+| `results`              | array of result obj | engine  | One entry per check. See [results](#results).                                                                                      |
+
+`follow_declarations`, `declared_hosts`, and `registry_fingerprint` are optional, and a reader treats a missing one as
+not evaluated rather than as a recorded value: a missing `follow_declarations` never reads as following on, a missing
+`declared_hosts` means no trail was recorded (an empty array is a recorded trail with nothing in it), and a missing
+`registry_fingerprint` means the registry version is unknown. The engine records none of the three for an audit that
+did not evaluate the hosts the site declares.
 
 ## Response freshness
 
-Freshness travels beside the scorecard, never inside it, so schema 0.4 owns the audit result and nothing else. Every
-successful per-target response carries the same three fields as siblings of `scorecard`: the terminal `complete` event
-from the browser audit stream, the `audit_website` and `get_website_audit` MCP results, and the four result-page WebMCP
-tools.
+Freshness travels beside the scorecard, never inside it, so the scorecard schema owns the audit result and nothing
+else. Every successful per-target response carries the same three fields as siblings of `scorecard`: the terminal
+`complete` event from the browser audit stream, the `audit_website` and `get_website_audit` MCP results, and the four
+result-page WebMCP tools.
 
 | Field           | Type           | Meaning                                                                                                                       |
 | --------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
@@ -181,24 +193,28 @@ One object per check.
   "tier": "recommended",
   "principle": "P2",
   "status": "pass",
-  "evidence": "https://example.com/llms.txt -> 200"
+  "evidence": "https://example.com/llms.txt -> 200",
+  "hosts": [{ "host": "example.com" }],
+  "host": "example.com"
 }
 ```
 
-| Field       | Type           | Meaning                                                                                                                                                                                                                                                                                           |
-| ----------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`        | string         | The check id from the registry (e.g. `llms-txt`, `mcp-initialize`, `mcp-modern-tools-list`). The remediation-catalog and fix-skill key.                                                                                                                                                           |
-| `label`     | string         | Human-readable check title.                                                                                                                                                                                                                                                                       |
-| `category`  | string         | The visible category slug (one of the `categories[].id` values). Drives the display grouping.                                                                                                                                                                                                     |
-| `group`     | string         | Mirrors `principle` for shared-renderer compatibility.                                                                                                                                                                                                                                            |
-| `layer`     | string         | Always `web` for a web scorecard row.                                                                                                                                                                                                                                                             |
-| `keyword`   | string         | `must`, `should`, or `may`, derived from the check's tier.                                                                                                                                                                                                                                        |
-| `tier`      | string         | `required`, `recommended`, or `optional` (the keyword's source).                                                                                                                                                                                                                                  |
-| `principle` | string         | Internal principle tag `P1` through `P8`. Kept as data; web surfaces neither display nor link it.                                                                                                                                                                                                 |
-| `status`    | string         | `pass`, `noncompliant`, `broken`, `absent`, `n_a`, `skip`, or `error`. `noncompliant` = works but violates a spec detail; `broken` = present but invalid; `absent` = not there. See [statuses](#statuses).                                                                                        |
-| `na_reason` | string         | Present only on `n_a` rows: `antecedent-unmet` (the check does not apply to this site), `optional-absent` (an applicable MAY not implemented), or `posture-consistent` (a deliberate, consistent opt-out of the probed surface pair). Absent on handler-emitted `n_a` rows with nothing to probe. |
-| `unprobed`  | boolean        | Present only when `true`: the row settled from an antecedent the audit did observe rather than from its own request, so the run holds no observation of the surface itself. It still scores, and it carries no `remediation` object, because a fix prompt would name a defect nothing observed.   |
-| `evidence`  | string \| null | A compact human-readable summary of what the probe observed.                                                                                                                                                                                                                                      |
+| Field       | Type           | Meaning                                                                                                                                                                                                                                                                                         |
+| ----------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`        | string         | The check id from the registry (e.g. `llms-txt`, `mcp-initialize`, `mcp-modern-tools-list`). The remediation-catalog and fix-skill key.                                                                                                                                                         |
+| `label`     | string         | Human-readable check title.                                                                                                                                                                                                                                                                     |
+| `category`  | string         | The visible category slug (one of the `categories[].id` values). Drives the display grouping.                                                                                                                                                                                                   |
+| `group`     | string         | Mirrors `principle` for shared-renderer compatibility.                                                                                                                                                                                                                                          |
+| `layer`     | string         | Always `web` for a web scorecard row.                                                                                                                                                                                                                                                           |
+| `keyword`   | string         | `must`, `should`, or `may`, derived from the check's tier.                                                                                                                                                                                                                                      |
+| `tier`      | string         | `required`, `recommended`, or `optional` (the keyword's source).                                                                                                                                                                                                                                |
+| `principle` | string         | Internal principle tag `P1` through `P8`. Kept as data; web surfaces neither display nor link it.                                                                                                                                                                                               |
+| `status`    | string         | `pass`, `noncompliant`, `broken`, `absent`, `n_a`, `skip`, or `error`. `noncompliant` = works but violates a spec detail; `broken` = present but invalid; `absent` = not there. See [statuses](#statuses).                                                                                      |
+| `na_reason` | string         | Present only on `n_a` rows, one of a closed set. See [statuses](#statuses) for every value. Absent on handler-emitted `n_a` rows with nothing to probe.                                                                                                                                         |
+| `unprobed`  | boolean        | Present only when `true`: the row settled from an antecedent the audit did observe rather than from its own request, so the run holds no observation of the surface itself. It still scores, and it carries no `remediation` object, because a fix prompt would name a defect nothing observed. |
+| `evidence`  | string \| null | A compact human-readable summary of what the probe observed.                                                                                                                                                                                                                                    |
+| `hosts`     | array          | The distinct hosts the row's evidence was requested from, as `{ host }` objects in evidence order. Empty when the row settled without a request (an unmet antecedent, a skipped check) or its evidence names no URL; a URL the SSRF guard refused names no host.                                |
+| `host`      | string         | Present only when `hosts` has exactly one entry: that host. A row carrying neither `hosts` nor `host` reads as evaluated at the audited host.                                                                                                                                                   |
 
 ### Statuses
 
@@ -209,12 +225,23 @@ One object per check.
 - `broken` — the surface exists but is invalid (malformed body, wrong content-type, an unexpected status where the
   surface clearly exists). Scores below absent.
 - `absent` — the surface is not there (404/410, no DNS records, no CORS headers).
-- `n_a` — excluded from both scores; `na_reason` says why: `antecedent-unmet` (does not apply to this site),
-  `optional-absent` (an applicable MAY not implemented), or `posture-consistent` (the CORS pair's deliberate no-CORS
-  posture, with `Access-Control-Allow-Origin` on neither the preflight nor the POST). A handler with nothing to probe
-  (no discovered MCP endpoint) emits `n_a` with no `na_reason`.
+- `n_a` — excluded from both scores; `na_reason` says why, from a closed set:
+  - `antecedent-unmet`: the check does not apply to this site.
+  - `optional-absent`: an applicable MAY that is not implemented.
+  - `posture-consistent`: the CORS pair's deliberate no-CORS posture, with `Access-Control-Allow-Origin` on neither the
+    preflight nor the POST.
+  - `follow-disabled`: the check depends on a host the site declares, and declared hosts were not followed for this
+    audit.
+  - `reciprocity-refused`: the declared host did not confirm the endpoint the site named.
+  - `declared-host-unreachable`: the declared host did not answer.
+  - `declared-host-budget-exceeded`: anc's hourly probe limit for the declared host was reached.
+  - `auth-required`: the host requires sign-in before the check can run.
 - `skip` — the per-audit deadline passed before the check ran.
 - `error` — an operational failure (network error, timeout); never credited, never penalized.
+
+A handler with nothing to probe (no discovered MCP endpoint) emits `n_a` with no `na_reason`. The derived `result` line
+leads with the reason's own phrase, and the last five reasons begin "Not evaluated:", for example "Not evaluated:
+mcp.example.com requires sign-in".
 
 ## Remediation on the MCP surface
 

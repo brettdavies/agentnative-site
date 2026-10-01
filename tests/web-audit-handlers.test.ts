@@ -30,6 +30,7 @@ import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 import { captureLogs } from './helpers/log-capture';
 import { isModernProbe, MODERN_PROTOCOL } from './helpers/mcp-modern';
 import { resetMcpTestState } from './helpers/mcp-rpc';
+import { stubFetch } from './helpers/stub-fetch';
 
 function ctx(overrides: Partial<HandlerContext> & { fetchImpl: typeof fetch }): HandlerContext {
   return {
@@ -41,13 +42,6 @@ function ctx(overrides: Partial<HandlerContext> & { fetchImpl: typeof fetch }): 
     fetchOptions: { fetchImpl: overrides.fetchImpl },
     ...overrides,
   };
-}
-
-function stubFetch(handler: (url: string, init?: RequestInit) => Response): typeof fetch {
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-    return handler(url, init);
-  }) as typeof fetch;
 }
 
 function check(partial: Partial<WebCheck>): WebCheck {

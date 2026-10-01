@@ -12,6 +12,7 @@ and `tests/web-audit-conformance-corpus.test.ts` fails when the two disagree.
 tests/fixtures/web-audit-conformance/
   README.md                        this file
   regex-parity.json                every registry pattern x a fixed probe table -> RegExp boolean
+  scores.json                      every scenario's scores and row statuses, one line per row
   scenarios/<name>/scenario.json   input: target, site type, exchanges, unmatched policy
   scenarios/<name>/scorecard.json  output: the engine's scorecard, normalized as described below
 ```
@@ -51,6 +52,21 @@ every number is an integer. A scenario that ends in
 the engine's `unreachable` event writes `{"unreachable": "<reason>"}` instead of a scorecard. The engine runs
 under a fixed clock, so no per-audit deadline fires; per-probe timeouts appear only as declared transport
 failures.
+
+Each row's `hosts` lists the distinct hosts its raw evidence items were requested from, in evidence order, as
+`{"host": ...}` objects. Only an item with a string `url` and no `blocked` marker counts: a request the SSRF
+guard refused never reached a host. The host is the WHATWG URL `host`, which keeps a non-default port
+(`example.com:8443`), so an engine whose URL library drops the port must add it back. An item whose `url` does
+not parse contributes nothing, and a row with no counting item has `hosts: []`. `host` is present, holding the
+same value, exactly when `hosts` has one entry.
+
+## scores.json
+
+One entry per scenario, keyed by scenario name in sorted order: `score_pct`, `score` (`relative` and
+`global`), and `results`, one line per row in registry order carrying the row's `id`, `status`, and
+`na_reason` when it has one. A scenario that ends unreachable reads `{"unreachable": true}`. Every value is
+copied from the scenario's `scorecard.json`, so the file adds no contract of its own; it turns a regeneration that
+moves a score or a row status into a short diff of one file instead of a change buried in a full golden.
 
 ## regex-parity.json
 

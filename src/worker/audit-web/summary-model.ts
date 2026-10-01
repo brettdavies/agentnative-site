@@ -8,10 +8,20 @@
 // so a change to one had no way of reaching the other.
 //
 // This module also owns the display vocabulary. STATUS_LABELS is the single
-// enumeration of the seven schema 0.4 statuses; STATUS_ORDER derives from it
+// enumeration of the seven web scorecard statuses; STATUS_ORDER derives from it
 // rather than repeating the list, so a status added there reaches the labels,
 // the marks, the counts, and the machine context together.
 
+import {
+  type DeclaredHostEntry,
+  entryHostOf,
+  type FollowState,
+  type RowHost,
+  readDeclaredHosts,
+  readFollowState,
+  readRegistryFingerprint,
+  rowHostOf,
+} from './provenance';
 import type { McpLaneSpec } from './registry';
 import type { WebRemediationResource } from './remediation';
 import { assembleRemediation, isFixableStatus, resultLine, type WebRemediationCatalog } from './remediation';
@@ -28,12 +38,17 @@ export type WebScorecardRow = {
   na_reason?: NaReason;
   unprobed?: true;
   evidence: string | null;
+  hosts?: RowHost[];
+  host?: string;
 };
 
 export type WebScorecardShape = {
   spec_version?: string;
   target_url?: string;
   tool?: { name?: string; url?: string };
+  follow_declarations?: unknown;
+  declared_hosts?: unknown;
+  registry_fingerprint?: unknown;
   score_pct?: number;
   score?: { relative?: number; global?: number };
   categories?: Array<{ id: string; name: string; passed: number; counted: number }>;
@@ -139,6 +154,11 @@ export type WebSummaryModel = {
   global: number;
   counts: Record<ScorecardStatus, number>;
   categories: SummaryCategory[];
+  followDeclarations: FollowState;
+  /** Null when the scorecard recorded no trail, which is not the same as an empty one. */
+  declaredHosts: DeclaredHostEntry[] | null;
+  /** Null when the registry version the score was computed under is unknown. */
+  registryFingerprint: string | null;
 };
 
 export interface WebSummaryModelInput {
@@ -171,7 +191,12 @@ function isFixable(row: WebScorecardRow): boolean {
   return row.unprobed !== true && isFixableStatus(row.status);
 }
 
-function summaryRow(row: WebScorecardRow, catalog: WebRemediationCatalog, origin: string): SummaryRow {
+function summaryRow(
+  row: WebScorecardRow,
+  catalog: WebRemediationCatalog,
+  origin: string,
+  entryHost: string,
+): SummaryRow {
   const entry = catalog[row.id];
   const assembled = assembleRemediation(entry, { checkId: row.id, origin, evidence: row.evidence });
   return {
@@ -182,7 +207,7 @@ function summaryRow(row: WebScorecardRow, catalog: WebRemediationCatalog, origin
     status: row.status,
     unprobed: row.unprobed === true,
     fixable: isFixable(row),
-    result: resultLine(row.status, row.evidence, row.na_reason),
+    result: resultLine(row.status, row.evidence, row.na_reason, rowHostOf(row, entryHost)),
     goal: entry?.goal ?? assembled.goal,
     fix: assembled.fix,
     prompt: assembled.prompt,
@@ -250,12 +275,13 @@ export function webSummaryModel(input: WebSummaryModelInput): WebSummaryModel {
   const { relative, global: globalScore } = scoresOf(sc);
   const lanes = input.registry?.mcp_lanes ?? {};
   const placement = lanePlacement(input.registry);
+  const entryHost = entryHostOf(sc.target_url) ?? input.domain;
 
   const byCategory = new Map<string, SummaryRow[]>();
   for (const row of rows) {
     const key = row.category ?? '';
     const bucket = byCategory.get(key) ?? [];
-    bucket.push(summaryRow(row, catalog, input.origin));
+    bucket.push(summaryRow(row, catalog, input.origin, entryHost));
     byCategory.set(key, bucket);
   }
 
@@ -270,5 +296,8 @@ export function webSummaryModel(input: WebSummaryModelInput): WebSummaryModel {
       const laneRows = laneBlocks(categoryRows, lanes, placement);
       return { ...category, rows: categoryRows, ...(laneRows ? { lanes: laneRows } : {}) };
     }),
+    followDeclarations: readFollowState(sc.follow_declarations),
+    declaredHosts: readDeclaredHosts(sc.declared_hosts),
+    registryFingerprint: readRegistryFingerprint(sc.registry_fingerprint),
   };
 }

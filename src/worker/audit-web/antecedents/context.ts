@@ -3,6 +3,7 @@
 // resolves a subset of the tokens against this context; index.ts composes
 // them into the dispatch tables.
 
+import type { NaReason } from '../../../shared/web-audit-findings';
 import type { ProbeResponse } from '../assert';
 import type { EvidenceItem, ProbeOutcome } from '../handlers/types';
 import type { WebSiteType } from '../registry';
@@ -18,7 +19,14 @@ export interface AntecedentContext {
   sources: ReadonlyMap<string, ProbeOutcome>;
 }
 
-export type AntecedentResolution = 'apply' | 'n_a' | 'error';
+/** Whether a check applies, does not, or cannot be decided because the root never answered. */
+export type AntecedentOutcome = 'apply' | 'n_a' | 'error';
+
+/**
+ * A resolver's result: a bare outcome, or an `n_a` that names its reason,
+ * which the gate stamps on the row in place of `antecedent-unmet`.
+ */
+export type AntecedentResolution = AntecedentOutcome | { outcome: 'n_a'; reason: NaReason };
 
 /** Resolves one antecedent token against the wave-1 context. */
 export type AntecedentResolver = (ctx: AntecedentContext) => AntecedentResolution;
@@ -32,7 +40,7 @@ export function rootContentType(ctx: AntecedentContext): string {
  * root never answered, `'n_a'` when it answered as non-HTML, and `null`
  * when it is HTML and the caller should keep resolving.
  */
-export function htmlRootGate(ctx: AntecedentContext): Exclude<AntecedentResolution, 'apply'> | null {
+export function htmlRootGate(ctx: AntecedentContext): Exclude<AntecedentOutcome, 'apply'> | null {
   if (ctx.root === null || ctx.root.status === null) return 'error';
   if (!rootContentType(ctx).includes('text/html')) return 'n_a';
   return null;

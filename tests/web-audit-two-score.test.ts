@@ -8,6 +8,7 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { NA_REASONS } from '../src/shared/web-audit-findings';
 import {
   categoryRollups,
   DEFAULT_BROKEN_FACTOR,
@@ -26,6 +27,7 @@ const PY_TOOL = join(REPO_ROOT, 'scripts', 'scoring', 'score_model.py');
 type TierOutcome = [keyof ScoreWeights, 'pass' | 'noncompliant' | 'broken' | 'absent' | 'n_a'];
 
 interface ParityFixture {
+  scoring_input: string[];
   weights: ScoreWeights;
   broken_factor: number;
   noncompliant_credit: number;
@@ -160,6 +162,31 @@ describe('score_model.py parity (shared fixture)', () => {
     expect({ relative: score.relative, global: score.global }).toEqual(fixture.expected);
   });
 
+  // Provenance and n_a reasons ride on every row, so they must never reach
+  // a score; the Python model checks the same declared input list.
+  test('the engine scorer reads only the declared scoring input: hosts and n_a reasons never move a score', () => {
+    expect(fixture.scoring_input).toEqual(['keyword', 'status']);
+    const universeMax = universeMaxOf(
+      fixture.universe_tiers.map((keyword) => ({ keyword })),
+      { weights: fixture.weights },
+    );
+    const config = {
+      weights: fixture.weights,
+      brokenFactor: fixture.broken_factor,
+      noncompliantCredit: fixture.noncompliant_credit,
+    };
+    const decorated = fixture.rows.map(([keyword, status], i) => ({
+      keyword,
+      status,
+      hosts: [{ host: `h${i}.example` }, { host: 'api.example' }],
+      host: `h${i}.example`,
+      ...(status === 'n_a' ? { na_reason: NA_REASONS[i % NA_REASONS.length] } : {}),
+    }));
+    const score = scoreWebAudit(decorated, universeMax, config);
+    expect(score).toEqual(scoreWebAudit(rowsToResults(fixture.rows), universeMax, config));
+    expect({ relative: score.relative, global: score.global }).toEqual(fixture.expected);
+  });
+
   // The dev tool is guarded from main (guard-main-docs extra_paths), so
   // this cross-check runs only on branches that carry it; the committed
   // `expected` above is the always-on invariant.
@@ -203,7 +230,7 @@ describe('categoryRollups', () => {
   });
 });
 
-describe('buildWebScorecard (schema 0.4)', () => {
+describe('buildWebScorecard (schema 0.5)', () => {
   function engineRow(partial: Partial<EngineResult>): EngineResult {
     return {
       id: 'llms-txt',
@@ -251,7 +278,7 @@ describe('buildWebScorecard (schema 0.4)', () => {
 
   test('carries score_pct (RELATIVE), the score pair, and no badge', () => {
     expect(scorecard.schema_version).toBe(WEB_SCHEMA_VERSION);
-    expect(WEB_SCHEMA_VERSION).toBe('0.4');
+    expect(WEB_SCHEMA_VERSION).toBe('0.5');
     expect(typeof scorecard.score_pct).toBe('number');
     expect(scorecard.score_pct).toBe(scorecard.score.relative);
     expect(typeof scorecard.score.global).toBe('number');
@@ -269,6 +296,53 @@ describe('buildWebScorecard (schema 0.4)', () => {
       { id: 'discoverability', name: 'Discoverability', passed: 0, counted: 0 },
       { id: 'content-for-agents', name: 'Content for agents', passed: 1, counted: 2 },
     ]);
+  });
+
+  test('a row carries the distinct hosts its evidence was requested from, and host only when there is one', () => {
+    const built = buildWebScorecard(
+      [
+        engineRow({
+          id: 'one-host',
+          raw_evidence: [{ url: 'https://example.com/llms.txt' }, { url: 'https://example.com/llms-full.txt' }],
+        }),
+        engineRow({
+          id: 'two-hosts',
+          raw_evidence: [
+            { url: 'https://api.example.com/v1/nope' },
+            { url: 'https://example.com/openapi.json' },
+            { url: 'https://api.example.com/v1/also-nope' },
+          ],
+        }),
+        engineRow({
+          id: 'no-request',
+          status: 'n_a',
+          na_reason: 'antecedent-unmet',
+          raw_evidence: [{ why: ['no API surface detected'] }],
+        }),
+        engineRow({
+          id: 'guard-refused',
+          raw_evidence: [
+            { url: 'http://10.0.0.5/docs', blocked: 'blocked: ipv4 10.0.0.5 is in blocked range 10.0.0.0/8' },
+            { url: 'https://example.com/docs' },
+          ],
+        }),
+      ],
+      {
+        targetUrl: 'https://example.com/',
+        domain: 'example.com',
+        mcpEndpoint: null,
+        discoveryEvidence: [],
+        specVersion: '0.5.0',
+        registry,
+      },
+    );
+    const row = (id: string) => built.results.find((r) => r.id === id) ?? {};
+    expect(row('one-host')).toMatchObject({ hosts: [{ host: 'example.com' }], host: 'example.com' });
+    expect(row('two-hosts')).toMatchObject({ hosts: [{ host: 'api.example.com' }, { host: 'example.com' }] });
+    expect('host' in row('two-hosts')).toBe(false);
+    expect(row('no-request')).toMatchObject({ hosts: [] });
+    expect('host' in row('no-request')).toBe(false);
+    expect(row('guard-refused')).toMatchObject({ hosts: [{ host: 'example.com' }], host: 'example.com' });
   });
 
   test('rows carry category + hidden principle + na_reason where set', () => {

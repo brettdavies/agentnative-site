@@ -4,6 +4,7 @@
 // the SSRF guard (src/worker/audit-web/ssrf.ts); no handler calls fetch
 // directly.
 
+import type { NaReason } from '../../../shared/web-audit-findings';
 import type { ProbeResponse } from '../assert';
 import type { GuardedFetchOptions } from '../ssrf';
 
@@ -22,17 +23,6 @@ export type ProbeStatus = 'pass' | 'noncompliant' | 'broken' | 'absent' | 'na' |
 
 /** Handler-specific evidence rows, kept structurally open like the extracted JSON. */
 export type EvidenceItem = Record<string, unknown>;
-
-/**
- * Why a row is n_a: `antecedent-unmet` = the check does not apply to
- * this site (declared type or runtime antecedent); `optional-absent` =
- * it applies, is a MAY, and simply is not implemented;
- * `posture-consistent` = the probed surfaces show a deliberate,
- * consistent opt-out (the CORS pair with Allow-Origin on neither
- * surface). A handler with nothing to probe (no discovered MCP endpoint)
- * emits n_a with no reason.
- */
-export type NaReason = 'antecedent-unmet' | 'optional-absent' | 'posture-consistent';
 
 /**
  * Whether the target serves the modern MCP era, read from the wave-1

@@ -4,6 +4,7 @@
 import { describe, expect, test } from 'bun:test';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
+import { stubFetch } from './helpers/stub-fetch';
 
 function makeCheck(partial: Partial<WebCheck> & { id: string }): WebCheck {
   return {
@@ -109,13 +110,6 @@ function resultsOf(events: AuditEvent[]) {
   return events.flatMap((e) => (e.type === 'result' ? [e.result] : []));
 }
 
-function siteFetch(handler: (url: string, init?: RequestInit) => Response): typeof fetch {
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-    return handler(url, init);
-  }) as typeof fetch;
-}
-
 function mcpInitialize(capabilities: Record<string, unknown> = {}): Response {
   return new Response(
     JSON.stringify({
@@ -140,7 +134,7 @@ function resourcesList(resources: Array<{ uri: string }>): Response {
 
 describe('API hygiene + MCP resources + ARD', () => {
   test('no api-surface leaves JSON-errors and rate-limit n_a', async () => {
-    const fetchImpl = siteFetch((url) => {
+    const fetchImpl = stubFetch((url) => {
       if (url.endsWith('/openapi.json')) return new Response('nope', { status: 404 });
       return new Response('<html><body>no api</body></html>', {
         status: 200,
@@ -158,7 +152,7 @@ describe('API hygiene + MCP resources + ARD', () => {
   });
 
   test('API present with an HTML error body misses json-errors', async () => {
-    const fetchImpl = siteFetch((url, init) => {
+    const fetchImpl = stubFetch((url, init) => {
       if (url.endsWith('/mcp') && init?.method === 'POST') return mcpInitialize();
       if (url.endsWith('/openapi.json')) {
         return new Response(OPENAPI_SPEC, { status: 200, headers: { 'content-type': 'application/json' } });
@@ -179,7 +173,7 @@ describe('API hygiene + MCP resources + ARD', () => {
   });
 
   test('API present with rate-limit headers passes rate-limit-headers', async () => {
-    const fetchImpl = siteFetch((url, init) => {
+    const fetchImpl = stubFetch((url, init) => {
       if (url.endsWith('/mcp') && init?.method === 'POST') return mcpInitialize();
       if (url.endsWith('/openapi.json')) {
         return new Response(OPENAPI_SPEC, { status: 200, headers: { 'content-type': 'application/json' } });
@@ -202,7 +196,7 @@ describe('API hygiene + MCP resources + ARD', () => {
   });
 
   test('capabilities omit resources → resources check n_a', async () => {
-    const fetchImpl = siteFetch((url, init) => {
+    const fetchImpl = stubFetch((url, init) => {
       if (url.endsWith('/mcp') && init?.method === 'POST') {
         const body = JSON.parse(String(init.body));
         if (body.method === 'initialize') return mcpInitialize({ tools: {} });
@@ -220,7 +214,7 @@ describe('API hygiene + MCP resources + ARD', () => {
   });
 
   test('capabilities.resources set with an empty list is broken', async () => {
-    const fetchImpl = siteFetch((url, init) => {
+    const fetchImpl = stubFetch((url, init) => {
       if (url.endsWith('/mcp') && init?.method === 'POST') {
         const body = JSON.parse(String(init.body));
         if (body.method === 'initialize') return mcpInitialize({ resources: {} });
@@ -238,7 +232,7 @@ describe('API hygiene + MCP resources + ARD', () => {
 
   test('resources-list follows initialize session id and initialized notification', async () => {
     const methods: string[] = [];
-    const fetchImpl = siteFetch((url, init) => {
+    const fetchImpl = stubFetch((url, init) => {
       if (url.endsWith('/mcp') && init?.method === 'POST') {
         const body = JSON.parse(String(init.body));
         methods.push(body.method);
@@ -288,7 +282,7 @@ describe('API hygiene + MCP resources + ARD', () => {
   });
 
   test('missing ai-catalog is optional-absent n_a', async () => {
-    const fetchImpl = siteFetch((url) => {
+    const fetchImpl = stubFetch((url) => {
       if (url.endsWith('/ai-catalog.json')) return new Response('gone', { status: 404 });
       return new Response('<html></html>', { status: 200, headers: { 'content-type': 'text/html' } });
     });

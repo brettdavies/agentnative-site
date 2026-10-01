@@ -7,8 +7,8 @@
 // always-shown Result line derived from status + evidence.
 
 import { fixPath } from '../../shared/audit-routes';
-import { isRemediableStatus } from '../../shared/web-audit-findings';
-import type { NaReason, ScorecardStatus } from './scorecard';
+import { isRemediableStatus, type NaReason, naReasonPhrase } from '../../shared/web-audit-findings';
+import type { ScorecardStatus } from './scorecard';
 
 export interface WebRemediationResource {
   label: string;
@@ -156,10 +156,16 @@ export function isFixableStatus(status: ScorecardStatus): boolean {
 
 /**
  * The always-shown Result line, derived uniformly from status + evidence
- * (affirmative for pass, negative otherwise). Bespoke per-check copy is
- * a deferred optional override.
+ * (affirmative for pass, negative otherwise). An `n_a` row with a reason
+ * leads with that reason's shared phrase, which names `host`, the row's
+ * host. Bespoke per-check copy is a deferred optional override.
  */
-export function resultLine(status: ScorecardStatus, evidence: string | null, naReason?: NaReason): string {
+export function resultLine(
+  status: ScorecardStatus,
+  evidence: string | null,
+  naReason: NaReason | undefined,
+  host: string,
+): string {
   const detail = evidence && evidence.length > 0 ? ` (${evidence})` : '';
   switch (status) {
     case 'pass':
@@ -171,9 +177,7 @@ export function resultLine(status: ScorecardStatus, evidence: string | null, naR
     case 'absent':
       return `Not found${detail}`;
     case 'n_a':
-      if (naReason === 'optional-absent') return `Not implemented, optional${detail}`;
-      if (naReason === 'posture-consistent') return `Deliberate posture, not scored${detail}`;
-      return `Not applicable${detail}`;
+      return `${naReason === undefined ? 'Not applicable' : naReasonPhrase(naReason, host)}${detail}`;
     case 'skip':
       return `Not evaluated: audit deadline exceeded${detail}`;
     case 'error':

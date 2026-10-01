@@ -1,5 +1,6 @@
 {
-  "description": "Shared scoring fixture: src/worker/audit-web/score.ts (tests/web-audit-two-score.test.ts) and scripts/scoring/score_model.py --fixture must both produce `expected`. Non-default weights, broken factor and noncompliant credit exercise the config surface.",
+  "description": "Shared scoring fixture: src/worker/audit-web/score.ts (tests/web-audit-two-score.test.ts) and scripts/scoring/score_model.py --fixture must both produce `expected`. Non-default weights, broken factor and noncompliant credit exercise the config surface. `scoring_input` names the row fields both scorers compute a score from.",
+  "scoring_input": ["keyword", "status"],
   "weights": { "must": 4, "should": 2.5, "may": 1 },
   "broken_factor": 0.6,
   "noncompliant_credit": 0.4,

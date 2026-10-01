@@ -13,7 +13,7 @@ import { normalizeWebAuditRegistry } from '../../src/build/13-web-audit-registry
 import type { ExpectBlock } from '../../src/worker/audit-web/assert';
 import { runWebAudit } from '../../src/worker/audit-web/engine';
 import type { WebAuditRegistry, WebSiteType } from '../../src/worker/audit-web/registry';
-import type { WebScorecard } from '../../src/worker/audit-web/scorecard';
+import type { NaReason, ScorecardStatus, WebScorecard } from '../../src/worker/audit-web/scorecard';
 import { SCENARIOS } from './conformance-scenarios';
 
 export const REPO_ROOT = join(import.meta.dir, '..', '..');
@@ -359,6 +359,46 @@ export function regexParityFixture(registry: WebAuditRegistry): RegexParityFixtu
 }
 
 // ---------------------------------------------------------------------------
+// scores.json
+// ---------------------------------------------------------------------------
+
+type ScoreIndexRow = { id: string; status: ScorecardStatus; na_reason?: NaReason };
+
+type ScoreIndexEntry =
+  | { unreachable: true }
+  | { score_pct: number; score: { relative: number; global: number }; results: ScoreIndexRow[] };
+
+function scoreIndexEntry(output: string): ScoreIndexEntry {
+  const parsed = JSON.parse(output) as { unreachable: string } | WebScorecard;
+  if ('unreachable' in parsed) return { unreachable: true };
+  return {
+    score_pct: parsed.score_pct,
+    score: { relative: parsed.score.relative, global: parsed.score.global },
+    results: parsed.results.map((row) => ({
+      id: row.id,
+      status: row.status,
+      ...(row.na_reason !== undefined ? { na_reason: row.na_reason } : {}),
+    })),
+  };
+}
+
+/** One line per row, so a moved status is a one-line diff. */
+function scoresJson(entries: ReadonlyArray<[string, ScoreIndexEntry]>): string {
+  const blocks = entries.map(([name, entry]) => {
+    if ('unreachable' in entry) return `  ${JSON.stringify(name)}: ${JSON.stringify(entry)}`;
+    const rows = entry.results.map((row) => `      ${JSON.stringify(row)}`);
+    return [
+      `  ${JSON.stringify(name)}: {`,
+      `    "score_pct": ${JSON.stringify(entry.score_pct)},`,
+      `    "score": ${JSON.stringify(entry.score)},`,
+      rows.length === 0 ? '    "results": []' : `    "results": [\n${rows.join(',\n')}\n    ]`,
+      '  }',
+    ].join('\n');
+  });
+  return `{\n${blocks.join(',\n')}\n}\n`;
+}
+
+// ---------------------------------------------------------------------------
 // Corpus generation
 // ---------------------------------------------------------------------------
 
@@ -419,6 +459,7 @@ and \`tests/web-audit-conformance-corpus.test.ts\` fails when the two disagree.
 tests/fixtures/web-audit-conformance/
   README.md                        this file
   regex-parity.json                every registry pattern x a fixed probe table -> RegExp boolean
+  scores.json                      every scenario's scores and row statuses, one line per row
   scenarios/<name>/scenario.json   input: target, site type, exchanges, unmatched policy
   scenarios/<name>/scorecard.json  output: the engine's scorecard, normalized as described below
 \`\`\`
@@ -459,6 +500,21 @@ the engine's \`unreachable\` event writes \`{"unreachable": "<reason>"}\` instea
 under a fixed clock, so no per-audit deadline fires; per-probe timeouts appear only as declared transport
 failures.
 
+Each row's \`hosts\` lists the distinct hosts its raw evidence items were requested from, in evidence order, as
+\`{"host": ...}\` objects. Only an item with a string \`url\` and no \`blocked\` marker counts: a request the SSRF
+guard refused never reached a host. The host is the WHATWG URL \`host\`, which keeps a non-default port
+(\`example.com:8443\`), so an engine whose URL library drops the port must add it back. An item whose \`url\` does
+not parse contributes nothing, and a row with no counting item has \`hosts: []\`. \`host\` is present, holding the
+same value, exactly when \`hosts\` has one entry.
+
+## scores.json
+
+One entry per scenario, keyed by scenario name in sorted order: \`score_pct\`, \`score\` (\`relative\` and
+\`global\`), and \`results\`, one line per row in registry order carrying the row's \`id\`, \`status\`, and
+\`na_reason\` when it has one. A scenario that ends unreachable reads \`{"unreachable": true}\`. Every value is
+copied from the scenario's \`scorecard.json\`, so the file adds no contract of its own; it turns a regeneration that
+moves a score or a row status into a short diff of one file instead of a change buried in a full golden.
+
 ## regex-parity.json
 
 \`probes\` is one fixed string table; \`patterns\` lists every \`content_type\`, \`header_regex\`, \`body_regex\`
@@ -478,14 +534,17 @@ export async function generateCorpus(registry: WebAuditRegistry): Promise<Map<st
   const ids = new Set(registry.checks.map((check) => check.id));
   const names = Object.keys(SCENARIOS).sort();
   const files = new Map<string, string>();
+  const scores: Array<[string, ScoreIndexEntry]> = [];
   for (const name of names) {
     const scenario = SCENARIOS[name];
     validateScenario(name, scenario, ids);
     const run = await runScenario(name, scenario, registry);
     files.set(`scenarios/${name}/scenario.json`, scenarioJson(scenario));
     files.set(`scenarios/${name}/scorecard.json`, run.output);
+    scores.push([name, scoreIndexEntry(run.output)]);
   }
   files.set('regex-parity.json', `${JSON.stringify(regexParityFixture(registry), null, 2)}\n`);
+  files.set('scores.json', scoresJson(scores));
   files.set('README.md', readme(names));
   return files;
 }

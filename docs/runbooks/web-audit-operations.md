@@ -25,7 +25,7 @@ the old content, and the deploy hook re-scores it once the release lands (see
 `POST /api/score` with a JSON body `{ target, site_type?, public_listing?, turnstile_token }` streams NDJSON for either
 lane; a website target is any host or URL. The terminal `complete` event is the shared result envelope: `{ kind, tier,
 target, scorecard_url, markdown_url, json_url, freshness, spec_version, scorecard }`, carrying the full web scorecard
-(schema `0.4`). `site_type` is optional (`content` | `api`); omit it to let the audit auto-detect.
+(schema `0.5`). `site_type` is optional (`content` | `api`); omit it to let the audit auto-detect.
 
 A cache hit answers with a single `application/json` body instead of a stream: the same envelope with no `type`.
 Content-type is the discriminator: `application/json` means served from cache, NDJSON means the engine ran. Both shapes
