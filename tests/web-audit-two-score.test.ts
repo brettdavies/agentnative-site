@@ -40,11 +40,17 @@ function rowsToResults(rows: TierOutcome[]): Array<Pick<EngineResult, 'keyword' 
   return rows.map(([keyword, status]) => ({ keyword, status }));
 }
 
+/** The universe of a registry holding one ungated check per tier listed, with no alternatives. */
+function tierUniverse(tiers: ReadonlyArray<keyof ScoreWeights>, weights?: ScoreWeights): number {
+  const checks = tiers.map((keyword, i) => ({ id: `u${i}`, keyword, antecedent: 'none' as const }));
+  return universeMaxOf({ checks }, [], { weights });
+}
+
 /** A registry-shaped universe: 5 MUST, 15 SHOULD, 16 MAY at default weights. */
-const UNIVERSE_MAX = universeMaxOf([
-  ...Array.from({ length: 5 }, () => ({ keyword: 'must' as const })),
-  ...Array.from({ length: 15 }, () => ({ keyword: 'should' as const })),
-  ...Array.from({ length: 16 }, () => ({ keyword: 'may' as const })),
+const UNIVERSE_MAX = tierUniverse([
+  ...Array.from({ length: 5 }, () => 'must' as const),
+  ...Array.from({ length: 15 }, () => 'should' as const),
+  ...Array.from({ length: 16 }, () => 'may' as const),
 ]);
 
 function bucketRows(buckets: Partial<Record<string, number>>): Array<Pick<EngineResult, 'keyword' | 'status'>> {
@@ -150,10 +156,7 @@ describe('score_model.py parity (shared fixture)', () => {
   const fixture = JSON.parse(readFileSync(FIXTURE_PATH, 'utf8')) as ParityFixture;
 
   test('the engine scorer reproduces the committed expected scores', () => {
-    const universeMax = universeMaxOf(
-      fixture.universe_tiers.map((keyword) => ({ keyword })),
-      { weights: fixture.weights },
-    );
+    const universeMax = tierUniverse(fixture.universe_tiers, fixture.weights);
     const score = scoreWebAudit(rowsToResults(fixture.rows), universeMax, {
       weights: fixture.weights,
       brokenFactor: fixture.broken_factor,
@@ -166,10 +169,7 @@ describe('score_model.py parity (shared fixture)', () => {
   // a score; the Python model checks the same declared input list.
   test('the engine scorer reads only the declared scoring input: hosts and n_a reasons never move a score', () => {
     expect(fixture.scoring_input).toEqual(['keyword', 'status']);
-    const universeMax = universeMaxOf(
-      fixture.universe_tiers.map((keyword) => ({ keyword })),
-      { weights: fixture.weights },
-    );
+    const universeMax = tierUniverse(fixture.universe_tiers, fixture.weights);
     const config = {
       weights: fixture.weights,
       brokenFactor: fixture.broken_factor,

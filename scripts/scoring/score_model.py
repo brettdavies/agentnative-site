@@ -124,7 +124,7 @@ class Rows:
         return {
             "earned": round(earned, 1),
             "relative": max(0, relative),
-            "global": max(0, global_),
+            "global": min(100, max(0, global_)),
         }
 
 

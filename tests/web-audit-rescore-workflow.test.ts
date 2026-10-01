@@ -421,6 +421,22 @@ describe('runWebRescore', () => {
       two.checks = [...two.checks, { ...two.checks[0], id: 'second' }];
       expect(await fpOf(two)).not.toBe(base);
     });
+
+    // An alternative group decides which checks a site's global universe
+    // counts, so every stored global depends on it.
+    test('declaring or changing an alternative group reflows', async () => {
+      const grouped = (variants: Record<string, string[]>) => ({
+        ...registryWith({}),
+        alternatives: [{ group: 'mcp-access', variants }],
+      });
+      const base = await fpOf(registryWith({}));
+      const declared = await fpOf(grouped({ open: ['mcp-session'], protected: ['mcp-auth-required'] }));
+      const widened = await fpOf(grouped({ open: ['mcp-session', 'mcp-resources'], protected: ['mcp-auth-required'] }));
+      expect({ declared: declared === base, widened: widened === declared }).toEqual({
+        declared: false,
+        widened: false,
+      });
+    });
   });
 
   test('a changed registry fingerprint reflows every domain even when all are fresh', async () => {

@@ -52,7 +52,6 @@ const BASE = 'https://example.com/';
 const registry = normalizeWebAuditRegistry(
   yaml.load(await readFile(REGISTRY_PATH, 'utf8')) as object,
 ) as unknown as WebAuditRegistry;
-const universeMax = universeMaxOf(registry.checks);
 
 const json = (body: object, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -284,7 +283,7 @@ function auditOf(label: string, fetchImpl: typeof fetch): Promise<Audit> {
     }) as AsyncGenerator<AuditEvent>) {
       if (event.type === 'result') rows.push(event.result);
     }
-    return { score: scoreWebAudit(rows, universeMax), rows };
+    return { score: scoreWebAudit(rows, universeMaxOf(registry, rows)), rows };
   })();
   audits.set(label, run);
   return run;
@@ -539,6 +538,10 @@ describe('an operational condition on the discriminator is not an era verdict', 
 });
 
 describe('the scorer prices the four scored statuses in one order, for every check', () => {
+  // The synthetic rows below name no check, so they present no alternative
+  // and every one of them scores against the same universe.
+  const universeMax = universeMaxOf(registry, []);
+
   test('pass beats noncompliant beats absent beats broken', async () => {
     // The whole model in one assertion, on synthetic rows so it reads as
     // the scorer's rule rather than an MCP-handler behavior. Every

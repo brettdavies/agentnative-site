@@ -64,6 +64,15 @@ export interface WebCheck {
   with: Record<string, unknown>;
 }
 
+/**
+ * Checks that are alternatives: mutually exclusive outcomes of one probe.
+ * Each variant names the antecedent tokens whose checks form it.
+ */
+export interface WebAlternativeGroup {
+  group: string;
+  variants: Record<string, AntecedentToken[]>;
+}
+
 /** One protocol lane the MCP category's rows group under, keyed by lane id. */
 export interface McpLaneSpec {
   label: string;
@@ -87,6 +96,8 @@ export interface WebAuditRegistry {
   categories: Record<string, string>;
   /** Display order is key order. */
   mcp_lanes?: Record<string, McpLaneSpec>;
+  /** Absent reads as no alternatives: every check counts in the global universe. */
+  alternatives?: WebAlternativeGroup[];
   checks: WebCheck[];
 }
 

@@ -101,6 +101,20 @@ mcp_lanes:
     label: In-page tools · WebMCP
     note: browser tools exposed by the site's HTML, not by the MCP server
 
+# Checks that are alternatives: mutually exclusive outcomes of one probe, so
+# no single site can earn every variant. A variant names antecedent tokens,
+# and every check gated on one of them belongs to it. The global score's
+# universe (src/worker/audit-web/score.ts) counts each variant the site
+# presents, meaning one of its rows reads anything but n_a or an n_a reason
+# only an applicable check carries, and the largest variant when the site
+# presents none. An endpoint that serves some probes without sign-in and
+# refuses others with a 401 presents both MCP access variants.
+alternatives:
+  - group: mcp-access
+    variants:
+      open: [mcp-session, mcp-resources]
+      protected: [mcp-auth-required]
+
 checks:
   # ---- API -----------------------------------------------------------------
   - id: openapi

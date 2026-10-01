@@ -144,7 +144,7 @@ export interface WebScorecardMeta {
   /** The effective follow state and the trail it produced; a build given neither records neither. */
   followDeclarations?: boolean;
   declaredHosts?: DeclaredHostEntry[];
-  registry: Pick<WebAuditRegistry, 'category_order' | 'categories' | 'checks'>;
+  registry: Pick<WebAuditRegistry, 'category_order' | 'categories' | 'checks' | 'alternatives'>;
   scoreConfig?: ScoreConfig;
 }
 
@@ -170,7 +170,7 @@ export function buildWebScorecard(results: EngineResult[], meta: WebScorecardMet
     });
   }
 
-  const universeMax = universeMaxOf(meta.registry.checks, meta.scoreConfig);
+  const universeMax = universeMaxOf(meta.registry, results, meta.scoreConfig);
   const score = scoreWebAudit(results, universeMax, meta.scoreConfig);
 
   return {

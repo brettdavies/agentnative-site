@@ -1,7 +1,7 @@
 {
   "alias-inline-copy-noncompliant": {
     "score_pct": 63,
-    "score": {"relative":63,"global":37},
+    "score": {"relative":63,"global":38},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -223,7 +223,7 @@
   },
   "alias-redirect-pass": {
     "score_pct": 65,
-    "score": {"relative":65,"global":38},
+    "score": {"relative":65,"global":39},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -297,7 +297,7 @@
   },
   "alias-unpublished-optional-absent": {
     "score_pct": 64,
-    "score": {"relative":64,"global":37},
+    "score": {"relative":64,"global":38},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -445,7 +445,7 @@
   },
   "api-hygiene-html-error": {
     "score_pct": 64,
-    "score": {"relative":64,"global":16},
+    "score": {"relative":64,"global":17},
     "results": [
       {"id":"openapi","status":"pass"},
       {"id":"json-schemas","status":"pass"},
@@ -519,7 +519,7 @@
   },
   "api-hygiene-json-200": {
     "score_pct": 71,
-    "score": {"relative":71,"global":16},
+    "score": {"relative":71,"global":17},
     "results": [
       {"id":"openapi","status":"pass"},
       {"id":"json-schemas","status":"n_a","na_reason":"optional-absent"},
@@ -741,7 +741,7 @@
   },
   "auth-declared-endpoint": {
     "score_pct": 68,
-    "score": {"relative":68,"global":26},
+    "score": {"relative":68,"global":32},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -889,7 +889,7 @@
   },
   "auth-enforcement-defects": {
     "score_pct": 42,
-    "score": {"relative":42,"global":13},
+    "score": {"relative":42,"global":17},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -1259,7 +1259,7 @@
   },
   "auth-open-endpoint": {
     "score_pct": 64,
-    "score": {"relative":64,"global":37},
+    "score": {"relative":64,"global":38},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -1333,7 +1333,7 @@
   },
   "auth-own-endpoint": {
     "score_pct": 65,
-    "score": {"relative":65,"global":24},
+    "score": {"relative":65,"global":30},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -1777,7 +1777,7 @@
   },
   "cors-full-pass": {
     "score_pct": 82,
-    "score": {"relative":82,"global":57},
+    "score": {"relative":82,"global":58},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -1851,7 +1851,7 @@
   },
   "cors-post-only": {
     "score_pct": 78,
-    "score": {"relative":78,"global":53},
+    "score": {"relative":78,"global":55},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -1925,7 +1925,7 @@
   },
   "cors-post-transport-failure-no-cors": {
     "score_pct": 81,
-    "score": {"relative":81,"global":53},
+    "score": {"relative":81,"global":54},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -1999,7 +1999,7 @@
   },
   "cors-posture-consistent": {
     "score_pct": 81,
-    "score": {"relative":81,"global":53},
+    "score": {"relative":81,"global":54},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -2073,7 +2073,7 @@
   },
   "cors-preflight-500-with-acao": {
     "score_pct": 78,
-    "score": {"relative":78,"global":53},
+    "score": {"relative":78,"global":55},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -2147,7 +2147,7 @@
   },
   "cors-preflight-only": {
     "score_pct": 78,
-    "score": {"relative":78,"global":53},
+    "score": {"relative":78,"global":55},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -2221,7 +2221,7 @@
   },
   "cors-preflight-transport-failure": {
     "score_pct": 82,
-    "score": {"relative":82,"global":55},
+    "score": {"relative":82,"global":56},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -2295,7 +2295,7 @@
   },
   "discovery-card-generations-auth": {
     "score_pct": 65,
-    "score": {"relative":65,"global":39},
+    "score": {"relative":65,"global":40},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -2369,7 +2369,7 @@
   },
   "discovery-catalog-card": {
     "score_pct": 62,
-    "score": {"relative":62,"global":36},
+    "score": {"relative":62,"global":37},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -2443,7 +2443,7 @@
   },
   "discovery-catalog-declarations": {
     "score_pct": 62,
-    "score": {"relative":62,"global":36},
+    "score": {"relative":62,"global":37},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -2517,7 +2517,7 @@
   },
   "discovery-catalog-inline-card": {
     "score_pct": 62,
-    "score": {"relative":62,"global":36},
+    "score": {"relative":62,"global":37},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -2591,7 +2591,7 @@
   },
   "discovery-legacy-card": {
     "score_pct": 64,
-    "score": {"relative":64,"global":37},
+    "score": {"relative":64,"global":38},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -2665,7 +2665,7 @@
   },
   "discovery-suffix-card": {
     "score_pct": 62,
-    "score": {"relative":62,"global":35},
+    "score": {"relative":62,"global":36},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -3035,7 +3035,7 @@
   },
   "follow-card-admit": {
     "score_pct": 66,
-    "score": {"relative":66,"global":41},
+    "score": {"relative":66,"global":42},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -3257,7 +3257,7 @@
   },
   "follow-own-redirect-admit": {
     "score_pct": 64,
-    "score": {"relative":64,"global":39},
+    "score": {"relative":64,"global":40},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -3479,7 +3479,7 @@
   },
   "follow-redirect-hop": {
     "score_pct": 66,
-    "score": {"relative":66,"global":41},
+    "score": {"relative":66,"global":42},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -3553,7 +3553,7 @@
   },
   "frontmatter-absent": {
     "score_pct": 65,
-    "score": {"relative":65,"global":19},
+    "score": {"relative":65,"global":20},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -4367,7 +4367,7 @@
   },
   "http-discovery-cards-broken": {
     "score_pct": 35,
-    "score": {"relative":35,"global":9},
+    "score": {"relative":35,"global":10},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -4441,7 +4441,7 @@
   },
   "http-get-fast-fail-timeout-broken": {
     "score_pct": 59,
-    "score": {"relative":59,"global":35},
+    "score": {"relative":59,"global":36},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -4515,7 +4515,7 @@
   },
   "http-header-regex-absent": {
     "score_pct": 57,
-    "score": {"relative":57,"global":16},
+    "score": {"relative":57,"global":17},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -4737,7 +4737,7 @@
   },
   "http-llms-txt-pass": {
     "score_pct": 62,
-    "score": {"relative":62,"global":19},
+    "score": {"relative":62,"global":20},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -4811,7 +4811,7 @@
   },
   "http-mixed-candidates-broken": {
     "score_pct": 46,
-    "score": {"relative":46,"global":11},
+    "score": {"relative":46,"global":12},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -5033,7 +5033,7 @@
   },
   "http-robots-broken": {
     "score_pct": 42,
-    "score": {"relative":42,"global":10},
+    "score": {"relative":42,"global":11},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -5699,7 +5699,7 @@
   },
   "llms-quality-pass": {
     "score_pct": 62,
-    "score": {"relative":62,"global":19},
+    "score": {"relative":62,"global":20},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -5773,7 +5773,7 @@
   },
   "mcp-capabilities-empty": {
     "score_pct": 59,
-    "score": {"relative":59,"global":33},
+    "score": {"relative":59,"global":34},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -5847,7 +5847,7 @@
   },
   "mcp-card-no-endpoint-field": {
     "score_pct": 64,
-    "score": {"relative":64,"global":37},
+    "score": {"relative":64,"global":38},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -5921,7 +5921,7 @@
   },
   "mcp-card-off-origin": {
     "score_pct": 64,
-    "score": {"relative":64,"global":37},
+    "score": {"relative":64,"global":38},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -5995,7 +5995,7 @@
   },
   "mcp-dual-stack": {
     "score_pct": 82,
-    "score": {"relative":82,"global":57},
+    "score": {"relative":82,"global":58},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -6143,7 +6143,7 @@
   },
   "mcp-legacy-lane": {
     "score_pct": 62,
-    "score": {"relative":62,"global":35},
+    "score": {"relative":62,"global":36},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -6217,7 +6217,7 @@
   },
   "mcp-modern-lane": {
     "score_pct": 56,
-    "score": {"relative":56,"global":34},
+    "score": {"relative":56,"global":35},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -6365,7 +6365,7 @@
   },
   "mcp-open-stream": {
     "score_pct": 61,
-    "score": {"relative":61,"global":31},
+    "score": {"relative":61,"global":32},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -6513,7 +6513,7 @@
   },
   "mcp-resources-empty-broken": {
     "score_pct": 59,
-    "score": {"relative":59,"global":35},
+    "score": {"relative":59,"global":36},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -6661,7 +6661,7 @@
   },
   "mcp-sse-framing": {
     "score_pct": 65,
-    "score": {"relative":65,"global":38},
+    "score": {"relative":65,"global":39},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -6735,7 +6735,7 @@
   },
   "mcp-stateful-session": {
     "score_pct": 62,
-    "score": {"relative":62,"global":39},
+    "score": {"relative":62,"global":40},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -6809,7 +6809,7 @@
   },
   "mcp-typed-http-refusals": {
     "score_pct": 51,
-    "score": {"relative":51,"global":30},
+    "score": {"relative":51,"global":31},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -7031,7 +7031,7 @@
   },
   "run-all-pass": {
     "score_pct": 100,
-    "score": {"relative":100,"global":98},
+    "score": {"relative":100,"global":100},
     "results": [
       {"id":"openapi","status":"pass"},
       {"id":"json-schemas","status":"pass"},
@@ -7254,7 +7254,7 @@
   "run-edge-530": {"unreachable":true},
   "run-healthy": {
     "score_pct": 93,
-    "score": {"relative":93,"global":85},
+    "score": {"relative":93,"global":86},
     "results": [
       {"id":"openapi","status":"pass"},
       {"id":"json-schemas","status":"pass"},
@@ -7550,7 +7550,7 @@
   },
   "run-site-type-api": {
     "score_pct": 100,
-    "score": {"relative":100,"global":96},
+    "score": {"relative":100,"global":98},
     "results": [
       {"id":"openapi","status":"pass"},
       {"id":"json-schemas","status":"pass"},
@@ -7624,7 +7624,7 @@
   },
   "run-site-type-content": {
     "score_pct": 100,
-    "score": {"relative":100,"global":90},
+    "score": {"relative":100,"global":92},
     "results": [
       {"id":"openapi","status":"n_a","na_reason":"antecedent-unmet"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -7773,7 +7773,7 @@
   },
   "scoped-llms-broken": {
     "score_pct": 78,
-    "score": {"relative":78,"global":20},
+    "score": {"relative":78,"global":21},
     "results": [
       {"id":"openapi","status":"n_a","na_reason":"antecedent-unmet"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -7921,7 +7921,7 @@
   },
   "scoped-llms-sitemap-dirs": {
     "score_pct": 78,
-    "score": {"relative":78,"global":20},
+    "score": {"relative":78,"global":21},
     "results": [
       {"id":"openapi","status":"n_a","na_reason":"antecedent-unmet"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},

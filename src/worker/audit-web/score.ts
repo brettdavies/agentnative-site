@@ -4,7 +4,7 @@
 //
 // RELATIVE ("for sites like yours") is the headline: earned points over
 // the max achievable for THIS site's applicable set. GLOBAL is context:
-// earned over a maximally agent-ready site's max, so a bigger correct
+// earned over the most a single site could earn, so a bigger correct
 // routine outscores a small perfect one. Outcome scale: pass = +weight;
 // noncompliant = +noncompliantCredit x weight (a surface an agent can
 // use that violates a spec detail); broken = -brokenFactor x weight at
@@ -12,12 +12,14 @@
 // more than absence); MUST absent is a full-weight zero; SHOULD absent is
 // a zero occupying half its weight in the relative denominator; MAY
 // absent arrives as n_a and is excluded from RELATIVE. Both scores floor
-// at 0.
+// at 0, and GLOBAL caps at 100.
 //
 // Per-tier point values are deliberately UNLOCKED config pending real
 // anc100 audit data (n=1 today); the registry's per-check `weight` field
 // is not consulted here.
 
+import { NA_REASON_ONLY_WHEN_APPLICABLE } from '../../shared/web-audit-findings';
+import type { WebAlternativeGroup, WebCheck } from './registry';
 import type { EngineResult } from './scorecard';
 
 export interface ScoreWeights {
@@ -65,17 +67,62 @@ function roundHalfUp(x: number): number {
   return Math.floor(x + 0.5);
 }
 
+/** The registry fields the global universe reads. */
+export interface UniverseRegistry {
+  checks: ReadonlyArray<Pick<WebCheck, 'id' | 'keyword' | 'antecedent'>>;
+  alternatives?: ReadonlyArray<WebAlternativeGroup>;
+}
+
+/** The row fields the global universe reads; a stored scorecard row carries every one. */
+export type UniverseRow = Pick<EngineResult, 'id' | 'status' | 'na_reason'>;
+
+function rowApplied(row: UniverseRow): boolean {
+  return row.status !== 'n_a' || (row.na_reason !== undefined && NA_REASON_ONLY_WHEN_APPLICABLE[row.na_reason]);
+}
+
 /**
- * GLOBAL denominator: every check in the registry at its tier weight,
- * whatever status the site's row reads, so an n_a, skip, or error row
- * costs global what an absent one does.
+ * GLOBAL denominator: the most a single site could earn. Every registry
+ * check counts at its tier weight whatever status the site's row reads, so
+ * an n_a, skip, or error row costs global what an absent one does. A group
+ * of alternatives is the exception: it counts each variant the site
+ * presents, meaning one of the variant's rows shows its check applied, or
+ * its largest variant when the site presents none. Presentation is read
+ * from the rows alone so a stored scorecard recomputes the denominator it
+ * was scored under.
  */
 export function universeMaxOf(
-  checks: ReadonlyArray<{ keyword: keyof ScoreWeights }>,
+  registry: UniverseRegistry,
+  rows: ReadonlyArray<UniverseRow>,
   config: ScoreConfig = {},
 ): number {
   const weights = config.weights ?? DEFAULT_SCORE_WEIGHTS;
-  return checks.reduce((sum, check) => sum + weights[check.keyword], 0);
+  const applied = new Set(rows.filter(rowApplied).map((row) => row.id));
+  const groups = (registry.alternatives ?? []).map((group) =>
+    Object.values(group.variants).map((tokens) => ({ tokens, size: 0, presented: false })),
+  );
+  const variantOf = new Map<string, { size: number; presented: boolean }>();
+  for (const variants of groups) {
+    for (const variant of variants) for (const token of variant.tokens) variantOf.set(token, variant);
+  }
+  let total = 0;
+  for (const check of registry.checks) {
+    const weight = weights[check.keyword];
+    const variant = variantOf.get(check.antecedent);
+    if (variant === undefined) {
+      total += weight;
+      continue;
+    }
+    variant.size += weight;
+    if (applied.has(check.id)) variant.presented = true;
+  }
+  for (const variants of groups) {
+    const shown = variants.filter((variant) => variant.presented);
+    total +=
+      shown.length > 0
+        ? shown.reduce((sum, variant) => sum + variant.size, 0)
+        : Math.max(0, ...variants.map((variant) => variant.size));
+  }
+  return total;
 }
 
 const CREDIT: Record<string, number | null> = { pass: 1, absent: 0 };
@@ -111,7 +158,7 @@ export function scoreWebAudit(
   }
 
   const relative = applicableMax > 0 ? Math.max(0, roundHalfUp((100 * earned) / applicableMax)) : 0;
-  const globalScore = universeMax > 0 ? Math.max(0, roundHalfUp((100 * earned) / universeMax)) : 0;
+  const globalScore = universeMax > 0 ? Math.min(100, Math.max(0, roundHalfUp((100 * earned) / universeMax))) : 0;
   return { relative, global: globalScore, earned: Math.round(earned * 10) / 10 };
 }
 

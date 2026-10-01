@@ -11,6 +11,7 @@ import * as yaml from 'js-yaml';
 import { KEYWORD_BY_TIER, normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import { AI_USER_FETCHER_PROBE_UA, CLI_PROBE_UA } from '../src/shared/user-agents';
 import { type McpOp, mcpOpLane } from '../src/worker/audit-web/handlers/mcp';
+import type { WebAuditRegistry } from '../src/worker/audit-web/registry';
 import { universeMaxOf } from '../src/worker/audit-web/score';
 import { buildWebScorecard, type EngineResult } from '../src/worker/audit-web/scorecard';
 
@@ -46,6 +47,7 @@ interface NormalizedWebAuditRegistry {
   category_order: string[];
   categories: Record<string, string>;
   mcp_lanes: Record<string, { label: string; note: string }>;
+  alternatives: Array<{ group: string; variants: Record<string, string[]> }>;
   checks: NormalizedWebAuditCheck[];
 }
 
@@ -422,6 +424,71 @@ describe('web-audit registry shape', () => {
     );
   });
 
+  // The global universe counts a group by the checks its variants' tokens
+  // gate: a token in two variants would count its checks twice, and a
+  // variant that gates no check could never be presented.
+  describe('alternatives', () => {
+    const gated = (id: string, antecedent: string) => ({ ...abortCheck, id, antecedent });
+    const groupedChecks = [
+      gated('open-a', 'mcp-session'),
+      gated('open-b', 'mcp-resources'),
+      gated('protected-a', 'mcp-auth-required'),
+    ];
+    const access = {
+      group: 'mcp-access',
+      variants: { open: ['mcp-session', 'mcp-resources'], protected: ['mcp-auth-required'] },
+    };
+    const withAlternatives = (alternatives: unknown) =>
+      normalizeWebAuditRegistry({ ...abortBase, alternatives, checks: groupedChecks });
+
+    test('a well-formed group normalizes as declared, and an absent block reads as none', () => {
+      expect(withAlternatives([access]).alternatives).toEqual([access]);
+      expect(normalizeWebAuditRegistry({ ...abortBase, checks: groupedChecks }).alternatives).toEqual([]);
+    });
+
+    const malformed: Array<[string, unknown, RegExp]> = [
+      ['a block that is not an array', access, /alternatives must be an array/],
+      ['a group id that is not a slug', [{ ...access, group: 'MCP access' }], /group "MCP access" must match/],
+      ['a duplicate group', [access, access], /duplicate alternatives group "mcp-access"/],
+      ['a group without variants', [{ group: 'mcp-access' }], /"mcp-access" needs at least two variants/],
+      [
+        'a group with one variant',
+        [{ group: 'mcp-access', variants: { open: ['mcp-session'] } }],
+        /"mcp-access" needs at least two variants/,
+      ],
+      [
+        'a variant with no tokens',
+        [{ group: 'mcp-access', variants: { open: [], protected: ['mcp-auth-required'] } }],
+        /"mcp-access\.open" needs a non-empty array of antecedent tokens/,
+      ],
+      [
+        'an unknown antecedent token',
+        [{ group: 'mcp-access', variants: { open: ['mcp-session'], protected: ['mcp-signed-in'] } }],
+        /"mcp-access\.protected" names unknown antecedent "mcp-signed-in"/,
+      ],
+      [
+        'a token in two variants of one group',
+        [{ group: 'mcp-access', variants: { open: ['mcp-session'], protected: ['mcp-session'] } }],
+        /"mcp-session" belongs to both "mcp-access\.open" and "mcp-access\.protected"/,
+      ],
+      [
+        'a token in two groups',
+        [access, { group: 'session', variants: { held: ['mcp-session'], refused: ['mcp-auth-required'] } }],
+        /"mcp-session" belongs to both "mcp-access\.open" and "session\.held"/,
+      ],
+      [
+        'a variant that gates no check',
+        [{ group: 'mcp-access', variants: { open: ['mcp-session'], protected: ['mcp-auth'] } }],
+        /"mcp-access\.protected" gates no check/,
+      ],
+    ];
+    for (const [label, alternatives, message] of malformed) {
+      test(`${label} aborts normalization`, () => {
+        expect(() => withAlternatives(alternatives)).toThrow(message);
+      });
+    }
+  });
+
   // A lane names the protocol era a row exercises, and the handler's op table
   // is where that era is decided. An op row filed under the other lane would
   // tell a reader the wrong era failed. A row every lane answers alike sits
@@ -434,6 +501,13 @@ describe('web-audit registry shape', () => {
       const op = (check.with as { op: McpOp }).op;
       expect({ id: check.id, lane: check.lane }).toEqual({ id: check.id, lane: mcpOpLane(op) });
     }
+  });
+
+  test('the registry declares MCP access as its one alternative group', async () => {
+    const registry = await loadNormalized();
+    expect(registry.alternatives).toEqual([
+      { group: 'mcp-access', variants: { open: ['mcp-session', 'mcp-resources'], protected: ['mcp-auth-required'] } },
+    ]);
   });
 
   test('the lane map lists its lanes in display order', async () => {
@@ -541,12 +615,12 @@ describe('buildWebScorecard', () => {
 // re-categorization is caught here.
 describe('scoring invariance under the API/MCP category split', () => {
   test('the real registry keeps its 4/37/27 tier distribution and universeMax under the split', async () => {
-    const registry = await loadNormalized();
-    // 4 MUST x5 + 37 SHOULD x3 + 27 MAY x1 = 158.
-    const universeMax = universeMaxOf(
-      registry.checks.map((c) => ({ keyword: c.keyword as 'must' | 'should' | 'may' })),
-    );
-    expect(universeMax).toBe(158);
+    const registry = (await loadNormalized()) as unknown as WebAuditRegistry;
+    // 4 MUST x5 + 37 SHOULD x3 + 27 MAY x1 = 158 across every check.
+    expect(universeMaxOf({ checks: registry.checks }, [])).toBe(158);
+    // A site presenting neither MCP access variant counts the larger one,
+    // open (31) over protected (3): 158 - 3.
+    expect(universeMaxOf(registry, [])).toBe(155);
   });
 
   test('the same outcomes score identically whether labeled mcp-api or split into api/mcp', () => {

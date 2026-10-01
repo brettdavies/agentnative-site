@@ -92,7 +92,7 @@ const CHECK_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
  * error on any missing/invalid field so the build fails loudly.
  *
  * @param {object} doc — js-yaml load of src/data/web-audit/registry.yaml
- * @returns {{ version: number, mcp_discovery: object, categories: Record<string,string>, mcp_lanes: Record<string,{label: string, note: string}>, checks: Array<object> }}
+ * @returns {{ version: number, mcp_discovery: object, category_order: string[], categories: Record<string,string>, mcp_lanes: Record<string,{label: string, note: string}>, alternatives: Array<{ group: string, variants: Record<string, string[]> }>, checks: Array<object> }}
  */
 export function normalizeWebAuditRegistry(doc) {
   if (!doc || typeof doc !== 'object') {
@@ -275,8 +275,70 @@ export function normalizeWebAuditRegistry(doc) {
     category_order: categoryOrder,
     categories,
     mcp_lanes: mcpLanes,
+    alternatives: normalizeAlternatives(doc.alternatives, normalized),
     checks: normalized,
   };
+}
+
+/**
+ * Validate the alternative groups against the normalized checks. Pure. A
+ * variant is a set of antecedent tokens; the global score counts a group's
+ * variants by the checks those tokens gate, so a token in two variants
+ * would count its checks twice and a variant that gates no check could
+ * never be presented.
+ *
+ * @param {unknown} groups The YAML `alternatives` value; absent means none.
+ * @param {Array<{ antecedent: string }>} checks The normalized checks.
+ * @returns {Array<{ group: string, variants: Record<string, string[]> }>}
+ */
+function normalizeAlternatives(groups, checks) {
+  if (groups === undefined) return [];
+  if (!Array.isArray(groups)) {
+    throw new Error('web-audit registry: alternatives must be an array of groups');
+  }
+  const groupIds = new Set();
+  const claimedBy = new Map();
+  return groups.map((entry) => {
+    const group = entry?.group;
+    if (typeof group !== 'string' || !CHECK_ID_RE.test(group)) {
+      throw new Error(
+        `web-audit registry: alternatives group ${JSON.stringify(group)} must match /^[a-z0-9][a-z0-9-]*$/`,
+      );
+    }
+    if (groupIds.has(group)) throw new Error(`web-audit registry: duplicate alternatives group "${group}"`);
+    groupIds.add(group);
+    const variants = entry.variants;
+    if (!variants || typeof variants !== 'object' || Array.isArray(variants) || Object.keys(variants).length < 2) {
+      throw new Error(`web-audit registry: alternatives group "${group}" needs at least two variants`);
+    }
+    const normalizedVariants = {};
+    for (const [variant, tokens] of Object.entries(variants)) {
+      const name = `${group}.${variant}`;
+      if (!CHECK_ID_RE.test(variant)) {
+        throw new Error(`web-audit registry: alternatives variant "${name}" must match /^[a-z0-9][a-z0-9-]*$/`);
+      }
+      if (!Array.isArray(tokens) || tokens.length === 0) {
+        throw new Error(
+          `web-audit registry: alternatives variant "${name}" needs a non-empty array of antecedent tokens`,
+        );
+      }
+      for (const token of tokens) {
+        if (!WEB_AUDIT_ANTECEDENTS.has(token)) {
+          throw new Error(`web-audit registry: alternatives variant "${name}" names unknown antecedent "${token}"`);
+        }
+        const prior = claimedBy.get(token);
+        if (prior !== undefined) {
+          throw new Error(`web-audit registry: antecedent "${token}" belongs to both "${prior}" and "${name}"`);
+        }
+        claimedBy.set(token, name);
+      }
+      if (!checks.some((check) => tokens.includes(check.antecedent))) {
+        throw new Error(`web-audit registry: alternatives variant "${name}" gates no check`);
+      }
+      normalizedVariants[variant] = tokens;
+    }
+    return { group, variants: normalizedVariants };
+  });
 }
 
 /**
