@@ -8,10 +8,20 @@
 // and the first one admitted is the slice's endpoint, so the requests a
 // declaration list can cause stop at the endpoint the audit will use.
 //
+// The card documents declared ahead of every endpoint the slice could admit
+// are read side by side, each GET capped so a host that hangs leaves the
+// slice to the endpoints after it. Host slots, domain reservations, and the
+// request cap admit those GETs and their redirect hops in declaration order,
+// never in the order hosts answer. A card document declared after such an
+// endpoint is read at its place, and only while no endpoint is admitted.
+//
 // Every failure of an endpoint's reciprocity, from a dead host to a card
 // naming another URL, records one outcome, so the trail cannot be read as
-// an oracle for what a third-party host serves. Caps, budgets, and guard
-// refusals are decided before any request and record their own outcomes.
+// an oracle for what a third-party host serves. A card document is the
+// site's own declaration, read rather than confirmed, so a card host that
+// gives no response at all records unreachable; any answer that yields no
+// endpoint records reciprocity-refused. Caps, budgets, and guard refusals
+// are decided before any request and record their own outcomes.
 // The trail follows declaration order, never completion order.
 
 import type { ProbeResponse } from './assert';
@@ -53,6 +63,7 @@ const MAX_FOLLOW_REQUESTS = 12;
 // GET only looks for a redirect and a challenge, so a hang must not spend
 // the slice reciprocity needs.
 const ENDPOINT_GET_TIMEOUT_MS = 3_000;
+const CARD_DOCUMENT_TIMEOUT_MS = 3_000;
 
 /**
  * The hourly budget for each declared domain, drawn once per audit and
@@ -92,6 +103,19 @@ export interface FollowResult {
 }
 
 type ReadOptions = ArtifactReadOptions & { timeoutCapMs?: number };
+
+const CARD_DOCUMENT_READ: ReadOptions = {
+  maxBodyBytes: DOCUMENT_MAX_BODY_BYTES,
+  accept: MCP_SERVER_CARD_TYPE,
+  timeoutCapMs: CARD_DOCUMENT_TIMEOUT_MS,
+};
+
+const BEYOND_ENDPOINT: Settled = { outcome: 'not-followed', reason: 'beyond-endpoint-of-record' };
+
+/** Where a declared URL landed after at most one redirect hop, and its response. */
+type Fetched = { url: string; response: ProbeResponse };
+/** The URL a declaration lands on, and its GET, started once the slice admitted that URL. */
+type Landing = { url: string; response: Promise<ProbeResponse | Settled> };
 
 class FollowStop extends Error {
   constructor(readonly budgetCause: BudgetCause) {
@@ -170,39 +194,43 @@ export async function followDeclarations(input: FollowInput): Promise<FollowResu
   };
 
   /**
-   * GETs a declared URL, taking at most one redirect hop once its target
-   * passes the guard, the host cap, and the domain budget. Returns the
-   * final URL and its response, or how the declaration settles instead.
+   * Where a declared URL's first response leads: to itself, or to the one
+   * redirect hop the guard, the host cap, and the domain budget admit,
+   * whose GET starts here. Settles the declaration when the hop is refused.
    */
-  const fetchDeclared = async (
+  const admitHop = async (
     declaration: McpDeclaration,
+    first: ProbeResponse,
     opts: ReadOptions,
-  ): Promise<{ url: string; response: ProbeResponse } | Settled> => {
-    const first = await get(declaration.url, opts);
+  ): Promise<Landing | Settled> => {
     const location = first.headers.location;
     if (first.status === null || !REDIRECT_STATUSES.has(first.status) || location === undefined) {
-      return { url: declaration.url, response: first };
+      return { url: declaration.url, response: Promise.resolve(first) };
     }
     const hop = resolveUrl(declaration.url, location);
     const refused = hop === '' ? ({ outcome: 'blocked' } as const) : refusal(hop, declaration.kind);
     if (refused !== null) return refused;
     await enter(hop);
-    const response = await get(hop, opts);
-    if (response.status !== null && REDIRECT_STATUSES.has(response.status)) {
-      return { final_url: hop, outcome: 'reciprocity-refused' };
-    }
-    return { url: hop, response };
+    return { url: hop, response: stopped(() => getHop(hop, opts), budgetExceeded) };
   };
+  /** The hop's GET; a second redirect is never taken. */
+  const getHop = async (hop: string, opts: ReadOptions): Promise<ProbeResponse | Settled> => {
+    const response = await get(hop, opts);
+    return response.status !== null && REDIRECT_STATUSES.has(response.status)
+      ? { final_url: hop, outcome: 'reciprocity-refused' }
+      : response;
+  };
+  /** GETs a declared URL, taking at most one admitted redirect hop. */
+  const fetchDeclared = async (declaration: McpDeclaration, opts: ReadOptions): Promise<Fetched | Settled> =>
+    land(await admitHop(declaration, await get(declaration.url, opts), opts));
 
-  /** Reads a card document for the endpoints it names, which settle later in declaration order. */
-  const readCardDocument = async (declaration: McpDeclaration): Promise<CardDocumentRead> => {
-    await enter(declaration.url);
-    const fetched = await fetchDeclared(declaration, {
-      maxBodyBytes: DOCUMENT_MAX_BODY_BYTES,
-      accept: MCP_SERVER_CARD_TYPE,
-    });
+  /** A card document's trail entry, and the endpoints it names, which settle later in declaration order. */
+  const cardDocumentRead = (declaration: McpDeclaration, fetched: Fetched | Settled): CardDocumentRead => {
     if (!('response' in fetched)) return { entry: trailEntry(declaration, fetched), named: [] };
     const finalUrl = fetched.url === declaration.url ? undefined : fetched.url;
+    if (fetched.response.status === null) {
+      return { entry: trailEntry(declaration, { final_url: finalUrl, outcome: 'unreachable' }), named: [] };
+    }
     const card = fetched.response.status === 200 ? parseJsonObject(fetched.response) : null;
     const named = card === null ? null : cardEndpoint(card);
     if (card === null || named === null) {
@@ -215,6 +243,42 @@ export async function followDeclarations(input: FollowInput): Promise<FollowResu
       entry: trailEntry(declaration, { final_url: finalUrl, outcome: 'followed' }),
       named: [primary, ...otherRemotes(card, declaration.url, fetched.url)].filter((d) => declaresHost(d, input.base)),
     };
+  };
+
+  /**
+   * Reads card documents side by side. Each first GET is admitted in
+   * declaration order before it starts, and each redirect hop in
+   * declaration order once every first GET has answered, so host slots,
+   * domain reservations, and the request cap never go to whichever host
+   * answers first.
+   */
+  const readCardDocuments = async (declarations: readonly McpDeclaration[]): Promise<CardDocumentRead[]> => {
+    const firsts: Array<Promise<ProbeResponse | Settled>> = [];
+    for (const declaration of declarations) {
+      const settled =
+        settledUpfront(declaration, input) ??
+        (await stopped<Settled | null>(async () => {
+          await enter(declaration.url);
+          return null;
+        }, budgetExceeded));
+      firsts.push(
+        settled !== null
+          ? Promise.resolve(settled)
+          : stopped<ProbeResponse | Settled>(() => get(declaration.url, CARD_DOCUMENT_READ), budgetExceeded),
+      );
+    }
+    const answered = await Promise.all(firsts);
+    const landings: Array<Landing | Settled> = [];
+    for (const [i, declaration] of declarations.entries()) {
+      const first = answered[i];
+      landings.push(
+        'status' in first
+          ? await stopped<Landing | Settled>(() => admitHop(declaration, first, CARD_DOCUMENT_READ), budgetExceeded)
+          : first,
+      );
+    }
+    const fetched = await Promise.all(landings.map(land));
+    return declarations.map((declaration, i) => cardDocumentRead(declaration, fetched[i]));
   };
 
   const settleEndpoint = async (declaration: McpDeclaration): Promise<Settled> => {
@@ -238,39 +302,35 @@ export async function followDeclarations(input: FollowInput): Promise<FollowResu
     return { final_url: finalUrl, outcome: 'followed', admitted_by: admittedBy };
   };
 
+  /** How a declaration settles with no request: before the slice, or once an endpoint is admitted. */
+  const settledWithoutRequest = (declaration: McpDeclaration): Settled | null =>
+    settledUpfront(declaration, input) ?? (endpoint !== null ? BEYOND_ENDPOINT : null);
+
   /** Endpoints in declaration order, stopping at the first one admitted. */
   const settleEndpoints = async (declarations: readonly McpDeclaration[]): Promise<TrailEntry[]> => {
     const out: TrailEntry[] = [];
     for (const declaration of declarations) {
-      const upfront = settledUpfront(declaration, input);
-      if (upfront !== null) out.push(trailEntry(declaration, upfront));
-      else if (endpoint !== null) {
-        out.push(trailEntry(declaration, { outcome: 'not-followed', reason: 'beyond-endpoint-of-record' }));
-      } else out.push(trailEntry(declaration, await stopped(() => settleEndpoint(declaration), budgetExceeded)));
+      const settled = settledWithoutRequest(declaration);
+      out.push(trailEntry(declaration, settled ?? (await stopped(() => settleEndpoint(declaration), budgetExceeded))));
     }
     return out;
   };
 
+  /** A card document declared after an endpoint the slice could admit, read at its place. */
+  const readInPlace = async (declaration: McpDeclaration): Promise<CardDocumentRead> => {
+    const settled = settledWithoutRequest(declaration);
+    return settled !== null ? cardDocumentRead(declaration, settled) : (await readCardDocuments([declaration]))[0];
+  };
+
   const declared = unique(input.declarations.filter((declaration) => declaresHost(declaration, input.base)));
-  // Card documents are read concurrently; the endpoints they name join the
-  // declaration-ordered walk below at their card's place.
-  const cardReads = new Map(
-    await Promise.all(
-      declared
-        .filter((declaration) => declaration.kind === 'card-document')
-        .map(async (declaration) => {
-          const upfront = settledUpfront(declaration, input);
-          const read =
-            upfront !== null
-              ? { entry: trailEntry(declaration, upfront), named: [] }
-              : await stopped(
-                  () => readCardDocument(declaration),
-                  (cause) => ({ entry: trailEntry(declaration, budgetExceeded(cause)), named: [] }),
-                );
-          return [declarationKey(declaration), read] as const;
-        }),
-    ),
+  const firstEndpoint = declared.findIndex(
+    (declaration) => declaration.kind === 'mcp-endpoint' && settledUpfront(declaration, input) === null,
   );
+  const ahead = declared
+    .slice(0, firstEndpoint === -1 ? declared.length : firstEndpoint)
+    .filter((declaration) => declaration.kind === 'card-document');
+  const aheadReads = await readCardDocuments(ahead);
+  const cardReads = new Map(ahead.map((declaration, i) => [declarationKey(declaration), aheadReads[i]]));
   const walked = new Set<string>();
   /** A URL declared twice settles once, at its first place. */
   const firstSeen = (declaration: McpDeclaration): boolean => {
@@ -281,18 +341,25 @@ export async function followDeclarations(input: FollowInput): Promise<FollowResu
   };
   for (const declaration of declared) {
     if (!firstSeen(declaration)) continue;
-    const read = cardReads.get(declarationKey(declaration));
-    entries.set(
-      declarationKey(declaration),
-      read === undefined
-        ? await settleEndpoints([declaration])
-        : [read.entry, ...(await settleEndpoints(read.named.filter(firstSeen)))],
-    );
+    const key = declarationKey(declaration);
+    if (declaration.kind === 'mcp-endpoint') {
+      entries.set(key, await settleEndpoints([declaration]));
+      continue;
+    }
+    const read = cardReads.get(key) ?? (await readInPlace(declaration));
+    entries.set(key, [read.entry, ...(await settleEndpoints(read.named.filter(firstSeen)))]);
   }
   return { endpoint, entries, evidence, requests };
 }
 
 type CardDocumentRead = { entry: TrailEntry; named: McpDeclaration[] };
+
+/** Where a landing ends: its URL and response, or how its GET settled. */
+async function land(landing: Landing | Settled): Promise<Fetched | Settled> {
+  if (!('response' in landing)) return landing;
+  const response = await landing.response;
+  return 'status' in response ? { url: landing.url, response } : response;
+}
 
 function budgetExceeded(cause: BudgetCause): Settled {
   return { outcome: 'budget-exceeded', cause };

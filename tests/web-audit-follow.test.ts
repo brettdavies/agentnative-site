@@ -30,6 +30,11 @@ import { stubFetch } from './helpers/stub-fetch';
 const ENDPOINT = 'https://mcp.example.net/mcp';
 const NET = 'mcp.example.net';
 
+const hangUntilAbort = (init?: RequestInit): Promise<Response> =>
+  new Promise((_resolve, reject) =>
+    init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))),
+  );
+
 describe('follow: admission by an artifact on the endpoint host', () => {
   test('a card at <endpoint>/server-card naming the endpoint makes it the endpoint of record, with no wire probe before that GET', async () => {
     const seen: Seen[] = [];
@@ -168,7 +173,8 @@ describe('follow: RFC 9728 metadata', () => {
     () =>
       new Response(null, { status: 401, headers: { 'www-authenticate': `Bearer resource_metadata="${metadataUrl}"` } });
 
-  test('mismatched resource, a metadata URL on another host, a private one, and a timed-out fetch each refuse', async () => {
+  test('mismatched resource, a metadata URL on another host, a plain-http one, a private one, and a timed-out fetch each refuse', async () => {
+    // `never` is a URL prefix no request may start with.
     const cases: Array<{ name: string; routes: Record<string, Route>; never?: string }> = [
       {
         name: 'mismatched resource',
@@ -183,12 +189,20 @@ describe('follow: RFC 9728 metadata', () => {
           [`GET ${ENDPOINT}`]: challengeTo('https://auth.example.org/.well-known/oauth-protected-resource'),
           'GET https://auth.example.org/.well-known/oauth-protected-resource': () => json({ resource: ENDPOINT }),
         },
-        never: 'auth.example.org',
+        never: 'https://auth.example.org/',
+      },
+      {
+        name: 'plain-http metadata URL on the endpoint host',
+        routes: {
+          [`GET ${ENDPOINT}`]: challengeTo(`http://${NET}/.well-known/oauth-protected-resource`),
+          [`GET http://${NET}/.well-known/oauth-protected-resource`]: () => json({ resource: ENDPOINT }),
+        },
+        never: `http://${NET}/`,
       },
       {
         name: 'private metadata URL',
         routes: { [`GET ${ENDPOINT}`]: challengeTo('https://10.0.0.7/.well-known/oauth-protected-resource') },
-        never: '10.0.0.7',
+        never: 'https://10.0.0.7/',
       },
       {
         name: 'timed-out metadata',
@@ -209,7 +223,9 @@ describe('follow: RFC 9728 metadata', () => {
         outcome: 'reciprocity-refused',
       });
       expect({ name, wire: wireProbesTo(seen, NET) }).toEqual({ name, wire: [] });
-      if (never !== undefined) expect({ name, never: requestsTo(seen, never) }).toEqual({ name, never: [] });
+      if (never !== undefined) {
+        expect({ name, never: seen.filter((r) => r.url.startsWith(never)) }).toEqual({ name, never: [] });
+      }
     }
   });
 
@@ -328,6 +344,94 @@ describe('follow: documents over their cap', () => {
       },
     ]);
     expect(requestsTo(seen, NET)).toEqual([]);
+  });
+});
+
+describe('follow: card document hosts that give no response', () => {
+  test('a card host that refuses the connection, fails DNS, or times out records unreachable, and the rows name it', async () => {
+    const dead = 'https://dead.example.org/card';
+    const failures: Array<[string, () => never]> = [
+      [
+        'connection refused',
+        () => {
+          throw new TypeError('connection refused');
+        },
+      ],
+      [
+        'dns failure',
+        () => {
+          throw new TypeError('getaddrinfo ENOTFOUND dead.example.org');
+        },
+      ],
+      [
+        'timed out',
+        () => {
+          const err = new Error('deadline exceeded');
+          err.name = 'TimeoutError';
+          throw err;
+        },
+      ],
+    ];
+    for (const [name, failure] of failures) {
+      const { scorecard } = await audit(
+        router(
+          {
+            [`GET ${TARGET}`]: () => html(),
+            'GET https://example.com/.well-known/ai-catalog.json': () => aiCatalog(cardEntry({ url: dead })),
+            [`GET ${dead}`]: failure,
+          },
+          [],
+        ),
+      );
+      expect({ name, trail: scorecard.declared_hosts }).toEqual({
+        name,
+        trail: [
+          {
+            surface: '/.well-known/ai-catalog.json#/entries/0',
+            kind: 'card-document',
+            url: dead,
+            host: 'dead.example.org',
+            outcome: 'unreachable',
+          },
+        ],
+      });
+      expect({ name, row: row(scorecard, 'mcp-initialize') }).toMatchObject({
+        name,
+        row: { status: 'n_a', na_reason: 'declared-host-unreachable', host: 'dead.example.org' },
+      });
+    }
+  });
+
+  test('a card host that answers with no card still reads reciprocity-refused', async () => {
+    const cards = 'https://cards.example.org/card';
+    const answers: Array<[string, Route]> = [
+      ['404', () => new Response('not found', { status: 404 })],
+      [
+        'unparseable',
+        () => new Response('{not json', { status: 200, headers: { 'content-type': 'application/json' } }),
+      ],
+      ['names no endpoint', () => cardDocument({ name: 'net.example/mcp', version: '1.0.0' })],
+    ];
+    for (const [name, answer] of answers) {
+      const { scorecard } = await audit(
+        router(
+          {
+            [`GET ${TARGET}`]: () => html(),
+            'GET https://example.com/.well-known/ai-catalog.json': () => aiCatalog(cardEntry({ url: cards })),
+            [`GET ${cards}`]: answer,
+          },
+          [],
+        ),
+      );
+      expect({ name, outcome: scorecard.declared_hosts?.[0]?.outcome }).toEqual({
+        name,
+        outcome: 'reciprocity-refused',
+      });
+      expect({ name, reason: row(scorecard, 'mcp-initialize').na_reason }).toEqual({
+        name,
+        reason: 'reciprocity-refused',
+      });
+    }
   });
 });
 
@@ -450,6 +554,108 @@ describe('follow: the endpoint of record', () => {
   });
 });
 
+describe('follow: card documents and the endpoint of record', () => {
+  const catalogDeclaring = (...entries: unknown[]): Record<string, Route> => ({
+    [`GET ${TARGET}`]: () => html(),
+    'GET https://example.com/.well-known/ai-catalog.json': () => aiCatalog(...entries),
+  });
+  const confirmable = (endpoint: string): Record<string, Route> => ({
+    [`GET ${endpoint}/server-card`]: () => cardDocument(sep2127Card(endpoint)),
+    [`POST ${endpoint}`]: () => initializeResult(),
+  });
+
+  test('an endpoint declared ahead of a card host that never answers is admitted', async () => {
+    const slow = 'https://slow.example.org/card';
+    let clock = 1_000_000;
+    const seen: Seen[] = [];
+    const { scorecard } = await audit(
+      router(
+        {
+          ...catalogDeclaring(cardEntry({ data: sep2127Card(ENDPOINT) }), cardEntry({ url: slow })),
+          ...confirmable(ENDPOINT),
+          [`GET ${slow}`]: (init) => {
+            clock += 7_000;
+            return hangUntilAbort(init);
+          },
+        },
+        seen,
+      ),
+      { now: () => clock, perCheckTimeoutMs: 50 },
+    );
+    expect(scorecard.mcp_endpoint).toBe(ENDPOINT);
+    expect(scorecard.declared_hosts?.[0]).toMatchObject({ url: ENDPOINT, outcome: 'followed', admitted_by: 'card' });
+    expect(row(scorecard, 'mcp-initialize')).toMatchObject({ status: 'pass', host: NET });
+  });
+
+  test('a card document declared after the admitted endpoint is never requested; one after a refused endpoint is read in place', async () => {
+    const cards = 'https://cards.example.org/card';
+    const seen: Seen[] = [];
+    const { scorecard } = await audit(
+      router(
+        {
+          ...catalogDeclaring(cardEntry({ data: sep2127Card(ENDPOINT) }), cardEntry({ url: cards })),
+          ...confirmable(ENDPOINT),
+          [`GET ${cards}`]: () => cardDocument(sep2127Card('https://mcp2.example.org/mcp')),
+        },
+        seen,
+      ),
+    );
+    expect(scorecard.mcp_endpoint).toBe(ENDPOINT);
+    expect(scorecard.declared_hosts?.map((e) => [e.url, e.outcome, e.reason])).toEqual([
+      [ENDPOINT, 'followed', undefined],
+      [cards, 'not-followed', 'beyond-endpoint-of-record'],
+    ]);
+    expect(requestsTo(seen, 'cards.example.org')).toEqual([]);
+
+    const second = 'https://mcp2.example.org/mcp';
+    const inPlace = await audit(
+      router(
+        {
+          ...catalogDeclaring(cardEntry({ data: sep2127Card(ENDPOINT) }), cardEntry({ url: cards })),
+          [`GET ${cards}`]: () => cardDocument(sep2127Card(second)),
+          ...confirmable(second),
+        },
+        [],
+      ),
+    );
+    expect(inPlace.scorecard.mcp_endpoint).toBe(second);
+    expect(inPlace.scorecard.declared_hosts?.map((e) => [e.url, e.outcome])).toEqual([
+      [ENDPOINT, 'reciprocity-refused'],
+      [cards, 'followed'],
+      [second, 'followed'],
+    ]);
+  });
+
+  test('card documents redirecting to new hosts take the last host slot in declaration order, whichever answers first', async () => {
+    const cards = ['https://c1.example.org/card', 'https://c2.example.org/card', 'https://c3.example.org/card'];
+    const hops = ['https://r1.example.org/card', 'https://r2.example.org/card'];
+    const run = async (delays: number[]) => {
+      const seen: Seen[] = [];
+      const fetchImpl = stubFetch(async (url, init) => {
+        const method = init?.method ?? 'GET';
+        seen.push({ method, url });
+        const at = cards.indexOf(url);
+        if (at !== -1) {
+          await new Promise((resolve) => setTimeout(resolve, delays[at]));
+          return at < hops.length ? redirect(hops[at]) : new Response('not found', { status: 404 });
+        }
+        const route = catalogDeclaring(...cards.map((card) => cardEntry({ url: card })))[`${method} ${url}`];
+        return route ? route(init) : new Response('not found', { status: 404 });
+      });
+      return { scorecard: (await audit(fetchImpl)).scorecard, seen };
+    };
+    const first = await run([30, 1, 1]);
+    const second = await run([1, 30, 1]);
+    expect(JSON.stringify(first.scorecard)).toBe(JSON.stringify(second.scorecard));
+    expect(first.scorecard.declared_hosts?.map((e) => [e.url, e.final_url, e.outcome, e.cause])).toEqual([
+      [cards[0], hops[0], 'reciprocity-refused', undefined],
+      [cards[1], undefined, 'budget-exceeded', 'per-audit-cap'],
+      [cards[2], undefined, 'reciprocity-refused', undefined],
+    ]);
+    for (const { seen } of [first, second]) expect(requestsTo(seen, 'r2.example.org')).toEqual([]);
+  });
+});
+
 describe('follow: caps and budgets', () => {
   test('five distinct declared hosts hit the cap of 4: the fifth is budget-exceeded and nothing is sent to it', async () => {
     const hosts = ['h1', 'h2', 'h3', 'h4'].map((h) => `${h}.example.net`);
@@ -473,14 +679,43 @@ describe('follow: caps and budgets', () => {
     expect(requestsTo(seen, 'h5.example.net')).toEqual([]);
   });
 
+  test('three endpoints on one host stop at the request cap: twelve requests reach it and the third is budget-exceeded', async () => {
+    // One host keeps the host cap out of reach. The first endpoint's
+    // reciprocity costs nine requests (its GET, its card, the host catalog,
+    // four catalog cards, two metadata locations); the second reuses the
+    // catalog, its cards, and the root metadata, so it costs three.
+    const endpoints = ['mcp', 'mcp2', 'mcp3'].map((path) => `https://${NET}/${path}`);
+    const cards = [1, 2, 3, 4].map((n) => `https://${NET}/cards/${n}`);
+    const seen: Seen[] = [];
+    const { scorecard } = await audit(
+      router(
+        {
+          [`GET ${TARGET}`]: () => html(),
+          'GET https://example.com/.well-known/ai-catalog.json': () =>
+            aiCatalog(...endpoints.map((url) => cardEntry({ data: sep2127Card(url) }))),
+          [`GET https://${NET}/.well-known/ai-catalog.json`]: () =>
+            aiCatalog(...cards.map((url) => cardEntry({ url }))),
+          ...Object.fromEntries(
+            cards.map((url) => [`GET ${url}`, () => cardDocument(sep2127Card(`https://${NET}/other`))]),
+          ),
+        },
+        seen,
+      ),
+    );
+    expect(scorecard.declared_hosts?.map((e) => [e.url, e.outcome, e.cause])).toEqual([
+      [endpoints[0], 'reciprocity-refused', undefined],
+      [endpoints[1], 'reciprocity-refused', undefined],
+      [endpoints[2], 'budget-exceeded', 'per-audit-cap'],
+    ]);
+    expect(requestsTo(seen, NET)).toHaveLength(12);
+  });
+
   test('a declared host that never answers spends the slice; the audit completes and the rows read budget-exceeded', async () => {
     let clock = 1_000_000;
     const seen: Seen[] = [];
-    const hang = (_init?: RequestInit): Promise<Response> => {
+    const hang = (init?: RequestInit): Promise<Response> => {
       clock += 7_000;
-      return new Promise<Response>((_resolve, reject) =>
-        _init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))),
-      );
+      return hangUntilAbort(init);
     };
     const fetchImpl = stubFetch((url, init) => {
       const method = init?.method ?? 'GET';
@@ -639,11 +874,23 @@ describe('follow: redirects', () => {
 
 describe('follow: hosts that are never requested', () => {
   test("a declaration naming one of the auditor's own paths is refused before reciprocity; the canonical MCP path is admitted", async () => {
-    const tokenPath = 'https://anc.dev/api/web-rescore?token=x';
-    const seen: Seen[] = [];
-    const refused = await audit(router(siteDeclaring(tokenPath), seen));
-    expect(refused.scorecard.declared_hosts?.[0]).toMatchObject({ outcome: 'not-followed', reason: 'self-path' });
-    expect(requestsTo(seen, 'anc.dev')).toEqual([]);
+    const selfPaths = [
+      'https://anc.dev/api/web-rescore?token=x',
+      'https://anc.dev./api/web-rescore?token=x',
+      'https://ANC.dev./api/web-rescore?token=x',
+      'https://staging.anc.dev./x',
+      'https://anc.dev./mcp',
+    ];
+    const toSelfZone = (r: Seen): boolean => new URL(r.url).hostname.replace(/\.$/, '').endsWith('anc.dev');
+    for (const selfPath of selfPaths) {
+      const seen: Seen[] = [];
+      const refused = await audit(router(siteDeclaring(selfPath), seen));
+      expect({ selfPath, entry: refused.scorecard.declared_hosts?.[0] }).toMatchObject({
+        selfPath,
+        entry: { outcome: 'not-followed', reason: 'self-path' },
+      });
+      expect({ selfPath, sent: seen.filter(toSelfZone) }).toEqual({ selfPath, sent: [] });
+    }
 
     const canonical = 'https://anc.dev/mcp';
     const admitted = await audit(
@@ -768,10 +1015,6 @@ describe('follow: sequencing and determinism', () => {
   });
 
   test('hanging POSTs on the audited site and a slow declared host cost the longer phase, not their sum', async () => {
-    const hangUntilAbort = (init?: RequestInit): Promise<Response> =>
-      new Promise((_resolve, reject) =>
-        init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))),
-      );
     const fetchImpl = stubFetch((url, init) => {
       const method = init?.method ?? 'GET';
       if (method === 'POST' && url === 'https://example.com/mcp') return hangUntilAbort(init);

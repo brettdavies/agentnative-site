@@ -65,7 +65,9 @@ function isIpLiteral(hostname: string): boolean {
   return hostname.startsWith('[') || parseIpv4Literal(hostname) !== null;
 }
 
-function inSelfZone(hostname: string): boolean {
+function inSelfZone(rawHostname: string): boolean {
+  // WHATWG URL keeps a trailing dot, and `anc.dev.` names the same zone.
+  const hostname = rawHostname.toLowerCase().replace(/\.$/, '');
   return hostname === SELF_ZONE || hostname.endsWith(`.${SELF_ZONE}`);
 }
 
