@@ -108,7 +108,7 @@ class Rows:
         applicable_max = 0.0  # the RELATIVE denominator (site-specific)
         for tier, outcome in self.items:
             c = credit(outcome, m.broken_factor, m.noncompliant_credit)
-            if c is None:  # n_a excluded from both scores
+            if c is None:  # n_a: no credit, no relative slot
                 continue
             earned += m.weight[tier] * c
             # An absent SHOULD hurts less than an absent MUST: it occupies only

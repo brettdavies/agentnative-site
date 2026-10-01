@@ -5,13 +5,14 @@
 // RELATIVE ("for sites like yours") is the headline: earned points over
 // the max achievable for THIS site's applicable set. GLOBAL is context:
 // earned over a maximally agent-ready site's max, so a bigger correct
-// routine outranks a small perfect one. Outcome scale: pass = +weight;
+// routine outscores a small perfect one. Outcome scale: pass = +weight;
 // noncompliant = +noncompliantCredit x weight (a surface an agent can
 // use that violates a spec detail); broken = -brokenFactor x weight at
 // every tier (a present-but-invalid surface misleads agents, so it costs
 // more than absence); MUST absent is a full-weight zero; SHOULD absent is
 // a zero occupying half its weight in the relative denominator; MAY
-// absent arrives as n_a and is excluded. Both scores floor at 0.
+// absent arrives as n_a and is excluded from RELATIVE. Both scores floor
+// at 0.
 //
 // Per-tier point values are deliberately UNLOCKED config pending real
 // anc100 audit data (n=1 today); the registry's per-check `weight` field
@@ -39,8 +40,10 @@ export const DEFAULT_BROKEN_FACTOR = 0.75;
 export const NONCOMPLIANT_CREDIT = 0.25;
 
 /**
- * Statuses that occupy a slot in either score. Everything else (n_a,
- * skip, error) carries no observation and is excluded from both.
+ * Statuses that carry an observation, so they occupy a slot in the
+ * relative score and the category rollups. Everything else (n_a, skip,
+ * error) carries none: it earns nothing and takes no relative slot or
+ * rollup count, though the global denominator still counts its check.
  */
 export const SCORED_STATUSES: ReadonlySet<string> = new Set(['pass', 'noncompliant', 'broken', 'absent']);
 
@@ -62,7 +65,11 @@ function roundHalfUp(x: number): number {
   return Math.floor(x + 0.5);
 }
 
-/** GLOBAL denominator: every check in the registry at its tier weight. */
+/**
+ * GLOBAL denominator: every check in the registry at its tier weight,
+ * whatever status the site's row reads, so an n_a, skip, or error row
+ * costs global what an absent one does.
+ */
 export function universeMaxOf(
   checks: ReadonlyArray<{ keyword: keyof ScoreWeights }>,
   config: ScoreConfig = {},
@@ -92,7 +99,7 @@ export function scoreWebAudit(
   let applicableMax = 0;
   for (const r of results) {
     const credit = creditFor(r.status, brokenFactor, noncompliantCredit);
-    if (credit === null || credit === undefined) continue; // n_a / skip / error excluded from both scores
+    if (credit === null || credit === undefined) continue; // n_a / skip / error: no credit, no relative slot
     const w = weights[r.keyword];
     earned += w * credit;
     // An absent SHOULD hurts less than an absent MUST: it occupies only

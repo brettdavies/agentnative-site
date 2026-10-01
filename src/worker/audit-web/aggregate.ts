@@ -74,8 +74,10 @@ export async function rebuildWebAggregates(
       },
     });
   }
-  // /web ranks by GLOBAL; the homepage pane headlines the site score, so
-  // its top-N slice ranks by RELATIVE.
+  // Every HTML and markdown board re-ranks by RELATIVE at render time, so
+  // this GLOBAL order reaches only list_website_audits, which returns the
+  // stored entries as-is. The homepage slice is cut by RELATIVE so its
+  // top-N matches the pane that renders it.
   sortByGlobal(entries);
   const wroteBoard = await putAggregate(env, 'leaderboard', entries, specVersion);
   const byRelative = entries.slice();
@@ -110,8 +112,7 @@ export async function rebuildAggregatesIfSeeded(
   }
 }
 
-// GLOBAL is the default board order; ties break by relative then domain
-// (same ordering the board renderer applies).
+// GLOBAL order for the stored board; ties break by relative then domain.
 function sortByGlobal(entries: WebAggregateEntry[]): void {
   entries.sort((a, b) => {
     const byGlobal = b.score.global - a.score.global;

@@ -32,13 +32,15 @@ keyword and belongs to one of six categories:
 - **Agent discovery and auth**: the A2A agent card, optional `/.well-known/ai-catalog.json` (ARD), agent-skills index,
   OAuth discovery metadata, and `auth.md`.
 
-A check is scored only when it applies: MCP checks need a discovered endpoint, API checks need an API surface, and a
-declared site type (`content` or `api`) scopes the rest. Anything that does not apply is `n_a` and never counts against
-the site. Two scores come out of one run: the **site score** (the headline) measures the site against the checks that
-apply to it, so a site perfect for its type approaches 100%; the **global score** measures it against a maximally
-agent-ready site, so exposing and nailing more surfaces ranks higher. A present-but-broken surface costs more than an
-absent one, because it misleads agents. A surface that works while violating a spec detail reads `noncompliant` and
-earns partial credit, so showing an imperfect capability always beats withdrawing it.
+A check counts toward the headline score only when it applies: MCP checks need a discovered endpoint, API checks need an
+API surface, and a declared site type (`content` or `api`) scopes the rest. Anything that does not apply is `n_a`. Two
+scores come out of one run: the **site score** (the headline) measures the site against the checks that apply to it, so
+a site perfect for its type approaches 100% and an `n_a` check never counts against it; the **global score** measures it
+against the most a single site could earn, with `n_a` checks still in the denominator, so a site without MCP sees what
+adding it is worth, and exposing and nailing more surfaces scores higher. The web leaderboard ranks by the site score
+and breaks ties by the global score. A present-but-broken surface costs more than an absent one, because it misleads
+agents. A surface that works while violating a spec detail reads `noncompliant` and earns partial credit, so showing an
+imperfect capability always beats withdrawing it.
 
 ## From an agent: websites
 
