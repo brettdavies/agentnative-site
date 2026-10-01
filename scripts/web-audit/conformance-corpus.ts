@@ -12,6 +12,7 @@ import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../../src/build/13-web-audit-registry.mjs';
 import type { ExpectBlock } from '../../src/worker/audit-web/assert';
 import { runWebAudit } from '../../src/worker/audit-web/engine';
+import { ALWAYS_ADMIT_BUDGET } from '../../src/worker/audit-web/follow';
 import type { WebAuditRegistry, WebSiteType } from '../../src/worker/audit-web/registry';
 import type { NaReason, ScorecardStatus, WebScorecard } from '../../src/worker/audit-web/scorecard';
 import { SCENARIOS } from './conformance-scenarios';
@@ -47,6 +48,8 @@ export type Scenario = {
   target: string;
   site_type: WebSiteType | null;
   spec_version: string;
+  /** Whether the run follows the hosts the target declares; absent means it does. */
+  follow_declarations?: boolean;
   unmatched: ExchangeResponse;
   allow_unmatched: boolean;
   exchanges: Exchange[];
@@ -160,6 +163,8 @@ export async function runScenario(name: string, scenario: Scenario, registry: We
     registry,
     siteType: scenario.site_type,
     specVersion: scenario.spec_version,
+    followDeclarations: scenario.follow_declarations ?? true,
+    domainBudget: ALWAYS_ADMIT_BUDGET,
     fetchOptions: { fetchImpl: stubFetchFor(scenario, log) },
     now: () => FIXED_NOW_MS,
   });
@@ -433,6 +438,7 @@ function scenarioJson(scenario: Scenario): string {
     target: scenario.target,
     site_type: scenario.site_type,
     spec_version: scenario.spec_version,
+    ...(scenario.follow_declarations !== undefined ? { follow_declarations: scenario.follow_declarations } : {}),
     unmatched: scenario.unmatched,
     allow_unmatched: scenario.allow_unmatched,
     exchanges: scenario.exchanges,
@@ -472,6 +478,9 @@ tests/fixtures/web-audit-conformance/
 - \`target\`: the URL handed to the engine.
 - \`site_type\`: \`"content"\`, \`"api"\` or \`null\` (run everything).
 - \`spec_version\`: the literal both engines are given for the run.
+- \`follow_declarations\` (optional): \`false\` runs with following off, so no declared host is requested and the
+  trail records each declaration not followed. Absent means \`true\`. Both engines run every scenario with a per-domain
+  budget that admits every domain, so no budget state reaches a golden.
 - \`unmatched\`: the response for a request no exchange matches, either a transport failure
   (\`{"error": "Name: message"}\`) or a full response.
 - \`allow_unmatched\`: when false, generation fails if any request reaches the unmatched policy.
@@ -501,11 +510,18 @@ under a fixed clock, so no per-audit deadline fires; per-probe timeouts appear o
 failures.
 
 Each row's \`hosts\` lists the distinct hosts its raw evidence items were requested from, in evidence order, as
-\`{"host": ...}\` objects. Only an item with a string \`url\` and no \`blocked\` marker counts: a request the SSRF
-guard refused never reached a host. The host is the WHATWG URL \`host\`, which keeps a non-default port
-(\`example.com:8443\`), so an engine whose URL library drops the port must add it back. An item whose \`url\` does
-not parse contributes nothing, and a row with no counting item has \`hosts: []\`. \`host\` is present, holding the
-same value, exactly when \`hosts\` has one entry.
+\`{"host": ...}\` objects. Only an item with no \`blocked\` marker counts: a request the SSRF guard refused never
+reached a host. An item with a string \`url\` counts that URL's host; one with no \`url\` and a non-empty string
+\`host\` counts that value, which is how a row a declared host kept from being evaluated names that host. The host is
+the WHATWG URL \`host\`, which keeps a non-default port (\`example.com:8443\`), so an engine whose URL library drops the
+port must add it back. An item whose \`url\` does not parse contributes nothing, and a row with no counting item has
+\`hosts: []\`. \`host\` is present, holding the same value, exactly when \`hosts\` has one entry.
+
+\`declared_hosts\` holds one entry per URL the target's discovery documents declare off its origin, in declaration
+order (the AI catalog's card entries, the card under the discovered endpoint, then the well-known cards; the endpoints a
+followed card document names come right after that document's entry), never in the order requests complete. A URL
+declared twice keeps its first entry. Endpoints are tried one at a time in that order and the first that its own host
+confirms becomes the endpoint, so every later endpoint reads \`not-followed\`.
 
 ## scores.json
 
