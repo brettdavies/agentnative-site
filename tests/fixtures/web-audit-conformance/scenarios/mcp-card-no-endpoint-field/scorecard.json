@@ -43,6 +43,8 @@
   "audit_profile": null,
   "site_type": null,
   "public_listing": false,
+  "follow_declarations": true,
+  "declared_hosts": [],
   "summary": {
     "pass": 21,
     "noncompliant": 0,

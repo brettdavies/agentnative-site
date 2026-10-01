@@ -251,7 +251,7 @@ function discover(fetchImpl: typeof fetch) {
 describe('discoverMcpEndpoint: SEP-2127 order and retained documents', () => {
   const OFF_ORIGIN_REMOTE = { type: 'streamable-http', url: 'https://mcp.example.net/mcp' };
 
-  test("an AI catalog entry by URL declares its card's first streamable-http remote", async () => {
+  test("an AI catalog entry by URL declares its card's first streamable-http remote, and its other remotes as not followed", async () => {
     const seen: SeenRequest[] = [];
     const card = sep2127Card({ type: 'sse', url: 'https://example.com/sse' }, OFF_ORIGIN_REMOTE, {
       type: 'streamable-http',
@@ -272,6 +272,18 @@ describe('discoverMcpEndpoint: SEP-2127 order and retained documents', () => {
     );
     expect(result.declarations).toEqual([
       { kind: 'mcp-endpoint', url: 'https://mcp.example.net/mcp', source: '/cards/weather' },
+      {
+        kind: 'mcp-endpoint',
+        url: 'https://example.com/sse',
+        source: '/cards/weather',
+        not_followed: 'beyond-endpoint-of-record',
+      },
+      {
+        kind: 'mcp-endpoint',
+        url: 'https://mcp.example.net/v2',
+        source: '/cards/weather',
+        not_followed: 'beyond-endpoint-of-record',
+      },
     ]);
     expect(result.documents.get('server-card')).toMatchObject({
       url: 'https://example.com/cards/weather',

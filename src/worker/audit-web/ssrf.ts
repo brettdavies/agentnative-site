@@ -48,6 +48,12 @@ export type GuardedFetchOptions = {
    * needs to see the 301, which following would erase.
    */
   followRedirects?: boolean;
+  /**
+   * When true, a redirect answer is a failure naming its target and no hop
+   * is taken: a URL pinned by proof of control must not hand the auditor to
+   * a location nothing confirmed.
+   */
+  refuseRedirects?: boolean;
   /** Injection point for tests; production uses global fetch. */
   fetchImpl?: typeof fetch;
 };
@@ -288,6 +294,9 @@ export async function guardedFetch(
       }
 
       const location = response.headers.get('location');
+      if (opts.refuseRedirects === true && REDIRECT_STATUSES.has(response.status) && location) {
+        return fail(`redirect refused: ${response.status} to ${location}`);
+      }
       if (opts.followRedirects !== false && REDIRECT_STATUSES.has(response.status) && location) {
         let next: URL;
         try {
@@ -341,6 +350,8 @@ export const STATUS_ONLY_BODY_BYTES = 0;
 export const AUDIT_PROBE_MAX_BODY_BYTES = 64 * 1024;
 /** Cap for a discovery document the audit keeps: a server card, the AI catalog, the API catalog. */
 export const DOCUMENT_MAX_BODY_BYTES = 256 * 1024;
+/** Cap for an RFC 9728 protected-resource metadata document. */
+export const METADATA_MAX_BODY_BYTES = 64 * 1024;
 
 type BodyRead = { body: string; truncated: boolean };
 

@@ -11,7 +11,7 @@
 import type { WebCheck } from '../registry';
 import { guardedFetch, STATUS_ONLY_BODY_BYTES } from '../ssrf';
 import { LEGACY_TOOLS_LIST_BODY, legacyProbeHeaders } from './mcp';
-import { resolveUrl, substituteEndpoint, timeoutMsFor } from './shared';
+import { endpointRedirects, resolveUrl, substituteEndpoint, timeoutMsFor } from './shared';
 import type { EvidenceItem, HandlerContext, ProbeOutcome, ProbeStatus } from './types';
 
 type CorsWith = {
@@ -40,6 +40,7 @@ export async function runCorsPreflight(check: WebCheck, ctx: HandlerContext): Pr
   }
   const origin = w.origin ?? 'https://example.com';
   const timeoutMs = timeoutMsFor(w.timeout, ctx.defaultTimeoutMs);
+  const redirects = endpointRedirects(w.path, ctx.mcpEndpointFollowed);
   const postHeaders: Record<string, string> = { ...legacyProbeHeaders(), Origin: origin };
   if (ctx.mcpSessionId) postHeaders['Mcp-Session-Id'] = ctx.mcpSessionId;
 
@@ -56,12 +57,12 @@ export async function runCorsPreflight(check: WebCheck, ctx: HandlerContext): Pr
           'Access-Control-Request-Headers': w.request_headers ?? 'content-type',
         },
       },
-      { ...ctx.fetchOptions, timeoutMs, maxBodyBytes: STATUS_ONLY_BODY_BYTES },
+      { ...ctx.fetchOptions, timeoutMs, maxBodyBytes: STATUS_ONLY_BODY_BYTES, ...redirects },
     ),
     guardedFetch(
       url,
       { method: 'POST', headers: postHeaders, body: LEGACY_TOOLS_LIST_BODY },
-      { ...ctx.fetchOptions, timeoutMs, maxBodyBytes: STATUS_ONLY_BODY_BYTES },
+      { ...ctx.fetchOptions, timeoutMs, maxBodyBytes: STATUS_ONLY_BODY_BYTES, ...redirects },
     ),
   ]);
 

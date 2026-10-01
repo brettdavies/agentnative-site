@@ -1,14 +1,21 @@
 // MCP antecedents: whether an MCP endpoint was discovered, and whether it
-// challenges for auth.
+// challenges for auth. With no endpoint, a declared host that was not
+// evaluated names why.
 
 import { advertisesResources } from '../handlers/mcp';
 import type { AntecedentToken } from '../registry';
-import { type AntecedentResolver, cardDeclaresAuth, evidenceShowsAuthChallenge, sourceEvidence } from './context';
+import {
+  type AntecedentResolver,
+  cardDeclaresAuth,
+  evidenceShowsAuthChallenge,
+  noMcpEndpoint,
+  sourceEvidence,
+} from './context';
 
-const mcpPresent: AntecedentResolver = (ctx) => (ctx.mcpEndpoint !== null ? 'apply' : 'n_a');
+const mcpPresent: AntecedentResolver = (ctx) => (ctx.mcpEndpoint !== null ? 'apply' : noMcpEndpoint(ctx));
 
 const mcpAuth: AntecedentResolver = (ctx) => {
-  if (ctx.mcpEndpoint === null) return 'n_a';
+  if (ctx.mcpEndpoint === null) return noMcpEndpoint(ctx);
   return evidenceShowsAuthChallenge(sourceEvidence(ctx, 'mcp-initialize')) || cardDeclaresAuth(ctx) ? 'apply' : 'n_a';
 };
 
@@ -16,7 +23,7 @@ const mcpAuth: AntecedentResolver = (ctx) => {
 // server/discover capability advertisement both satisfy the token, so a
 // single-era server's resources-gated rows probe on the lane it offers.
 const mcpResources: AntecedentResolver = (ctx) => {
-  if (ctx.mcpEndpoint === null) return 'n_a';
+  if (ctx.mcpEndpoint === null) return noMcpEndpoint(ctx);
   return advertisesResources(sourceEvidence(ctx, 'mcp-initialize')) ||
     advertisesResources(sourceEvidence(ctx, 'mcp-server-discover'))
     ? 'apply'

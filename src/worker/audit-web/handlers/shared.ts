@@ -19,6 +19,11 @@ export function substituteEndpoint(value: string, mcpEndpoint: string | null): s
   return value.replaceAll('{mcp_endpoint}', mcpEndpoint ?? '');
 }
 
+/** Redirect handling for a probe of `rawPath`: refused when it targets an endpoint on a declared host. */
+export function endpointRedirects(rawPath: string, followed: boolean | undefined): { refuseRedirects?: true } {
+  return followed === true && rawPath.includes('{mcp_endpoint}') ? { refuseRedirects: true } : {};
+}
+
 /** Replace the `{host}` token used by DoH record names. */
 export function substituteHost(value: string, host: string): string {
   return value.replaceAll('{host}', host);

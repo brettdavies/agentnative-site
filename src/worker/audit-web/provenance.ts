@@ -30,13 +30,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * The distinct hosts a row's evidence was requested from, in evidence
  * order, plus `host` when there is exactly one. An item the SSRF guard
- * refused never reached its host, so it names none.
+ * refused never reached its host, so it names none. An item with no URL
+ * that names a `host` is a row a declared host kept from being evaluated,
+ * and it names that host.
  */
 export function rowHostFields(evidence: readonly EvidenceItem[]): { hosts: RowHost[]; host?: string } {
   const hosts: string[] = [];
   for (const item of evidence) {
-    if (typeof item.url !== 'string' || item.blocked !== undefined) continue;
-    const host = hostOf(item.url);
+    if (item.blocked !== undefined) continue;
+    const host =
+      typeof item.url === 'string'
+        ? hostOf(item.url)
+        : typeof item.host === 'string' && item.host.length > 0
+          ? item.host
+          : null;
     if (host !== null && !hosts.includes(host)) hosts.push(host);
   }
   return { hosts: hosts.map((host) => ({ host })), ...(hosts.length === 1 ? { host: hosts[0] } : {}) };

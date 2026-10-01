@@ -524,6 +524,8 @@ export async function notifyMcpInitialized(
   opts: {
     timeoutMs: number;
     fetchOptions?: Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects'>;
+    /** The endpoint is on a declared host: see HandlerContext.mcpEndpointFollowed. */
+    followed?: boolean;
   },
 ): Promise<void> {
   await guardedFetch(
@@ -533,7 +535,7 @@ export async function notifyMcpInitialized(
       headers: { ...legacyProbeHeaders(), 'Mcp-Session-Id': sessionId },
       body: INITIALIZED_BODY,
     },
-    { ...opts.fetchOptions, timeoutMs: opts.timeoutMs },
+    { ...opts.fetchOptions, timeoutMs: opts.timeoutMs, ...(opts.followed === true ? { refuseRedirects: true } : {}) },
   );
 }
 
@@ -641,7 +643,12 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
   // shared audit cap bounds what a hostile endpoint can make the auditor
   // buffer.
   const timeoutMs = timeoutMsFor(w.timeout, ctx.defaultTimeoutMs);
-  const fetchOpts = { ...ctx.fetchOptions, timeoutMs, maxBodyBytes: AUDIT_PROBE_MAX_BODY_BYTES };
+  const fetchOpts = {
+    ...ctx.fetchOptions,
+    timeoutMs,
+    maxBodyBytes: AUDIT_PROBE_MAX_BODY_BYTES,
+    ...(ctx.mcpEndpointFollowed === true ? { refuseRedirects: true } : {}),
+  };
   // The re-ask below is a second hop on one row's budget; the row's
   // deadline is what bounds it, so the retry gets the remainder rather
   // than a second full timeout the engine only checks between checks.

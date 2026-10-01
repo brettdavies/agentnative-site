@@ -7,7 +7,7 @@ import type { RetainedDocumentKey } from '../../../shared/web-audit-documents';
 import { assertHttp, classifyAliasProbe, type ExpectBlock, type ProbeResponse } from '../assert';
 import type { WebCheck } from '../registry';
 import { guardedFetch } from '../ssrf';
-import { resolveUrl, sameOriginRecoveryLink, substituteEndpoint, timeoutMsFor } from './shared';
+import { endpointRedirects, resolveUrl, sameOriginRecoveryLink, substituteEndpoint, timeoutMsFor } from './shared';
 import type { EvidenceItem, HandlerContext, ProbeOutcome, ProbeStatus } from './types';
 
 type HttpWith = {
@@ -90,7 +90,11 @@ export async function runHttp(check: WebCheck, ctx: HandlerContext): Promise<Pro
     const reuseRoot = ctx.root !== undefined && url === ctx.base && method === 'GET' && w.headers === undefined;
     const resp = reuseRoot
       ? (ctx.root as NonNullable<HandlerContext['root']>)
-      : await guardedFetch(url, { method, headers }, { ...ctx.fetchOptions, timeoutMs });
+      : await guardedFetch(
+          url,
+          { method, headers },
+          { ...ctx.fetchOptions, timeoutMs, ...endpointRedirects(rawPath, ctx.mcpEndpointFollowed) },
+        );
     const { ok, item } = assessResponse(url, resp, w, ctx.base);
     evidence.push(item);
     if (ok) return { status: 'pass', evidence };
