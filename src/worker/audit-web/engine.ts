@@ -48,7 +48,7 @@ import type { EvidenceItem, HandlerContext, McpLaneEvidence, ProbeOutcome } from
 import { runWebMcp } from './handlers/webmcp';
 import type { WebAuditRegistry, WebCheck, WebSiteType } from './registry';
 import { buildWebScorecard, type EngineResult, type ScorecardStatus, type WebScorecard } from './scorecard';
-import { type GuardedFetchOptions, guardedFetch } from './ssrf';
+import { type GuardedFetchOptions, guardedFetch, isEdgeErrorStatus } from './ssrf';
 
 const DEFAULT_CONCURRENCY = 6;
 const DEFAULT_PER_CHECK_TIMEOUT_MS = 8_000;
@@ -255,13 +255,6 @@ function skipResult(check: WebCheck): EngineResult {
     evidence: 'skipped: per-audit deadline exceeded',
     raw_evidence: [{ why: ['per-audit deadline exceeded'] }],
   };
-}
-
-// Cloudflare answers on the origin's behalf with these when the origin
-// never spoke: 52x for connection and timeout failures, 530 when the host
-// does not resolve. They carry the auditor's edge, not the target.
-function isEdgeErrorStatus(status: number | null): boolean {
-  return status !== null && (status === 530 || (status >= 520 && status <= 527));
 }
 
 function answeredByTarget(status: unknown): boolean {

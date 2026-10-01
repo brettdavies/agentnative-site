@@ -26,7 +26,11 @@
 import { AUDIT_USER_AGENT } from '../../shared/user-agents';
 import type { ProbeResponse } from './assert';
 
-export type UrlValidation = { ok: true; url: URL } | { ok: false; reason: string };
+/**
+ * A refusal names what was refused: the URL itself, when it does not parse
+ * or its scheme is not http(s), or the host it names.
+ */
+export type UrlValidation = { ok: true; url: URL } | { ok: false; reason: string; refused: 'url' | 'host' };
 
 export type GuardedFetchInit = {
   method?: string;
@@ -85,6 +89,14 @@ function hasHeader(headers: Record<string, string> | undefined, name: string): b
   return Object.keys(headers).some((k) => k.toLowerCase() === wanted);
 }
 export const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
+
+// Cloudflare answers on the origin's behalf with these when the origin
+// never spoke: 52x for connection and timeout failures, 530 when the host
+// does not resolve. A Worker's fetch returns them rather than throwing, and
+// they carry the auditor's edge, not the target.
+export function isEdgeErrorStatus(status: number | null): boolean {
+  return status !== null && (status === 530 || (status >= 520 && status <= 527));
+}
 
 // Blocked IPv4 ranges as [base, prefixBits]. The metadata IP
 // 169.254.169.254 sits inside 169.254.0.0/16.
@@ -217,7 +229,8 @@ function blockedIpv6Reason(bytes: Uint8Array): string | null {
 
 /** Returns a block reason for the hostname, or null when it may be fetched. */
 export function blockedHostReason(rawHostname: string): string | null {
-  const hostname = rawHostname.toLowerCase().replace(/\.$/, '');
+  // WHATWG URL keeps trailing dots as written: `localhost..` is localhost.
+  const hostname = rawHostname.toLowerCase().replace(/\.+$/, '');
   if (hostname.length === 0) return 'empty hostname';
   if (hostname === 'localhost' || hostname.endsWith('.localhost')) return 'localhost is not a public host';
   if (hostname === 'metadata.google.internal' || hostname.endsWith('.internal')) {
@@ -244,13 +257,13 @@ export function validatePublicUrl(raw: string): UrlValidation {
   try {
     url = new URL(raw);
   } catch {
-    return { ok: false, reason: `unparseable url: ${raw}` };
+    return { ok: false, reason: `unparseable url: ${raw}`, refused: 'url' };
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    return { ok: false, reason: `scheme ${url.protocol} is not http(s)` };
+    return { ok: false, reason: `scheme ${url.protocol} is not http(s)`, refused: 'url' };
   }
   const reason = blockedHostReason(url.hostname);
-  if (reason) return { ok: false, reason: `blocked: ${reason}` };
+  if (reason) return { ok: false, reason: `blocked: ${reason}`, refused: 'host' };
   return { ok: true, url };
 }
 

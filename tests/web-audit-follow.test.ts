@@ -5,6 +5,7 @@
 import { describe, expect, test } from 'bun:test';
 import { runWebAudit } from '../src/worker/audit-web/engine';
 import type { DomainBudget } from '../src/worker/audit-web/follow-requests';
+import { endpointRedirects, mcpEndpointRedirects } from '../src/worker/audit-web/handlers/shared';
 import { resultLine } from '../src/worker/audit-web/remediation';
 import {
   aiCatalog,
@@ -350,9 +351,11 @@ describe('follow: documents over their cap', () => {
 });
 
 describe('follow: card document hosts that give no response', () => {
-  test('a card host that refuses the connection, fails DNS, or times out records unreachable, and the rows name it', async () => {
+  test('a card host that refuses the connection, fails DNS, times out, or is answered for by the edge records unreachable, and the rows name it', async () => {
     const dead = 'https://dead.example.org/card';
-    const failures: Array<[string, () => never]> = [
+    // A Worker's fetch to a host that does not resolve or never answers
+    // returns Cloudflare's own 530 or 52x rather than throwing.
+    const failures: Array<[string, Route]> = [
       [
         'connection refused',
         () => {
@@ -373,6 +376,8 @@ describe('follow: card document hosts that give no response', () => {
           throw err;
         },
       ],
+      ['edge 530, origin DNS error', () => new Response('error code: 1016', { status: 530 })],
+      ['edge 522, connection timed out', () => new Response('error code: 522', { status: 522 })],
     ];
     for (const [name, failure] of failures) {
       const { scorecard } = await audit(
@@ -778,6 +783,27 @@ describe('follow: redirects', () => {
     );
   });
 
+  test('a declared URL redirecting to a Location that does not parse is unconfirmed, and its rows name the declared host', async () => {
+    const seen: Seen[] = [];
+    const { scorecard } = await audit(
+      router({ ...siteDeclaring(ENDPOINT), [`GET ${ENDPOINT}`]: () => redirect('//[unparseable') }, seen),
+    );
+    expect(scorecard.declared_hosts).toEqual([
+      {
+        surface: '/.well-known/mcp.json',
+        kind: 'mcp-endpoint',
+        url: ENDPOINT,
+        host: NET,
+        outcome: 'reciprocity-refused',
+      },
+    ]);
+    expect(seen.filter((r) => r.url.includes('unparseable'))).toEqual([]);
+    const initialize = row(scorecard, 'mcp-initialize');
+    expect(resultLine(initialize.status, null, initialize.na_reason, initialize.host ?? '')).toBe(
+      `Not evaluated: ${NET} did not confirm this endpoint`,
+    );
+  });
+
   test('a redirect to another public host whose card names itself pins the final URL and records both', async () => {
     const final = 'https://mcp.example.org/mcp';
     const seen: Seen[] = [];
@@ -1016,12 +1042,15 @@ describe("follow: the audited site's own endpoint redirecting off its origin", (
 
   test("a cross-origin redirect answered to a wire probe of the site's own endpoint is never replayed", async () => {
     const registry = followRegistry();
-    registry.checks.push({
-      ...registry.checks[0],
-      id: 'mcp-get-fast-fail',
-      handler: 'http',
-      with: { path: '{mcp_endpoint}', method: 'GET', timeout: 8, expect: { status_below: 500 } },
-    });
+    registry.checks.push(
+      {
+        ...registry.checks[0],
+        id: 'mcp-get-fast-fail',
+        handler: 'http',
+        with: { path: '{mcp_endpoint}', method: 'GET', timeout: 8, expect: { status_below: 500 } },
+      },
+      { ...registry.checks[0], id: 'mcp-tools-list', with: { op: 'tools-list' } },
+    );
     const seen: Seen[] = [];
     const { scorecard } = await audit(
       router(
@@ -1047,8 +1076,61 @@ describe("follow: the audited site's own endpoint redirecting off its origin", (
     expect(seen.filter((r) => r.method === 'POST' && r.url === OWN).length).toBeGreaterThanOrEqual(3);
     expect(requestsTo(seen, 'elsewhere.example.org')).toEqual([]);
     expect(row(scorecard, 'mcp-cors-preflight').status).toBe('error');
+    expect(row(scorecard, 'mcp-tools-list').status).toBe('error');
     expect(row(scorecard, 'mcp-get-fast-fail')).toMatchObject({ status: 'pass', host: 'example.com' });
     expect(seen.filter((r) => r.method === 'GET' && r.url === OWN)).toHaveLength(1);
+  });
+
+  test('a GET or HEAD probe of the endpoint takes an off-origin redirect as its answer; other methods fail on it, and a followed endpoint takes none', () => {
+    for (const method of ['GET', 'HEAD']) {
+      expect({ method, own: mcpEndpointRedirects(false, method) }).toEqual({
+        method,
+        own: { crossOriginRedirects: 'return' },
+      });
+      expect({ method, own: endpointRedirects('{mcp_endpoint}', undefined, method) }).toEqual({
+        method,
+        own: { crossOriginRedirects: 'return' },
+      });
+    }
+    for (const method of ['POST', 'OPTIONS', 'DELETE', undefined]) {
+      expect({ method, own: mcpEndpointRedirects(false, method) }).toEqual({
+        method,
+        own: { crossOriginRedirects: 'refuse' },
+      });
+    }
+    for (const method of ['GET', 'HEAD', 'POST', 'OPTIONS']) {
+      expect({ method, followed: mcpEndpointRedirects(true, method) }).toEqual({
+        method,
+        followed: { refuseRedirects: true },
+      });
+    }
+    expect(endpointRedirects('/llms.txt', true, 'HEAD')).toEqual({});
+  });
+
+  test('an apex whose root and endpoint both redirect to www confirms nothing there: the www endpoint is a declaration, receives no POST, and its rows name it', async () => {
+    const WWW = 'https://www.example.com/mcp';
+    const seen: Seen[] = [];
+    const { scorecard } = await audit(
+      router(
+        {
+          [`GET ${TARGET}`]: () => redirect('https://www.example.com/', 301),
+          'GET https://www.example.com/': () => html(),
+          [`POST ${OWN}`]: () => redirect(WWW, 301),
+        },
+        seen,
+      ),
+    );
+    expect(scorecard.mcp_endpoint).toBeNull();
+    expect(scorecard.declared_hosts).toEqual([
+      { surface: '/mcp', kind: 'mcp-endpoint', url: WWW, host: 'www.example.com', outcome: 'reciprocity-refused' },
+    ]);
+    expect(wireProbesTo(seen, 'www.example.com')).toEqual([]);
+    for (const id of ['mcp-initialize', 'mcp-cors-preflight']) {
+      expect({ id, row: row(scorecard, id) }).toMatchObject({
+        id,
+        row: { status: 'n_a', na_reason: 'reciprocity-refused', host: 'www.example.com' },
+      });
+    }
   });
 
   test("redirect targets settle after the declarations discovery read, under the slice's own host cap", async () => {
@@ -1103,9 +1185,17 @@ describe("follow: the audited site's own endpoint redirecting off its origin", (
     expect(requestsTo(selfSeen, 'anc.dev')).toEqual([]);
   });
 
-  test('a redirect target the slice has no time left for is budget-exceeded with nothing sent there', async () => {
+  test('a redirect target the slice has no time left for is budget-exceeded with nothing sent there and no budget drawn', async () => {
     let clock = 1_000_000;
     const seen: Seen[] = [];
+    const reserved: string[] = [];
+    const budget: DomainBudget = {
+      keyOf: (hostname) => hostname,
+      reserve: async (key) => {
+        reserved.push(key);
+        return true;
+      },
+    };
     const { scorecard, complete } = await audit(
       router(
         {
@@ -1118,7 +1208,7 @@ describe("follow: the audited site's own endpoint redirecting off its origin", (
         },
         seen,
       ),
-      { now: () => clock },
+      { now: () => clock, domainBudget: budget },
     );
     expect(complete).toBe(true);
     expect(scorecard.declared_hosts).toEqual([
@@ -1132,6 +1222,7 @@ describe("follow: the audited site's own endpoint redirecting off its origin", (
       },
     ]);
     expect(requestsTo(seen, 'mcp.example.org')).toEqual([]);
+    expect(reserved).toEqual([]);
     expect(row(scorecard, 'mcp-initialize')).toMatchObject({
       status: 'n_a',
       na_reason: 'declared-host-budget-exceeded',
@@ -1148,8 +1239,10 @@ describe('follow: hosts that are never requested', () => {
       'https://ANC.dev./api/web-rescore?token=x',
       'https://staging.anc.dev./x',
       'https://anc.dev./mcp',
+      'https://anc.dev../mcp',
+      'https://www.anc.dev../x',
     ];
-    const toSelfZone = (r: Seen): boolean => new URL(r.url).hostname.replace(/\.$/, '').endsWith('anc.dev');
+    const toSelfZone = (r: Seen): boolean => new URL(r.url).hostname.replace(/\.+$/, '').endsWith('anc.dev');
     for (const selfPath of selfPaths) {
       const seen: Seen[] = [];
       const refused = await audit(router(siteDeclaring(selfPath), seen));
@@ -1189,6 +1282,44 @@ describe('follow: hosts that are never requested', () => {
       expect(resultLine(initialize.status, null, initialize.na_reason, initialize.host ?? '')).toBe(
         `Not evaluated: ${host} is a private or IP address`,
       );
+    }
+  });
+
+  test('an endpoint anc cannot request is one its host cannot confirm, never a private or IP address', async () => {
+    const wss = 'wss://mcp.example.com/ws';
+    const seen: Seen[] = [];
+    const { scorecard } = await audit(router(siteDeclaring(wss), seen));
+    expect(scorecard.declared_hosts).toEqual([
+      {
+        surface: '/.well-known/mcp.json',
+        kind: 'mcp-endpoint',
+        url: wss,
+        host: 'mcp.example.com',
+        outcome: 'reciprocity-refused',
+      },
+    ]);
+    expect(requestsTo(seen, 'mcp.example.com')).toEqual([]);
+    const initialize = row(scorecard, 'mcp-initialize');
+    expect(initialize).toMatchObject({ status: 'n_a', na_reason: 'reciprocity-refused', host: 'mcp.example.com' });
+    expect(resultLine(initialize.status, null, initialize.na_reason, initialize.host ?? '')).toBe(
+      'Not evaluated: mcp.example.com did not confirm this endpoint',
+    );
+  });
+
+  test('an endpoint URL with no host names no host in its rows', async () => {
+    for (const hostless of ['mailto:mcp@example.org', 'data:text/plain,mcp']) {
+      const { scorecard } = await audit(router(siteDeclaring(hostless), []));
+      expect({ hostless, outcome: scorecard.declared_hosts?.[0]?.outcome }).toEqual({
+        hostless,
+        outcome: 'reciprocity-refused',
+      });
+      const initialize = row(scorecard, 'mcp-initialize');
+      expect({ hostless, reason: initialize.na_reason, host: initialize.host }).toEqual({
+        hostless,
+        reason: 'antecedent-unmet',
+        host: undefined,
+      });
+      expect(resultLine(initialize.status, null, initialize.na_reason, initialize.host ?? '')).toBe('Not applicable');
     }
   });
 

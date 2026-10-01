@@ -66,10 +66,17 @@ function isIpLiteral(hostname: string): boolean {
 }
 
 function inSelfZone(rawHostname: string): boolean {
-  // WHATWG URL keeps a trailing dot, and `anc.dev.` names the same zone.
-  const hostname = rawHostname.toLowerCase().replace(/\.$/, '');
+  // WHATWG URL keeps trailing dots as written, and `anc.dev.` and
+  // `anc.dev..` name the same zone.
+  const hostname = rawHostname.toLowerCase().replace(/\.+$/, '');
   return hostname === SELF_ZONE || hostname.endsWith(`.${SELF_ZONE}`);
 }
+
+// A URL anc cannot request (one that does not parse, or a scheme other
+// than http(s)) names an endpoint no host can confirm to anc. `blocked`
+// is kept for a host the guard refuses and an IP literal, which is what
+// the rows say of it.
+const UNREQUESTABLE: Settled = { outcome: 'reciprocity-refused' };
 
 /**
  * Where the URL may not be requested at all, or null when it may. The
@@ -77,7 +84,8 @@ function inSelfZone(rawHostname: string): boolean {
  */
 export function refusal(url: string, kind: McpDeclaration['kind']): Settled | null {
   const validated = validatePublicUrl(url);
-  if (!validated.ok || isIpLiteral(validated.url.hostname)) return { outcome: 'blocked' };
+  if (!validated.ok) return validated.refused === 'host' ? { outcome: 'blocked' } : UNREQUESTABLE;
+  if (isIpLiteral(validated.url.hostname)) return { outcome: 'blocked' };
   if (
     inSelfZone(validated.url.hostname) &&
     (kind !== 'mcp-endpoint' || normalizeEndpointUrl(url) !== CANONICAL_SELF_ENDPOINT)
@@ -93,7 +101,7 @@ export function refusal(url: string, kind: McpDeclaration['kind']): Settled | nu
  * host the redirect led to rather than the one that sent it there.
  */
 export function hopRefusal(hop: string, kind: McpDeclaration['kind']): Settled | null {
-  const refused = hop === '' ? ({ outcome: 'blocked' } as const) : refusal(hop, kind);
+  const refused = hop === '' ? UNREQUESTABLE : refusal(hop, kind);
   if (refused === null) return null;
   return hostOf(hop) ? { final_url: hop, ...refused } : refused;
 }

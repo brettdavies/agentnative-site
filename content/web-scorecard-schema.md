@@ -152,15 +152,16 @@ refused connection, a DNS failure, a timeout), and `reciprocity-refused` when th
 confirmed endpoint in declaration order is the endpoint of record unless the audited site serves its own; an endpoint or
 card document declared after it, or an endpoint confirmed while the site serves its own, reads `not-followed`. A URL the
 SSRF guard refuses, a private address or an IP literal, or a redirect hop to one, reads `blocked` and is never
-requested; its rows read `declared-host-blocked`.
+requested; its rows read `declared-host-blocked`. A URL anc cannot request at all, one that does not parse or whose
+scheme is not `http` or `https`, is never requested and reads `reciprocity-refused`.
 
 anc never re-sends a probe of the site's own MCP endpoint to another origin. When one of the site's MCP paths answers a
 discovery POST with a redirect to another origin, `mcp_discovery` records the probe's status and `redirect` target, and
 the target joins this trail as an `mcp-endpoint` whose `surface` is that path; like any declared endpoint, it receives
 no wire probe until its own host confirms it. A redirect that keeps the scheme, host, and port (`/mcp` to `/mcp/`) is
-followed. A later probe of the site's endpoint answered with a redirect to another origin is not followed and reads as
-an `error`. A row not evaluated because of a declared host names that host in `hosts` and `host`, or the host its
-redirect led to.
+followed. A later probe of the site's endpoint by any method other than GET or HEAD, answered with a redirect to another
+origin, is not followed and reads as an `error`; a GET or HEAD probe takes the redirect response itself as its answer. A
+row not evaluated because of a declared host names that host in `hosts` and `host`, or the host its redirect led to.
 
 ## The two-score model
 

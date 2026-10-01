@@ -25,9 +25,10 @@
 // naming another URL, records one outcome, so the trail cannot be read as
 // an oracle for what a third-party host serves. A card document is the
 // site's own declaration, read rather than confirmed, so a card host that
-// gives no response at all records unreachable; any answer that yields no
-// endpoint records reciprocity-refused. Caps, budgets, and guard refusals
-// are decided before any request and record their own outcomes.
+// gives no response at all, or one the edge answers for, records
+// unreachable; any answer that yields no endpoint records
+// reciprocity-refused. Caps, budgets, and guard refusals are decided
+// before any request and record their own outcomes.
 // The trail follows declaration order, never completion order.
 
 import type { ProbeResponse } from './assert';
@@ -62,7 +63,7 @@ import { phaseBudget, resolveUrl } from './handlers/shared';
 import type { EvidenceItem } from './handlers/types';
 import { admittingArtifact, normalizeEndpointUrl } from './reciprocity';
 import type { WebAuditDiscoveryConfig } from './registry';
-import { DOCUMENT_MAX_BODY_BYTES, type GuardedFetchOptions, STATUS_ONLY_BODY_BYTES } from './ssrf';
+import { DOCUMENT_MAX_BODY_BYTES, type GuardedFetchOptions, isEdgeErrorStatus, STATUS_ONLY_BODY_BYTES } from './ssrf';
 
 const FOLLOW_SLICE_MS = 6_000;
 // A streamable-HTTP endpoint may hold a GET open as an event stream; the
@@ -128,7 +129,7 @@ export function openFollow(input: FollowInput): FollowSession {
   const cardDocumentRead = (declaration: McpDeclaration, fetched: Fetched | Settled): CardDocumentRead => {
     if (!('response' in fetched)) return { entry: trailEntry(declaration, fetched), named: [] };
     const finalUrl = fetched.url === declaration.url ? undefined : fetched.url;
-    if (fetched.response.status === null) {
+    if (fetched.response.status === null || isEdgeErrorStatus(fetched.response.status)) {
       return { entry: trailEntry(declaration, { final_url: finalUrl, outcome: 'unreachable' }), named: [] };
     }
     const card = fetched.response.status === 200 ? parseJsonObject(fetched.response) : null;

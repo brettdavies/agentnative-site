@@ -49,6 +49,8 @@ describe('validatePublicUrl', () => {
     ['rfc1918 172.16/12', 'http://172.20.1.1/'],
     ['gcp metadata hostname', 'http://metadata.google.internal/'],
     ['localhost hostname', 'http://localhost:8787/'],
+    ['localhost with trailing dots', 'http://localhost../'],
+    ['metadata hostname with trailing dots', 'http://metadata.google.internal../'],
     ['decimal ip literal (127.0.0.1)', 'http://2130706433/'],
     ['octal ip literal (127.0.0.1)', 'http://0177.0.0.1/'],
     ['hex ip literal (127.0.0.1)', 'http://0x7f.0.0.1/'],

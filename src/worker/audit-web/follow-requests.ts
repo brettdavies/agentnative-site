@@ -93,6 +93,9 @@ export function sliceRequests(input: {
     return reservation;
   };
   const enter = async (url: string): Promise<void> => {
+    // A reservation draws on a budget shared across audits, so none is
+    // spent for a host the slice has no time left to request.
+    if (input.phase.slice() === null) throw new FollowStop('slice');
     const hostname = new URL(url).hostname;
     if (!admitHost(hostname)) throw new FollowStop('per-audit-cap');
     if (!(await reserve(hostname))) throw new FollowStop('domain-budget');

@@ -47,7 +47,7 @@ function unmetReason(trail: readonly TrailEntry[]): DeclaredHostReason | null {
         : ROW_REASONS[entry.outcome];
     const url = entry.final_url ?? entry.url;
     const host = hostOf(url);
-    if (reason !== undefined && host !== null) return { reason, host, url };
+    if (reason !== undefined && host !== null && host.length > 0) return { reason, host, url };
   }
   return null;
 }
