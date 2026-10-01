@@ -6,6 +6,7 @@
 // confirming anything. Metadata the audit already read while finding or
 // admitting the endpoint is not read again.
 
+import type { ProbeResponse } from './assert';
 import type { McpAuthRequired, ProbeOutcome } from './handlers/types';
 import {
   type ArtifactSource,
@@ -16,8 +17,8 @@ import {
 } from './reciprocity';
 import { type GuardedFetchOptions, guardedFetch } from './ssrf';
 
-/** The wave-1 wire probes whose 401 decides it, in the order their challenge is read. */
-const WIRE_PROBES = ['mcp-initialize', 'mcp-server-discover'];
+/** The wave-1 wire probes whose answer decides it, in the order a 401's challenge is read. */
+export const WIRE_PROBES = ['mcp-initialize', 'mcp-server-discover'] as const;
 
 /**
  * Where metadata is read outside the follow slice: one GET per location,
@@ -52,14 +53,32 @@ export interface ChallengedPath {
   challenge: string | null;
 }
 
+/** A source that sends each read once, so challenged paths on one host share their root and echo reads. */
+function readingOnce(source: ArtifactSource): ArtifactSource {
+  const reads = new Map<string, Promise<ProbeResponse>>();
+  return {
+    get: (url, read) => {
+      const key = `${read.maxBodyBytes} ${read.accept ?? ''} ${url}`;
+      let pending = reads.get(key);
+      if (pending === undefined) {
+        pending = source.get(url, read);
+        reads.set(key, pending);
+      }
+      return pending;
+    },
+    decline: (url, why) => source.decline(url, why),
+  };
+}
+
 /** The first challenged path, in probe order, whose own metadata names it; null when none does. */
 export async function signInEndpoint(
   challenged: readonly ChallengedPath[],
   source: ArtifactSource,
 ): Promise<{ path: ChallengedPath; metadata: MetadataMatch } | null> {
+  const once = readingOnce(source);
   for (const path of challenged) {
-    const resolved = await resolveProtectedResourceMetadata(path.url, source, path.challenge ?? undefined);
-    if (resolved.matched) return { path, metadata: { url: resolved.url, metadata: resolved.metadata } };
+    const metadata = await resolveProtectedResourceMetadata(path.url, once, path.challenge ?? undefined);
+    if (metadata !== null) return { path, metadata };
   }
   return null;
 }
@@ -88,16 +107,16 @@ export async function settleMcpAuth(input: {
   sources: ReadonlyMap<string, ProbeOutcome>;
   source: ArtifactSource;
 }): Promise<McpAuthRequired | null> {
-  const endpoint = input.endpoint === null ? null : normalizeEndpointUrl(input.endpoint);
-  if (input.endpoint === null || endpoint === null) return null;
+  if (input.endpoint === null) return null;
+  const endpoint = normalizeEndpointUrl(input.endpoint);
+  if (endpoint === null) return null;
   const answer = wireChallenge(input.sources);
   if (answer === null) return null;
   const named = answer.challenge === null ? null : resourceMetadataFromChallenge(answer.challenge);
-  let match = input.known !== null && (named === null || named === input.known.url) ? input.known : null;
-  if (match === null) {
-    const resolved = await resolveProtectedResourceMetadata(endpoint, input.source, answer.challenge ?? undefined);
-    match = resolved.matched ? { url: resolved.url, metadata: resolved.metadata } : null;
-  }
+  const match =
+    input.known !== null && (named === null || named === input.known.url)
+      ? input.known
+      : await resolveProtectedResourceMetadata(endpoint, input.source, answer.challenge ?? undefined);
   if (match === null) return null;
   return { endpoint: input.endpoint, challenge: answer.challenge, metadataUrl: match.url, metadata: match.metadata };
 }

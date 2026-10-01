@@ -119,8 +119,6 @@ export function resourceMetadataFromChallenge(challenge: string | undefined): st
 /** RFC 9728 metadata naming an endpoint, and where it was read. */
 export type MetadataMatch = { url: string; metadata: JsonObject };
 
-export type MetadataResolution = ({ matched: true } & MetadataMatch) | { matched: false };
-
 async function readMetadata(source: ArtifactSource, url: string): Promise<JsonObject | null> {
   const response = await source.get(url, { maxBodyBytes: METADATA_MAX_BODY_BYTES });
   return response.status === 200 ? parseJsonObject(response) : null;
@@ -162,10 +160,10 @@ export async function resolveProtectedResourceMetadata(
   endpoint: string,
   source: ArtifactSource,
   challenge?: string,
-): Promise<MetadataResolution> {
+): Promise<MetadataMatch | null> {
   const fromChallenge = challenge === undefined ? undefined : challengeMetadataUrl(source, endpoint, challenge);
-  if (fromChallenge === null) return { matched: false };
-  let found: { url: string; metadata: JsonObject } | null = null;
+  if (fromChallenge === null) return null;
+  let found: MetadataMatch | null = null;
   for (const url of fromChallenge !== undefined ? [fromChallenge] : protectedResourceMetadataUrls(endpoint)) {
     const metadata = await readMetadata(source, url);
     if (metadata !== null) {
@@ -173,13 +171,13 @@ export async function resolveProtectedResourceMetadata(
       break;
     }
   }
-  if (found === null || resourceOf(found.metadata) !== endpoint) return { matched: false };
+  if (found === null || resourceOf(found.metadata) !== endpoint) return null;
   const { origin, pathname } = new URL(endpoint);
   if (pathname !== '/') {
     const echoed = resourceOf(await readMetadata(source, `${origin}${PROTECTED_RESOURCE_PATH}${ECHO_PROBE_PATH}`));
-    if (echoed === normalizeEndpointUrl(`${origin}${ECHO_PROBE_PATH}`)) return { matched: false };
+    if (echoed === normalizeEndpointUrl(`${origin}${ECHO_PROBE_PATH}`)) return null;
   }
-  return { matched: true, ...found };
+  return found;
 }
 
 /** The artifact that admitted an endpoint, and the metadata when metadata is what did. */
@@ -202,6 +200,6 @@ export async function admittingArtifact(
     return { by: 'card', metadata: null };
   }
   if (await hostCatalogNames(source, endpoint, cfg.ai_catalog)) return { by: 'ai-catalog', metadata: null };
-  const resolved = await resolveProtectedResourceMetadata(endpoint, source, challenge);
-  return resolved.matched ? { by: 'metadata', metadata: { url: resolved.url, metadata: resolved.metadata } } : null;
+  const metadata = await resolveProtectedResourceMetadata(endpoint, source, challenge);
+  return metadata === null ? null : { by: 'metadata', metadata };
 }

@@ -9,6 +9,8 @@ import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
 import { enrichWebScorecardForDisplay } from '../src/worker/audit-web/display';
 import { endpointRedirects } from '../src/worker/audit-web/handlers/shared';
+import { signInEndpoint } from '../src/worker/audit-web/mcp-auth';
+import type { ArtifactSource } from '../src/worker/audit-web/reciprocity';
 import type { AntecedentToken, WebAuditRegistry } from '../src/worker/audit-web/registry';
 import type { WebRemediationCatalog } from '../src/worker/audit-web/remediation';
 import type { ScorecardStatus, WebScorecard } from '../src/worker/audit-web/scorecard';
@@ -224,6 +226,31 @@ describe('presence with auth required', () => {
     expect(scorecard.mcp_endpoint).toBe(SAME);
     expect(row(scorecard, 'mcp-initialize')).toMatchObject({ status: 'n_a', na_reason: 'auth-required' });
     expect(row(scorecard, 'mcp-tools-list')).toMatchObject({ status: 'n_a', na_reason: 'auth-required' });
+  });
+});
+
+describe('finding a sign-in endpoint among challenged common paths', () => {
+  test('paths on one host share one read of the root metadata', async () => {
+    const reads: string[] = [];
+    const source: ArtifactSource = {
+      get: async (url) => {
+        reads.push(url);
+        return { status: 404, headers: {}, body: '', error: null };
+      },
+      decline: () => {},
+    };
+    const challenged = ['/mcp', '/sse'].map((path) => ({
+      path,
+      url: `https://example.com${path}`,
+      probed: 'mcp-common-path',
+      challenge: null,
+    }));
+    expect(await signInEndpoint(challenged, source)).toBeNull();
+    expect(reads).toEqual([
+      'https://example.com/.well-known/oauth-protected-resource/mcp',
+      'https://example.com/.well-known/oauth-protected-resource',
+      'https://example.com/.well-known/oauth-protected-resource/sse',
+    ]);
   });
 });
 

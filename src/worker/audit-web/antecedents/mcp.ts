@@ -4,6 +4,7 @@
 // evaluated names why.
 
 import { advertisesResources } from '../handlers/mcp';
+import { WIRE_PROBES } from '../mcp-auth';
 import { hostOf } from '../provenance';
 import type { AntecedentToken } from '../registry';
 import {
@@ -26,7 +27,7 @@ const mcpAuth: AntecedentResolver = (ctx) => {
 
 /** A wave-1 wire probe got a 2xx answer: the endpoint served a request that carried no token. */
 function answeredWithoutSignIn(ctx: AntecedentContext): boolean {
-  return ['mcp-initialize', 'mcp-server-discover'].some((id) => {
+  return WIRE_PROBES.some((id) => {
     const status = sourceEvidence(ctx, id)[0]?.status;
     return typeof status === 'number' && status >= 200 && status < 300;
   });

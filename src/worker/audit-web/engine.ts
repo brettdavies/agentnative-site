@@ -41,6 +41,7 @@ import { runLlmsTxtQuality } from './handlers/llms-txt-quality';
 import { runMarkdownFrontmatter } from './handlers/markdown-frontmatter';
 import {
   advertisedCapabilities,
+  ENFORCEMENT_OPS,
   mcpModernLaneFrom,
   mcpSessionIdFrom,
   notifyMcpInitialized,
@@ -150,7 +151,9 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
     // wrong code on a row whose code was right and whose payload was not.
     // An enforcement row's reason is its whole finding, whatever its status.
     if (
-      (outcome.status === 'absent' || outcome.status === 'noncompliant' || op === 'unauthenticated-tools-list') &&
+      (outcome.status === 'absent' ||
+        outcome.status === 'noncompliant' ||
+        ENFORCEMENT_OPS.some((enforcementOp) => enforcementOp === op)) &&
       Array.isArray(first.why)
     ) {
       return (first.why as string[]).join('; ');
