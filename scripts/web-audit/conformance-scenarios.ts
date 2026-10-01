@@ -954,7 +954,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     post(MCP_PATH, rpcError(-32099)),
   ]),
   'mcp-www-authenticate': scenario(
-    'an endpoint that answers legacy POSTs with a 401 whose challenge names no metadata, while root RFC 9728 metadata names it: it requires sign-in, so the rows those 401s answer read auth-required, its modern lane refuses without a token, and the challenge satisfies the mcp-auth antecedent',
+    'an endpoint that answers legacy POSTs with a 401 whose challenge names no metadata, while root RFC 9728 metadata names it: the rows those 401s answer read auth-required, its modern lane answers token-less probes with a method-not-found so the session rows still apply and it presents both MCP access alternatives, and the challenge satisfies the mcp-auth antecedent',
     ['mcp-initialize', 'mcp-auth-challenge', 'oauth-protected-resource', 'auth-md'],
     [
       ...baseline(),
