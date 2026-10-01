@@ -42,7 +42,11 @@ Responses carry lowercase header names with single string values and a UTF-8 tex
 reads it. No response carries `content-encoding`: decompression is pinned by transport tests, not by the
 corpus. A transport failure is `{"error": "Name: message"}`, the string `ProbeResponse.error` carries at the
 seam; a `TimeoutError` is always recorded as `TimeoutError: deadline exceeded`. Redirects are ordinary
-exchanges (a 3xx with a `location` header) that the guarded fetch above the seam follows with a new request.
+exchanges (a 3xx with a `location` header) that the guarded fetch above the seam follows with a new request,
+except where the engine keeps a probe off hosts nothing confirmed. A request to the MCP endpoint on the audited
+origin (discovery's common-path POSTs and every probe of that endpoint) takes only hops that keep the scheme, host,
+and port: discovery records a redirect to another origin with its target and declares the target, and any other probe
+reads it as a refused redirect. A probe of an endpoint on a declared host takes no redirect at all.
 
 ## scorecard.json
 
@@ -66,9 +70,10 @@ port must add it back. An item whose `url` does not parse contributes nothing, a
 
 `declared_hosts` holds one entry per URL the target's discovery documents declare off its origin, in declaration
 order (the AI catalog's card entries, the card under the discovered endpoint, then the well-known cards; the endpoints a
-followed card document names come right after that document's entry), never in the order requests complete. A URL
-declared twice keeps its first entry. Endpoints are tried one at a time in that order and the first that its own host
-confirms becomes the endpoint, so every later endpoint reads `not-followed`.
+followed card document names come right after that document's entry), then the targets the common-path POSTs were
+redirected to off the origin, in probe order and with the redirecting path as their `surface`, never in the order
+requests complete. A URL declared twice keeps its first entry. Endpoints are tried one at a time in that order and the
+first that its own host confirms becomes the endpoint, so every later endpoint reads `not-followed`.
 
 ## scores.json
 
@@ -126,6 +131,8 @@ the first two, `im` for the body patterns) and `results[i] = new RegExp(pattern,
 | `follow-card-admit` | the card names an endpoint on another host, whose own card at `<endpoint>/server-card` names it: the MCP rows are scored there | `mcp-initialize`, `mcp-tools-list`, `mcp-cors-preflight`, `mcp-cors-actual`, `mcp-get-fast-fail` |
 | `follow-disabled` | the same declared endpoint as follow-card-admit with following off: nothing off the audited origin is requested and the MCP rows read follow-disabled | `mcp-initialize`, `mcp-tools-list`, `mcp-cors-preflight`, `mcp-cors-actual`, `mcp-get-fast-fail` |
 | `follow-host-cap` | four declared hosts each redirect into a private range and are blocked; the fifth exceeds the per-audit host cap and is never requested | `mcp-initialize` |
+| `follow-own-redirect-admit` | the audited site's /mcp answers the discovery POSTs with a 307 to another host whose card at `<endpoint>/server-card` names it: no POST follows the redirect, the target is confirmed like a declared endpoint, and the MCP rows are scored there | `mcp-initialize`, `mcp-tools-list`, `mcp-cors-preflight`, `mcp-cors-actual`, `mcp-get-fast-fail` |
+| `follow-own-redirect-refused` | the audited site's /mcp answers the discovery POSTs with a 307 to another host that publishes nothing naming that URL: no POST or OPTIONS reaches the host, and the MCP rows name the host that did not confirm it | `mcp-initialize`, `mcp-tools-list`, `mcp-cors-preflight`, `mcp-cors-actual`, `mcp-get-fast-fail` |
 | `follow-reciprocity-refused` | the declared endpoint answers GET with 405 and Allow: POST but publishes no card, catalog entry, or metadata naming it: no wire probe, and the MCP rows name the host that did not confirm it | `mcp-initialize`, `mcp-tools-list`, `mcp-cors-preflight`, `mcp-cors-actual`, `mcp-get-fast-fail` |
 | `follow-redirect-hop` | the declared endpoint redirects once to another public host whose card names the final URL: the final URL is the endpoint and the trail records both | `mcp-initialize`, `mcp-tools-list`, `mcp-cors-preflight`, `mcp-cors-actual`, `mcp-get-fast-fail` |
 | `frontmatter-absent` | a twin opening with prose is absent, which a MAY finalizes as optional-absent | `markdown-frontmatter` |

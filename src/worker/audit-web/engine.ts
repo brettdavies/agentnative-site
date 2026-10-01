@@ -27,7 +27,7 @@ import {
 import type { ProbeResponse } from './assert';
 import { readDiscoveryDocuments } from './discovery';
 import { settleEndpointOfRecord } from './endpoint-of-record';
-import { ALWAYS_ADMIT_BUDGET, type DomainBudget } from './follow';
+import { ALWAYS_ADMIT_BUDGET, type DomainBudget } from './follow-requests';
 import { runApiHygiene } from './handlers/api-hygiene';
 import { runAuthMd } from './handlers/auth-md';
 import { runContentWithoutJs } from './handlers/content-without-js';

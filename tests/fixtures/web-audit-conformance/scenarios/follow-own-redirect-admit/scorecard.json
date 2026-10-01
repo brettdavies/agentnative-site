@@ -2,7 +2,7 @@
   "schema_version": "0.5",
   "spec_version": "0.0.0-corpus",
   "target_url": "https://example.com/",
-  "mcp_endpoint": null,
+  "mcp_endpoint": "https://mcp.example.org/mcp",
   "mcp_discovery": [
     {
       "source": "/.well-known/mcp.json",
@@ -10,16 +10,12 @@
     },
     {
       "source": "/.well-known/mcp/server-card.json",
-      "status": 200,
-      "shape": "sep-1649",
-      "endpoint": "https://h5.example.net/mcp",
-      "blocked": "off-origin endpoint declaration"
+      "status": 404
     },
     {
       "source": "/.well-known/ai-catalog.json",
       "document": "ai-catalog",
-      "status": 200,
-      "shape": "ai-catalog"
+      "status": 404
     },
     {
       "source": "/.well-known/api-catalog",
@@ -27,34 +23,10 @@
       "status": 404
     },
     {
-      "source": "/.well-known/ai-catalog.json#/entries/0/data",
-      "document": "server-card",
-      "shape": "sep-2127",
-      "endpoint": "https://h1.example.net/mcp",
-      "blocked": "off-origin endpoint declaration"
-    },
-    {
-      "source": "/.well-known/ai-catalog.json#/entries/1/data",
-      "shape": "sep-2127",
-      "endpoint": "https://h2.example.net/mcp",
-      "blocked": "off-origin endpoint declaration"
-    },
-    {
-      "source": "/.well-known/ai-catalog.json#/entries/2/data",
-      "shape": "sep-2127",
-      "endpoint": "https://h3.example.net/mcp",
-      "blocked": "off-origin endpoint declaration"
-    },
-    {
-      "source": "/.well-known/ai-catalog.json#/entries/3/data",
-      "shape": "sep-2127",
-      "endpoint": "https://h4.example.net/mcp",
-      "blocked": "off-origin endpoint declaration"
-    },
-    {
       "source": "/mcp",
-      "status": 404,
-      "probed": "initialize (no serverInfo)"
+      "status": 307,
+      "probed": "initialize (off-origin redirect)",
+      "redirect": "https://mcp.example.org/mcp"
     },
     {
       "source": "/sse",
@@ -68,8 +40,9 @@
     },
     {
       "source": "/mcp",
-      "status": 404,
-      "probed": "modern-tools-list (no tools)"
+      "status": 307,
+      "probed": "modern-tools-list (off-origin redirect)",
+      "redirect": "https://mcp.example.org/mcp"
     },
     {
       "source": "/sse",
@@ -93,73 +66,41 @@
   "follow_declarations": true,
   "declared_hosts": [
     {
-      "surface": "/.well-known/ai-catalog.json#/entries/0/data",
+      "surface": "/mcp",
       "kind": "mcp-endpoint",
-      "url": "https://h1.example.net/mcp",
-      "host": "h1.example.net",
-      "final_url": "http://10.0.0.1/mcp",
-      "outcome": "blocked"
-    },
-    {
-      "surface": "/.well-known/ai-catalog.json#/entries/1/data",
-      "kind": "mcp-endpoint",
-      "url": "https://h2.example.net/mcp",
-      "host": "h2.example.net",
-      "final_url": "http://10.0.0.1/mcp",
-      "outcome": "blocked"
-    },
-    {
-      "surface": "/.well-known/ai-catalog.json#/entries/2/data",
-      "kind": "mcp-endpoint",
-      "url": "https://h3.example.net/mcp",
-      "host": "h3.example.net",
-      "final_url": "http://10.0.0.1/mcp",
-      "outcome": "blocked"
-    },
-    {
-      "surface": "/.well-known/ai-catalog.json#/entries/3/data",
-      "kind": "mcp-endpoint",
-      "url": "https://h4.example.net/mcp",
-      "host": "h4.example.net",
-      "final_url": "http://10.0.0.1/mcp",
-      "outcome": "blocked"
-    },
-    {
-      "surface": "/.well-known/mcp/server-card.json",
-      "kind": "mcp-endpoint",
-      "url": "https://h5.example.net/mcp",
-      "host": "h5.example.net",
-      "outcome": "budget-exceeded",
-      "cause": "per-audit-cap"
+      "url": "https://mcp.example.org/mcp",
+      "host": "mcp.example.org",
+      "outcome": "followed",
+      "admitted_by": "card"
     }
   ],
   "summary": {
-    "pass": 10,
+    "pass": 22,
     "noncompliant": 0,
     "broken": 1,
-    "absent": 7,
-    "n_a": 46,
+    "absent": 15,
+    "n_a": 26,
     "skip": 0,
     "error": 1
   },
   "coverage_summary": {
     "must": {
-      "total": 1,
-      "verified": 0
+      "total": 4,
+      "verified": 2
     },
     "should": {
-      "total": 13,
-      "verified": 6
+      "total": 31,
+      "verified": 17
     },
     "may": {
-      "total": 4,
-      "verified": 4
+      "total": 3,
+      "verified": 3
     }
   },
-  "score_pct": 51,
+  "score_pct": 64,
   "score": {
-    "relative": 51,
-    "global": 13
+    "relative": 64,
+    "global": 40
   },
   "categories": [
     {
@@ -189,14 +130,14 @@
     {
       "id": "mcp",
       "name": "MCP",
-      "passed": 1,
-      "counted": 1
+      "passed": 14,
+      "counted": 22
     },
     {
       "id": "agent-discovery-auth",
       "name": "Agent discovery & auth",
-      "passed": 1,
-      "counted": 1
+      "passed": 0,
+      "counted": 0
     }
   ],
   "results": [
@@ -296,15 +237,14 @@
       "keyword": "must",
       "tier": "required",
       "principle": "P2",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "pass",
+      "evidence": "serverInfo example, protocol 2025-06-18",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-capabilities",
@@ -315,15 +255,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P2",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "pass",
+      "evidence": "serverInfo example, protocol 2025-06-18",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-tools-list",
@@ -334,15 +273,14 @@
       "keyword": "must",
       "tier": "required",
       "principle": "P2",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "pass",
+      "evidence": "2 tools, 1 with input schema",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-resources-list",
@@ -353,15 +291,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P2",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "pass",
+      "evidence": "https://mcp.example.org/mcp -> 200",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-modern-tools-list",
@@ -372,15 +309,15 @@
       "keyword": "must",
       "tier": "required",
       "principle": "P2",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "absent",
+      "unprobed": true,
+      "evidence": "no modern lane: server/discover returned no result",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-server-discover",
@@ -391,15 +328,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P2",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "absent",
+      "evidence": "no modern lane: server/discover refused with code -32601",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-unknown-method",
@@ -410,15 +346,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "pass",
+      "evidence": "error code -32601",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-malformed-body",
@@ -429,15 +364,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "pass",
+      "evidence": "error code -32700",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-batch-reject",
@@ -448,15 +382,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "pass",
+      "evidence": "error code -32600",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-unknown-tool",
@@ -467,15 +400,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "pass",
+      "evidence": "error code -32602",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-modern-unknown-method",
@@ -486,15 +418,15 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "absent",
+      "unprobed": true,
+      "evidence": "no modern lane: server/discover returned no result",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-modern-clientcaps",
@@ -505,15 +437,15 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "absent",
+      "unprobed": true,
+      "evidence": "no modern lane: server/discover returned no result",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-modern-header-mismatch",
@@ -524,15 +456,15 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "absent",
+      "unprobed": true,
+      "evidence": "no modern lane: server/discover returned no result",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-modern-version-reject",
@@ -543,15 +475,15 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "absent",
+      "unprobed": true,
+      "evidence": "no modern lane: server/discover returned no result",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-modern-resources-miss",
@@ -562,15 +494,15 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "absent",
+      "unprobed": true,
+      "evidence": "no modern lane: server/discover returned no result",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-accept-json",
@@ -581,15 +513,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "pass",
+      "evidence": "https://mcp.example.org/mcp -> 200",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-accept-unsatisfiable",
@@ -600,15 +531,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "pass",
+      "evidence": "https://mcp.example.org/mcp -> 406",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-get-fast-fail",
@@ -619,15 +549,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "pass",
+      "evidence": "https://mcp.example.org/mcp -> 405",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-cors-preflight",
@@ -638,15 +567,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P6",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "pass",
+      "evidence": "preflight 204 allow-origin *; post 200 allow-origin *",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-cors-actual",
@@ -657,15 +585,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P6",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "pass",
+      "evidence": "preflight 204 allow-origin *; post 200 allow-origin *",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "mcp.example.org"
     },
     {
       "id": "well-known-mcp-card",
@@ -676,15 +603,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P8",
-      "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "status": "absent",
+      "evidence": "https://example.com/.well-known/mcp/server-card.json -> 404 (status 404 not in [200])",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "example.com"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "example.com"
     },
     {
       "id": "mcp-card-legacy-aliases",
@@ -696,14 +622,14 @@
       "tier": "optional",
       "principle": "P8",
       "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "na_reason": "optional-absent",
+      "evidence": "https://example.com/.well-known/mcp -> 404 (404 alias not published)",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "example.com"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "example.com"
     },
     {
       "id": "mcp-usage-doc",
@@ -715,14 +641,14 @@
       "tier": "optional",
       "principle": "P8",
       "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
+      "na_reason": "optional-absent",
+      "evidence": "https://example.com/mcp-skill.md -> 404 (status 404 not in [200])",
       "hosts": [
         {
-          "host": "10.0.0.1"
+          "host": "example.com"
         }
       ],
-      "host": "10.0.0.1"
+      "host": "example.com"
     },
     {
       "id": "webmcp",
@@ -1256,8 +1182,9 @@
       "keyword": "may",
       "tier": "optional",
       "principle": "P8",
-      "status": "pass",
-      "evidence": "https://example.com/.well-known/ai-catalog.json -> 200",
+      "status": "n_a",
+      "na_reason": "optional-absent",
+      "evidence": "https://example.com/.well-known/ai-catalog.json -> 404 (status 404 not in [200])",
       "hosts": [
         {
           "host": "example.com"
@@ -1308,14 +1235,9 @@
       "tier": "optional",
       "principle": "P1",
       "status": "n_a",
-      "na_reason": "declared-host-blocked",
-      "evidence": "http://10.0.0.1/mcp",
-      "hosts": [
-        {
-          "host": "10.0.0.1"
-        }
-      ],
-      "host": "10.0.0.1"
+      "na_reason": "antecedent-unmet",
+      "evidence": "MCP endpoint does not challenge for auth",
+      "hosts": []
     },
     {
       "id": "auth-md",

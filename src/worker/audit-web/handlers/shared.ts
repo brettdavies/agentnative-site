@@ -1,7 +1,10 @@
 // Shared helpers for the probe handlers and the discovery and follow
 // phases: base-relative URL resolution, `{mcp_endpoint}`/`{host}`
 // substitution, per-check timeout derivation (registry `with.timeout` is
-// in seconds), and a phase's share of the per-audit deadline.
+// in seconds), redirect handling for probes of the MCP endpoint, and a
+// phase's share of the per-audit deadline.
+
+import type { GuardedFetchOptions } from '../ssrf';
 
 /** Join a path to the base, or pass an absolute URL through unchanged. */
 export function resolveUrl(base: string, pathOrUrl: string): string {
@@ -20,14 +23,23 @@ export function substituteEndpoint(value: string, mcpEndpoint: string | null): s
   return value.replaceAll('{mcp_endpoint}', mcpEndpoint ?? '');
 }
 
-/** Redirect handling for a request to an MCP endpoint: refused when the endpoint is on a declared host. */
-export function followedRedirects(followed: boolean | undefined): { refuseRedirects?: true } {
-  return followed === true ? { refuseRedirects: true } : {};
+type RedirectPolicy = Pick<GuardedFetchOptions, 'refuseRedirects' | 'crossOriginRedirects'>;
+
+/**
+ * Redirect handling for a request to the MCP endpoint. No probe of it
+ * reaches a host nothing confirmed: on a declared host no redirect is
+ * taken, and on the audited origin only hops that stay on it are. There,
+ * a GET gets the hop it may not take back as its answer, since a redirect
+ * is a valid answer to a GET; any other method fails on it.
+ */
+export function mcpEndpointRedirects(followed: boolean | undefined, method = 'POST'): RedirectPolicy {
+  if (followed === true) return { refuseRedirects: true };
+  return { crossOriginRedirects: method === 'GET' || method === 'HEAD' ? 'return' : 'refuse' };
 }
 
-/** Redirect handling for a probe of `rawPath`: refused when it targets an endpoint on a declared host. */
-export function endpointRedirects(rawPath: string, followed: boolean | undefined): { refuseRedirects?: true } {
-  return followedRedirects(followed === true && rawPath.includes('{mcp_endpoint}'));
+/** Redirect handling for a probe of `rawPath`: the MCP endpoint's when the path targets it. */
+export function endpointRedirects(rawPath: string, followed: boolean | undefined, method?: string): RedirectPolicy {
+  return rawPath.includes('{mcp_endpoint}') ? mcpEndpointRedirects(followed, method) : {};
 }
 
 /** Replace the `{host}` token used by DoH record names. */

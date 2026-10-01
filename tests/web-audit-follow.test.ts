@@ -4,12 +4,14 @@
 
 import { describe, expect, test } from 'bun:test';
 import { runWebAudit } from '../src/worker/audit-web/engine';
-import type { DomainBudget } from '../src/worker/audit-web/follow';
+import type { DomainBudget } from '../src/worker/audit-web/follow-requests';
+import { resultLine } from '../src/worker/audit-web/remediation';
 import {
   aiCatalog,
   audit,
   cardDocument,
   cardEntry,
+  DISCOVERY,
   followRegistry,
   html,
   initializeResult,
@@ -756,17 +758,24 @@ describe('follow: caps and budgets', () => {
 });
 
 describe('follow: redirects', () => {
-  test('a declared URL redirecting to a private address is refused on the hop and recorded blocked', async () => {
+  test('a declared URL redirecting to a private address is refused on the hop, recorded blocked, and its rows name the hop', async () => {
+    const hop = 'http://169.254.169.254/latest';
     const seen: Seen[] = [];
     const { scorecard } = await audit(
-      router(
-        { ...siteDeclaring(ENDPOINT), [`GET ${ENDPOINT}`]: () => redirect('http://169.254.169.254/latest') },
-        seen,
-      ),
+      router({ ...siteDeclaring(ENDPOINT), [`GET ${ENDPOINT}`]: () => redirect(hop) }, seen),
     );
-    expect(scorecard.declared_hosts?.[0]).toMatchObject({ outcome: 'blocked' });
+    expect(scorecard.declared_hosts?.[0]).toMatchObject({ final_url: hop, outcome: 'blocked' });
     expect(requestsTo(seen, '169.254.169.254')).toEqual([]);
-    expect(row(scorecard, 'mcp-initialize')).toMatchObject({ na_reason: 'declared-host-unreachable', host: NET });
+    const initialize = row(scorecard, 'mcp-initialize');
+    expect(initialize).toMatchObject({
+      status: 'n_a',
+      na_reason: 'declared-host-blocked',
+      host: '169.254.169.254',
+      evidence: hop,
+    });
+    expect(resultLine(initialize.status, initialize.evidence, initialize.na_reason, initialize.host ?? '')).toBe(
+      `Not evaluated: 169.254.169.254 is a private or IP address (${hop})`,
+    );
   });
 
   test('a redirect to another public host whose card names itself pins the final URL and records both', async () => {
@@ -872,6 +881,265 @@ describe('follow: redirects', () => {
   });
 });
 
+describe("follow: the audited site's own endpoint redirecting off its origin", () => {
+  const OWN = 'https://example.com/mcp';
+  const VICTIM = 'https://victim.example/hook';
+  const MOVED = 'https://mcp.example.org/mcp';
+  const ELSEWHERE = 'https://elsewhere.example.org/mcp';
+
+  test('a common path answering a POST with a 307 to another host sends that host no POST and confirms nothing', async () => {
+    const seen: Seen[] = [];
+    const { scorecard } = await audit(
+      router({ [`GET ${TARGET}`]: () => html(), [`POST ${OWN}`]: () => redirect(VICTIM, 307) }, seen),
+    );
+    expect(wireProbesTo(seen, 'victim.example')).toEqual([]);
+    expect(scorecard.mcp_endpoint).toBeNull();
+    expect(scorecard.declared_hosts).toEqual([
+      { surface: '/mcp', kind: 'mcp-endpoint', url: VICTIM, host: 'victim.example', outcome: 'reciprocity-refused' },
+    ]);
+    expect(row(scorecard, 'mcp-initialize')).toMatchObject({
+      status: 'n_a',
+      na_reason: 'reciprocity-refused',
+      host: 'victim.example',
+      evidence: VICTIM,
+    });
+    expect(scorecard.mcp_discovery.filter((item) => item.source === '/mcp')).toEqual([
+      { source: '/mcp', status: 307, probed: 'initialize (off-origin redirect)', redirect: VICTIM },
+      { source: '/mcp', status: 307, probed: 'modern-tools-list (off-origin redirect)', redirect: VICTIM },
+    ]);
+  });
+
+  test('with following off, a redirect target reads follow-disabled and receives nothing', async () => {
+    const seen: Seen[] = [];
+    const { scorecard } = await audit(
+      router({ [`GET ${TARGET}`]: () => html(), [`POST ${OWN}`]: () => redirect(VICTIM, 307) }, seen),
+      { followDeclarations: false },
+    );
+    expect(requestsTo(seen, 'victim.example')).toEqual([]);
+    expect(scorecard.declared_hosts).toEqual([
+      {
+        surface: '/mcp',
+        kind: 'mcp-endpoint',
+        url: VICTIM,
+        host: 'victim.example',
+        outcome: 'not-followed',
+        reason: 'follow-disabled',
+      },
+    ]);
+    expect(row(scorecard, 'mcp-initialize')).toMatchObject({ status: 'n_a', na_reason: 'follow-disabled' });
+  });
+
+  test('a redirect target whose own card names it becomes the endpoint of record, and its wire probes refuse redirects', async () => {
+    const seen: Seen[] = [];
+    const { events, scorecard } = await audit(
+      router(
+        {
+          [`GET ${TARGET}`]: () => html(),
+          [`POST ${OWN}`]: () => redirect(MOVED, 307),
+          [`GET ${MOVED}/server-card`]: () => cardDocument(sep2127Card(MOVED)),
+          [`POST ${MOVED}`]: () => initializeResult(),
+          [`OPTIONS ${MOVED}`]: () => redirect(ELSEWHERE, 307),
+        },
+        seen,
+      ),
+    );
+    expect(events.find((e) => e.type === 'discovery')).toMatchObject({ endpoint: MOVED });
+    expect(scorecard.mcp_endpoint).toBe(MOVED);
+    expect(scorecard.declared_hosts).toEqual([
+      {
+        surface: '/mcp',
+        kind: 'mcp-endpoint',
+        url: MOVED,
+        host: 'mcp.example.org',
+        outcome: 'followed',
+        admitted_by: 'card',
+      },
+    ]);
+    expect(row(scorecard, 'mcp-initialize')).toMatchObject({ status: 'pass', host: 'mcp.example.org' });
+    const cardRead = seen.findIndex((r) => r.method === 'GET' && r.url === `${MOVED}/server-card`);
+    const firstWireProbe = seen.findIndex((r) => r.method !== 'GET' && new URL(r.url).host === 'mcp.example.org');
+    expect(cardRead).toBeGreaterThan(-1);
+    expect(firstWireProbe).toBeGreaterThan(cardRead);
+    expect(requestsTo(seen, 'elsewhere.example.org')).toEqual([]);
+    expect(row(scorecard, 'mcp-cors-preflight').status).toBe('error');
+  });
+
+  test('a same-origin redirect on a common path still discovers the endpoint there, and its wire probes take the hop', async () => {
+    const seen: Seen[] = [];
+    const { scorecard } = await audit(
+      router(
+        {
+          [`GET ${TARGET}`]: () => html(),
+          [`POST ${OWN}`]: () => redirect('/mcp/', 308),
+          [`POST ${OWN}/`]: () => initializeResult(),
+        },
+        seen,
+      ),
+    );
+    expect(scorecard.mcp_endpoint).toBe(OWN);
+    expect(scorecard.declared_hosts).toEqual([]);
+    expect(scorecard.mcp_discovery.filter((item) => item.source === '/mcp')).toEqual([
+      { source: '/mcp', endpoint: OWN, probed: 'initialize' },
+    ]);
+    expect(row(scorecard, 'mcp-initialize')).toMatchObject({ status: 'pass', host: 'example.com' });
+    expect(seen.filter((r) => new URL(r.url).host !== 'example.com' && !r.url.includes('dns'))).toEqual([]);
+  });
+
+  test('where a common path redirects is recorded not followed once another common path answers, and nothing is sent there', async () => {
+    const registry = followRegistry();
+    registry.mcp_discovery = { ...DISCOVERY, common_paths: ['/mcp', '/sse'] };
+    const seen: Seen[] = [];
+    const { scorecard } = await audit(
+      router(
+        {
+          [`GET ${TARGET}`]: () => html(),
+          [`POST ${OWN}`]: () => redirect(VICTIM, 307),
+          'POST https://example.com/sse': () => initializeResult(),
+        },
+        seen,
+      ),
+      { registry },
+    );
+    expect(scorecard.mcp_endpoint).toBe('https://example.com/sse');
+    expect(scorecard.declared_hosts).toEqual([
+      {
+        surface: '/mcp',
+        kind: 'mcp-endpoint',
+        url: VICTIM,
+        host: 'victim.example',
+        outcome: 'not-followed',
+        reason: 'beyond-endpoint-of-record',
+      },
+    ]);
+    expect(requestsTo(seen, 'victim.example')).toEqual([]);
+  });
+
+  test("a cross-origin redirect answered to a wire probe of the site's own endpoint is never replayed", async () => {
+    const registry = followRegistry();
+    registry.checks.push({
+      ...registry.checks[0],
+      id: 'mcp-get-fast-fail',
+      handler: 'http',
+      with: { path: '{mcp_endpoint}', method: 'GET', timeout: 8, expect: { status_below: 500 } },
+    });
+    const seen: Seen[] = [];
+    const { scorecard } = await audit(
+      router(
+        {
+          ...siteDeclaring(OWN),
+          [`POST ${OWN}`]: (init) =>
+            String(init?.body).includes('"initialize"')
+              ? json(
+                  { jsonrpc: '2.0', id: 1, result: { serverInfo: { name: 'own' }, protocolVersion: '2025-06-18' } },
+                  200,
+                  { 'mcp-session-id': 's1' },
+                )
+              : redirect(ELSEWHERE, 307),
+          [`OPTIONS ${OWN}`]: () => redirect(ELSEWHERE, 307),
+          [`GET ${OWN}`]: () => redirect(ELSEWHERE, 302),
+        },
+        seen,
+      ),
+      { registry },
+    );
+    expect(scorecard.mcp_endpoint).toBe(OWN);
+    expect(row(scorecard, 'mcp-initialize').status).toBe('pass');
+    expect(seen.filter((r) => r.method === 'POST' && r.url === OWN).length).toBeGreaterThanOrEqual(3);
+    expect(requestsTo(seen, 'elsewhere.example.org')).toEqual([]);
+    expect(row(scorecard, 'mcp-cors-preflight').status).toBe('error');
+    expect(row(scorecard, 'mcp-get-fast-fail')).toMatchObject({ status: 'pass', host: 'example.com' });
+    expect(seen.filter((r) => r.method === 'GET' && r.url === OWN)).toHaveLength(1);
+  });
+
+  test("redirect targets settle after the declarations discovery read, under the slice's own host cap", async () => {
+    const hosts = ['h1', 'h2', 'h3', 'h4'].map((h) => `${h}.example.net`);
+    const seen: Seen[] = [];
+    const { scorecard } = await audit(
+      router(
+        {
+          [`GET ${TARGET}`]: () => html(),
+          'GET https://example.com/.well-known/ai-catalog.json': () =>
+            aiCatalog(...hosts.map((h) => cardEntry({ data: sep2127Card(`https://${h}/mcp`) }))),
+          ...Object.fromEntries(hosts.map((h) => [`GET https://${h}/mcp`, () => redirect('http://10.0.0.1/mcp')])),
+          [`POST ${OWN}`]: () => redirect('https://h5.example.net/mcp', 307),
+        },
+        seen,
+      ),
+    );
+    expect(scorecard.declared_hosts?.map((e) => [e.surface, e.host, e.outcome, e.cause])).toEqual([
+      ...hosts.map((h, i) => [`/.well-known/ai-catalog.json#/entries/${i}/data`, h, 'blocked', undefined]),
+      ['/mcp', 'h5.example.net', 'budget-exceeded', 'per-audit-cap'],
+    ]);
+    expect(requestsTo(seen, 'h5.example.net')).toEqual([]);
+  });
+
+  test('a redirect target meets the guards a declaration meets: an IP literal is blocked and an auditor path is not followed', async () => {
+    const literal = 'https://93.184.216.34/mcp';
+    const literalSeen: Seen[] = [];
+    const blocked = await audit(
+      router({ [`GET ${TARGET}`]: () => html(), [`POST ${OWN}`]: () => redirect(literal, 307) }, literalSeen),
+    );
+    expect(blocked.scorecard.declared_hosts).toEqual([
+      { surface: '/mcp', kind: 'mcp-endpoint', url: literal, host: '93.184.216.34', outcome: 'blocked' },
+    ]);
+    expect(row(blocked.scorecard, 'mcp-initialize')).toMatchObject({
+      status: 'n_a',
+      na_reason: 'declared-host-blocked',
+      host: '93.184.216.34',
+    });
+    expect(requestsTo(literalSeen, '93.184.216.34')).toEqual([]);
+
+    const selfPath = 'https://anc.dev/api/web-rescore?token=x';
+    const selfSeen: Seen[] = [];
+    const refused = await audit(
+      router({ [`GET ${TARGET}`]: () => html(), [`POST ${OWN}`]: () => redirect(selfPath, 307) }, selfSeen),
+    );
+    expect(refused.scorecard.declared_hosts?.[0]).toMatchObject({
+      surface: '/mcp',
+      url: selfPath,
+      outcome: 'not-followed',
+      reason: 'self-path',
+    });
+    expect(requestsTo(selfSeen, 'anc.dev')).toEqual([]);
+  });
+
+  test('a redirect target the slice has no time left for is budget-exceeded with nothing sent there', async () => {
+    let clock = 1_000_000;
+    const seen: Seen[] = [];
+    const { scorecard, complete } = await audit(
+      router(
+        {
+          [`GET ${TARGET}`]: () => html(),
+          [`POST ${OWN}`]: () => {
+            clock += 7_000;
+            return redirect(MOVED, 307);
+          },
+          [`GET ${MOVED}/server-card`]: () => cardDocument(sep2127Card(MOVED)),
+        },
+        seen,
+      ),
+      { now: () => clock },
+    );
+    expect(complete).toBe(true);
+    expect(scorecard.declared_hosts).toEqual([
+      {
+        surface: '/mcp',
+        kind: 'mcp-endpoint',
+        url: MOVED,
+        host: 'mcp.example.org',
+        outcome: 'budget-exceeded',
+        cause: 'slice',
+      },
+    ]);
+    expect(requestsTo(seen, 'mcp.example.org')).toEqual([]);
+    expect(row(scorecard, 'mcp-initialize')).toMatchObject({
+      status: 'n_a',
+      na_reason: 'declared-host-budget-exceeded',
+      host: 'mcp.example.org',
+    });
+  });
+});
+
 describe('follow: hosts that are never requested', () => {
   test("a declaration naming one of the auditor's own paths is refused before reciprocity; the canonical MCP path is admitted", async () => {
     const selfPaths = [
@@ -906,12 +1174,21 @@ describe('follow: hosts that are never requested', () => {
     expect(admitted.scorecard.mcp_endpoint).toBe(canonical);
   });
 
-  test('IPv4 and IPv6 literal endpoints are never fetched and are recorded blocked', async () => {
+  test('IPv4 and IPv6 literal endpoints are never fetched, are recorded blocked, and their rows read declared-host-blocked', async () => {
     for (const literal of ['https://93.184.216.34/mcp', 'https://[2606:2800:220:1::]/mcp']) {
+      const host = new URL(literal).host;
       const seen: Seen[] = [];
       const { scorecard } = await audit(router(siteDeclaring(literal), seen));
       expect({ literal, outcome: scorecard.declared_hosts?.[0]?.outcome }).toEqual({ literal, outcome: 'blocked' });
-      expect(requestsTo(seen, new URL(literal).host)).toEqual([]);
+      expect(requestsTo(seen, host)).toEqual([]);
+      const initialize = row(scorecard, 'mcp-initialize');
+      expect({ literal, row: initialize }).toMatchObject({
+        literal,
+        row: { status: 'n_a', na_reason: 'declared-host-blocked', host },
+      });
+      expect(resultLine(initialize.status, null, initialize.na_reason, initialize.host ?? '')).toBe(
+        `Not evaluated: ${host} is a private or IP address`,
+      );
     }
   });
 

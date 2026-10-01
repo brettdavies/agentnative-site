@@ -17,10 +17,11 @@ export type FindingStatus = (typeof FINDING_STATUSES)[number];
  * antecedent). `optional-absent`: it applies, is a MAY, and is not
  * implemented. `posture-consistent`: the probed surfaces show a
  * deliberate, consistent opt-out (the CORS pair with Allow-Origin on
- * neither surface). The other five name a declared host the audit did not
+ * neither surface). The other six name a declared host the audit did not
  * evaluate: following was off, the host did not confirm the endpoint, it
- * did not answer, its hourly probe limit was reached, or it requires
- * sign-in. A handler with nothing to probe emits `n_a` with no reason.
+ * did not answer, it is a private or IP address the auditor never
+ * contacts, its hourly probe limit was reached, or it requires sign-in. A
+ * handler with nothing to probe emits `n_a` with no reason.
  */
 export const NA_REASONS = [
   'antecedent-unmet',
@@ -29,6 +30,7 @@ export const NA_REASONS = [
   'follow-disabled',
   'reciprocity-refused',
   'declared-host-unreachable',
+  'declared-host-blocked',
   'declared-host-budget-exceeded',
   'auth-required',
 ] as const;
@@ -41,6 +43,7 @@ const NA_REASON_PHRASES: Record<NaReason, (host: string) => string> = {
   'follow-disabled': () => 'Not evaluated: declared hosts were not followed for this audit',
   'reciprocity-refused': (host) => `Not evaluated: ${host} did not confirm this endpoint`,
   'declared-host-unreachable': (host) => `Not evaluated: ${host} did not answer`,
+  'declared-host-blocked': (host) => `Not evaluated: ${host} is a private or IP address`,
   'declared-host-budget-exceeded': (host) => `Not evaluated: anc's hourly probe limit for ${host} was reached`,
   'auth-required': (host) => `Not evaluated: ${host} requires sign-in`,
 };

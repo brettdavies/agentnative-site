@@ -7,8 +7,7 @@
 
 import type { NaReason } from '../../shared/web-audit-findings';
 import type { DiscoveryDocuments, DiscoveryResult } from './discovery';
-import type { McpDeclaration } from './discovery-documents';
-import { type FollowInput, type FollowResult, followDeclarations } from './follow';
+import { type FollowInput, type FollowResult, openFollow } from './follow';
 import { declarationKey, declaresHost, type TrailEntry, type TrailOutcome, trailEntry } from './follow-trail';
 import { hostOf } from './provenance';
 
@@ -29,8 +28,7 @@ export interface EndpointOfRecord {
 
 const ROW_REASONS: Partial<Record<TrailOutcome, NaReason>> = {
   'reciprocity-refused': 'reciprocity-refused',
-  // The guard refused it: from the auditor's vantage the host cannot be reached.
-  blocked: 'declared-host-unreachable',
+  blocked: 'declared-host-blocked',
   unreachable: 'declared-host-unreachable',
   'budget-exceeded': 'declared-host-budget-exceeded',
 };
@@ -56,13 +54,13 @@ function unmetReason(trail: readonly TrailEntry[]): DeclaredHostReason | null {
 
 export function endpointOfRecord(
   base: string,
-  discovery: { endpoint: string | null; declarations: readonly McpDeclaration[] },
+  discovery: Pick<DiscoveryResult, 'endpoint' | 'declarations' | 'redirected'>,
   follow: Pick<FollowResult, 'endpoint' | 'entries'>,
 ): EndpointOfRecord {
   const own = discovery.endpoint;
   const trail: TrailEntry[] = [];
   const keys = new Set<string>();
-  for (const declaration of discovery.declarations) {
+  for (const declaration of [...discovery.declarations, ...discovery.redirected]) {
     if (!declaresHost(declaration, base)) continue;
     // Only a card read after the POSTs (one at the audited site's own
     // endpoint) declares what the slice never saw.
@@ -87,27 +85,23 @@ export function endpointOfRecord(
   };
 }
 
-const NOTHING_FOLLOWED: FollowResult = { endpoint: null, entries: new Map(), evidence: [], requests: 0 };
-
 /**
- * Discovery's POSTs and the follow slice, side by side, then the endpoint
- * of record. A site that answered nothing gets no request sent to the
- * hosts it declares.
+ * Discovery's POSTs and the follow slice, side by side, then where the
+ * POSTs were redirected off the audited origin, on what is left of the
+ * slice, then the endpoint of record. The hosts the documents declare are
+ * followed only when the site answered the root or a document read; a
+ * redirected POST is an answer of its own.
  */
 export async function settleEndpointOfRecord(
   documents: DiscoveryDocuments,
-  opts: Omit<FollowInput, 'declarations' | 'entryEndpointDeclared'> & { siteAnswered: boolean },
+  opts: Omit<FollowInput, 'entryEndpointDeclared'> & { siteAnswered: boolean },
 ): Promise<{ discovery: DiscoveryResult; declared: EndpointOfRecord }> {
   const { siteAnswered, ...follow } = opts;
-  const [discovery, followed] = await Promise.all([
+  const session = openFollow({ ...follow, entryEndpointDeclared: documents.cardEndpoint !== null });
+  const [discovery] = await Promise.all([
     documents.probeEndpoint(),
-    siteAnswered
-      ? followDeclarations({
-          ...follow,
-          declarations: documents.declarations,
-          entryEndpointDeclared: documents.cardEndpoint !== null,
-        })
-      : NOTHING_FOLLOWED,
+    session.settle(siteAnswered ? documents.declarations : []),
   ]);
-  return { discovery, declared: endpointOfRecord(follow.base, discovery, followed) };
+  await session.settle(discovery.redirected);
+  return { discovery, declared: endpointOfRecord(follow.base, discovery, session.result()) };
 }

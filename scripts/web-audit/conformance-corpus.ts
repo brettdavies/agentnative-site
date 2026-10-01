@@ -12,7 +12,7 @@ import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../../src/build/13-web-audit-registry.mjs';
 import type { ExpectBlock } from '../../src/worker/audit-web/assert';
 import { runWebAudit } from '../../src/worker/audit-web/engine';
-import { ALWAYS_ADMIT_BUDGET } from '../../src/worker/audit-web/follow';
+import { ALWAYS_ADMIT_BUDGET } from '../../src/worker/audit-web/follow-requests';
 import type { WebAuditRegistry, WebSiteType } from '../../src/worker/audit-web/registry';
 import type { NaReason, ScorecardStatus, WebScorecard } from '../../src/worker/audit-web/scorecard';
 import { SCENARIOS } from './conformance-scenarios';
@@ -495,7 +495,11 @@ Responses carry lowercase header names with single string values and a UTF-8 tex
 reads it. No response carries \`content-encoding\`: decompression is pinned by transport tests, not by the
 corpus. A transport failure is \`{"error": "Name: message"}\`, the string \`ProbeResponse.error\` carries at the
 seam; a \`TimeoutError\` is always recorded as \`TimeoutError: deadline exceeded\`. Redirects are ordinary
-exchanges (a 3xx with a \`location\` header) that the guarded fetch above the seam follows with a new request.
+exchanges (a 3xx with a \`location\` header) that the guarded fetch above the seam follows with a new request,
+except where the engine keeps a probe off hosts nothing confirmed. A request to the MCP endpoint on the audited
+origin (discovery's common-path POSTs and every probe of that endpoint) takes only hops that keep the scheme, host,
+and port: discovery records a redirect to another origin with its target and declares the target, and any other probe
+reads it as a refused redirect. A probe of an endpoint on a declared host takes no redirect at all.
 
 ## scorecard.json
 
@@ -519,9 +523,10 @@ port must add it back. An item whose \`url\` does not parse contributes nothing,
 
 \`declared_hosts\` holds one entry per URL the target's discovery documents declare off its origin, in declaration
 order (the AI catalog's card entries, the card under the discovered endpoint, then the well-known cards; the endpoints a
-followed card document names come right after that document's entry), never in the order requests complete. A URL
-declared twice keeps its first entry. Endpoints are tried one at a time in that order and the first that its own host
-confirms becomes the endpoint, so every later endpoint reads \`not-followed\`.
+followed card document names come right after that document's entry), then the targets the common-path POSTs were
+redirected to off the origin, in probe order and with the redirecting path as their \`surface\`, never in the order
+requests complete. A URL declared twice keeps its first entry. Endpoints are tried one at a time in that order and the
+first that its own host confirms becomes the endpoint, so every later endpoint reads \`not-followed\`.
 
 ## scores.json
 

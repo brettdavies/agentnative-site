@@ -1058,6 +1058,21 @@ export const SCENARIOS: Record<string, Scenario> = {
       ...legacyOnlyMcp({ endpoint: REDIRECTED_ENDPOINT, cors: 'full' }),
     ],
   ),
+  'follow-own-redirect-admit': scenario(
+    "the audited site's /mcp answers the discovery POSTs with a 307 to another host whose card at `<endpoint>/server-card` names it: no POST follows the redirect, the target is confirmed like a declared endpoint, and the MCP rows are scored there",
+    FOLLOWED_IDS,
+    [
+      ...baseline(),
+      post(MCP_PATH, redirect(REDIRECTED_ENDPOINT, 307)),
+      selfNamingCard(REDIRECTED_ENDPOINT),
+      ...legacyOnlyMcp({ endpoint: REDIRECTED_ENDPOINT, cors: 'full' }),
+    ],
+  ),
+  'follow-own-redirect-refused': scenario(
+    "the audited site's /mcp answers the discovery POSTs with a 307 to another host that publishes nothing naming that URL: no POST or OPTIONS reaches the host, and the MCP rows name the host that did not confirm it",
+    FOLLOWED_IDS,
+    [...baseline(), post(MCP_PATH, redirect(DECLARED_ENDPOINT, 307))],
+  ),
   'follow-host-cap': scenario(
     'four declared hosts each redirect into a private range and are blocked; the fifth exceeds the per-audit host cap and is never requested',
     ['mcp-initialize'],

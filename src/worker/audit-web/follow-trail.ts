@@ -87,6 +87,17 @@ export function refusal(url: string, kind: McpDeclaration['kind']): Settled | nu
   return null;
 }
 
+/**
+ * Where a redirect hop may not be requested, or null when it may. A refused
+ * hop that names a host records it as the final URL, so the rows read as the
+ * host the redirect led to rather than the one that sent it there.
+ */
+export function hopRefusal(hop: string, kind: McpDeclaration['kind']): Settled | null {
+  const refused = hop === '' ? ({ outcome: 'blocked' } as const) : refusal(hop, kind);
+  if (refused === null) return null;
+  return hostOf(hop) ? { final_url: hop, ...refused } : refused;
+}
+
 /** What a declaration settles to before the slice runs, or null when the slice must request it. */
 export function settledUpfront(
   declaration: McpDeclaration,

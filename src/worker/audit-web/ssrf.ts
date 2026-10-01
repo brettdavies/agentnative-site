@@ -11,6 +11,8 @@
 //     metadata hostnames (localhost, *.internal),
 //   - follows redirects manually with a hop cap, re-validating each
 //     Location target through the same canonicalization + range check,
+//   - can keep the hops on the request's own origin, so a probe's method
+//     and body never reach a host its caller did not name,
 //   - wraps the whole chain in one AbortController deadline.
 //
 // DNS-rebinding residual: Workers cannot pre-resolve a hostname and pin
@@ -54,6 +56,13 @@ export type GuardedFetchOptions = {
    * a location nothing confirmed.
    */
   refuseRedirects?: boolean;
+  /**
+   * When set, only redirect hops that keep the scheme, host, and port are
+   * taken, and the method and body are never re-sent to another origin.
+   * `'return'` hands a redirect to another origin back as-is (status +
+   * Location); `'refuse'` makes it a failure naming its target.
+   */
+  crossOriginRedirects?: 'return' | 'refuse';
   /** Injection point for tests; production uses global fetch. */
   fetchImpl?: typeof fetch;
 };
@@ -278,6 +287,7 @@ export async function guardedFetch(
   try {
     let current = validatePublicUrl(rawUrl);
     if (!current.ok) return fail(current.reason.startsWith('blocked') ? current.reason : `blocked: ${current.reason}`);
+    const origin = current.url.origin;
 
     for (let hop = 0; hop <= maxRedirects; hop++) {
       let response: Response;
@@ -294,29 +304,36 @@ export async function guardedFetch(
       }
 
       const location = response.headers.get('location');
-      if (opts.refuseRedirects === true && REDIRECT_STATUSES.has(response.status) && location) {
-        return fail(`redirect refused: ${response.status} to ${location}`);
+      const redirect = REDIRECT_STATUSES.has(response.status) && location ? location : null;
+      if (redirect !== null && opts.refuseRedirects === true) {
+        return fail(`redirect refused: ${response.status} to ${redirect}`);
       }
-      if (opts.followRedirects !== false && REDIRECT_STATUSES.has(response.status) && location) {
+      if (redirect !== null && opts.followRedirects !== false) {
         let next: URL;
         try {
-          next = new URL(location, current.url);
+          next = new URL(redirect, current.url);
         } catch {
-          return fail(`blocked: unparseable redirect target ${location}`);
+          return fail(`blocked: unparseable redirect target ${redirect}`);
         }
-        const validated = validatePublicUrl(next.toString());
-        if (!validated.ok) {
-          return fail(
-            validated.reason.startsWith('blocked')
-              ? `${validated.reason} (redirect hop ${hop + 1})`
-              : `blocked: ${validated.reason} (redirect hop ${hop + 1})`,
-          );
+        const offOrigin = opts.crossOriginRedirects !== undefined && next.origin !== origin;
+        if (offOrigin && opts.crossOriginRedirects === 'refuse') {
+          return fail(`redirect refused: ${response.status} to ${redirect}`);
         }
-        if (hop === maxRedirects) {
-          return fail(`redirect limit exceeded (${maxRedirects} hops)`);
+        if (!offOrigin) {
+          const validated = validatePublicUrl(next.toString());
+          if (!validated.ok) {
+            return fail(
+              validated.reason.startsWith('blocked')
+                ? `${validated.reason} (redirect hop ${hop + 1})`
+                : `blocked: ${validated.reason} (redirect hop ${hop + 1})`,
+            );
+          }
+          if (hop === maxRedirects) {
+            return fail(`redirect limit exceeded (${maxRedirects} hops)`);
+          }
+          current = validated;
+          continue;
         }
-        current = validated;
-        continue;
       }
 
       const headers: Record<string, string> = {};

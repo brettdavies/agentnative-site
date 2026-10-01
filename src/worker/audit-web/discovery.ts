@@ -8,8 +8,9 @@
 // on the audited origin, catalog cards first, is the endpoint. Without one,
 // the endpoint probing that follows sends legacy `initialize` and modern
 // `tools/list` POSTs to the common paths together under one timeout, and a
-// legacy answer wins. The split lets the engine follow the declarations the
-// documents name while the POSTs are in flight.
+// legacy answer wins (discovery-posts.ts). The split lets the engine
+// follow the declarations the documents name while the POSTs are in
+// flight.
 //
 // A card's endpoint is attacker-controlled, so one off the audited origin,
 // or one written as a URL template, is recorded as a declaration and never
@@ -24,7 +25,7 @@
 // the audit budget even against a target that never answers.
 
 import type { RetainedDocumentKey } from '../../shared/web-audit-documents';
-import { type ProbeResponse, parseJsonRpc } from './assert';
+import type { ProbeResponse } from './assert';
 import {
   aiCatalogShape,
   apiCatalogShape,
@@ -43,11 +44,11 @@ import {
   readCard,
   sameOrigin,
 } from './discovery-documents';
-import { legacyInitializeBody, legacyProbeHeaders, modernProbeBody, modernProbeHeaders } from './handlers/mcp';
+import { probeCommonPaths } from './discovery-posts';
 import { phaseBudget, resolveUrl } from './handlers/shared';
 import type { EvidenceItem } from './handlers/types';
 import type { WebAuditDiscoveryConfig } from './registry';
-import { DOCUMENT_MAX_BODY_BYTES, type GuardedFetchInit, type GuardedFetchOptions, guardedFetch } from './ssrf';
+import { DOCUMENT_MAX_BODY_BYTES, type GuardedFetchOptions, guardedFetch } from './ssrf';
 
 export interface DiscoveryOptions {
   timeoutMs: number;
@@ -63,6 +64,8 @@ export interface DiscoveryResult {
   evidence: EvidenceItem[];
   /** In SEP-2127 order: the catalog's entries, the suffix card, then the well-known cards. */
   declarations: McpDeclaration[];
+  /** Where common paths redirected their POSTs off the audited origin, in probe order. */
+  redirected: McpDeclaration[];
   documents: ReadonlyMap<RetainedDocumentKey, RetainedDocument>;
 }
 
@@ -92,8 +95,6 @@ const API_CATALOG_PATH = '/.well-known/api-catalog';
 // The extension's discovery flow asks for a card by its media type.
 const CARD_REQUEST_HEADERS = { accept: MCP_SERVER_CARD_TYPE };
 
-type FetchOptions = DiscoveryOptions['fetchOptions'];
-
 type CatalogSlot =
   | { index: number; read: CardRead }
   | { index: number; declaration: McpDeclaration }
@@ -102,42 +103,6 @@ type CatalogSlot =
 function pathOf(url: string): string {
   const u = new URL(url);
   return `${u.pathname}${u.search}`;
-}
-
-/** Legacy `initialize` and modern `tools/list` on every common path at once; a legacy answer wins. */
-async function probeCommonPaths(
-  candidates: ReadonlyArray<{ path: string; url: string }>,
-  protocolVersion: string,
-  timeoutMs: number,
-  fetchOptions: FetchOptions,
-): Promise<{ endpoint: string | null; items: EvidenceItem[] }> {
-  const send = (init: GuardedFetchInit) =>
-    Promise.all(candidates.map((c) => guardedFetch(c.url, init, { ...fetchOptions, timeoutMs })));
-  const [legacy, modern] = await Promise.all([
-    send({ method: 'POST', headers: legacyProbeHeaders(), body: legacyInitializeBody(protocolVersion) }),
-    send({ method: 'POST', headers: modernProbeHeaders('tools/list'), body: modernProbeBody('tools/list') }),
-  ]);
-  const items: EvidenceItem[] = [];
-  for (const [i, resp] of legacy.entries()) {
-    const { path, url } = candidates[i];
-    const rpc = parseJsonRpc(resp);
-    const result = rpc?.result as { serverInfo?: unknown } | undefined;
-    if (rpc && result && typeof result === 'object' && result.serverInfo) {
-      items.push({ source: path, endpoint: url, probed: 'initialize' });
-      return { endpoint: url, items };
-    }
-    items.push({ source: path, status: resp.status, probed: 'initialize (no serverInfo)' });
-  }
-  for (const [i, resp] of modern.entries()) {
-    const { path, url } = candidates[i];
-    const result = parseJsonRpc(resp)?.result as { tools?: unknown } | undefined;
-    if (result && Array.isArray(result.tools)) {
-      items.push({ source: path, endpoint: url, probed: 'modern-tools-list' });
-      return { endpoint: url, items };
-    }
-    items.push({ source: path, status: resp.status, probed: 'modern-tools-list (no tools)' });
-  }
-  return { endpoint: null, items };
 }
 
 export async function discoverMcpEndpoint(
@@ -171,6 +136,7 @@ export async function readDiscoveryDocuments(
   const catalogSlots: CatalogSlot[] = [];
   let postItems: EvidenceItem[] = [];
   let postEndpoint: string | null = null;
+  let postRedirected: McpDeclaration[] = [];
   let suffix: CardRead | null = null;
   let deadlineHit = false;
   const documents = new Map<RetainedDocumentKey, RetainedDocument>();
@@ -216,7 +182,13 @@ export async function readDiscoveryDocuments(
       ...(suffix !== null ? [item(suffix)] : []),
       ...(deadlineHit ? [{ note: 'per-audit deadline exceeded during discovery' }] : []),
     ];
-    return { endpoint, evidence, declarations: declared(), documents };
+    // The audited site serves its own endpoint, so where its other paths
+    // redirect can never become the endpoint of record.
+    const redirected =
+      endpoint === null
+        ? postRedirected
+        : postRedirected.map((d): McpDeclaration => ({ ...d, not_followed: 'beyond-endpoint-of-record' }));
+    return { endpoint, evidence, declarations: declared(), redirected, documents };
   };
   const declared = (): McpDeclaration[] => {
     const ofRead = (read: CardRead) => [read.declaration, ...read.others];
@@ -314,6 +286,7 @@ export async function readDiscoveryDocuments(
       const probed = await probeCommonPaths(candidates, cfg.protocol_version, postPass, opts.fetchOptions);
       postItems = probed.items;
       postEndpoint = probed.endpoint;
+      postRedirected = probed.redirected;
     }
 
     // With no catalog card, the endpoint's own card outranks a SEP-1649 card.

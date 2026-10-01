@@ -138,6 +138,72 @@ describe('guardedFetch', () => {
     expect(resp.error).toBe('redirect refused: 307 to https://elsewhere.example.org/mcp');
   });
 
+  test('with cross-origin redirects returned, same-origin hops are followed and a cross-origin redirect comes back as-is', async () => {
+    const sent: Array<{ method: string; url: string; body: string }> = [];
+    const fetchImpl = stubFetch((url, init) => {
+      sent.push({ method: init?.method ?? 'GET', url, body: String(init?.body ?? '') });
+      if (url === 'https://example.com/mcp') return new Response(null, { status: 308, headers: { Location: '/mcp/' } });
+      if (url === 'https://example.com/mcp/') {
+        return new Response(null, { status: 307, headers: { Location: 'https://victim.example/hook' } });
+      }
+      return new Response('replayed', { status: 200 });
+    });
+    const resp = await guardedFetch(
+      'https://example.com/mcp',
+      { method: 'POST', body: '{"method":"initialize"}' },
+      { fetchImpl, crossOriginRedirects: 'return' },
+    );
+    expect(sent).toEqual([
+      { method: 'POST', url: 'https://example.com/mcp', body: '{"method":"initialize"}' },
+      { method: 'POST', url: 'https://example.com/mcp/', body: '{"method":"initialize"}' },
+    ]);
+    expect(resp.status).toBe(307);
+    expect(resp.headers.location).toBe('https://victim.example/hook');
+    expect(resp.error).toBeNull();
+  });
+
+  test('a redirect that keeps the host but changes the scheme or port leaves the origin', async () => {
+    for (const location of ['http://example.com/mcp', 'https://example.com:8443/mcp']) {
+      const sent: string[] = [];
+      const fetchImpl = stubFetch((url) => {
+        sent.push(url);
+        return url === 'https://example.com/mcp'
+          ? new Response(null, { status: 307, headers: { Location: location } })
+          : new Response('replayed', { status: 200 });
+      });
+      const resp = await guardedFetch(
+        'https://example.com/mcp',
+        { method: 'POST' },
+        { fetchImpl, crossOriginRedirects: 'return' },
+      );
+      expect({ location, sent, status: resp.status }).toEqual({
+        location,
+        sent: ['https://example.com/mcp'],
+        status: 307,
+      });
+    }
+  });
+
+  test('with cross-origin redirects refused, a same-origin hop is followed and a cross-origin one is a failure naming its target', async () => {
+    const sent: string[] = [];
+    const fetchImpl = stubFetch((url) => {
+      sent.push(url);
+      if (url === 'https://example.com/mcp') return new Response(null, { status: 308, headers: { Location: '/mcp/' } });
+      if (url === 'https://example.com/mcp/') {
+        return new Response(null, { status: 302, headers: { Location: 'https://victim.example/hook' } });
+      }
+      return new Response('replayed', { status: 200 });
+    });
+    const resp = await guardedFetch(
+      'https://example.com/mcp',
+      { method: 'POST' },
+      { fetchImpl, crossOriginRedirects: 'refuse' },
+    );
+    expect(sent).toEqual(['https://example.com/mcp', 'https://example.com/mcp/']);
+    expect(resp.status).toBeNull();
+    expect(resp.error).toBe('redirect refused: 302 to https://victim.example/hook');
+  });
+
   test('follows allowed redirects and returns the final response', async () => {
     const fetchImpl = stubFetch((url) => {
       if (url === 'https://example.com/a') {

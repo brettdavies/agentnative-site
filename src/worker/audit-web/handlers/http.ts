@@ -93,7 +93,7 @@ export async function runHttp(check: WebCheck, ctx: HandlerContext): Promise<Pro
       : await guardedFetch(
           url,
           { method, headers },
-          { ...ctx.fetchOptions, timeoutMs, ...endpointRedirects(rawPath, ctx.mcpEndpointFollowed) },
+          { ...ctx.fetchOptions, timeoutMs, ...endpointRedirects(rawPath, ctx.mcpEndpointFollowed, method) },
         );
     const { ok, item } = assessResponse(url, resp, w, ctx.base);
     evidence.push(item);

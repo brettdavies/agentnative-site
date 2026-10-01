@@ -12,7 +12,7 @@
 import { parseJsonRpc } from '../assert';
 import type { WebCheck } from '../registry';
 import { AUDIT_PROBE_MAX_BODY_BYTES, type GuardedFetchOptions, guardedFetch } from '../ssrf';
-import { followedRedirects, remainingDeadlineMs, timeoutMsFor } from './shared';
+import { mcpEndpointRedirects, remainingDeadlineMs, timeoutMsFor } from './shared';
 import type { EvidenceItem, HandlerContext, McpLaneEvidence, McpModernLane, ProbeOutcome } from './types';
 
 /**
@@ -535,7 +535,7 @@ export async function notifyMcpInitialized(
       headers: { ...legacyProbeHeaders(), 'Mcp-Session-Id': sessionId },
       body: INITIALIZED_BODY,
     },
-    { ...opts.fetchOptions, timeoutMs: opts.timeoutMs, ...followedRedirects(opts.followed) },
+    { ...opts.fetchOptions, timeoutMs: opts.timeoutMs, ...mcpEndpointRedirects(opts.followed) },
   );
 }
 
@@ -647,7 +647,7 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     ...ctx.fetchOptions,
     timeoutMs,
     maxBodyBytes: AUDIT_PROBE_MAX_BODY_BYTES,
-    ...followedRedirects(ctx.mcpEndpointFollowed),
+    ...mcpEndpointRedirects(ctx.mcpEndpointFollowed),
   };
   // The re-ask below is a second hop on one row's budget; the row's
   // deadline is what bounds it, so the retry gets the remainder rather
