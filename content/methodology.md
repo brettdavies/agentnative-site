@@ -285,11 +285,12 @@ A web audit produces two scores from the same per-check outcomes:
   site perfect for its type approaches 100. `n_a`, `skip`, and `error` rows are excluded from it. The
   [web leaderboard](/web) ranks by it.
 - **Global** (the secondary "global-ready" number) is earned points over the most a single site could earn: every check
-  in the registry, except that where checks are alternatives (mutually exclusive outcomes of one probe, such as MCP
-  access: an endpoint is open or protected, never both), only the alternative the site presents counts, or the larger
-  one when it presents neither. A check that does not apply to a site still counts in the global denominator and earns
-  nothing, whatever its `n_a` reason, and so does a `skip` or `error` row: a site without MCP sees what adding MCP is
-  worth. The web leaderboard breaks ties between equal relative scores by it.
+  in the registry, except that where checks are alternatives (such as MCP access: an open endpoint earns the session
+  checks, a protected one the sign-in checks), only the alternatives the site presents count, or the larger one when it
+  presents none. An endpoint that serves some token-less requests and refuses others presents both. A check that does
+  not apply to a site still counts in the global denominator and earns nothing, whatever its `n_a` reason, and so does a
+  `skip` or `error` row: a site without MCP sees what adding MCP is worth. The web leaderboard breaks ties between equal
+  relative scores by it.
 
 Each check carries a tier weight: 5 for MUST, 3 for SHOULD, 1 for MAY. At every tier, MAY included, a pass earns the
 full weight, a surface that works while violating a spec detail (`noncompliant`) earns 0.25 × weight, and a present but

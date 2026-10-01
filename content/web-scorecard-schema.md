@@ -171,18 +171,18 @@ from the JSON.
 - **`score.relative`** (the headline, mirrored at top-level `score_pct`) is earned points over the maximum achievable
   for **this site's applicable checks**, so a site perfect for its type approaches 100. `n_a`, `skip`, and `error` rows
   are excluded from it. The [web leaderboard](/web) ranks by it.
-- **`score.global`** is earned points over the most a single site could earn (the maximum of a
-  **maximally agent-ready site**): every check in the registry, except that where checks are alternatives (mutually
-  exclusive outcomes of one probe, such as MCP access: an endpoint is open or protected, never both), only the
-  alternative the site presents counts, or the larger alternative when it presents neither. Exposing and nailing more
-  surfaces scores higher. It is the secondary number beside the headline, and the web leaderboard breaks ties between
-  equal relative scores by it.
+- **`score.global`** is earned points over the most a single site could earn (the maximum of a **maximally agent-ready
+  site**): every check in the registry, except that where checks are alternatives (such as MCP access: an open endpoint
+  earns the session checks, a protected one the sign-in checks), only the alternatives the site presents count, or the
+  larger alternative when it presents none. An endpoint that serves some token-less requests and refuses others presents
+  both. Exposing and nailing more surfaces scores higher. It is the secondary number beside the headline, and the web
+  leaderboard breaks ties between equal relative scores by it.
 
 Global measures how much of the whole surface a site exposes, so a check that does not apply to a site still counts in
 its global denominator and earns nothing, whatever its `n_a` reason: a missing MCP endpoint, a declared site type, a
 deliberate no-CORS posture, or any other. A site without MCP therefore sees what adding MCP is worth. `skip` and `error`
-rows stay in the global denominator the same way. Only alternatives leave it: the one the site does not present, or the
-smaller one when it presents neither.
+rows stay in the global denominator the same way. Only alternatives leave it: those the site does not present, or all
+but the largest when it presents none.
 
 Per applicable check, with per-tier difficulty weights (currently 5 for MUST, 3 for SHOULD, 1 for MAY):
 

@@ -193,9 +193,9 @@ absent counts as not applicable, never as a miss.
 The two scores one web-audit run produces. Relative (the headline) measures the site against only the checks that apply
 to it, so a site perfect for its type approaches the maximum; the web leaderboard ranks by it. Global measures the same
 outcomes against the most a single site could earn: every registry check, not-applicable ones included, except that
-where checks are mutually exclusive alternatives only the one the site presents counts, or the larger when it presents
-neither. Exposing and nailing more surfaces scores higher, and global breaks ties between equal relative scores on the
-board.
+where checks are alternatives (an open or a protected MCP endpoint) only the ones the site presents count, or the larger
+when it presents none. Exposing and nailing more surfaces scores higher, and global breaks ties between equal relative
+scores on the board.
 
 ### Fix skill
 
