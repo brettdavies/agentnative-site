@@ -2,9 +2,9 @@
 
 A web scorecard is the structured output of the [website agent-readiness audit](/web-audit). It scores a website and its
 MCP server across six visible categories with a fairness-driven two-score model: a check that does not apply to a site
-is excluded rather than counted against it, a present-but-broken surface costs more than an absent one, and a surface
-that works while violating a spec detail earns partial credit rather than the full penalty. This page documents every
-field a web scorecard carries.
+is excluded from its headline score rather than counted against it, a present-but-broken surface costs more than an
+absent one, and a surface that works while violating a spec detail earns partial credit rather than the full penalty.
+This page documents every field a web scorecard carries.
 
 The web scorecard is site-owned. Its `schema_version` is **0.5**, independent of the CLI scorecard schema (currently
 0.7) and of the [agentnative spec](/principles) `spec_version`. The CLI scorecard schema is documented separately at
@@ -169,9 +169,20 @@ Both scores derive from the same per-check outcomes; the engine computes them an
 from the JSON.
 
 - **`score.relative`** (the headline, mirrored at top-level `score_pct`) is earned points over the maximum achievable
-  for **this site's applicable checks**, so a site perfect for its type approaches 100.
-- **`score.global`** is earned points over the maximum of a **maximally agent-ready site** (every check in the
-  registry), so exposing and nailing more surfaces ranks higher. The [web leaderboard](/web) sorts by it.
+  for **this site's applicable checks**, so a site perfect for its type approaches 100. `n_a`, `skip`, and `error` rows
+  are excluded from it. The [web leaderboard](/web) ranks by it.
+- **`score.global`** is earned points over the most a single site could earn (the maximum of a
+  **maximally agent-ready site**): every check in the registry, except that where checks are alternatives (mutually
+  exclusive outcomes of one probe, such as MCP access: an endpoint is open or protected, never both), only the
+  alternative the site presents counts, or the larger alternative when it presents neither. Exposing and nailing more
+  surfaces scores higher. It is the secondary number beside the headline, and the web leaderboard breaks ties between
+  equal relative scores by it.
+
+Global measures how much of the whole surface a site exposes, so a check that does not apply to a site still counts in
+its global denominator and earns nothing, whatever its `n_a` reason: a missing MCP endpoint, a declared site type, a
+deliberate no-CORS posture, or any other. A site without MCP therefore sees what adding MCP is worth. `skip` and `error`
+rows stay in the global denominator the same way. Only alternatives leave it: the one the site does not present, or the
+smaller one when it presents neither.
 
 Per applicable check, with per-tier difficulty weights (currently 5 for MUST, 3 for SHOULD, 1 for MAY):
 
@@ -183,8 +194,9 @@ Per applicable check, with per-tier difficulty weights (currently 5 for MUST, 3 
 - `broken` (present but invalid) costs 0.75 x weight at every tier: a malformed surface misleads agents, so it is worse
   than absence.
 - An absent MUST is a full-weight zero; an absent SHOULD is a zero that occupies only half its weight in the relative
-  denominator; an absent MAY is `n_a` (truly optional, never counted).
-- `n_a`, `skip`, and `error` rows are excluded from both scores. Both scores floor at 0.
+  denominator; an absent MAY is `n_a` (truly optional, never counted against the relative score).
+- `n_a`, `skip`, and `error` rows earn nothing. They are excluded from the relative score and stay in the global
+  denominator. Both scores floor at 0, and global never exceeds 100.
 
 ## `categories`
 
@@ -275,7 +287,7 @@ One object per check.
 - `broken` — the surface exists but is invalid (malformed body, wrong content-type, an unexpected status where the
   surface clearly exists). Scores below absent.
 - `absent` — the surface is not there (404/410, no DNS records, no CORS headers).
-- `n_a` — excluded from both scores; `na_reason` says why, from a closed set:
+- `n_a` — excluded from the relative score and kept in the global denominator; `na_reason` says why, from a closed set:
   - `antecedent-unmet`: the check does not apply to this site.
   - `optional-absent`: an applicable MAY that is not implemented.
   - `posture-consistent`: the CORS pair's deliberate no-CORS posture, with `Access-Control-Allow-Origin` on neither the
@@ -289,7 +301,8 @@ One object per check.
   - `declared-host-budget-exceeded`: anc's hourly probe limit for the declared host was reached.
   - `auth-required`: the host requires sign-in before the check can run.
 - `skip` — the per-audit deadline passed before the check ran.
-- `error` — an operational failure (network error, timeout); never credited, never penalized.
+- `error` — an operational failure (network error, timeout); never credited, never penalized in the relative score,
+  and kept in the global denominator like `n_a` and `skip`.
 
 A handler with nothing to probe (no discovered MCP endpoint) emits `n_a` with no `na_reason`. The derived `result` line
 leads with the reason's own phrase, and the last six reasons begin "Not evaluated:", for example "Not evaluated:

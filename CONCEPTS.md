@@ -173,7 +173,8 @@ non-passing rows.
 
 The runtime gate deciding whether a web-audit check applies to a site. Resolved from the declared site type, MCP
 discovery, the canonical root fetch, or another check's probe result — never a fresh fetch. An unmet antecedent makes
-the check not applicable (excluded from scoring entirely), which is different from the check failing.
+the check not applicable (excluded from the relative score, still in the global denominator), which is different from
+the check failing.
 
 ### Site type
 
@@ -190,8 +191,11 @@ absent counts as not applicable, never as a miss.
 ### Relative score / Global score
 
 The two scores one web-audit run produces. Relative (the headline) measures the site against only the checks that apply
-to it, so a site perfect for its type approaches the maximum. Global measures the same outcomes against a maximally
-agent-ready site, so exposing and nailing more surfaces ranks higher; the web leaderboard sorts by it.
+to it, so a site perfect for its type approaches the maximum; the web leaderboard ranks by it. Global measures the same
+outcomes against the most a single site could earn: every registry check, not-applicable ones included, except that
+where checks are mutually exclusive alternatives only the one the site presents counts, or the larger when it presents
+neither. Exposing and nailing more surfaces scores higher, and global breaks ties between equal relative scores on the
+board.
 
 ### Fix skill
 

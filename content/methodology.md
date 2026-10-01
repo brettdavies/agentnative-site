@@ -271,11 +271,36 @@ requested. An endpoint on the audited origin named by a card, catalog cards firs
 another origin, or written as a URL template, is recorded and never probed. With no such endpoint, a legacy `initialize`
 and a modern header-routed `tools/list` go to the common paths together, and a legacy answer wins, so a modern-only
 server is still discovered. MCP-shape checks apply only when an endpoint is found; on a site without one they are marked
-`n_a` and excluded from the score.
-The headline score is credit-weighted over the MUST and SHOULD checks that apply, with MAY checks informational, the
-same model the CLI score uses. Each check maps onto one of P1 through P8, so a web scorecard is isomorphic with a CLI
-scorecard and renders through the same presentation. Web results carry no badge; they live at a shareable
-[`/web/<domain>`](/web) page. The [web scorecard JSON schema](/web-scorecard-schema) documents the shape.
+`n_a` and excluded from the relative score.
+
+Each check maps onto one of P1 through P8, so a web scorecard is isomorphic with a CLI scorecard and renders through the
+same presentation. Web results carry no badge; they live at a shareable [`/web/<domain>`](/web) page. The
+[web scorecard JSON schema](/web-scorecard-schema) documents the shape.
+
+### Relative and global scores
+
+A web audit produces two scores from the same per-check outcomes:
+
+- **Relative** (the headline, `score_pct`) is earned points over the maximum for this site's applicable checks, so a
+  site perfect for its type approaches 100. `n_a`, `skip`, and `error` rows are excluded from it. The
+  [web leaderboard](/web) ranks by it.
+- **Global** (the secondary "global-ready" number) is earned points over the most a single site could earn: every check
+  in the registry, except that where checks are alternatives (mutually exclusive outcomes of one probe, such as MCP
+  access: an endpoint is open or protected, never both), only the alternative the site presents counts, or the larger
+  one when it presents neither. A check that does not apply to a site still counts in the global denominator and earns
+  nothing, whatever its `n_a` reason, and so does a `skip` or `error` row: a site without MCP sees what adding MCP is
+  worth. The web leaderboard breaks ties between equal relative scores by it.
+
+Each check carries a tier weight: 5 for MUST, 3 for SHOULD, 1 for MAY. At every tier, MAY included, a pass earns the
+full weight, a surface that works while violating a spec detail (`noncompliant`) earns 0.25 × weight, and a present but
+broken surface costs 0.75 × weight, because it misleads agents. An absent MUST or SHOULD earns nothing; an absent MAY
+reads `n_a`. Both scores floor at 0, and global never exceeds 100. These weights and outcomes are the web audit's own:
+the CLI score weights every tier equally and grades a miss as `warn` or `fail`. The
+[scoring reference](/web-scorecard-schema#the-two-score-model) carries the full credit table.
+
+Whenever the check universe grows, global scores read lower until a site re-audits under the wider universe. Seeded
+scorecards reflow automatically on the deploy that ships a registry change; other cached results re-audit on their next
+stale access and age out of the display within 30 days, so board movement settles inside that window.
 
 ### Era lanes and CORS posture
 
@@ -283,10 +308,11 @@ Two rules shape how MCP results score:
 
 - The modern MCP era (protocol revision `2026-07-28`) scores as its own lane alongside the legacy checks: a required
   header-routed `tools/list` check and a recommended `server/discover` check. A dual-stack server earns both lanes; a
-  single-era server reads `absent` on the lane it lacks rather than `broken`, so it is never penalized for an era it
-  never claimed. `server/discover` decides the modern lane, because it is the only method a legacy server cannot answer:
-  a refusal saying the method is not served here reads `absent` on that check and leaves every other modern check `n_a`,
-  excluded from both scores because no probe ever reached it, while a malformed result or a server error stays `broken`.
+  single-era server reads `absent` on the lane it lacks rather than `broken`, so it earns no credit for that lane and
+  takes no broken-surface penalty for an era it never claimed. `server/discover` decides the modern lane, because it is
+  the only method a legacy server cannot answer: a refusal saying the method is not served here reads `absent` on that
+  check and on every other applicable modern check, which scores as an absence without a request of its own
+  (`unprobed`), while a malformed result or a server error stays `broken`.
   A `-32000` refusal counts as that signal only at a status able to carry one; delivered with a 5xx or a rate-limit
   status it reports load rather than an era, and stays `broken`. On the legacy lane, an era-shaped refusal (a
   well-formed `-32601` or `-32022`) reads `absent` on the checks that name a method the lane could be missing, unless
@@ -299,11 +325,8 @@ Two rules shape how MCP results score:
   because each leaves the caller believing something untrue. The same split governs the unknown-method check on either
   lane.
 - The two CORS checks are posture-aware: a consistent no-CORS posture on both the preflight and the actual POST is a
-  deliberate choice and reads `n_a` (excluded from the score); only partial or misconfigured CORS is penalized.
-
-Whenever the check universe grows, global scores read lower until a site re-audits under the wider universe. Seeded
-scorecards reflow automatically on the deploy that ships a registry change; other cached results re-audit on their next
-stale access and age out of the display within 30 days, so board movement settles inside that window.
+  deliberate choice and reads `n_a`, excluded from the relative score and kept in the global denominator like every
+  `n_a` row; only partial or misconfigured CORS is penalized.
 
 ## Re-running the same audits locally
 
