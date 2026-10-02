@@ -52,6 +52,7 @@ export function findingRowsFromElements(nodes: Iterable<Element>): FindingRow[] 
       // Read from the rendered paragraph rather than a duplicate attribute,
       // so the evidence exists once in the DOM.
       result: resultLineOf(el),
+      host: el.getAttribute('data-host') || null,
       prompt: el.querySelector('[data-copy-text]')?.getAttribute('data-copy-text') || null,
       order: out.length,
     });

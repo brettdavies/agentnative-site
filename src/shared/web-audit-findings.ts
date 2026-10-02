@@ -101,6 +101,8 @@ export type FindingRow = {
    * reader see one finding rather than two versions of it.
    */
   result: string | null;
+  /** The host or hosts the row's evidence came from, space-separated, as the page renders them. */
+  host: string | null;
   prompt: string | null;
   /** Rendered document order, the last ordering tie-break. */
   order: number;
