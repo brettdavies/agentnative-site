@@ -17,6 +17,11 @@ import { type RunWebAuditInput, runWebAuditStream, type WebCoreEnv } from '../..
 export type HostedAuditInput = Omit<RunWebAuditInput, 'env' | 'surface' | 'probeFetch'> & {
   /** False for a caller whose request differs from any run it could join (an explicit listing choice). */
   attach: boolean;
+  /**
+   * False for a run that saves nothing (one that does not follow declared
+   * hosts): it claims no job and marks no flag, so no caller ever joins it.
+   */
+  singleFlight: boolean;
   signal?: AbortSignal;
 };
 
@@ -24,15 +29,16 @@ export type HostedAuditInput = Omit<RunWebAuditInput, 'env' | 'surface' | 'probe
 export type HostedAudit = { attached: boolean; terminal: TerminalEvent | null };
 
 export async function hostWebAudit(env: WebCoreEnv & InFlightEnv, input: HostedAuditInput): Promise<HostedAudit> {
-  const { attach, signal, ...run } = input;
+  const { attach, singleFlight, signal, ...run } = input;
   const host = run.target.host;
   const startedAt = new Date().toISOString();
-  const job = await claimJob(env, 'web', host, startedAt);
-  if (job.kind === 'running' && attach) {
+  const job = singleFlight ? await claimJob(env, 'web', host, startedAt) : null;
+  if (job?.kind === 'running' && attach) {
     return { attached: true, terminal: await awaitJobTerminal(env, job.name, signal) };
   }
-  const writer = job.kind === 'claimed' ? job.writer : null;
-  const flags = new InFlightFlags(env, 'web', startedAt, writer?.name ?? null, job.kind !== 'running');
+  const writer = job?.kind === 'claimed' ? job.writer : null;
+  const owns = job !== null && job.kind !== 'running';
+  const flags = new InFlightFlags(env, 'web', startedAt, writer?.name ?? null, owns);
   await flags.mark(host);
   writer?.append({ type: 'accepted', lane: 'web', target: host, started_at: startedAt });
   let terminal: TerminalEvent | null = null;

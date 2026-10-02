@@ -20,6 +20,10 @@
 //                                   would read as a website host)
 //   anything else ................ live: /score/<binary>
 //
+// A website result has a page unless it was never saved (a run that did not
+// follow the hosts the site declares): then it has no URL and carries
+// summary_html, like a CLI collision.
+//
 // A curated entry counts only with a committed scorecard; a metadata-only
 // registry entry owns no page, so its slug is neither a hit nor a shadow.
 
@@ -268,6 +272,15 @@ export type WebEnvelopeInput = {
   origin: string;
   cached?: boolean;
 };
+
+/**
+ * A website result with no page of its own: nothing was saved, so it carries
+ * no result URLs, and `summaryHtml` is the body the progress page renders in
+ * its place.
+ */
+export function transientWebEnvelope(envelope: AuditEnvelope, summaryHtml: string): AuditEnvelope {
+  return { ...envelope, ...NO_URLS, summary_html: summaryHtml };
+}
 
 /** A live or cached website result. */
 export function buildWebEnvelope(input: WebEnvelopeInput): AuditEnvelope {

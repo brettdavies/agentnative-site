@@ -8,7 +8,7 @@ import { _resetIndexCache } from '../src/worker/score/core';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
 import { ANC_VERSION } from '../src/worker/spec-version.gen';
 import { call, makeEnv, ndjson, newTracker, post, probeFetchFor } from './helpers/audit-api-env';
-import { fakeJobNamespace } from './helpers/audit-job-state';
+import { type FakeJobNamespace, fakeJobNamespace } from './helpers/audit-job-state';
 import { captureLogs } from './helpers/log-capture';
 import { getJsonToolContent, mcpInitialize, mcpRpc, resetMcpTestState } from './helpers/mcp-rpc';
 import { stubFetch } from './helpers/stub-fetch';
@@ -414,5 +414,114 @@ describe('audit_website hosts its own run under single-flight', () => {
       logs.restore();
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+describe('a run that does not follow declared hosts stays outside single-flight', () => {
+  const OPT_OUT = { target: 'anc.dev', turnstile_token: 'x', follow_declarations: false };
+  const FOLLOW = { target: 'anc.dev', turnstile_token: 'x' };
+  const isAccepted = (l: Line) => l.type === 'accepted';
+
+  // Every claim the endpoint makes, by job name.
+  function countClaims(jobs: FakeJobNamespace): string[] {
+    const claims: string[] = [];
+    const get = jobs.get.bind(jobs);
+    jobs.get = ((id: { name: string }) => {
+      const stub = get(id as unknown as DurableObjectId) as unknown as {
+        claim: (startedAt: string, deadlineMs: number) => Promise<unknown>;
+      };
+      return {
+        ...stub,
+        claim: (startedAt: string, deadlineMs: number) => {
+          claims.push(id.name);
+          return stub.claim(startedAt, deadlineMs);
+        },
+      };
+    }) as unknown as FakeJobNamespace['get'];
+    return claims;
+  }
+
+  function gatedProbe(tracker: ReturnType<typeof newTracker>) {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const probe = probeFetchFor(tracker, 'ok');
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      await gate;
+      return probe(input, init);
+    }) as typeof fetch;
+    return { fetchImpl, release };
+  }
+
+  const runs = (logs: ReturnType<typeof captureLogs>) =>
+    logs.records.filter((r) => r.record.scope === 'web-audit.run').map((r) => r.record.follow_declarations);
+
+  test('beside a followed run in flight it runs its own audit and claims no job', async () => {
+    const tracker = newTracker();
+    const gated = gatedProbe(tracker);
+    const jobs = fakeJobNamespace();
+    const claims = countClaims(jobs);
+    const env = makeEnv({ tracker, jobs, followSwitch: 'true', deps: { probeFetch: gated.fetchImpl } });
+    const logs = captureLogs();
+    try {
+      const followed = await call(post(FOLLOW, STREAM), env);
+      const initiator = lineReader(followed.res);
+      await initiator.until(isAccepted);
+      const optedOut = await call(post(OPT_OUT, STREAM), env);
+      const own = lineReader(optedOut.res);
+      await own.until(isAccepted);
+      gated.release();
+      const a = await initiator.rest();
+      const b = await own.rest();
+      await settle(followed.ctx, optedOut.ctx);
+      expect(claims).toEqual(['web:anc.dev']);
+      expect(runs(logs).sort()).toEqual([false, true]);
+      expect(a.at(-1)).toMatchObject({ type: 'complete', scorecard_url: 'https://anc.dev/score/anc.dev' });
+      expect(b.at(-1)).toMatchObject({ type: 'complete', scorecard_url: null });
+      const stored = jobs.jobs.get('web:anc.dev');
+      if (!stored) throw new Error('the followed run claimed no job');
+      const log = await ndjson(await stored.job.fetch(new Request('https://job.internal/attach')));
+      expect(log.filter((l) => l.type === 'complete')).toEqual([
+        expect.objectContaining({ scorecard_url: a.at(-1)?.scorecard_url }),
+      ]);
+    } finally {
+      logs.restore();
+    }
+  });
+
+  test('while it is in flight a followed request finds no flag and claims its own job', async () => {
+    const tracker = newTracker();
+    const gated = gatedProbe(tracker);
+    const jobs = fakeJobNamespace();
+    const claims = countClaims(jobs);
+    const env = makeEnv({ tracker, jobs, deps: { probeFetch: gated.fetchImpl } });
+    const optedOut = await call(post(OPT_OUT, STREAM), env);
+    const own = lineReader(optedOut.res);
+    await own.until(isAccepted);
+    expect([...env._kv.keys()].filter((key) => key.startsWith('inflight:'))).toEqual([]);
+    expect(claims).toEqual([]);
+    const followed = await call(post(FOLLOW, STREAM), env);
+    const initiator = lineReader(followed.res);
+    await initiator.until(isAccepted);
+    expect(claims).toEqual(['web:anc.dev']);
+    gated.release();
+    const a = await initiator.rest();
+    const b = await own.rest();
+    await settle(followed.ctx, optedOut.ctx);
+    expect(a.at(-1)).toMatchObject({ type: 'complete', scorecard_url: 'https://anc.dev/score/anc.dev' });
+    expect(b.at(-1)).toMatchObject({ type: 'complete', scorecard_url: null });
+  });
+
+  test('on its own it leaves no job and no job log', async () => {
+    const jobs = fakeJobNamespace();
+    const claims = countClaims(jobs);
+    const env = makeEnv({ jobs });
+    const { res, ctx } = await call(post(OPT_OUT, STREAM), env);
+    const lines = await ndjson(res);
+    await settle(ctx);
+    expect(lines.at(-1)).toMatchObject({ type: 'complete', scorecard_url: null });
+    expect(claims).toEqual([]);
+    expect(jobs.jobs.size).toBe(0);
   });
 });

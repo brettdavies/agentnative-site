@@ -1437,3 +1437,144 @@ describe('audit_website: the follow kill switch', () => {
     expect(on.run?.follow_declarations).toBe(true);
   });
 });
+
+describe('audit_website with follow_declarations false', () => {
+  const IP = '203.0.113.41';
+  const NOT_SAVED = 'Not saved: declared hosts were not followed for this run.';
+
+  // A bucket that records every write, seeded with `prefill`.
+  function recordingBucket(prefill: Record<string, string> = {}) {
+    const store = new Map(Object.entries(prefill));
+    const puts: string[] = [];
+    const bucket = makeBucket(store);
+    const put = bucket.put.bind(bucket);
+    bucket.put = ((key: string, value: string) => {
+      puts.push(key);
+      return put(key, value);
+    }) as unknown as R2Bucket['put'];
+    return { bucket, store, puts };
+  }
+
+  function purgeContext() {
+    const purged: string[][] = [];
+    const ctx = {
+      waitUntil() {},
+      passThroughOnException() {},
+      props: {},
+      exports: {
+        Cached: {
+          async purgeHitMinTags(tags: string[]) {
+            purged.push(tags);
+            return { success: true, errors: [] };
+          },
+        },
+      },
+    } as unknown as ExecutionContext;
+    return { ctx, purged };
+  }
+
+  async function offline<T>(fn: () => Promise<T>): Promise<T> {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response('not found', { status: 404 })) as unknown as typeof fetch;
+    try {
+      return await fn();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  async function seeded(scoredAt: string, stored = false): Promise<Record<string, string>> {
+    const record = {
+      spec_version: SPEC_VERSION,
+      target_url: 'https://anc.dev/',
+      scorecard: {
+        schema_version: '0.2',
+        target_url: 'https://anc.dev/',
+        score_pct: 64,
+        results: [],
+        public_listing: stored,
+      },
+      scored_at: scoredAt,
+    };
+    return { [await keyFor('https://anc.dev/', SPEC_VERSION)]: JSON.stringify(record) };
+  }
+
+  // anc.dev is the env's seeded domain, so a saved run would also rebuild both board aggregates.
+  async function run(args: Record<string, unknown>, opts: WebEnvOpts & { prefill?: Record<string, string> } = {}) {
+    const { prefill, ...envOpts } = opts;
+    const recorded = recordingBucket(prefill);
+    const env = await makeEnv({ minimalRegistry: true, followSwitch: 'true', ...envOpts });
+    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = recorded.bucket;
+    const purge = purgeContext();
+    const { result, records } = await offline(() =>
+      withLogCapture(() =>
+        runWithHitMinPurge(purge.ctx, async () => {
+          const body = await callTool(env, 'audit_website', { url: 'anc.dev', ...args }, IP);
+          await flushHitMinPurge();
+          return body;
+        }),
+      ),
+    );
+    const runRecord = records.map((r) => r.record).find((r) => r.scope === 'web-audit.run');
+    return {
+      result,
+      body: result.result?.isError ? null : jsonContent(result),
+      puts: recorded.puts,
+      purged: purge.purged,
+      runRecord,
+    };
+  }
+
+  test('returns a scorecard recording follow_declarations false with no result URLs, and writes, purges, and rebuilds nothing', async () => {
+    const out = await run({ follow_declarations: false });
+    expect(out.body).toMatchObject({ audited: true, scorecard_url: null, markdown_url: null, json_url: null });
+    expect((out.body?.scorecard as { follow_declarations: boolean }).follow_declarations).toBe(false);
+    expect(String(out.body?.summary_html)).toContain(NOT_SAVED);
+    expect(out.puts).toEqual([]);
+    expect(out.purged).toEqual([]);
+    expect(out.runRecord?.follow_declarations).toBe(false);
+    // Control: the same audit following its declarations writes the domain and both board aggregates.
+    const saved = await run({});
+    expect(saved.puts).toEqual(
+      expect.arrayContaining([
+        await keyFor('https://anc.dev/', SPEC_VERSION),
+        `audits/web/leaderboard/${SPEC_VERSION}.json`,
+        `audits/web/leaderboard-frontpage/${SPEC_VERSION}.json`,
+      ]),
+    );
+    expect(saved.purged.length).toBeGreaterThan(0);
+    expect(saved.runRecord?.follow_declarations).toBe(true);
+  });
+
+  test('a stored scorecard inside the serve window does not answer it, and with audits disabled it is told so', async () => {
+    const fresh = await run({ follow_declarations: false }, { prefill: await seeded(new Date().toISOString()) });
+    expect(fresh.body).toMatchObject({ audited: true, source: 'fresh-audit', scorecard_url: null });
+    for (const scoredAt of [new Date().toISOString(), new Date(Date.now() - 600_000).toISOString()]) {
+      const disabled = await run(
+        { follow_declarations: false },
+        { webEnabled: false, prefill: await seeded(scoredAt) },
+      );
+      expect(disabled.body).toMatchObject({ audited: false });
+      expect(String(disabled.body?.message)).toContain('disabled');
+      expect(disabled.body).not.toHaveProperty('scorecard');
+    }
+  });
+
+  test('a public_listing that differs from the stored choice is rejected; the stored choice runs', async () => {
+    const prefill = await seeded(new Date(Date.now() - 600_000).toISOString(), false);
+    const refused = await run({ follow_declarations: false, public_listing: true }, { prefill });
+    expect(refused.result.result?.isError).toBe(true);
+    expect(refused.result.result?.content?.[0]?.text).toContain('public_listing');
+    expect(refused.puts).toEqual([]);
+    const same = await run({ follow_declarations: false, public_listing: false }, { prefill });
+    expect(same.body).toMatchObject({ audited: true, scorecard_url: null });
+  });
+
+  test('a non-boolean follow_declarations is rejected by input validation', async () => {
+    const env = await makeEnv();
+    const res = await callTool(env, 'audit_website', { url: 'example.com', follow_declarations: 'no' }, IP);
+    const rejected = res.error !== undefined || res.result?.isError === true;
+    expect(rejected).toBe(true);
+    expect(JSON.stringify(res)).toContain('follow_declarations');
+  });
+});

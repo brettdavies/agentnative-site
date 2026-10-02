@@ -23,6 +23,15 @@ export function storedPublicListing(cached: CachedWebAudit | null): boolean | un
 }
 
 /**
+ * The listing a run that writes nothing carries: the stored choice, or
+ * unlisted when no choice was ever stored, the value a first audit defaults
+ * to.
+ */
+export function standingPublicListing(cached: CachedWebAudit | null): boolean {
+  return storedPublicListing(cached) ?? false;
+}
+
+/**
  * The write path a resolved request takes.
  *
  * `flagChanges` reports whether the write alters the stored listing value

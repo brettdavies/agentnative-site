@@ -38,6 +38,8 @@ export type AuditErrorCode =
   | 'invalid_body'
   | 'invalid_site_type'
   | 'invalid_public_listing'
+  | 'invalid_follow_declarations'
+  | 'listing_requires_follow'
   // Admission: bot defense, limiters, kill switches, bindings.
   | 'turnstile_failed'
   | 'turnstile_unavailable'
@@ -91,6 +93,9 @@ export const AUDIT_ERROR_MESSAGES: Readonly<Record<AuditErrorCode, string>> = {
   invalid_body: 'The request body must be a JSON object with a target.',
   invalid_site_type: 'That site type is not recognized.',
   invalid_public_listing: 'public_listing must be true or false.',
+  invalid_follow_declarations: 'follow_declarations must be true or false.',
+  listing_requires_follow:
+    'A run that does not follow declared hosts is not saved, so it cannot change the public listing.',
   turnstile_failed: 'Verification failed. Please try again.',
   turnstile_unavailable: 'Verification is briefly unavailable.',
   rate_limited: 'Too many requests.',

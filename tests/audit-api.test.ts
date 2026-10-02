@@ -5,7 +5,17 @@ import { keyFor as cliKeyFor } from '../src/worker/score/cache';
 import { _resetIndexCache } from '../src/worker/score/core';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
-import { CLI_RECORD, call, errorOf, makeEnv, ndjson, newTracker, post, WEB_RECORD } from './helpers/audit-api-env';
+import {
+  CLI_RECORD,
+  call,
+  errorOf,
+  makeCtx,
+  makeEnv,
+  ndjson,
+  newTracker,
+  post,
+  WEB_RECORD,
+} from './helpers/audit-api-env';
 import { requestsTo, router, type Seen, siteDeclaring } from './helpers/follow-fixtures';
 import { captureLogs } from './helpers/log-capture';
 
@@ -721,5 +731,130 @@ describe('POST /api/score: the follow kill switch', () => {
     expect(off.trail.every((entry) => entry.reason === 'follow-disabled')).toBe(true);
     // Control: with the switch on, the same site's declared host is reached.
     expect((await run('true')).requests).toBeGreaterThan(0);
+  });
+});
+
+describe('POST /api/score: a run that does not follow declared hosts', () => {
+  const NOT_SAVED = 'Not saved: declared hosts were not followed for this run.';
+
+  type Watched = ReturnType<typeof makeEnv> & { puts: string[] };
+
+  // The endpoint env with every R2 write recorded.
+  function watchedEnv(overrides: Parameters<typeof makeEnv>[0] = {}): Watched {
+    const env = makeEnv(overrides);
+    const puts: string[] = [];
+    const bucket = env.SCORE_CACHE;
+    const put = bucket.put.bind(bucket);
+    bucket.put = ((key: string, ...rest: Parameters<R2Bucket['put']> extends [string, ...infer R] ? R : never) => {
+      puts.push(key);
+      return put(key, ...rest);
+    }) as R2Bucket['put'];
+    return Object.assign(env, { puts });
+  }
+
+  // A context whose purge RPC records every tag batch the run queued.
+  function purgeCtx(): ReturnType<typeof makeCtx> & { purged: string[][] } {
+    const purged: string[][] = [];
+    const ctx = makeCtx();
+    return Object.assign(ctx, {
+      purged,
+      exports: {
+        Cached: {
+          async purgeHitMinTags(tags: string[]) {
+            purged.push(tags);
+            return { success: true, errors: [] };
+          },
+        },
+      },
+    });
+  }
+
+  const fresh = () => ({
+    ...WEB_RECORD('anc.dev'),
+    scorecard: { ...WEB_RECORD('anc.dev').scorecard, public_listing: true },
+  });
+
+  test('the parser rejects a non-boolean follow_declarations with a 400 naming the field', async () => {
+    for (const value of ['false', 0, null]) {
+      const { res } = await call(
+        post({ target: 'anc.dev', turnstile_token: 'x', follow_declarations: value }),
+        makeEnv(),
+      );
+      expect(res.status).toBe(400);
+      const error = await errorOf(res);
+      expect(error.code).toBe('invalid_follow_declarations');
+      expect(error.message).toContain('follow_declarations');
+    }
+  });
+
+  test('a fresh stored scorecard does not answer it: the run audits, returns no URLs, and writes nothing', async () => {
+    const env = watchedEnv({ cacheContent: { [await webKeyFor('https://anc.dev/', SPEC_VERSION)]: fresh() } });
+    const ctx = purgeCtx();
+    const { res } = await call(post({ target: 'anc.dev', turnstile_token: 'x', follow_declarations: false }), env, ctx);
+    expect(res.status).toBe(200);
+    await Promise.all(ctx._promises);
+    const body = (await res.json()) as Record<string, unknown> & { scorecard: Record<string, unknown> };
+    expect(body).toMatchObject({ kind: 'web', tier: 'live', scorecard_url: null, markdown_url: null, json_url: null });
+    expect(body.scorecard.follow_declarations).toBe(false);
+    expect(body.scorecard.public_listing).toBe(true);
+    expect(String(body.summary_html)).toContain(NOT_SAVED);
+    expect(env.puts).toEqual([]);
+    expect(ctx.purged).toEqual([]);
+  });
+
+  test('with audits disabled it gets the disabled error, never the stored followed scorecard', async () => {
+    const stale = { ...fresh(), scored_at: new Date(Date.now() - 600_000).toISOString() };
+    for (const record of [fresh(), stale]) {
+      const env = makeEnv({
+        webKill: true,
+        cacheContent: { [await webKeyFor('https://anc.dev/', SPEC_VERSION)]: record },
+      });
+      const { res } = await call(post({ target: 'anc.dev', turnstile_token: 'x', follow_declarations: false }), env);
+      expect(res.status).toBe(503);
+      expect((await errorOf(res)).code).toBe('web_audit_disabled');
+    }
+  });
+
+  test('it streams its rows and ends on a complete line with no URLs, marking no in-flight flag', async () => {
+    const env = watchedEnv();
+    const ctx = purgeCtx();
+    const { res } = await call(
+      post({ target: 'anc.dev', turnstile_token: 'x', follow_declarations: false }, { accept: 'application/x-ndjson' }),
+      env,
+      ctx,
+    );
+    const lines = await ndjson(res);
+    await Promise.all(ctx._promises);
+    expect(lines[0]).toMatchObject({ type: 'accepted', lane: 'web', target: 'anc.dev' });
+    expect(lines.some((l) => l.type === 'check')).toBe(true);
+    expect(lines.at(-1)).toMatchObject({ type: 'complete', scorecard_url: null, markdown_url: null, json_url: null });
+    expect(String(lines.at(-1)?.summary_html)).toContain(NOT_SAVED);
+    expect([...env._kv.keys()].filter((key) => key.startsWith('inflight:'))).toEqual([]);
+    expect(env.puts).toEqual([]);
+    expect(ctx.purged).toEqual([]);
+  });
+
+  test('a public_listing that differs from the stored choice is rejected; the stored choice runs', async () => {
+    const key = await webKeyFor('https://anc.dev/', SPEC_VERSION);
+    const listed = makeEnv({ cacheContent: { [key]: fresh() } });
+    const refused = await call(
+      post({ target: 'anc.dev', turnstile_token: 'x', follow_declarations: false, public_listing: false }),
+      listed,
+    );
+    expect(refused.res.status).toBe(400);
+    expect((await errorOf(refused.res)).code).toBe('listing_requires_follow');
+    const same = await call(
+      post({ target: 'anc.dev', turnstile_token: 'x', follow_declarations: false, public_listing: true }),
+      listed,
+    );
+    expect(same.res.status).toBe(200);
+    await Promise.all(same.ctx._promises);
+    // No stored record: the standing choice is unlisted, so asking to list is a change.
+    const first = await call(
+      post({ target: 'anc.dev', turnstile_token: 'x', follow_declarations: false, public_listing: true }),
+      makeEnv(),
+    );
+    expect(first.res.status).toBe(400);
+    expect((await errorOf(first.res)).code).toBe('listing_requires_follow');
   });
 });

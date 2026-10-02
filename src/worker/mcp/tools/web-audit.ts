@@ -45,6 +45,7 @@ import {
   decidePublicListingWrite,
   enforcePublicListingFlipLimit,
   resolveAuditListing,
+  standingPublicListing,
 } from '../../audit-web/public-listing';
 import { boardExcludeDomains } from '../../audit-web/seed';
 import { validatePublicUrl } from '../../audit-web/ssrf';
@@ -214,10 +215,19 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
               "the current stored choice — a blank never erases a prior opt-in. Defaults to off only on a domain's " +
               'first-ever audit.',
           ),
+        follow_declarations: z
+          .boolean()
+          .optional()
+          .describe(
+            'Follow the hosts the site declares (its MCP server, its API host) and score them with the site; ' +
+              'defaults to true. false audits only the site itself and returns a transient result: never cached, ' +
+              "never listed, no scorecard_url, markdown_url, or json_url, and never joined to another caller's run. " +
+              'With false, a public_listing that differs from the stored choice is rejected.',
+          ),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    async ({ url, site_type, public_listing }, extra) => {
+    async ({ url, site_type, public_listing, follow_declarations }, extra) => {
       // URL validation + SSRF (the cache key needs the URL, so these precede
       // the cache read and the kill switch).
       const siteUrl = siteOrigin();
@@ -227,6 +237,10 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       const validation = validatePublicUrl(canonicalTarget);
       if (!validation.ok) return isError(validation.reason);
       const domain = parsed.host;
+      // A run that does not follow declared hosts is never saved, so no
+      // stored scorecard answers it, it joins no run, and it may not change
+      // the listing.
+      const optedOut = follow_declarations === false;
 
       // Cache hit short-circuits ahead of the kill switch: cache state is
       // data, so a cached scorecard is served even when the audit is off.
@@ -241,7 +255,18 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       // takes the scored_at-preserving patch below, so a flag flip never
       // bypasses a gate the kill switch also enforces.
       const listingWrite = decidePublicListingWrite({ explicit: public_listing, cached });
-      if (cached && !isStale(cached.scored_at, WEB_AUDIT_STALE_AFTER_MS) && listingWrite.path === 'serve-cached') {
+      if (optedOut) {
+        if (public_listing !== undefined && public_listing !== standingPublicListing(cached)) {
+          return isError(
+            'follow_declarations false runs an audit that is never saved, so it cannot change public_listing; ' +
+              'omit public_listing or keep follow_declarations on.',
+          );
+        }
+      } else if (
+        cached &&
+        !isStale(cached.scored_at, WEB_AUDIT_STALE_AFTER_MS) &&
+        listingWrite.path === 'serve-cached'
+      ) {
         return textContent({
           audited: false,
           source: 'cache',
@@ -252,7 +277,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       // Kill switches: a stale hit is still data when fresh audits are
       // off, so only a true miss surfaces the disabled message.
       if (env.MCP_ENABLED !== 'true' || env.WEB_AUDIT_ENABLED !== 'true') {
-        if (cached) {
+        if (cached && !optedOut) {
           return textContent({
             audited: false,
             source: 'cache',
@@ -285,7 +310,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       // first. An explicit listing choice is its own request: attaching would
       // answer it with a run that never writes the caller's opt-in.
       const signal = getMcpRequest()?.signal;
-      if (public_listing === undefined) {
+      if (public_listing === undefined && !optedOut) {
         const attached = await awaitInFlightTerminal(env, 'web', domain, signal);
         // A null answer means nothing answered in flight; the audit runs below.
         if (attached || signal?.aborted) return attachedResult(attached, signal);
@@ -295,6 +320,21 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       if (env.SCORE_KV) {
         const ok = await consumeWebAuditHourlyBudget(env.SCORE_KV, ipString);
         if (!ok) return jsonRpcError32099('audit rate limit exceeded — 30 fresh audits per hour per source.');
+      }
+
+      const target = { host: domain, canonical: canonicalTarget };
+      if (optedOut) {
+        const run = await hostWebAudit(env, {
+          target,
+          siteType: site_type ?? null,
+          listing: standingPublicListing(cached),
+          followDeclarations: false,
+          origin: siteUrl,
+          attach: false,
+          singleFlight: false,
+          signal,
+        });
+        return freshResult(run.terminal);
       }
 
       // Per-domain flip budget (the same shared helper the webapp route calls,
@@ -331,12 +371,13 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       // Miss or stale hit — a (re-)audit, hosted under the site's job so a
       // caller that arrives mid-run attaches to it.
       const run = await hostWebAudit(env, {
-        target: { host: domain, canonical: canonicalTarget },
+        target,
         siteType: site_type ?? null,
         listing: resolveAuditListing(listingWrite, public_listing, cached),
         followDeclarations: true,
         origin: siteUrl,
         attach: public_listing === undefined,
+        singleFlight: true,
         signal,
       });
       return run.attached ? attachedResult(run.terminal, signal) : freshResult(run.terminal);
