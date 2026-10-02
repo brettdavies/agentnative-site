@@ -45,9 +45,9 @@ import {
   resolveAuditListing,
   standingPublicListing,
 } from './public-listing';
-import { loadWebAuditRegistry, type WebAuditRegistry, type WebSiteType } from './registry';
+import { loadWebAuditRegistry, type WebAuditRegistry, type WebSiteType, withRegistryFingerprint } from './registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remediation';
-import type { EngineResult } from './scorecard';
+import type { EngineResult, WebScorecard } from './scorecard';
 import { validatePublicUrl } from './ssrf';
 import type { WebScorecardShape } from './summary-model';
 import { buildWebSummaryBody } from './summary-render';
@@ -258,7 +258,7 @@ function checkEvent(result: EngineResult): AuditEvent {
  */
 export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerator<AuditEvent> {
   const { env, target } = input;
-  let scorecard: unknown = null;
+  let scorecard: WebScorecard | null = null;
   let complete = false;
   const followDeclarations = effectiveFollow(env, input.followDeclarations);
   try {
@@ -297,16 +297,17 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
     // a different clock for the same audit.
     const scoredAt = complete && scorecard ? new Date().toISOString() : null;
     if (scorecard && scoredAt) {
+      const stamped = await withRegistryFingerprint(scorecard, registry);
       const transient: TransientReason | undefined = input.followDeclarations ? undefined : { kind: 'opt-out' };
       if (!transient) {
-        const wrote = await cachePut(env, target.canonical, scorecard, SPEC_VERSION, scoredAt);
+        const wrote = await cachePut(env, target.canonical, stamped, SPEC_VERSION, scoredAt);
         if (wrote) queueHitMinPurge([webTag(), webDomainTag(target.host)]);
         await rebuildAggregatesIfSeeded(env, target.host, SPEC_VERSION);
       }
       const record: CachedWebAudit = {
         spec_version: SPEC_VERSION,
         target_url: target.canonical,
-        scorecard,
+        scorecard: stamped,
         scored_at: scoredAt,
       };
       yield {

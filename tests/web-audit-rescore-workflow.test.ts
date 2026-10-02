@@ -16,9 +16,14 @@ import {
   keyFor,
 } from '../src/worker/audit-web/cache';
 import {
+  FOLLOW_POLICY_VERSION,
+  registryFingerprint,
+  registryFingerprintPrefix,
+  type WebAuditRegistry,
+} from '../src/worker/audit-web/registry';
+import {
   auditDomainToCache,
   type RescoreStep,
-  registryFingerprint,
   runWebRescore,
   type WebRescoreEnv,
   WebRescoreWorkflow,
@@ -372,10 +377,7 @@ describe('runWebRescore', () => {
         },
       ],
     });
-    const fpOf = async (registry: unknown) => {
-      const { env } = makeEnv([seedEntry('a.test')], { registry });
-      return registryFingerprint(env);
-    };
+    const fpOf = async (registry: object) => registryFingerprint(registry as WebAuditRegistry);
 
     test('a site-only field does not reflow the corpus', async () => {
       // `breadcrumb` names the check's own page in the site's URL trail. No
@@ -447,6 +449,13 @@ describe('runWebRescore', () => {
         presented: presented === declared,
       }).toEqual({ declared: false, owning: false, presented: false });
     });
+  });
+
+  test('a new follow policy version reflows, whatever the registry', async () => {
+    const registry = MINIMAL_REGISTRY as WebAuditRegistry;
+    expect(await registryFingerprint(registry, FOLLOW_POLICY_VERSION + 1)).not.toBe(
+      await registryFingerprint(registry),
+    );
   });
 
   test('a changed registry fingerprint reflows every domain even when all are fresh', async () => {
@@ -525,6 +534,19 @@ describe('public listing on re-audit writes', () => {
       expect((cached.scorecard as { public_listing?: boolean }).public_listing).toBe(true);
       expect(putOptions.get(key)?.customMetadata?.public_listing).toBe('true');
     }
+  });
+
+  test("a curated seed's rescore records its registry prefix in the scorecard and the board metadata, still listed", async () => {
+    const { env, putOptions } = makeEnv([seedEntry('a.dev')], { registry: MINIMAL_REGISTRY });
+    const { step } = makeStep();
+    const result = await withStubbedFetch(() => runWebRescore(env, step));
+    expect(result.audited).toEqual(['a.dev']);
+    const key = await keyFor('https://a.dev/', SPEC_VERSION);
+    const cached = (await cacheGet(env, key)) as CachedWebAudit;
+    const prefix = await registryFingerprintPrefix(MINIMAL_REGISTRY as WebAuditRegistry);
+    expect(prefix).toMatch(/^[0-9a-f]{12}$/);
+    expect(cached.scorecard).toMatchObject({ registry_fingerprint: prefix, public_listing: true });
+    expect(putOptions.get(key)?.customMetadata).toMatchObject({ registry_fingerprint: prefix, public_listing: 'true' });
   });
 
   test('auditDomainToCache derives the flag from the seed: a non-seeded target stays unlisted', async () => {

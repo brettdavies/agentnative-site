@@ -30,7 +30,8 @@ import { type DomainBudgetEnv, declaredDomainBudget } from './domain-budget';
 import { runWebAudit } from './engine';
 import { effectiveFollow, type FollowSwitchEnv } from './follow-switch';
 import { homeTag, invokeCachedPurge, webDomainTag, webTag } from './hit-min-purge';
-import { loadWebAuditRegistry } from './registry';
+import { loadWebAuditRegistry, registryFingerprint, withRegistryFingerprint } from './registry';
+import type { WebScorecard } from './scorecard';
 import { isSeededDomain, loadWebSeed, type WebSeedEntry } from './seed';
 
 // The Workflow shares the Worker's bindings; SCORE_KV is optional so the
@@ -65,8 +66,8 @@ export interface RescoreDeps {
    * reflow. Setting it also bypasses the gate (tests drive the window
    * directly). */
   eligibleAfterMs?: number;
-  /** Injectable registry fingerprint for the change gate; defaults to a
-   * SHA-256 of the normalized registry JSON. */
+  /** Injectable registry fingerprint for the change gate; defaults to the
+   * fingerprint of the registry the audits load. */
   fingerprint?: (env: WebRescoreEnv) => Promise<string>;
 }
 
@@ -108,36 +109,6 @@ const RESCORE_MAX_CYCLES = 200;
 // age out.
 const REGISTRY_FINGERPRINT_KEY = 'web_rescore:registry_fp';
 
-/**
- * Registry fields no stored scorecard depends on.
- *
- * The fingerprint answers one question: could this registry produce a
- * different scorecard than the cached ones? A field no audit consumes cannot,
- * and hashing it spends the whole audit budget re-deriving identical evidence
- * across every seeded domain. `breadcrumb` labels a check's own page in the
- * site's URL trail; its only reader is the build that emits those pages.
- * `lane` and the `mcp_lanes` map group MCP rows on the result page, read from
- * the live registry at render time, so a stored scorecard picks up a lane
- * change on its next render without a re-audit.
- *
- * Membership here is a claim that the field is build-only or read from the
- * live registry at render time, never copied into a stored scorecard.
- * Anything absent from this set counts as scoring shape, so a new field
- * reflows until someone establishes otherwise.
- */
-const SITE_ONLY_REGISTRY_FIELDS: ReadonlySet<string> = new Set(['breadcrumb', 'lane', 'mcp_lanes']);
-
-/** SHA-256 hex of the normalized registry JSON minus its site-only fields. */
-export async function registryFingerprint(env: WebRescoreEnv): Promise<string> {
-  const registry = await loadWebAuditRegistry(env);
-  // A replacer rather than a rebuilt object: it drops the named keys while
-  // leaving every surviving key in its original order, so the digest stays
-  // stable across runs.
-  const shape = JSON.stringify(registry, (key, value) => (SITE_ONLY_REGISTRY_FIELDS.has(key) ? undefined : value));
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(shape));
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
-}
-
 /** Run one seeded domain's audit to completion and cache the scorecard. */
 export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string): Promise<void> {
   const registry = await loadWebAuditRegistry(env);
@@ -146,7 +117,7 @@ export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string):
   // the envelope and the R2 board metadata.
   const publicListing = await isSeededDomain(env, new URL(targetUrl).host);
   const followDeclarations = effectiveFollow(env, true);
-  let scorecard: unknown = null;
+  let scorecard: WebScorecard | null = null;
   let complete = false;
   for await (const event of instrumentAuditEvents(
     runWebAudit({
@@ -172,7 +143,11 @@ export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string):
   if (!complete || !scorecard) {
     throw new Error(`audit did not complete within the deadline for ${targetUrl}`);
   }
-  await cachePut(env, targetUrl, scorecard, SPEC_VERSION);
+  await cachePut(env, targetUrl, await withRegistryFingerprint(scorecard, registry), SPEC_VERSION);
+}
+
+async function currentRegistryFingerprint(env: WebRescoreEnv): Promise<string> {
+  return registryFingerprint(await loadWebAuditRegistry(env));
 }
 
 type BatchItem = { domain: string; target: string };
@@ -231,7 +206,7 @@ export async function runWebRescore(
   let fingerprintToRecord: string | null = null;
   if (deps.eligibleAfterMs === undefined && env.SCORE_KV) {
     const kv = env.SCORE_KV;
-    const compute = deps.fingerprint ?? registryFingerprint;
+    const compute = deps.fingerprint ?? currentRegistryFingerprint;
     const currentFp = await step.do('registry-fingerprint', async () => compute(env));
     const priorFp = await step.do('registry-fingerprint:prior', async () =>
       kv.get(REGISTRY_FINGERPRINT_KEY).catch(() => null),

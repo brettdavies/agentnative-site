@@ -18,13 +18,18 @@ import { keyFor, WEB_AUDIT_STALE_AFTER_MS } from '../src/worker/audit-web/cache'
 import type { DomainBudgetEnv } from '../src/worker/audit-web/domain-budget';
 import { flushHitMinPurge, runWithHitMinPurge } from '../src/worker/audit-web/hit-min-purge';
 import { enforcePublicListingFlipLimit } from '../src/worker/audit-web/public-listing';
-import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
+import {
+  registryFingerprintPrefix,
+  resetWebAuditRegistryCacheForTests,
+  type WebAuditRegistry,
+} from '../src/worker/audit-web/registry';
 import { buildWebSummaryMarkdown } from '../src/worker/audit-web/summary-markdown';
 import { buildWebSummaryBody } from '../src/worker/audit-web/summary-render';
 import { resetCatalogCacheForTests } from '../src/worker/mcp/catalog';
 import type { McpEnv } from '../src/worker/mcp/server';
 import { resetWebRemediationCacheForTests } from '../src/worker/mcp/tools/web-remediation';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { webRegistryJson } from './helpers/audit-api-env';
 import { countClaims, fakeJobNamespace } from './helpers/audit-job-state';
 import {
   at,
@@ -1503,6 +1508,26 @@ describe('audit_website: the declared-domain budget', () => {
     const { trail, sent } = await freshRun(env);
     expect(trail[0]).toMatchObject({ outcome: 'budget-exceeded', cause: 'domain-budget' });
     expect(sent).toBe(0);
+  });
+});
+
+describe('audit_website: the registry a saved run ran under', () => {
+  test('a saved fresh run carries the same registry prefix the transact endpoint records', async () => {
+    const env = await makeEnv();
+    const store = new Map<string, string>();
+    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(store);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = router({ 'GET https://example.com/': () => html() }, []);
+    try {
+      await withLogCapture(() => callTool(env, 'audit_website', { url: 'example.com' }, '203.0.113.61'));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    const stored = JSON.parse(store.get(await keyFor('https://example.com/', SPEC_VERSION)) as string) as {
+      scorecard: { registry_fingerprint?: string };
+    };
+    const registry = JSON.parse(await webRegistryJson()) as WebAuditRegistry;
+    expect(stored.scorecard.registry_fingerprint).toBe(await registryFingerprintPrefix(registry));
   });
 });
 

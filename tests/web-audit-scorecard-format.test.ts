@@ -10,11 +10,6 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import { WEB_AUDIT_STALE_AFTER_MS } from '../src/worker/audit-web/cache';
-import {
-  buildFrontpageBoardRows,
-  rankWebEntries,
-  type WebBoardEntry,
-} from '../src/worker/audit-web/leaderboard-render';
 import type { WebAuditRegistry } from '../src/worker/audit-web/registry';
 import { assembleRemediation } from '../src/worker/audit-web/remediation';
 import {
@@ -921,6 +916,16 @@ describe('stored scorecards that predate provenance', () => {
     const model = webSummaryModel({ ...input, scorecard });
     expect(model.declaredHosts).toEqual([]);
     expect(model.registryFingerprint).toBe('3f2a9c1b7e40');
+  });
+
+  test('a fingerprint that is not a recorded prefix reads as an unknown registry version', () => {
+    for (const value of ['', 'unknown', '3F2A9C1B7E40', '3f2a9c1b7e4', '<b>3f2a9c1b7e40</b>', 12]) {
+      const scorecard = { ...webScorecard(), registry_fingerprint: value } as ReturnType<typeof webScorecard>;
+      expect({ value, read: webSummaryModel({ ...input, scorecard }).registryFingerprint }).toEqual({
+        value,
+        read: null,
+      });
+    }
   });
 
   test("a declared-host reason's result line names the row host, or the audited host for a row without provenance", () => {

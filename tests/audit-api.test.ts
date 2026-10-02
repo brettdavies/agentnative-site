@@ -4,6 +4,7 @@ import { streamedResultLine, streamedRowHost } from '../src/shared/scoring-copy'
 import { isAuditApiPath } from '../src/worker/audit/api';
 import { keyFor as webKeyFor } from '../src/worker/audit-web/cache';
 import { rowHostsOf } from '../src/worker/audit-web/provenance';
+import { registryFingerprintPrefix, type WebAuditRegistry } from '../src/worker/audit-web/registry';
 import { keyFor as cliKeyFor } from '../src/worker/score/cache';
 import { _resetIndexCache } from '../src/worker/score/core';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
@@ -18,6 +19,7 @@ import {
   newTracker,
   post,
   WEB_RECORD,
+  webRegistryJson,
 } from './helpers/audit-api-env';
 import { budgetKeyPrefix } from './helpers/domain-budget-fakes';
 import { html, requestsTo, router, type Seen, siteDeclaring } from './helpers/follow-fixtures';
@@ -851,6 +853,19 @@ describe('POST /api/score: the declared-domain budget', () => {
     const { trail, sent } = await followed({ kvSeed });
     expect(trail[0]).toMatchObject({ outcome: 'budget-exceeded', cause: 'domain-budget' });
     expect(sent).toBe(0);
+  });
+});
+
+describe('POST /api/score: the registry a saved website audit ran under', () => {
+  test('the saved scorecard carries the prefix of the registry the audit loaded', async () => {
+    const env = makeEnv();
+    const { res, ctx } = await call(post({ target: 'example.com', turnstile_token: 'x' }), env);
+    expect(res.status).toBe(200);
+    await Promise.all(ctx._promises);
+    const object = await env.SCORE_CACHE.get(await webKeyFor('https://example.com/', SPEC_VERSION));
+    const stored = (await object?.json()) as { scorecard: { registry_fingerprint?: string } };
+    const registry = JSON.parse(await webRegistryJson()) as WebAuditRegistry;
+    expect(stored.scorecard.registry_fingerprint).toBe(await registryFingerprintPrefix(registry));
   });
 });
 

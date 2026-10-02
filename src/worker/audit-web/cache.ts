@@ -18,6 +18,7 @@
 
 import { type AuditFreshness, freshnessFor, WEB_AUDIT_STALE_AFTER_MS } from '../../shared/audit-envelope';
 import { emitLog, type LogScope } from '../telemetry/log';
+import { isRegistryFingerprintPrefix } from './registry';
 import type { WebVantage } from './scorecard';
 
 export { WEB_AUDIT_STALE_AFTER_MS };
@@ -71,7 +72,12 @@ export type WebListedAudit = {
   scored_at: string;
   public_listing: boolean;
   vantage: WebVantage['network'];
+  /** The registry fingerprint prefix the score was computed under; null when it is unknown. */
+  registry_fingerprint: string | null;
 };
+
+// The board metadata value for a scorecard that recorded no registry fingerprint.
+const UNKNOWN_REGISTRY = 'unknown';
 
 /**
  * Where a stored scorecard's audit ran. A scorecard stored without a
@@ -352,6 +358,7 @@ function boardMetadataOf(targetUrl: string, scorecard: unknown, scoredAt: string
     score_pct?: unknown;
     score?: { relative?: unknown; global?: unknown };
     public_listing?: unknown;
+    registry_fingerprint?: unknown;
   } | null;
   const domain = new URL(targetUrl).host;
   const toolName = sc?.tool?.name;
@@ -364,6 +371,11 @@ function boardMetadataOf(targetUrl: string, scorecard: unknown, scoredAt: string
     // string-only, and always emitted so a missing key can't read as opted-in.
     public_listing: String(sc?.public_listing ?? false),
     vantage: vantageNetworkOf(scorecard),
+    // Read from the scorecard on every write, so a listing patch and the
+    // backfill carry it forward.
+    registry_fingerprint: isRegistryFingerprintPrefix(sc?.registry_fingerprint)
+      ? sc.registry_fingerprint
+      : UNKNOWN_REGISTRY,
   };
   if (typeof sc?.score_pct === 'number') meta.score_pct = String(sc.score_pct);
   if (typeof sc?.score?.relative === 'number') meta.relative = String(sc.score.relative);
@@ -456,6 +468,7 @@ function parseListedMetadata(meta: Record<string, string> | undefined): WebListe
     // A missing key coerces to false: an unmigrated object reads as not-listed.
     public_listing: meta.public_listing === 'true',
     vantage: meta.vantage === 'local' ? 'local' : 'public',
+    registry_fingerprint: isRegistryFingerprintPrefix(meta.registry_fingerprint) ? meta.registry_fingerprint : null,
   };
 }
 
