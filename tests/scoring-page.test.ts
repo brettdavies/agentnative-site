@@ -169,7 +169,11 @@ describe('the progress page names where a website run reads', () => {
   test('the website lane promises a longer wait when a site declares other hosts, and reads them while it waits', () => {
     expect(LANE_EXPECTATION.web).toBe('Usually under 30 seconds; longer when the site declares other hosts.');
     expect(LANE_EXPECTATION.cli).toBe('Installs the tool in a sandbox; usually under a minute.');
-    expect(webReadingLine('stripe.dev')).toBe('Reading stripe.dev and any hosts it declares…');
+    expect(webReadingLine('stripe.dev', true)).toBe('Reading stripe.dev and any hosts it declares…');
+  });
+
+  test('a run that does not follow declared hosts reads only the target while it waits', () => {
+    expect(webReadingLine('stripe.dev', false)).toBe('Reading stripe.dev…');
   });
 
   test('an endpoint on another host is named with the target that declared it; one on the target is not', () => {

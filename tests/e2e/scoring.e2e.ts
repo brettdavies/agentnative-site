@@ -562,6 +562,16 @@ test.describe('/scoring progress page', () => {
     await expect(page.locator('[data-scoring-status]')).not.toContainText('declared by');
   });
 
+  test('a website run that does not follow declared hosts reads only the target while it waits', async ({ page }) => {
+    await mockTurnstile(page);
+    await seedStash(page, 'example.com', 'web', false);
+    const stream = await controlledStream(page);
+    await page.goto('/scoring?target=example.com');
+    await stream.opened();
+    await stream.send({ type: 'accepted', lane: 'web', target: 'example.com', started_at: AT });
+    await expect(page.locator('[data-scoring-status]')).toHaveText('Reading example.com…');
+  });
+
   test('the page never loads the WebMCP script', async ({ page }) => {
     await mockTurnstile(page);
     await mockScore(page, [json(403, { error: { code: 'turnstile_failed', message: 'x', cta: 'y' } })]);

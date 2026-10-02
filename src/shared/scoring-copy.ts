@@ -16,8 +16,8 @@ export const LANE_EXPECTATION: Readonly<Record<Lane, string>> = {
 };
 
 /** The website lane's status line once the run starts, until its first event arrives. */
-export function webReadingLine(target: string): string {
-  return `Reading ${target} and any hosts it declares…`;
+export function webReadingLine(target: string, follow: boolean): string {
+  return follow ? `Reading ${target} and any hosts it declares…` : `Reading ${target}…`;
 }
 
 /** The host a discovered endpoint sits on, or null when there is none to name. */

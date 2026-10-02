@@ -288,7 +288,7 @@ class ScoringRun {
     this.view.state('running');
     this.view.actions({ start: null, other: false });
     this.endpointHost = null;
-    this.view.say(this.lane === 'web' ? webReadingLine(this.target) : 'Started.');
+    this.view.say(this.lane === 'web' ? webReadingLine(this.target, this.follow) : 'Started.');
     // An attached tab joins a run already under way, so the counter reads from
     // when the run started rather than from when this page reached it.
     const parsed = Date.parse(startedAt);
