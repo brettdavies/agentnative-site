@@ -156,6 +156,11 @@ const LLMS_TXT_FULL = [
 ].join('\n');
 
 const LLMS_TXT_H1_ONLY = '# Example\n';
+const HTTP_LINK = 'http://example.com/docs/plain.md';
+const LLMS_TXT_HTTP_LINK = LLMS_TXT_FULL.replace(
+  '\n\n## When to use',
+  `\n- [Plain](${HTTP_LINK}): the same docs over plaintext\n\n## When to use`,
+);
 
 const LLMS_FULL_TXT = '# Example\n\n## Guide\n\nEverything in one fetch.\n';
 const SCOPED_LLMS = '# Docs\n\n- [Guide](/docs/guide.md)\n';
@@ -633,6 +638,23 @@ export const SCENARIOS: Record<string, Scenario> = {
       get('/s4', redirect(u('/s5'))),
       get('/s5', text('Contact: mailto:security@example.com\n')),
     ],
+  ),
+  'run-document-redirects-to-http': scenario(
+    'the audited site answers /llms.txt and its API catalog with a redirect to the same path over http, where each would answer: neither hop is taken, the llms.txt row reads error naming the refused redirect, and the API catalog is not read',
+    ['llms-txt', 'api-catalog'],
+    [
+      ...baseline(),
+      get('/llms.txt', redirect('http://example.com/llms.txt')),
+      get('http://example.com/llms.txt', text(LLMS_TXT_FULL)),
+      get('/.well-known/api-catalog', redirect('http://example.com/.well-known/api-catalog')),
+      get('http://example.com/.well-known/api-catalog', linkset()),
+    ],
+  ),
+  'run-root-redirects-to-http': scenario(
+    'every https request, the root included, redirects to the http root, which would answer: nothing is requested over http, the run is scored rather than unreachable, and the rows that need the root document read error naming the refused redirect',
+    ['agent-ua-reachable', 'content-without-js'],
+    [get('/', redirect('http://example.com/')), get('http://example.com/', html(rootHtml()))],
+    { unmatched: redirect('http://example.com/') },
   ),
   'run-body-over-cap': scenario(
     'bodies past the 64 KiB probe cap are truncated: a huge tools/list no longer parses and a huge JSON error body reads as non-JSON',
@@ -1491,6 +1513,17 @@ export const SCENARIOS: Record<string, Scenario> = {
     get('/llms.txt', text(LLMS_TXT_FULL)),
     get('/docs/guide.md', md(GUIDE_MD)),
   ]),
+  'llms-quality-http-link': scenario(
+    'an llms.txt that lists an http link beside resolving https links: the http link is never requested, though it would answer, and the links row reads noncompliant naming it',
+    ['llms-txt-links'],
+    [
+      ...baseline(),
+      get('/llms.txt', text(LLMS_TXT_HTTP_LINK)),
+      get('/docs/guide.md', md(GUIDE_MD)),
+      get('/docs/api.md', md(GUIDE_MD)),
+      get(HTTP_LINK, md(GUIDE_MD)),
+    ],
+  ),
 
   // ---- api-hygiene -------------------------------------------------------------
   'api-hygiene-pass': scenario('a documented 4xx GET answered with a JSON error body and rate-limit headers passes both rows', ['json-errors', 'rate-limit-headers'], [
