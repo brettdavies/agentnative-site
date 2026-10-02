@@ -216,7 +216,7 @@ export async function resolveProtectedResourceMetadata(
 }
 
 /** A source that declines every URL other than https, answering it as a read that got no response. */
-function httpsOnly(source: ArtifactSource): ArtifactSource {
+export function httpsOnly(source: ArtifactSource): ArtifactSource {
   return {
     get: (url, opts) => {
       if (isHttpsUrl(url)) return source.get(url, opts);
