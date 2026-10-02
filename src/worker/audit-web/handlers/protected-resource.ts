@@ -58,27 +58,46 @@ function challengeOutcome(auth: McpAuthRequired): ProbeOutcome {
   return verdict('pass', item, `resource_metadata names ${shown(named)}`);
 }
 
-/** Why a listed authorization server is unusable, or null when it is a public https URL. */
-function serverDefect(value: unknown): string | null {
+/**
+ * Why a listed authorization server is unusable from the audit's vantage,
+ * or null when an agent there can sign in through it. A private or reserved
+ * host is out of reach unless the endpoint itself is: a client that reached
+ * a private endpoint shares its network.
+ */
+function serverDefect(value: unknown, privateReachable: boolean): string | null {
   if (typeof value !== 'string') return 'is not a URL';
   if (value.length > MAX_URL_LENGTH) return `is longer than ${MAX_URL_LENGTH} characters`;
   const validated = validatePublicUrl(value);
-  if (!validated.ok) return validated.refused === 'host' ? 'names a private or reserved host' : 'is not a URL';
-  return validated.url.protocol === 'https:' ? null : 'is not https';
+  if (!validated.ok && validated.refused === 'url') return 'is not a URL';
+  if (!validated.ok && !privateReachable) return 'names a private or reserved host';
+  return new URL(value).protocol === 'https:' ? null : 'is not https';
 }
 
+/** The endpoint sits on a private or reserved host, by the guard every probe passes through. */
+function privateEndpoint(endpoint: string): boolean {
+  const validated = validatePublicUrl(endpoint);
+  return !validated.ok && validated.refused === 'host';
+}
+
+/**
+ * Priced by what an agent at the audit's vantage can do with the list: no
+ * usable server leaves it nowhere to sign in, a dead end, while a usable
+ * one listed beside bad entries still gets it signed in.
+ */
 function metadataOutcome(auth: McpAuthRequired): ProbeOutcome {
   const item: EvidenceItem = { url: auth.metadataUrl };
   const servers = auth.metadata.authorization_servers;
   if (!Array.isArray(servers) || servers.length === 0) {
     return verdict('broken', item, 'the metadata lists no authorization_servers');
   }
+  const privateReachable = privateEndpoint(auth.endpoint);
   const read = servers.slice(0, MAX_AUTHORIZATION_SERVERS);
-  for (const value of read) {
-    const defect = serverDefect(value);
-    if (defect !== null) return verdict('broken', item, `authorization server ${shown(value)} ${defect}`);
-  }
-  return verdict('pass', item, `authorization_servers: ${read.map(shown).join(', ')}`);
+  const defects = read.flatMap((value) => {
+    const defect = serverDefect(value, privateReachable);
+    return defect === null ? [] : [`authorization server ${shown(value)} ${defect}`];
+  });
+  if (defects.length === 0) return verdict('pass', item, `authorization_servers: ${read.map(shown).join(', ')}`);
+  return { status: defects.length === read.length ? 'broken' : 'noncompliant', evidence: [{ ...item, why: defects }] };
 }
 
 export async function runProtectedResource(check: WebCheck, ctx: HandlerContext): Promise<ProbeOutcome> {

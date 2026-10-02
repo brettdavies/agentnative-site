@@ -1182,6 +1182,21 @@ export const SCENARIOS: Record<string, Scenario> = {
       get(PROTECTED_RESOURCE_PATH, json({ resource: u(MCP_PATH), authorization_servers: ['http://auth.example.com'] })),
     ],
   ),
+  'auth-servers-mixed': scenario(
+    "an endpoint that requires sign-in lists a public https authorization server between an http one and one on a private address: an agent can still sign in through the usable server, so the metadata row is noncompliant and names both unusable entries, and none of the three is requested",
+    ['mcp-auth-servers'],
+    [
+      ...baseline(),
+      ...protectedMcp(MCP_PATH, u(PROTECTED_RESOURCE_PATH)),
+      get(
+        PROTECTED_RESOURCE_PATH,
+        json({
+          resource: u(MCP_PATH),
+          authorization_servers: ['http://auth.example.com', AUTH_SERVER, 'https://10.0.0.1/oauth'],
+        }),
+      ),
+    ],
+  ),
   'auth-modern-only': scenario(
     "a modern-only server behind OAuth at the audited site's /mcp refuses every legacy POST at HTTP 200 with a JSON-RPC error before reading a token, while every modern POST draws a 401 naming same-host RFC 9728 metadata that names it: the endpoint is found with sign-in required and presents only the protected MCP access alternative, the session rows read auth-required, and the refusal row is asked on the modern lane, where it passes",
     ['mcp-server-discover', 'mcp-modern-tools-list', 'mcp-auth-enforced'],

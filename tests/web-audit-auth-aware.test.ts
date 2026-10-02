@@ -10,6 +10,7 @@ import { loadRegistry, runScenario } from '../scripts/web-audit/conformance-corp
 import { SCENARIOS } from '../scripts/web-audit/conformance-scenarios';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
 import { enrichWebScorecardForDisplay } from '../src/worker/audit-web/display';
+import { runProtectedResource } from '../src/worker/audit-web/handlers/protected-resource';
 import { endpointRedirects } from '../src/worker/audit-web/handlers/shared';
 import { directArtifactSource, signInEndpoint } from '../src/worker/audit-web/mcp-auth';
 import { type ArtifactSource, resolveProtectedResourceMetadata } from '../src/worker/audit-web/reciprocity';
@@ -699,6 +700,93 @@ describe('auth enforcement rows', () => {
       expect(requestsTo(seen, 'auth.example.net')).toEqual([]);
       expect(requestsTo(seen, '10.0.0.1')).toEqual([]);
     }
+  });
+
+  // An agent signs in through any usable server the list names, so bad
+  // entries beside one cost a spec detail; a list with none usable leaves it
+  // nowhere to sign in.
+  test('one usable authorization server beside unusable ones reads noncompliant and names every unusable entry; none usable reads broken', async () => {
+    const cases: Array<{ servers: string[]; status: ScorecardStatus; evidence: string }> = [
+      {
+        servers: ['http://auth.example.net/', 'https://auth.example.net', 'https://10.0.0.1/oauth'],
+        status: 'noncompliant',
+        evidence:
+          'authorization server http://auth.example.net/ is not https; authorization server https://10.0.0.1/oauth names a private or reserved host',
+      },
+      {
+        servers: ['http://auth.example.net/', 'https://10.0.0.1/oauth'],
+        status: 'broken',
+        evidence:
+          'authorization server http://auth.example.net/ is not https; authorization server https://10.0.0.1/oauth names a private or reserved host',
+      },
+    ];
+    for (const { servers, status, evidence } of cases) {
+      const seen: Seen[] = [];
+      const { scorecard } = await audit(
+        router(
+          {
+            ...ROOT,
+            ...protectedServer(SAME, SAME_METADATA, { metadata: { resource: SAME, authorization_servers: servers } }),
+          },
+          seen,
+        ),
+        { registry: mcpRegistry() },
+      );
+      const { status: read, evidence: line } = row(scorecard, 'mcp-auth-servers');
+      expect({ servers, status: read, evidence: line }).toEqual({ servers, status, evidence });
+      expect(requestsTo(seen, 'auth.example.net')).toEqual([]);
+      expect(requestsTo(seen, '10.0.0.1')).toEqual([]);
+    }
+  });
+
+  // The public engine never audits a private endpoint, so this branch is
+  // reached only by a run on the endpoint's own network, which can reach a
+  // private authorization server too.
+  test('a private authorization server is usable for a private endpoint and unusable for a public one', async () => {
+    const check = REGISTRY.checks.find((c) => c.id === 'mcp-auth-servers');
+    if (!check) throw new Error('missing mcp-auth-servers');
+    const readFor = async (endpoint: string, servers: string[]) => {
+      const outcome = await runProtectedResource(check, {
+        base: 'https://example.com/',
+        host: 'example.com',
+        mcpEndpoint: endpoint,
+        protocolVersion: '2025-06-18',
+        defaultTimeoutMs: 50,
+        fetchOptions: {
+          fetchImpl: (async () => {
+            throw new Error('an authorization server is never requested');
+          }) as unknown as typeof fetch,
+        },
+        mcpAuth: {
+          endpoint,
+          challenge: null,
+          lane: 'legacy',
+          metadataUrl: `${new URL(endpoint).origin}/.well-known/oauth-protected-resource`,
+          metadata: { resource: endpoint, authorization_servers: servers },
+        },
+      });
+      return [outcome.status, outcome.evidence[0]?.why] as const;
+    };
+    expect({
+      privateServerPrivateEndpoint: await readFor('http://10.0.0.5/mcp', ['https://10.0.0.6/oauth']),
+      privateHttpServerPrivateEndpoint: await readFor('http://10.0.0.5/mcp', ['http://10.0.0.6/oauth']),
+      localhostServerLocalEndpoint: await readFor('http://localhost:8787/mcp', [
+        'https://localhost:9000/oauth',
+        'https://auth.example.net',
+      ]),
+      privateServerPublicEndpoint: await readFor(SAME, ['https://10.0.0.6/oauth']),
+    }).toEqual({
+      privateServerPrivateEndpoint: ['pass', ['authorization_servers: https://10.0.0.6/oauth']],
+      privateHttpServerPrivateEndpoint: ['broken', ['authorization server http://10.0.0.6/oauth is not https']],
+      localhostServerLocalEndpoint: [
+        'pass',
+        ['authorization_servers: https://localhost:9000/oauth, https://auth.example.net'],
+      ],
+      privateServerPublicEndpoint: [
+        'broken',
+        ['authorization server https://10.0.0.6/oauth names a private or reserved host'],
+      ],
+    });
   });
 
   test('a protected endpoint whose unauthenticated tools/list returns tools fails the rejection row', async () => {
