@@ -71,7 +71,8 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 readonly REPO_ROOT
-readonly OP_ITEM_TOKEN="Cloudflare Access Service Token - agentnative-site-staging"
+# CF Service Token - Staging CLI (agentnative-site)
+readonly OP_ITEM_TOKEN="iuutxdlnh3ujmylvzmuflraeia"
 readonly DEFAULT_STAGING_URL="https://agentnative-site-staging.brettdavies.workers.dev"
 readonly DEFAULT_LOCAL_URL="http://localhost:8787"
 
