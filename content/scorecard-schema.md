@@ -23,7 +23,7 @@ informational; when both are present and disagree, the build aborts with an inte
 
 ```json
 {
-  "schema_version": "0.7",
+  "schema_version": "0.9",
   "spec_version": "...",
   "tool":   { "name": "...", "binary": "...", "version": "..." },
   "anc":    { "version": "..." },
@@ -42,7 +42,7 @@ informational; when both are present and disagree, the build aborts with an inte
 
 | Field              | Type                | Source        | Meaning                                                                                                          |
 | ------------------ | ------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `schema_version`   | string              | `anc` emitted | Version of the JSON envelope itself. Pre-1.0; bumped when fields are added, removed, or renamed. Current: 0.7.   |
+| `schema_version`   | string              | `anc` emitted | Version of the JSON envelope itself. Pre-1.0; bumped when fields are added, removed, or renamed. Current: 0.9.   |
 | `spec_version`     | string              | `anc` emitted | Version of the [agentnative spec](/principles) the run conformed to. Independent of `schema_version`.            |
 | `tool`             | object              | `anc` emitted | Self-describing identity for the tool that was scored. See [tool](#tool) below. **Added in 0.4.**                |
 | `anc`              | object              | `anc` emitted | Provenance of the `anc` build that produced the scorecard. See [anc](#anc) below. **Added in 0.4.**              |
@@ -236,7 +236,8 @@ and the cohort-band colors.
 
 Array of one object per evaluated requirement row. Order is stable across runs of the same `anc` version. One probe can
 back several requirement rows (for example, the `--version` probe answers both a MUST and a SHOULD); each row is scored
-independently and carries its own `tier`.
+independently and carries its own `tier`. Three fields are optional and appear only on the rows they describe:
+`using_domain_verbs`, `domain_match_count`, and `config_hint`.
 
 ```json
 {
@@ -252,17 +253,20 @@ independently and carries its own `tier`.
 }
 ```
 
-| Field        | Type           | Meaning                                                                                                                                                          |
-| ------------ | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`         | string         | Stable identifier for the requirement row (e.g., `p3-must-help`). Citeable in commits and PRs.                                                                   |
-| `audit_id`   | string         | Identifier of the audit (probe) that produced this row (e.g., `p3-help`). Several requirement rows can share one `audit_id`. **Added in 0.7.**                   |
-| `label`      | string         | Human-readable name for the audit.                                                                                                                               |
-| `group`      | string         | Principle group this audit belongs to: `P1` through `P8`. Drives the **principles met** column on the leaderboard.                                               |
-| `layer`      | string         | `behavioral`, `project`, or `source`. Only `behavioral` rows feed the score. See [layers](/methodology#layers-behavioral-project-source).                        |
-| `tier`       | string         | `must`, `should`, or `may`. The requirement's RFC 2119 level, carried per row so the score is computable from the scorecard alone. **Added in 0.6.**             |
-| `status`     | string         | `pass`, `warn`, `fail`, `opt_out`, `n_a`, `skip`, or `error`. Definitions match the [`summary` table](#summary) above. `opt_out` and `n_a` added in 0.6.         |
-| `evidence`   | string \| null | Short explanation when the status is not a clean `pass`. Often names the suppressing audit profile, the unmet antecedent, or the input that triggered the audit. |
-| `confidence` | string         | `high`, `medium`, or `low`. Reflects how directly the audit observed the property: direct flag presence is high; inference from `--help` text is lower.          |
+| Field                | Type           | Meaning                                                                                                                                                          |
+| -------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                 | string         | Stable identifier for the requirement row (e.g., `p3-must-help`). Citeable in commits and PRs.                                                                   |
+| `audit_id`           | string         | Identifier of the audit (probe) that produced this row (e.g., `p3-help`). Several requirement rows can share one `audit_id`. **Added in 0.7.**                   |
+| `label`              | string         | Human-readable name for the audit.                                                                                                                               |
+| `group`              | string         | Principle group this audit belongs to: `P1` through `P8`. Drives the **principles met** column on the leaderboard.                                               |
+| `layer`              | string         | `behavioral`, `project`, or `source`. Only `behavioral` rows feed the score. See [layers](/methodology#layers-behavioral-project-source).                        |
+| `tier`               | string         | `must`, `should`, or `may`. The requirement's RFC 2119 level, carried per row so the score is computable from the scorecard alone. **Added in 0.6.**             |
+| `status`             | string         | `pass`, `warn`, `fail`, `opt_out`, `n_a`, `skip`, or `error`. Definitions match the [`summary` table](#summary) above. `opt_out` and `n_a` added in 0.6.         |
+| `evidence`           | string \| null | Short explanation when the status is not a clean `pass`. Often names the suppressing audit profile, the unmet antecedent, or the input that triggered the audit. |
+| `confidence`         | string         | `high` for a direct probe, `medium` for a heuristic, `low` for a soft signal such as `p6-may-standard-names`. `low` added in 0.8.                                |
+| `using_domain_verbs` | boolean        | `true` when the verdict relied on a `.anc.toml` `[p6] domain_verbs` list that recognized a subcommand. Absent otherwise. **Added in 0.8.**                       |
+| `domain_match_count` | integer        | Subcommands recognized through `domain_verbs` rather than the built-in verb list. Present exactly when `using_domain_verbs` is. **Added in 0.8.**                |
+| `config_hint`        | object         | The `.anc.toml` setting that would clear this row's warning. Absent from every other row. See [`config_hint`](#config_hint). **Added in 0.9.**                   |
 
 ### `status` semantics in detail
 
@@ -275,6 +279,44 @@ independently and carries its own `tier`.
 - `skip`: The probe could not measure the property: a linter limitation, not a tool defect (for example, a JSON-output
   audit that detected `--output` but could not validate the payload through safe probes). `evidence` says why.
 - `error`: Audit tried to run and crashed before producing a verdict. Treated as no-signal, not a defect.
+
+### `config_hint`
+
+An optional object on a row whose warning a `.anc.toml` setting would clear. `anc` attaches it only when no config
+supplied that setting. `p6-may-standard-names` is the one row that carries it: the warning names the subcommand verbs
+outside the built-in list, and the hint lists them ready to add under `[p6] domain_verbs`. **Added in 0.9.**
+
+```json
+"config_hint": {
+  "files": [
+    { "file": ".anc.toml", "scope": "tool-repository" },
+    { "file": "~/.anc.toml", "scope": "user" }
+  ],
+  "domain_verbs": ["lock", "export", "tree"],
+  "docs": "https://github.com/brettdavies/agentnative-cli#configuration-anctoml"
+}
+```
+
+| Field           | Type             | Meaning                                                                                                                                                                   |
+| --------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `files`         | array of objects | Where the setting can go, at least one entry: the repository's `.anc.toml` first, then the user-level file when one is configured.                                        |
+| `files[].file`  | string           | The file, named as evidence names it: `.anc.toml`, `~/.anc.toml`, or `$AGENTNATIVE_HOME_CONFIG` when that variable relocates the user-level file. Never an absolute path. |
+| `files[].scope` | string           | Which audits read the file: `repository`, `tool-repository`, or `user`. Defined below.                                                                                    |
+| `domain_verbs`  | array of strings | The entries to add under `[p6] domain_verbs`: the flagged verbs, lowercased, in `--help` order.                                                                           |
+| `docs`          | string           | URL of the `anc` README section on where `anc` looks for `.anc.toml`.                                                                                                     |
+
+Each `scope` value says which audits read the file:
+
+- `repository`: `.anc.toml` at the root of the repository the audit found, or of the directory passed with `--repo`. The
+  setting travels with the tool's source, and `anc` reads it on every audit of that repository.
+- `tool-repository`: `.anc.toml` at the root of the tool's own repository, which the audit could not find because the
+  target sits outside any repository (an installed binary on `$PATH`, for example). `anc` reads it when run from a
+  checkout, or through `--repo <checkout>`.
+- `user`: the user-level file, `~/.anc.toml` or the file `$AGENTNATIVE_HOME_CONFIG` names. Personal vocabulary that
+  applies to every tool audited on that machine.
+
+The set is closed for schema 0.9, and a later schema version can add a value. The per-tool page does not render
+`config_hint`; the scorecard JSON carries it.
 
 ## What is *not* in the scorecard (yet)
 

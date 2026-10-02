@@ -7,7 +7,7 @@ absent one, and a surface that works while violating a spec detail earns partial
 This page documents every field a web scorecard carries.
 
 The web scorecard is site-owned. Its `schema_version` is **0.5**, independent of the CLI scorecard schema (currently
-0.7) and of the [agentnative spec](/principles) `spec_version`. The CLI scorecard schema is documented separately at
+0.9) and of the [agentnative spec](/principles) `spec_version`. The CLI scorecard schema is documented separately at
 [/scorecard-schema](/scorecard-schema).
 
 ## Top-level fields
