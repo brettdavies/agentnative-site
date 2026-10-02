@@ -1,6 +1,9 @@
 // llms.txt quality trio (format / links / when-to-use). Reads the retained
 // wave-1 `/llms.txt` body so format and when-to-use issue no extra fetch.
-// Link probes are SSRF-guarded and budgeted like scoped-llms.
+// Link probes are SSRF-guarded and budgeted like scoped-llms. An http link,
+// or one that redirects to http, is never requested: llmstxt.org asks for a
+// markdown link per item and never for plaintext, so such a link is present
+// but not usable over https.
 
 import type { WebCheck } from '../registry';
 import { guardedFetch, STATUS_ONLY_BODY_BYTES, validatePublicUrl } from '../ssrf';
@@ -12,6 +15,9 @@ const DEFAULT_MAX_LINKS = 8;
 const WHEN_TO_USE_HEADING = /^#{1,3}\s+.*(when\s+to\s+use|programmatic access|when to (?:connect|call) (?:the )?mcp)/im;
 
 type QualityOp = 'format' | 'links' | 'when-to-use';
+
+/** Which miss decides the links row when several links miss. */
+const MISS_ORDER = ['broken', 'noncompliant', 'absent', 'error'] as const;
 
 function formatWhy(body: string): { ok: boolean; why: string[] } {
   const hasH1 = /^#\s+\S/m.test(body);
@@ -94,11 +100,21 @@ export async function runLlmsTxtQuality(check: WebCheck, ctx: HandlerContext): P
       misses.push('absent');
       continue;
     }
+    if (validation.url.protocol !== 'https:') {
+      evidence.push({ url: href, blocked: 'not https', ok: false, why: ['not https; not requested'] });
+      misses.push('noncompliant');
+      continue;
+    }
     const resp = await guardedFetch(
       href,
       {},
       { ...ctx.fetchOptions, timeoutMs: slice, maxBodyBytes: STATUS_ONLY_BODY_BYTES },
     );
+    if (resp.refused === 'insecure-scheme') {
+      evidence.push({ url: href, status: resp.status, ok: false, why: ['redirects to http; not requested'] });
+      misses.push('noncompliant');
+      continue;
+    }
     if (resp.error !== null || resp.status === null) {
       evidence.push({ url: href, status: resp.status, error: resp.error, ok: false });
       misses.push('error');
@@ -110,7 +126,7 @@ export async function runLlmsTxtQuality(check: WebCheck, ctx: HandlerContext): P
   }
 
   if (misses.length === 0) return { status: 'pass', evidence };
-  const status = misses.includes('broken') ? 'broken' : misses.includes('absent') ? 'absent' : 'error';
+  const status = MISS_ORDER.find((miss) => misses.includes(miss)) ?? 'error';
   const exhausted = evidence.some((row) => Array.isArray(row.why) && row.why.includes('nested-probe budget exhausted'));
   return { status, evidence, ...(exhausted ? { incomplete: true } : {}) };
 }

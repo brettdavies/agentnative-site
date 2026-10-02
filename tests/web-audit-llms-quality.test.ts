@@ -198,6 +198,77 @@ describe('llms.txt quality trio', () => {
     expect(JSON.stringify(outcome.evidence)).toContain('nested-probe budget exhausted');
   });
 
+  describe('links over http', () => {
+    const LINKS_CHECK = CHECKS.find((c) => c.id === 'llms-txt-links') as WebCheck;
+    const linksCtx = (body: string, fetchImpl: typeof fetch): HandlerContext => ({
+      base: 'https://example.com/',
+      host: 'example.com',
+      mcpEndpoint: null,
+      protocolVersion: '2025-06-18',
+      defaultTimeoutMs: 5000,
+      retainedBodies: new Map([['llms-txt', body]]),
+      fetchOptions: { fetchImpl },
+    });
+    const answering = (sent: string[], routes: Record<string, () => Response>) =>
+      stubFetch((url) => {
+        sent.push(url);
+        const route = routes[url];
+        return route ? route() : new Response('ok', { status: 200 });
+      });
+
+    test('an http link is never requested and reads noncompliant', async () => {
+      const sent: string[] = [];
+      const body =
+        '# Site\n\n> Summary\n\n- [Guide](https://example.com/guide.md)\n- [Plain](http://example.com/plain.md)\n';
+      const outcome = await runLlmsTxtQuality(LINKS_CHECK, linksCtx(body, answering(sent, {})));
+      expect(sent).toEqual(['https://example.com/guide.md']);
+      expect(outcome.status).toBe('noncompliant');
+      expect(outcome.evidence).toEqual([
+        { url: 'https://example.com/guide.md', status: 200, ok: true },
+        { url: 'http://example.com/plain.md', blocked: 'not https', ok: false, why: ['not https; not requested'] },
+      ]);
+    });
+
+    test('a link that redirects to http is not followed and reads noncompliant', async () => {
+      const sent: string[] = [];
+      const body = '# Site\n\n> Summary\n\n- [Old](https://example.com/old.md)\n';
+      const fetchImpl = answering(sent, {
+        'https://example.com/old.md': () =>
+          new Response(null, { status: 301, headers: { location: 'http://example.com/old.md' } }),
+      });
+      const outcome = await runLlmsTxtQuality(LINKS_CHECK, linksCtx(body, fetchImpl));
+      expect(sent).toEqual(['https://example.com/old.md']);
+      expect(outcome).toEqual({
+        status: 'noncompliant',
+        evidence: [
+          { url: 'https://example.com/old.md', status: 301, ok: false, why: ['redirects to http; not requested'] },
+        ],
+      });
+    });
+
+    test('misses decide the row in the order broken, noncompliant, absent, error', async () => {
+      const order = ['broken', 'noncompliant', 'absent', 'error'] as const;
+      const links: Record<(typeof order)[number], [string, () => Response]> = {
+        broken: ['https://example.com/broken.md', () => new Response('down', { status: 503 })],
+        noncompliant: ['http://example.com/plain.md', () => new Response('plaintext', { status: 200 })],
+        absent: ['https://example.com/gone.md', () => new Response('gone', { status: 404 })],
+        error: [
+          'https://example.com/flaky.md',
+          () => {
+            throw new TypeError('fetch failed');
+          },
+        ],
+      };
+      for (let i = 0; i < order.length; i++) {
+        const present = order.slice(i).reverse();
+        const body = `# Site\n\n> Summary\n\n${present.map((miss) => `- [${miss}](${links[miss][0]})`).join('\n')}\n`;
+        const routes = Object.fromEntries(present.map((miss) => links[miss]));
+        const outcome = await runLlmsTxtQuality(LINKS_CHECK, linksCtx(body, answering([], routes)));
+        expect({ present, status: outcome.status }).toEqual({ present, status: order[i] });
+      }
+    });
+  });
+
   test('a handler that overruns the audit deadline marks the run incomplete', async () => {
     const fetchImpl = (async () => {
       await new Promise((resolve) => setTimeout(resolve, 40));
