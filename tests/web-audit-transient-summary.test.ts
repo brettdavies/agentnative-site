@@ -44,7 +44,7 @@ const BUDGET: TransientReason = {
   domain: 'stripe.com',
   host: 'stripe.dev',
   savedScoredAt: '2026-09-10T17:00:00.000Z',
-  retryAt: '2026-09-30T15:00:00.000Z',
+  retry: { after: 'hour', at: '2026-09-30T15:00:00.000Z' },
 };
 
 describe('the transient website summary', () => {
@@ -72,6 +72,15 @@ describe('the transient website summary', () => {
     expect(html).not.toContain('data-reaudit');
     expect(html).not.toContain('control above');
     expect(html).not.toContain('result-spine__links');
+  });
+
+  test('a refusal the hour does not decide says to try again in a minute', () => {
+    const html = render({ ...BUDGET, retry: { after: 'minute' } });
+    expect(html).toContain(
+      '<a href="/score/stripe.dev">the saved scorecard from <time datetime="2026-09-10T17:00:00.000Z">2026-09-10</time></a> is unchanged. ' +
+        'Try again in a minute.</span>',
+    );
+    expect(html).not.toContain('Try again after');
   });
 
   test('a saved page keeps its freshness sentence, its links, and its closing note', () => {

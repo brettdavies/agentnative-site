@@ -21,7 +21,7 @@ import {
   WEB_RECORD,
   webRegistryJson,
 } from './helpers/audit-api-env';
-import { budgetKeyPrefix } from './helpers/domain-budget-fakes';
+import { budgetKeyPrefix, memoryRateLimit } from './helpers/domain-budget-fakes';
 import {
   html,
   redirect,
@@ -1059,6 +1059,31 @@ describe("POST /api/score: a run a declared domain's spent hourly budget limited
       expect(body).toMatchObject({ scorecard_url: null, scorecard: { public_listing: true } });
       expect(await storedText(env)).toBe(JSON.stringify(saved));
     });
+  });
+
+  test('a refusal the burst floor or a budget layer error decided says to try again in a minute', async () => {
+    const prefix = await budgetKeyPrefix('example.net');
+    const reasonLine = async (refuse: (env: ReturnType<typeof makeEnv>) => void) => {
+      const env = await declaringEnv({ prior: prior() });
+      refuse(env);
+      const body = await audit(env);
+      expect(env.puts).toEqual([]);
+      return String(body.summary_html);
+    };
+    const burstFloor = await reasonLine((env) => {
+      Object.assign(env, { WEB_AUDIT_DOMAIN_LIMITER: memoryRateLimit(0) });
+    });
+    const layerError = await reasonLine((env) => {
+      const kv = env.SCORE_KV as KVNamespace;
+      const get = kv.get.bind(kv);
+      kv.get = ((key: string) =>
+        key.startsWith(prefix) ? Promise.reject(new Error('KV GET failed')) : get(key)) as KVNamespace['get'];
+    });
+    for (const line of [burstFloor, layerError]) {
+      expect(line).toContain("Not saved: example.net reached anc's hourly probe limit;");
+      expect(line).toContain('is unchanged. Try again in a minute.');
+      expect(line).not.toContain('Try again after');
+    }
   });
 
   test('a run whose declared host the follow slice ran out of time for saves as any audit', async () => {

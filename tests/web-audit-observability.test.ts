@@ -55,7 +55,7 @@ const COMPLETE_EVENT: AuditEvent = {
   type: 'complete',
   scorecard: { score_pct: 50 } as WebScorecard,
   complete: true,
-  follow: { requests: 0, domainRequests: {}, elapsedMs: 0, budgetErrors: {} },
+  follow: { requests: 0, domainRequests: {}, elapsedMs: 0, budgetErrors: {}, budgetRefusals: {} },
 };
 
 describe('instrumentAuditEvents', () => {

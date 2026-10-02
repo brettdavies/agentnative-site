@@ -65,11 +65,11 @@ export function declaredDomainBudget(env: DomainBudgetEnv, options: { hourlyCeil
       const hash = await sha256Hex(domain);
       const burstAdmits = burst ? await attempt(async () => (await burst.limit({ key: hash })).success) : true;
       if (burstAdmits === FAILED) return { admitted: false, layerError: 'burst-refused' };
-      if (!burstAdmits) return { admitted: false };
+      if (!burstAdmits) return { admitted: false, refusedBy: 'burst-floor' };
       if (!kv) return { admitted: true };
       const take = await attempt(() => readDeclaredDomainWindow(kv, hash, options.hourlyCeiling));
       if (take === FAILED) return { admitted: false, layerError: 'read-refused' };
-      if (take === null) return { admitted: false };
+      if (take === null) return { admitted: false, refusedBy: 'hourly-window' };
       if ((await attempt(take)) === FAILED) return { admitted: true, layerError: 'put-admitted' };
       return { admitted: true };
     },

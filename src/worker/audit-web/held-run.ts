@@ -5,6 +5,7 @@
 
 import { type CachedWebAudit, patchStoredPublicListing, type WebCacheEnv } from './cache';
 import { domainBudgetHold } from './domain-budget-hold';
+import type { DomainRefusal } from './follow-requests';
 import { queueHitMinPurge, webTag } from './hit-min-purge';
 import { hourWindowEndsAt } from './limiter';
 import { standingPublicListing } from './public-listing';
@@ -32,12 +33,17 @@ async function applyListing(env: WebCacheEnv, saved: CachedWebAudit | null, list
   return listing;
 }
 
-/** The hold on a complete followed run of `target`, or null when the run saves as any audit. */
+/**
+ * The hold on a complete followed run of `target`, or null when the run
+ * saves as any audit. `refusals` names what refused each domain the run's
+ * follow slice could not reserve, which says when trying again can help.
+ */
 export async function heldRun(
   env: WebCacheEnv,
   target: { host: string; canonical: string },
   scorecard: WebScorecard,
   listing: boolean,
+  refusals: Readonly<Record<string, DomainRefusal>>,
 ): Promise<HeldRun | null> {
   const hold = await domainBudgetHold(env, target.canonical, scorecard);
   if (hold === null) return null;
@@ -47,7 +53,10 @@ export async function heldRun(
       domain: hold.domain,
       host: target.host,
       savedScoredAt: hold.saved?.scored_at ?? null,
-      retryAt: hourWindowEndsAt(Date.now()),
+      retry:
+        refusals[hold.domain] === 'hourly-window'
+          ? { after: 'hour', at: hourWindowEndsAt(Date.now()) }
+          : { after: 'minute' },
     },
     listing: await applyListing(env, hold.saved, listing),
   };

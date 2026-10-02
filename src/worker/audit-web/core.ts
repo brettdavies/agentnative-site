@@ -37,6 +37,7 @@ import {
 import { enrichWebScorecardForDisplay } from './display';
 import { type DomainBudgetEnv, declaredDomainBudget } from './domain-budget';
 import { runWebAudit } from './engine';
+import type { DomainRefusal } from './follow-requests';
 import { effectiveFollow, type FollowSwitchEnv } from './follow-switch';
 import { heldRun } from './held-run';
 import { queueHitMinPurge, webDomainTag, webTag } from './hit-min-purge';
@@ -265,6 +266,7 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
   const { env, target } = input;
   let scorecard: WebScorecard | null = null;
   let complete = false;
+  let refusals: Readonly<Record<string, DomainRefusal>> = {};
   const followDeclarations = effectiveFollow(env, input.followDeclarations);
   try {
     const registry = await loadWebAuditRegistry(env);
@@ -295,6 +297,7 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
       } else if (event.type === 'complete') {
         scorecard = event.scorecard;
         complete = event.complete;
+        refusals = event.follow.budgetRefusals;
       }
     }
     // One scoring instant per run, spent on both persistence and the
@@ -303,7 +306,7 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
     const scoredAt = complete && scorecard ? new Date().toISOString() : null;
     if (scorecard && scoredAt) {
       const stamped = await withRegistryFingerprint(scorecard, registry);
-      const held = input.followDeclarations ? await heldRun(env, target, stamped, input.listing) : null;
+      const held = input.followDeclarations ? await heldRun(env, target, stamped, input.listing, refusals) : null;
       const transient: TransientReason | undefined = input.followDeclarations ? held?.reason : { kind: 'opt-out' };
       if (!transient) {
         const wrote = await cachePut(env, target.canonical, stamped, SPEC_VERSION, scoredAt);

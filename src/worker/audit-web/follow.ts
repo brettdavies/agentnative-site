@@ -47,6 +47,7 @@ import {
   type BudgetLayerError,
   budgetExceeded,
   type DomainBudget,
+  type DomainRefusal,
   type Fetched,
   type ReadOptions,
   readDeclaredDocuments,
@@ -98,6 +99,11 @@ export interface FollowStats {
   elapsedMs: number;
   /** Reservations a budget layer error decided rather than the budget, per error. */
   budgetErrors: Readonly<Partial<Record<BudgetLayerError, number>>>;
+  /**
+   * Per domain budget key the budget refused, what refused it. Keyed by the
+   * domain in the clear, so it stays off the run record.
+   */
+  budgetRefusals: Readonly<Record<string, DomainRefusal>>;
 }
 
 export interface FollowResult {
@@ -283,6 +289,7 @@ export function openFollow(input: FollowInput): FollowSession {
         domainRequests: requests.countByDomain(),
         elapsedMs,
         budgetErrors: requests.budgetErrors(),
+        budgetRefusals: requests.budgetRefusals(),
       },
     }),
   };
