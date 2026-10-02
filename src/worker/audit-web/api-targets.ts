@@ -26,8 +26,8 @@ export type ApiDescriptionTarget = { url: string } & (
 /** One API anchor host, where the hygiene probes go. */
 export interface ApiHostTarget {
   origin: string;
-  /** The declared descriptions of the anchors on this host, in declaration order. */
-  descriptions: string[];
+  /** The anchors on this host and the description each declares, in declaration order. */
+  anchors: Array<{ url: string; description: string }>;
   /** The host is off the audited origin, so a probe of it takes no redirect to another origin. */
   declared: boolean;
   /** Why the host was not evaluated. */
@@ -79,7 +79,7 @@ export function apiTargets(
   };
 
   const descriptions = new Map<string, ApiDescriptionTarget>();
-  const origins = new Map<string, { declared: boolean; reaches: Reach[]; descriptions: string[] }>();
+  const origins = new Map<string, { declared: boolean; reaches: Reach[]; anchors: ApiHostTarget['anchors'] }>();
   for (const anchor of api) {
     const declared = anchor.description.url;
     const key = declarationKey({ kind: 'api-description', url: declared });
@@ -89,14 +89,14 @@ export function apiTargets(
     }
     const origin = originOf(anchor.url);
     if (origin === null) continue;
-    const group = origins.get(origin) ?? { declared: !sameOrigin(anchor.url, base), reaches: [], descriptions: [] };
+    const group = origins.get(origin) ?? { declared: !sameOrigin(anchor.url, base), reaches: [], anchors: [] };
     group.reaches.push(reach('api-anchor', anchor.url));
-    group.descriptions.push(descriptions.get(key)?.url ?? declared);
+    group.anchors.push({ url: anchor.url, description: declared });
     origins.set(origin, group);
   }
 
   const hosts = [...origins].flatMap(([origin, group]): ApiHostTarget[] => {
-    const target = { origin, descriptions: group.descriptions, declared: group.declared };
+    const target = { origin, anchors: group.anchors, declared: group.declared };
     if (group.reaches.some((r) => r === 'evaluate' || r === 'audited-origin')) return [target];
     const unmet = group.reaches.find((r): r is DeclaredHostReason => typeof r === 'object');
     return unmet === undefined ? [] : [{ ...target, unmet }];

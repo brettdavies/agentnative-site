@@ -440,6 +440,20 @@ describe('API category on api-catalog anchors', () => {
     ]);
   });
 
+  test('an API mounted under /v2 is probed under /v2, at the path its description documents', async () => {
+    const seen: Seen[] = [];
+    const mounted = `https://${API}/v2/v1/items/anc-web-audit-no-such`;
+    const { scorecard } = await auditApi(
+      site(() => linkset(anchor(`https://${API}/v2/`, 'https://specs.example.org/openapi.json')), {
+        'GET https://specs.example.org/openapi.json': () => json(OPENAPI),
+        [`GET ${mounted}`]: () => json({ error: 'not_found' }, 404),
+      }),
+      seen,
+    );
+    expect(hygieneProbes(seen)).toEqual([mounted]);
+    expect(row(scorecard, 'json-errors')).toMatchObject({ status: 'pass', host: API });
+  });
+
   test('a hygiene probe of an off-origin anchor host takes no redirect to another origin', async () => {
     const seen: Seen[] = [];
     const { scorecard } = await auditApi(
