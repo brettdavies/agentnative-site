@@ -37,7 +37,7 @@ export function transientReasonHtml(reason: TransientReason): string {
       ? `the saved scorecard from ${timeEl(reason.savedScoredAt, date)}`
       : 'the saved scorecard';
   return (
-    `Not saved: ${escHtml(reason.domain)} reached anc's hourly probe limit; ` +
+    `Not saved: ${escHtml(reason.domain)} reached anc's ${reason.retry.after === 'hour' ? 'hourly ' : ''}probe limit; ` +
     `<a href="${escHtml(scorePath(reason.host))}">${saved}</a> is unchanged.${retrySentence(reason.retry)}`
   );
 }

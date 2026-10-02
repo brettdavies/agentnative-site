@@ -80,6 +80,8 @@ describe('the transient website summary', () => {
       '<a href="/score/stripe.dev">the saved scorecard from <time datetime="2026-09-10T17:00:00.000Z">2026-09-10</time></a> is unchanged. ' +
         'Try again in a minute.</span>',
     );
+    expect(html).toContain("Not saved: stripe.com reached anc's probe limit; ");
+    expect(html).not.toContain('hourly');
     expect(html).not.toContain('Try again after');
   });
 
