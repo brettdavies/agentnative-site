@@ -27,7 +27,7 @@ const FLIP_CEILING = 5;
 // ceiling, so one caller's full hour of audits of a site fits, while a
 // hostile site declaring a third party cannot turn many callers into many
 // more than this many audits' worth of requests to it.
-const DECLARED_DOMAIN_HOURLY_CEILING = 30;
+export const DECLARED_DOMAIN_HOURLY_CEILING = 30;
 
 /** KV key prefix of the declared-domain budget: `<prefix>:<sha256(domain)>:<hour bucket>`. */
 export const DECLARED_DOMAIN_BUDGET_PREFIX = 'web_audit_follow';

@@ -1784,6 +1784,7 @@ describe('audit_website discloses third-party probing', () => {
       'at most 4 off-origin hosts with at most 12 follow-phase document requests inside a 6-second follow window',
     );
     expect(description).toContain("following lengthens an audit's wall time");
+    expect(description).toContain('capped at about 30 audits per hour per declared registrable domain');
     expect(description).toContain('WEB_AUDIT_FOLLOW_ENABLED');
     expect(tool?.inputSchema.properties.follow_declarations?.type).toBe('boolean');
   });
