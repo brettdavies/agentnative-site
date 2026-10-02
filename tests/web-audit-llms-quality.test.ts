@@ -1,6 +1,7 @@
 // Engine coverage for the llms.txt quality trio: format, links, when-to-use.
 
 import { describe, expect, test } from 'bun:test';
+import { resultLine } from '../src/shared/web-audit-result-line';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
 import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
 import { runLlmsTxtQuality } from '../src/worker/audit-web/handlers/llms-txt-quality';
@@ -229,7 +230,7 @@ describe('llms.txt quality trio', () => {
           url: 'http://example.com/plain.md',
           blocked: 'not https',
           ok: false,
-          why: ['not https; not requested'],
+          why: ['not https; anc sends no plaintext request'],
           link_verdict: 'noncompliant',
         },
       ]);
@@ -251,15 +252,15 @@ describe('llms.txt quality trio', () => {
             url: 'https://example.com/old.md',
             status: 301,
             ok: false,
-            why: ['redirects to http; not requested'],
+            why: ['redirects to http; anc sends no plaintext request'],
             link_verdict: 'noncompliant',
           },
         ],
       });
     });
 
-    test('misses decide the row in the order broken, noncompliant, absent, error', async () => {
-      const order = ['broken', 'noncompliant', 'absent', 'error'] as const;
+    test('misses decide the row in the order broken, absent, noncompliant, error', async () => {
+      const order = ['broken', 'absent', 'noncompliant', 'error'] as const;
       const links: Record<(typeof order)[number], [string, () => Response]> = {
         broken: ['https://example.com/broken.md', () => new Response('down', { status: 503 })],
         noncompliant: ['http://example.com/plain.md', () => new Response('plaintext', { status: 200 })],
@@ -278,6 +279,16 @@ describe('llms.txt quality trio', () => {
         const outcome = await runLlmsTxtQuality(LINKS_CHECK, linksCtx(body, answering([], routes)));
         expect({ present, status: outcome.status }).toEqual({ present, status: order[i] });
       }
+    });
+
+    test('a dead link beside an http link reads absent: listing an http link never lifts the row', async () => {
+      const sent: string[] = [];
+      const body =
+        '# Site\n\n> Summary\n\n- [Gone](https://example.com/gone.md)\n- [Plain](http://example.com/plain.md)\n';
+      const fetchImpl = answering(sent, { 'https://example.com/gone.md': () => new Response('gone', { status: 404 }) });
+      const outcome = await runLlmsTxtQuality(LINKS_CHECK, linksCtx(body, fetchImpl));
+      expect(sent).toEqual(['https://example.com/gone.md']);
+      expect(outcome.status).toBe('absent');
     });
   });
 
@@ -313,21 +324,27 @@ describe('llms.txt quality trio', () => {
         }),
       );
       const row = resultsOf(events).find((r) => r.id === 'llms-txt-links');
-      return { status: row?.status, evidence: row?.evidence, plaintext: sent.filter((u) => u.startsWith('http:')) };
+      if (row === undefined) throw new Error('no llms-txt-links row');
+      return {
+        status: row.status,
+        result: resultLine(row.status, row.evidence ?? null, row.na_reason, 'example.com'),
+        plaintext: sent.filter((u) => u.startsWith('http:')),
+      };
     };
     expect(await linksRow(llms)).toEqual({
       status: 'broken',
-      evidence: 'https://example.com/down.md -> 503',
+      result: 'Present but broken (https://example.com/down.md -> 503)',
       plaintext: [],
     });
     expect(await linksRow(llms.filter((line) => !line.includes('down.md')))).toEqual({
       status: 'noncompliant',
-      evidence: 'https://example.com/old.md -> 301 (redirects to http; not requested)',
+      result:
+        'Listed, but not over https (https://example.com/old.md -> 301 (redirects to http; anc sends no plaintext request))',
       plaintext: [],
     });
     expect(await linksRow(llms.filter((line) => !line.includes('down.md') && !line.includes('old.md')))).toEqual({
       status: 'noncompliant',
-      evidence: 'http://example.com/plain.md: not https; not requested',
+      result: 'Listed, but not over https (http://example.com/plain.md: not https; anc sends no plaintext request)',
       plaintext: [],
     });
   });

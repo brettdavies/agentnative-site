@@ -5,6 +5,7 @@
 // markdown link per item and never for plaintext, so such a link is present
 // but not usable over https.
 
+import { NO_PLAINTEXT_REQUEST } from '../../../shared/web-audit-result-line';
 import type { WebCheck } from '../registry';
 import { guardedFetch, STATUS_ONLY_BODY_BYTES, validatePublicUrl } from '../ssrf';
 import { remainingDeadlineMs, timeoutMsFor } from './shared';
@@ -16,8 +17,12 @@ const WHEN_TO_USE_HEADING = /^#{1,3}\s+.*(when\s+to\s+use|programmatic access|wh
 
 type QualityOp = 'format' | 'links' | 'when-to-use';
 
-/** Which miss decides the links row when several links miss. */
-const MISS_ORDER = ['broken', 'noncompliant', 'absent', 'error'] as const;
+/**
+ * Which miss decides the links row when several links miss. A dead link
+ * outranks an http one because noncompliant earns credit and absent does
+ * not: listing an http link must never lift a row a dead link decides.
+ */
+const MISS_ORDER = ['broken', 'absent', 'noncompliant', 'error'] as const;
 
 function formatWhy(body: string): { ok: boolean; why: string[] } {
   const hasH1 = /^#\s+\S/m.test(body);
@@ -61,14 +66,14 @@ async function probeLink(
   if (validation.url.protocol !== 'https:') {
     return {
       verdict: 'noncompliant',
-      item: { url: href, blocked: 'not https', ok: false, why: ['not https; not requested'] },
+      item: { url: href, blocked: 'not https', ok: false, why: [`not https; ${NO_PLAINTEXT_REQUEST}`] },
     };
   }
   const resp = await guardedFetch(href, {}, { ...ctx.fetchOptions, timeoutMs, maxBodyBytes: STATUS_ONLY_BODY_BYTES });
   if (resp.refused === 'insecure-scheme') {
     return {
       verdict: 'noncompliant',
-      item: { url: href, status: resp.status, ok: false, why: ['redirects to http; not requested'] },
+      item: { url: href, status: resp.status, ok: false, why: [`redirects to http; ${NO_PLAINTEXT_REQUEST}`] },
     };
   }
   if (resp.error !== null || resp.status === null) {

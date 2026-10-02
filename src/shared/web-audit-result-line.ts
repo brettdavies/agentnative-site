@@ -6,6 +6,13 @@
 
 import { FINDING_STATUSES, type FindingStatus, NA_REASONS, type NaReason, naReasonPhrase } from './web-audit-findings';
 
+/**
+ * Why a URL went unrequested because reaching it takes plaintext. A row's
+ * evidence carries it verbatim, so the result line can tell a link anc
+ * never tried from one it tried and found wanting.
+ */
+export const NO_PLAINTEXT_REQUEST = 'anc sends no plaintext request';
+
 /** One host a row's evidence was requested from, with that host's own outcome on a row over several hosts. */
 export type HostOutcome = { host: string; status?: string; na_reason?: string };
 
@@ -54,16 +61,16 @@ export function resultLine(
 ): string {
   const detail = evidence && evidence.length > 0 ? ` (${evidence})` : '';
   const perHost = hostOutcomesText(hosts);
-  const line = `${leadOf(status, naReason, host)}${detail}`;
+  const line = `${leadOf(status, evidence, naReason, host)}${detail}`;
   return perHost === null ? line : `${line}; ${perHost}`;
 }
 
-function leadOf(status: FindingStatus, naReason: string | undefined, host: string): string {
+function leadOf(status: FindingStatus, evidence: string | null, naReason: string | undefined, host: string): string {
   switch (status) {
     case 'pass':
       return 'Verified';
     case 'noncompliant':
-      return 'Works but does not conform';
+      return evidence?.includes(NO_PLAINTEXT_REQUEST) ? 'Listed, but not over https' : 'Works but does not conform';
     case 'broken':
       return 'Present but broken';
     case 'absent':

@@ -649,7 +649,7 @@
       "tier": "recommended",
       "principle": "P2",
       "status": "noncompliant",
-      "evidence": "http://example.com/docs/plain.md: not https; not requested",
+      "evidence": "http://example.com/docs/plain.md: not https; anc sends no plaintext request",
       "hosts": [
         {
           "host": "example.com"
