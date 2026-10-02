@@ -13,18 +13,18 @@
 // cf-connecting-ip presence (no anon fallback -> -32099), a per-IP burst
 // limiter (WEB_AUDIT_LIMITER_IP) + a KV-backed hourly window shared with
 // the webapp route. Cache state is data, not failure: read outcomes
-// return isError:false.
+// return isError:false. A fresh run is hosted under the site's AuditJob
+// (web-audit-host.ts), the single-flight gate the transact endpoint uses.
 
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
+import type { TerminalEvent } from '../../../shared/audit-events';
 import { leaderboardPath, scorePath } from '../../../shared/audit-routes';
 import { awaitInFlightTerminal, type InFlightEnv, readInFlight } from '../../audit/inflight';
-import { rebuildAggregatesIfSeeded } from '../../audit-web/aggregate';
-import { type AuditLogEnv, instrumentAuditEvents, logAuditError } from '../../audit-web/audit-log';
+import type { AuditLogEnv } from '../../audit-web/audit-log';
 import {
   type CachedWebAudit,
   get as cacheGet,
-  put as cachePut,
   canonicalTargetOf,
   coerceUrl,
   getAggregate,
@@ -38,23 +38,22 @@ import {
   WEB_AUDIT_STALE_AFTER_MS,
 } from '../../audit-web/cache';
 import { webEnvelope } from '../../audit-web/core';
-import { runWebAudit } from '../../audit-web/engine';
-import { effectiveFollow, type FollowSwitchEnv } from '../../audit-web/follow-switch';
-import { queueHitMinPurge, webDomainTag, webTag } from '../../audit-web/hit-min-purge';
+import type { FollowSwitchEnv } from '../../audit-web/follow-switch';
+import { queueHitMinPurge, webTag } from '../../audit-web/hit-min-purge';
 import { consumeWebAuditHourlyBudget } from '../../audit-web/limiter';
 import {
   decidePublicListingWrite,
   enforcePublicListingFlipLimit,
   resolveAuditListing,
 } from '../../audit-web/public-listing';
-import { loadWebAuditRegistry } from '../../audit-web/registry';
 import { boardExcludeDomains } from '../../audit-web/seed';
 import { validatePublicUrl } from '../../audit-web/ssrf';
-import { type NotifyEnv, notifyFailure } from '../../notify';
+import type { NotifyEnv } from '../../notify';
 import { SPEC_VERSION } from '../../spec-version.gen';
 import { getMcpRequest } from '../request-context';
 import { requestHeader } from '../request-header';
 import { siteOrigin } from '../site-origin';
+import { hostWebAudit } from './web-audit-host';
 
 export interface WebAuditToolsEnv extends AuditLogEnv, NotifyEnv, InFlightEnv, FollowSwitchEnv {
   ASSETS: Fetcher;
@@ -86,6 +85,37 @@ function jsonRpcError32099(message: string) {
 
 function isError(message: string) {
   return { content: [{ type: 'text' as const, text: message }], isError: true };
+}
+
+/** The answer to a call that attached to another caller's run of the same site. */
+function attachedResult(terminal: TerminalEvent | null, signal: AbortSignal | undefined) {
+  if (terminal?.type === 'complete') {
+    const { type: _tag, ...envelope } = terminal;
+    return textContent({ audited: true, source: 'fresh-audit', attached: true, ...envelope });
+  }
+  if (terminal) {
+    const reason = terminal.type === 'incomplete' ? 'incomplete' : terminal.error.code;
+    return isError(`the audit this call attached to did not finish (${reason}); nothing was cached. Retry.`);
+  }
+  // A null answer after the caller aborted means the wait ended, not that
+  // nothing is running; dispatching now would audit for nobody.
+  if (signal?.aborted) {
+    return jsonRpcError32099('the caller went away while attaching to the audit already in flight.');
+  }
+  return isError('the audit already in flight for this site did not answer; nothing was cached. Retry.');
+}
+
+/** The answer to a call whose own run produced `terminal`. */
+function freshResult(terminal: TerminalEvent | null) {
+  if (terminal?.type === 'complete') {
+    const { type: _tag, ...envelope } = terminal;
+    return textContent({ audited: true, source: 'fresh-audit', ...envelope });
+  }
+  if (terminal?.type === 'incomplete') {
+    return isError('the audit did not finish within the deadline; nothing was cached. Retry.');
+  }
+  if (terminal) return isError(`${terminal.error.message} Nothing was cached. ${terminal.error.cta}`);
+  return isError('the audit ended without a result; nothing was cached. Retry.');
 }
 
 /**
@@ -254,22 +284,11 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       // open for the rest of that run, so it passes the source gates above
       // first. An explicit listing choice is its own request: attaching would
       // answer it with a run that never writes the caller's opt-in.
+      const signal = getMcpRequest()?.signal;
       if (public_listing === undefined) {
-        const signal = getMcpRequest()?.signal;
         const attached = await awaitInFlightTerminal(env, 'web', domain, signal);
-        if (attached?.type === 'complete') {
-          const { type: _tag, ...envelope } = attached;
-          return textContent({ audited: true, source: 'fresh-audit', attached: true, ...envelope });
-        }
-        if (attached) {
-          const reason = attached.type === 'incomplete' ? 'incomplete' : attached.error.code;
-          return isError(`the audit this call attached to did not finish (${reason}); nothing was cached. Retry.`);
-        }
-        // A null answer after the caller aborted means the wait ended, not
-        // that nothing is running; dispatching now would audit for nobody.
-        if (signal?.aborted) {
-          return jsonRpcError32099('the caller went away while attaching to the audit already in flight.');
-        }
+        // A null answer means nothing answered in flight; the audit runs below.
+        if (attached || signal?.aborted) return attachedResult(attached, signal);
       }
 
       // Hourly window (shared with the webapp route).
@@ -309,61 +328,18 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         });
       }
 
-      // Miss or stale hit — a (re-)audit.
-      const auditListing = resolveAuditListing(listingWrite, public_listing, cached);
-
-      // Run the engine to completion (terminal-only; no streaming on MCP).
-      const registry = await loadWebAuditRegistry(env);
-      const followDeclarations = effectiveFollow(env, true);
-      let scorecard: unknown = null;
-      let complete = false;
-      try {
-        for await (const event of instrumentAuditEvents(
-          runWebAudit({
-            url: canonicalTarget,
-            registry,
-            siteType: site_type ?? null,
-            publicListing: auditListing,
-            specVersion: SPEC_VERSION,
-            followDeclarations,
-          }),
-          env,
-          { target: canonicalTarget, surface: 'mcp', followDeclarations },
-        )) {
-          if (event.type === 'complete') {
-            scorecard = event.scorecard;
-            complete = event.complete;
-          } else if (event.type === 'unreachable') {
-            return isError(`target unreachable; nothing was cached. ${event.reason}`);
-          }
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        logAuditError(canonicalTarget, 'mcp', err);
-        await notifyFailure(env, {
-          key: 'web-audit-mcp',
-          subject: 'audit_website tool failed',
-          text: `The audit_website engine threw for ${canonicalTarget}: ${message}`,
-        });
-        return isError(`the audit failed: ${message}. Nothing was cached. Retry.`);
-      }
-      if (!complete || !scorecard) {
-        return isError('the audit did not finish within the deadline; nothing was cached. Retry.');
-      }
-      // One scoring instant, spent on both persistence and this response, so a
-      // later cache read reports the same clock for the same audit. The
-      // envelope reports `cached: false` on the strength of having produced
-      // the result, not on the write landing.
-      const scoredAt = new Date().toISOString();
-      const wrote = await cachePut(env, canonicalTarget, scorecard, SPEC_VERSION, scoredAt);
-      if (wrote) queueHitMinPurge([webTag(), webDomainTag(domain)]);
-      await rebuildAggregatesIfSeeded(env, domain, SPEC_VERSION);
-      const record = { spec_version: SPEC_VERSION, target_url: canonicalTarget, scorecard, scored_at: scoredAt };
-      return textContent({
-        audited: true,
-        source: 'fresh-audit',
-        ...(await webEnvelope(env, { tier: 'live', host: domain, record, origin: siteUrl })),
+      // Miss or stale hit — a (re-)audit, hosted under the site's job so a
+      // caller that arrives mid-run attaches to it.
+      const run = await hostWebAudit(env, {
+        target: { host: domain, canonical: canonicalTarget },
+        siteType: site_type ?? null,
+        listing: resolveAuditListing(listingWrite, public_listing, cached),
+        followDeclarations: true,
+        origin: siteUrl,
+        attach: public_listing === undefined,
+        signal,
       });
+      return run.attached ? attachedResult(run.terminal, signal) : freshResult(run.terminal);
     },
   );
 

@@ -165,6 +165,7 @@ async function makeEnv(opts: WebEnvOpts = {}): Promise<McpEnv> {
         return opts.kvSeed?.[key] ?? null;
       },
       async put() {},
+      async delete() {},
     } as unknown as KVNamespace,
     AUDIT_JOB: opts.jobs,
     WEB_AUDIT_ENABLED: (opts.webEnabled ?? true) ? 'true' : undefined,

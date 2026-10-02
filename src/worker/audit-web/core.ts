@@ -271,9 +271,9 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
     logAuditError(target.canonical, input.surface, err);
     yield { type: 'error', error: { code: 'unreachable', message, cta: CTA_RETRY } };
     await notifyFailure(env, {
-      key: 'web-audit-stream',
-      subject: 'web-audit stream task failed',
-      text: `The streaming audit task threw for ${target.canonical}: ${message}`,
+      key: `web-audit-${input.surface}`,
+      subject: `web-audit ${input.surface} task failed`,
+      text: `The ${input.surface} audit task threw for ${target.canonical}: ${message}`,
     });
   }
 }
