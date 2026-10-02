@@ -339,8 +339,11 @@ Two rules shape how MCP results score:
   the only method a legacy server cannot answer: a refusal saying the method is not served here reads `absent` on that
   check and on every other applicable modern check, which scores as an absence without a request of its own
   (`unprobed`), while a malformed result or a server error stays `broken`.
-  A `-32000` refusal counts as that signal only at a status able to carry one; delivered with a 5xx or a rate-limit
-  status it reports load rather than an era, and stays `broken`. On the legacy lane, an era-shaped refusal (a
+  A `-32000` refusal counts as that signal only at a status able to carry one; delivered with a 5xx it reports load
+  rather than an era, and stays `broken`. A target asking to be retried reports load too: an HTTP `408` or `429` answer
+  to any MCP check reads `error`, like a JSON-RPC `-32099` rate-limit refusal, whatever body it carries. On
+  `server/discover` it leaves the modern lane undecided, so the other modern checks probe on their own answers rather
+  than read `absent`. On the legacy lane, an era-shaped refusal (a
   well-formed `-32601` or `-32022`) reads `absent` on the checks that name a method the lane could be missing, unless
   the lane's own handshake advertised the capability it is refusing, which contradicts the handshake and stays `broken`.
   The error-code conformance checks ask about a request the lane has already proven it accepts, so no era softening
