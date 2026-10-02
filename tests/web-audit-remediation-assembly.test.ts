@@ -210,6 +210,16 @@ describe('resultLine', () => {
     expect(resultLine('pass', null, undefined, 'a', [{ host: 'a' }, { host: 'b' }])).toBe('Verified');
   });
 
+  test('a row over several hosts drops the per-host list when any outcome is missing or unknown, rather than guessing', () => {
+    const partial = [{ host: 'a', status: 'pass' }, { host: 'b' }];
+    const unknown = [
+      { host: 'a', status: 'pass' },
+      { host: 'b', status: 'stale' },
+    ];
+    expect(resultLine('broken', '404', undefined, 'a', partial)).toBe('Present but broken (404)');
+    expect(resultLine('broken', '404', undefined, 'a', unknown)).toBe('Present but broken (404)');
+  });
+
   test('skip and error read as not-evaluated', () => {
     expect(resultLine('skip', null, undefined, 'x.dev')).toContain('Not evaluated');
     expect(resultLine('error', null, undefined, 'x.dev')).toBe('Not evaluated');

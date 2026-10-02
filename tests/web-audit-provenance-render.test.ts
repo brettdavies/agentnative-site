@@ -7,6 +7,7 @@
 import { describe, expect, test } from 'bun:test';
 import { findingRowsFromElements } from '../src/client/assemble-prompt';
 import { getWorksheet } from '../src/client/webmcp-result';
+import { enrichWebScorecardForDisplay } from '../src/worker/audit-web/display';
 import { buildWebSummaryMarkdown } from '../src/worker/audit-web/summary-markdown';
 import { buildWebSummaryBody } from '../src/worker/audit-web/summary-render';
 import type { TransientReason } from '../src/worker/audit-web/summary-transient';
@@ -346,6 +347,44 @@ describe('trail entries', () => {
     ]);
   });
 
+  test('an anchor with no service description and an entry following skipped read their own not-followed labels', async () => {
+    const sc = scorecardOf(SITE, [row('llms-txt', 'pass', at(SITE))], {
+      follow_declarations: true,
+      declared_hosts: [
+        {
+          kind: 'api-anchor',
+          surface: '/.well-known/api-catalog#/linkset/1',
+          url: 'https://status.example.net/',
+          host: 'status.example.net',
+          outcome: 'not-followed',
+          reason: 'no-service-desc',
+        },
+        entry({
+          surface: '/.well-known/mcp.json',
+          url: 'https://off.example.net/mcp',
+          host: 'off.example.net',
+          outcome: 'not-followed',
+          reason: 'follow-disabled',
+        }),
+      ],
+    });
+    const doc = await parseHtml(page(sc));
+    expect(
+      [...doc.querySelectorAll('.declared-hosts__entry')].map((li) => [
+        li.querySelector('.declared-hosts__host')?.textContent,
+        li.querySelector('.declared-hosts__outcome')?.textContent,
+      ]),
+    ).toEqual([
+      ['status.example.net', 'not followed: no service description'],
+      ['off.example.net', 'not followed: following off for this audit'],
+    ]);
+    const md = sectionMd(twin(sc), '## Declared hosts');
+    expect(md).toContain('- api-catalog anchor: `status.example.net`, not followed: no service description\n');
+    expect(md).toContain(
+      '`off.example.net` (`https://off.example.net/mcp`), not followed: following off for this audit\n',
+    );
+  });
+
   test('an entry the endpoint host did not confirm names the three URLs anc checked, once, and none reach a prompt', () => {
     const html = page(scorecard());
     const guidance = [...html.matchAll(/<p class="declared-hosts__guidance">(.*?)<\/p>/g)].map((m) => textOf(m[1]));
@@ -581,6 +620,38 @@ describe('rows the audit could not run', () => {
     expect(twin(sc, { lanes: false })).not.toContain('checks not run');
   });
 
+  test('rows sharing a reason at two hosts group per host: three at one host collapse, two at the other stay rows', () => {
+    const signIn = (id: string, host: string) => row(id, 'n_a', { na_reason: 'auth-required', ...at(host) });
+    const sc = scorecardOf('example.com', [
+      signIn('mcp-initialize', 'mcp.example.net'),
+      signIn('mcp-capabilities', 'mcp.example.org'),
+      signIn('mcp-tools-list', 'mcp.example.net'),
+      signIn('mcp-resources-list', 'mcp.example.org'),
+      signIn('mcp-unknown-method', 'mcp.example.net'),
+      row('mcp-get-fast-fail', 'pass', at('mcp.example.net')),
+    ]);
+    const mcp = categoryHtml(page(sc, { lanes: false }), 'mcp');
+    const groups = [
+      ...mcp.matchAll(/<details class="web-check web-check--n_a web-check--group">\s*<summary aria-label="([^"]+)">/g),
+    ];
+    expect(groups.map((m) => m[1])).toEqual(['3 checks not run, mcp.example.net requires sign-in']);
+    const nested = mcp.slice(
+      mcp.indexOf('<div class="web-check__group">'),
+      mcp.indexOf('</div>', mcp.indexOf('<div class="web-check__group">')),
+    );
+    expect([...nested.matchAll(/data-id="([^"]+)"/g)].map((m) => m[1])).toEqual([
+      'mcp-initialize',
+      'mcp-tools-list',
+      'mcp-unknown-method',
+    ]);
+    expect(
+      mcp.match(/<p class="web-check__note">anc&#39;s public audit holds no sign-in for mcp\.example\.org/g),
+    ).toHaveLength(2);
+    const md = twin(sc, { lanes: false });
+    expect(md).toContain('\n3 checks not run: mcp.example.net requires sign-in. ');
+    expect(md).not.toContain('checks not run: mcp.example.org');
+  });
+
   test('a group opens with why the public audit could not run its rows and the command that can', () => {
     const html = page(stripeShaped());
     const group = html.slice(html.indexOf('web-check--group'), html.indexOf('<div class="web-check__group">'));
@@ -634,5 +705,51 @@ describe('rows the audit could not run', () => {
     ]);
     expect(page(unmet)).toContain('<p class="audit-group__note">No checks in this category apply to this site.</p>');
     expect(twin(unmet)).toContain('\nNo checks in this category apply to this site.\n');
+  });
+});
+
+describe('a host carrying a backtick, which the URL parser accepts', () => {
+  const HOST = 'a`b.example.com';
+  const scorecard = () =>
+    scorecardOf(
+      'example.com',
+      [
+        row('openapi', 'pass', { evidence: 'https://api.example.net/openapi.json -> 200', ...at('api.example.net') }),
+        row('rate-limit-headers', 'absent', { evidence: 'no rate-limit header', ...at(HOST) }),
+        row('json-errors', 'n_a', { na_reason: 'auth-required', evidence: `https://${HOST}/`, ...at(HOST) }),
+      ],
+      {
+        follow_declarations: true,
+        declared_hosts: [
+          {
+            kind: 'api-anchor',
+            surface: '/.well-known/api-catalog#/linkset/0',
+            url: `https://${HOST}/v1`,
+            host: HOST,
+            outcome: 'reciprocity-refused',
+          },
+        ],
+      },
+    );
+  const REMEDY =
+    "anc's public audit holds no sign-in for a\\`b.example.com. Run `anc web example.com` with `ANC_WEB_TOKEN` set to a token for a\\`b.example.com to evaluate this check from your own network.";
+
+  test('the twin widens the code span around it and escapes it in prose, so no span closes early', () => {
+    expect(new URL(`https://${HOST}/`).host).toBe(HOST);
+    const md = twin(scorecard());
+    expect(md).toContain('- Host: `` a`b.example.com ``\n');
+    expect(sectionMd(md, '## Declared hosts')).toContain(
+      '- api-catalog anchor: `` a`b.example.com `` (`` https://a`b.example.com/v1 ``), not confirmed by a\\`b.example.com',
+    );
+    expect(md).toContain(`- Note: ${REMEDY}\n`);
+  });
+
+  test('the MCP read carries the same escaped remedy as access_remedy', () => {
+    const read = enrichWebScorecardForDisplay(scorecard(), {
+      registry: REGISTRY,
+      catalog: REMEDIATION,
+      origin: 'https://anc.dev',
+    }) as { results: Array<{ id: string; access_remedy?: string }> };
+    expect(read.results.find((r) => r.id === 'json-errors')?.access_remedy).toBe(REMEDY);
   });
 });
