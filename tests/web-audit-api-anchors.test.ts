@@ -114,6 +114,8 @@ const NOT_A_DESCRIPTION_PAST_THE_CAP: Array<[string, string, string]> = [
   ['an HTML page', 'text/html', HTML_PAST_THE_CAP],
   ['an HTML page labelled JSON', 'application/json', HTML_PAST_THE_CAP],
   ['plain text that opens no JSON object', 'text/plain', `${PADDING}\nopenapi\n`],
+  ['an AsyncAPI document in YAML', 'application/yaml', `asyncapi: 3.0.0\n# ${PADDING}\nopenapi\n`],
+  ['a GraphQL introspection result', 'application/json', `{"__schema": {"types": "${PADDING}"}, "openapi": 1}`],
 ];
 
 async function auditDescription(placement: Placement, contentType: string, body: string) {

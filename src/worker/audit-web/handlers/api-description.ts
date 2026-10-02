@@ -26,11 +26,17 @@ const DESCRIPTION_TYPE_RE = /json|yaml|vnd\.oai\.openapi/i;
 const HTML_TYPE_RE = /html/i;
 const MARKUP_START_RE = /^\s*</;
 const JSON_OBJECT_START_RE = /^\s*\{/;
+// Service descriptions that are not OpenAPI, named in their opening bytes.
+const OTHER_FORMAT_RE = /^\s*asyncapi\s*:|"asyncapi"\s*:|"__schema"\s*:|"_postman_id"\s*:|^#%RAML/m;
 
-/** A JSON or YAML document by its content type, or a body that opens a JSON object; never an HTML page. */
+/**
+ * A JSON or YAML document by its content type, or a body that opens a JSON
+ * object; never an HTML page or a description in another format.
+ */
 function descriptionShaped(response: ProbeResponse): boolean {
   const type = response.headers['content-type'] ?? '';
   if (HTML_TYPE_RE.test(type) || MARKUP_START_RE.test(response.body)) return false;
+  if (OTHER_FORMAT_RE.test(response.body)) return false;
   return DESCRIPTION_TYPE_RE.test(type) || JSON_OBJECT_START_RE.test(response.body);
 }
 
