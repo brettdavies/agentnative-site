@@ -336,6 +336,9 @@ const SHAPES: Record<string, typeof fetch> = {
   // Operational conditions on the discovery probe.
   'server/discover answers -32000 at HTTP 500': dualStack(withDiscover(modernConforming, () => rpcError(-32000, 500))),
   'server/discover answers -32000 at HTTP 429': dualStack(withDiscover(modernConforming, () => rpcError(-32000, 429))),
+  'server/discover answers a bare 429': dualStack(
+    withDiscover(modernConforming, () => new Response('slow down', { status: 429, headers: { 'retry-after': '30' } })),
+  ),
   'server/discover answers a bare 500': dualStack(
     withDiscover(modernConforming, () => new Response('boom', { status: 500 })),
   ),
@@ -509,12 +512,25 @@ describe('showing an imperfect lane beats hiding it', () => {
 });
 
 describe('an operational condition on the discriminator is not an era verdict', () => {
-  test('-32000 at a server-error or rate-limit status scores as a broken discovery probe', async () => {
-    for (const label of ['server/discover answers -32000 at HTTP 500', 'server/discover answers -32000 at HTTP 429']) {
+  test('-32000 at a server-error status scores as a broken discovery probe', async () => {
+    const label = 'server/discover answers -32000 at HTTP 500';
+    expect(statusOf(await scoreFor(label), 'mcp-server-discover')).toBe('broken');
+    await expectSameScore(label, 'server/discover answers a bare 500');
+  });
+
+  test('a rate-limited discovery probe is unscored and leaves the modern rows to their own answers', async () => {
+    // A busy server is neither broken nor missing a lane, so it must
+    // outscore one that failed, and the body riding the 429 cannot matter.
+    for (const label of ['server/discover answers -32000 at HTTP 429', 'server/discover answers a bare 429']) {
       const audit = await scoreFor(label);
-      expect(`${label}:${statusOf(audit, 'mcp-server-discover')}`).toBe(`${label}:broken`);
-      await expectSameScore(label, 'server/discover answers a bare 500');
+      expect(`${label}:${statusOf(audit, 'mcp-server-discover')}`).toBe(`${label}:error`);
+      const row = audit.rows.find((r) => r.id === 'mcp-modern-tools-list');
+      expect(`${label}:${String(row?.status)}/${String(row?.unprobed)}`).toBe(`${label}:pass/undefined`);
+      const failed = await scoreFor('server/discover answers a bare 500');
+      expect(audit.score.relative).toBeGreaterThan(failed.score.relative);
+      expect(audit.score.global).toBeGreaterThan(failed.score.global);
     }
+    await expectSameScore('server/discover answers -32000 at HTTP 429', 'server/discover answers a bare 429');
   });
 
   test('-32000 at a status that can carry an era signal still reads as an absent lane', async () => {

@@ -161,7 +161,7 @@ async function echoControl(source: ArtifactSource, origin: string): Promise<Echo
   const response = await source.get(`${origin}${PROTECTED_RESOURCE_PATH}${ECHO_PROBE_PATH}`, {
     maxBodyBytes: METADATA_MAX_BODY_BYTES,
   });
-  if (response.status === null || response.status >= 500 || RETRY_SHAPED_STATUSES.includes(response.status)) {
+  if (response.status === null || response.status >= 500 || RETRY_SHAPED_STATUSES.has(response.status)) {
     return 'unanswered';
   }
   const echoed = response.status === 200 ? resourceOf(parseJsonObject(response)) : null;

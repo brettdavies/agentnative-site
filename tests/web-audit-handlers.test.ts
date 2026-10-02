@@ -17,6 +17,8 @@ import { runLlmsTxtQuality } from '../src/worker/audit-web/handlers/llms-txt-qua
 import { runMarkdownFrontmatter } from '../src/worker/audit-web/handlers/markdown-frontmatter';
 import {
   CONFORMANCE_OPS,
+  ENFORCEMENT_OPS,
+  ERA_OPS,
   MODERN_LANE_DEPENDENT_OPS,
   modernProbeBody,
   NEGOTIATION_OPS,
@@ -1014,12 +1016,19 @@ describe('runMcp era-lane classification', () => {
       ['500', () => rpcError(-32000, 500)],
       ['502', () => rpcError(-32000, 502)],
       ['503', () => rpcError(-32000, 503)],
-      ['429', () => rpcError(-32000, 429)],
-      ['408', () => rpcError(-32000, 408)],
     ];
     for (const [label, response] of notEraSignals) {
       const outcome = await run({ op: 'server-discover' }, stubFetch(response));
       expect(`-32000 at ${label}:${outcome.status}`).toBe(`-32000 at ${label}:broken`);
+    }
+    // A target asking to be retried is busy, which is neither an era nor
+    // a defect, so the row leaves scoring the way a -32099 refusal does.
+    for (const status of [408, 429]) {
+      const outcome = await run(
+        { op: 'server-discover' },
+        stubFetch(() => rpcError(-32000, status)),
+      );
+      expect(`-32000 at ${status}:${outcome.status}`).toBe(`-32000 at ${status}:error`);
     }
     for (const status of [200, 400, 401, 415]) {
       const outcome = await run(
@@ -1401,6 +1410,44 @@ describe('runMcp error-code conformance', () => {
       );
       expect(`${String(w.op)}:${outcome.status}`).toBe(`${String(w.op)}:error`);
       expect(outcome.evidence[0].error_code).toBe(-32099);
+    }
+  });
+
+  test('an HTTP 408 or 429 answer is an operational error on every op, whatever body rides it', async () => {
+    const ops: Array<Record<string, unknown>> = [...ERA_OPS, ...CONFORMANCE_OPS].map((op) =>
+      op === 'error' ? { op, method: 'nonexistent/method', expect_code: -32601 } : { op },
+    );
+    const bodies: Array<[string, (status: number) => Response]> = [
+      ['no body', (status) => new Response(null, { status })],
+      ['plain text', (status) => new Response('slow down', { status, headers: { 'retry-after': '30' } })],
+      ['framework JSON', (status) => json({ error: 'rate_limited' }, status)],
+      ['-32000 envelope', (status) => rpcError(-32000, status)],
+      ['-32601 envelope', (status) => rpcError(-32601, status)],
+    ];
+    // The token-less refusal row reads a busy answer the same way: a 429
+    // says nothing about whether the request would have been refused.
+    const busyOps = [...ops, ...ENFORCEMENT_OPS.map((op) => ({ op }))];
+    for (const status of [408, 429]) {
+      for (const [label, body] of bodies) {
+        for (const w of busyOps) {
+          const outcome = await run(
+            w,
+            stubFetch(() => body(status)),
+            'sess-1',
+          );
+          const row = `${String(w.op)} at ${status} with ${label}`;
+          expect(`${row}:${outcome.status}`).toBe(`${row}:error`);
+          expect(`${row}:${(outcome.evidence[0].why as string[] | undefined)?.[0]}`).toContain(`HTTP ${status}`);
+        }
+      }
+    }
+    // A 5xx is a server that tried and failed, so it keeps the penalty.
+    for (const w of ops) {
+      const outcome = await run(
+        w,
+        stubFetch(() => new Response('unavailable', { status: 503 })),
+      );
+      expect(`${String(w.op)} at 503:${outcome.status}`).toBe(`${String(w.op)} at 503:broken`);
     }
   });
 
@@ -1955,30 +2002,57 @@ describe('era lanes resolved across a whole audit (engine)', () => {
     expect(rows.find((r) => r.id === 'mcp-unknown-tool')?.status).toBe('pass');
   });
 
-  test('a dual-stack server keeps every modern row live', async () => {
-    const dual = site((headers, body) => {
-      if (headers.get('mcp-protocol-version') === MODERN_PROTOCOL) {
-        if (headers.get('mcp-method') === 'server/discover') {
-          return json({
-            jsonrpc: '2.0',
-            id: 1,
-            result: {
-              supportedVersions: [MODERN_PROTOCOL],
-              capabilities: { tools: {} },
-              _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'dual', version: '1.0' } },
-            },
-          });
-        }
-        const meta = (JSON.parse(body).params?._meta ?? {}) as Record<string, unknown>;
-        if (!('io.modelcontextprotocol/clientCapabilities' in meta)) return rpcError(-32602, 400);
-        return toolsResult();
+  const dualStackAnswer = (headers: Headers, body: string): Response => {
+    if (headers.get('mcp-protocol-version') === MODERN_PROTOCOL) {
+      if (headers.get('mcp-method') === 'server/discover') {
+        return json({
+          jsonrpc: '2.0',
+          id: 1,
+          result: {
+            supportedVersions: [MODERN_PROTOCOL],
+            capabilities: { tools: {} },
+            _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'dual', version: '1.0' } },
+          },
+        });
       }
-      return legacyResult(legacyMethod(body), { tools: {} });
-    });
-    const rows = await auditRows(dual);
+      const meta = (JSON.parse(body).params?._meta ?? {}) as Record<string, unknown>;
+      if (!('io.modelcontextprotocol/clientCapabilities' in meta)) return rpcError(-32602, 400);
+      return toolsResult();
+    }
+    return legacyResult(legacyMethod(body), { tools: {} });
+  };
+
+  test('a dual-stack server keeps every modern row live', async () => {
+    const rows = await auditRows(site(dualStackAnswer));
     expect(rows.find((r) => r.id === 'mcp-server-discover')?.status).toBe('pass');
     expect(rows.find((r) => r.id === 'mcp-modern-tools-list')?.status).toBe('pass');
     expect(rows.find((r) => r.id === 'mcp-modern-clientcaps')?.status).toBe('pass');
+  });
+
+  test('a handshake answered HTTP 408 or 429 settles every row the way an unanswered one does', async () => {
+    const isHandshake = (headers: Headers, body: string): boolean =>
+      headers.get('mcp-method') === 'server/discover' || legacyMethod(body) === 'initialize';
+    const settled = (rows: EngineResult[]): string[] =>
+      rows.map((r) => `${r.id}:${r.status}${r.unprobed === true ? '/unprobed' : ''}`).sort();
+    const unanswered = settled(
+      await auditRows(
+        site((headers, body) => {
+          if (isHandshake(headers, body)) throw new TypeError('connection reset');
+          return dualStackAnswer(headers, body);
+        }),
+      ),
+    );
+    // The modern lane is left unknown, so its rows probe on their own
+    // answers instead of reading the busy discovery probe as an absence.
+    expect(unanswered).toContain('mcp-modern-tools-list:pass');
+    for (const status of [408, 429]) {
+      const busy = site((headers, body) =>
+        isHandshake(headers, body)
+          ? new Response('slow down', { status, headers: { 'retry-after': '30' } })
+          : dualStackAnswer(headers, body),
+      );
+      expect(`${status}: ${settled(await auditRows(busy)).join(', ')}`).toBe(`${status}: ${unanswered.join(', ')}`);
+    }
   });
 
   test('a legacy lane advertising resources is broken, not absent, when it refuses the read', async () => {

@@ -10,9 +10,13 @@ import type { GuardedFetchOptions } from '../ssrf';
 /**
  * Statuses whose shape is "not now" rather than "not here": a target
  * asking to be retried is reporting its own load, not answering what the
- * request asked.
+ * request asked. Each maps to its RFC 9110 reason phrase, which a row's
+ * evidence can name.
  */
-export const RETRY_SHAPED_STATUSES: readonly number[] = [408, 429];
+export const RETRY_SHAPED_STATUSES: ReadonlyMap<number, string> = new Map([
+  [408, 'Request Timeout'],
+  [429, 'Too Many Requests'],
+]);
 
 /** Join a path to the base, or pass an absolute URL through unchanged. */
 export function resolveUrl(base: string, pathOrUrl: string): string {
