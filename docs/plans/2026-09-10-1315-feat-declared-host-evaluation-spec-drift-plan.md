@@ -631,8 +631,8 @@ The funnel's shared surfaces carry this plan's fields, and the units edit them i
   and noncompliant when a usable one sits beside bad entries. A local credential goes only to the audited endpoint's
   handshake and session probes, never to followed hosts, metadata, sign-in servers, or the enforcement probe, and is
   never written to the scorecard. Every access-limited row is disclosed with its remedy, `anc web <target>` plus
-  `--token` for sign-in (U6). A new check takes its score from its tier, its antecedent, and the access limits it can
-  hit, and joins a group only as a design alternative. Instantiates R12, R14, R15, R16 (ledger R17).
+  `ANC_WEB_TOKEN` for sign-in (U6). A new check takes its score from its tier, its antecedent, and the access limits it
+  can hit, and joins a group only as a design alternative. Instantiates R12, R14, R15, R16 (ledger R17).
 
 ### High-Level Technical Design
 
@@ -1429,7 +1429,7 @@ Phase C:
      entry stacks surface, host, then outcome; verify at 390 px in both themes.
   1f. Every access-limited group or row (the six declared-host reasons and auth-required) is disclosed with its remedy
      (KTD25): the group's body opens with one caption line naming why the public audit could not evaluate those rows and
-     `anc web <target>` to evaluate them from the reader's own network, adding `--token` for auth-required rows; a
+     `anc web <target>` to evaluate them from the reader's own network, adding `ANC_WEB_TOKEN` for auth-required rows; a
      scorecard holding any access-limited row adds one sentence to the score note saying the global score keeps those
      rows in its maximum and pointing to the same command. The markdown twin and the MCP read carry the same sentences.
      Verify at 390 px in both themes.
