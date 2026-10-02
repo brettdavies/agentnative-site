@@ -9,8 +9,8 @@ import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
 import { enrichWebScorecardForDisplay } from '../src/worker/audit-web/display';
 import { endpointRedirects } from '../src/worker/audit-web/handlers/shared';
-import { signInEndpoint } from '../src/worker/audit-web/mcp-auth';
-import type { ArtifactSource } from '../src/worker/audit-web/reciprocity';
+import { directArtifactSource, signInEndpoint } from '../src/worker/audit-web/mcp-auth';
+import { type ArtifactSource, resolveProtectedResourceMetadata } from '../src/worker/audit-web/reciprocity';
 import type { AntecedentToken, WebAuditRegistry } from '../src/worker/audit-web/registry';
 import type { WebRemediationCatalog } from '../src/worker/audit-web/remediation';
 import type { ScorecardStatus, WebScorecard } from '../src/worker/audit-web/scorecard';
@@ -216,6 +216,55 @@ describe('presence with auth required', () => {
       { registry: mcpRegistry() },
     );
     expect(scorecard.mcp_endpoint).toBeNull();
+  });
+
+  test('a host that mints path-echo metadata grants no presence when its echo read fails, times out, or answers 5xx', async () => {
+    const suffixed = `${SAME_METADATA}/mcp`;
+    const echoReads: Array<[string, Route]> = [
+      [
+        'timeout',
+        () => {
+          throw new DOMException('deadline exceeded', 'TimeoutError');
+        },
+      ],
+      [
+        'transport error',
+        () => {
+          throw new TypeError('connection refused');
+        },
+      ],
+      ['5xx', () => new Response('upstream error', { status: 503 })],
+    ];
+    for (const [label, echo] of echoReads) {
+      const seen: Seen[] = [];
+      const { scorecard } = await audit(
+        router({ ...ROOT, ...protectedServer(SAME, suffixed), [`GET ${ECHO_PROBE}`]: echo }, seen),
+        { registry: mcpRegistry() },
+      );
+      expect({ label, echoRead: seen.some((r) => r.url === ECHO_PROBE), endpoint: scorecard.mcp_endpoint }).toEqual({
+        label,
+        echoRead: true,
+        endpoint: null,
+      });
+    }
+  });
+
+  test('an echo read the budget never sends confirms nothing', async () => {
+    const suffixed = `${SAME_METADATA}/mcp`;
+    const seen: Seen[] = [];
+    const fetchImpl = router(protectedServer(SAME, suffixed), seen);
+    let slices = 1;
+    const source = directArtifactSource(() => (slices-- > 0 ? 1_000 : null), { fetchImpl });
+    expect(await resolveProtectedResourceMetadata(SAME, source)).toBeNull();
+    expect(seen.map((r) => r.url)).toEqual([suffixed]);
+  });
+
+  test('an echo read answered below 500 without the nonsense path lets path-suffixed metadata stand', async () => {
+    const suffixed = `${SAME_METADATA}/mcp`;
+    const seen: Seen[] = [];
+    const source = directArtifactSource(() => 1_000, { fetchImpl: router(protectedServer(SAME, suffixed), seen) });
+    expect(await resolveProtectedResourceMetadata(SAME, source)).toMatchObject({ url: suffixed });
+    expect(seen.map((r) => r.url)).toEqual([suffixed, ECHO_PROBE]);
   });
 
   test('a card-declared endpoint on the audited origin answering 401 with matching metadata reads auth-required, not broken', async () => {

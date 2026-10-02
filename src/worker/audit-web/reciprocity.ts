@@ -149,12 +149,28 @@ function challengeMetadataUrl(source: ArtifactSource, endpoint: string, challeng
 }
 
 /**
+ * Whether the nonsense-path metadata read rules out a gateway that echoes
+ * any requested path: it must have answered, below 500, without naming
+ * that path. A read that failed, timed out, ran out of budget, or hit a
+ * server error leaves the echo unchecked, so it confirms nothing.
+ */
+async function echoRuledOut(source: ArtifactSource, origin: string): Promise<boolean> {
+  const response = await source.get(`${origin}${PROTECTED_RESOURCE_PATH}${ECHO_PROBE_PATH}`, {
+    maxBodyBytes: METADATA_MAX_BODY_BYTES,
+  });
+  if (response.status === null || response.status >= 500) return false;
+  const echoed = response.status === 200 ? resourceOf(parseJsonObject(response)) : null;
+  return echoed !== normalizeEndpointUrl(`${origin}${ECHO_PROBE_PATH}`);
+}
+
+/**
  * Resolves RFC 9728 metadata for `endpoint` in order: the challenge's
  * `resource_metadata` URL when the endpoint sent one, else the
  * path-suffixed well-known location, then the root one. It matches only
  * when its `resource` normalizes to the endpoint. For an endpoint below the
- * root, metadata at a nonsense path must not echo that path back: a
- * gateway that generates metadata for any requested path confirms nothing.
+ * root, metadata at a nonsense path must answer without echoing that path
+ * back: a gateway that generates metadata for any requested path confirms
+ * nothing.
  */
 export async function resolveProtectedResourceMetadata(
   endpoint: string,
@@ -173,10 +189,7 @@ export async function resolveProtectedResourceMetadata(
   }
   if (found === null || resourceOf(found.metadata) !== endpoint) return null;
   const { origin, pathname } = new URL(endpoint);
-  if (pathname !== '/') {
-    const echoed = resourceOf(await readMetadata(source, `${origin}${PROTECTED_RESOURCE_PATH}${ECHO_PROBE_PATH}`));
-    if (echoed === normalizeEndpointUrl(`${origin}${ECHO_PROBE_PATH}`)) return null;
-  }
+  if (pathname !== '/' && !(await echoRuledOut(source, origin))) return null;
   return found;
 }
 
