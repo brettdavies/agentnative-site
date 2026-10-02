@@ -107,7 +107,7 @@ session-time summary.
 Resources: `anc://registry` (concrete) plus four templates `anc://tool/{slug}`, `anc://principle/{n}`,
 `anc://spec/{section}`, `anc://scorecard/{binary}`.
 
-**Four rate limits, two cost profiles.** `MCP_LIMITER` gates every `POST /mcp` at 60 requests per 60 seconds per IP and
+**Five rate limits, two cost profiles.** `MCP_LIMITER` gates every `POST /mcp` at 60 requests per 60 seconds per IP and
 falls back to a shared `anon` bucket on missing `cf-connecting-ip`. `MCP_AUDIT_LIMITER` gates `score_cli` cache-miss
 audits only, at 5 fresh audits per 60 minutes per IP, with **no anon fallback**. `audit_website` fresh audits key
 `WEB_AUDIT_LIMITER_IP` (30 per 60 seconds per IP burst, no anon fallback) plus a shared 30-per-hour-per-IP ceiling;
@@ -117,7 +117,12 @@ Turnstile solve mints a `__Host-anc-session` cookie, `WEB_AUDIT_LIMITER` caps 10
 `<sid>:<sha256(target)>`, and `WEB_AUDIT_LIMITER_IP` is the coarse per-IP fallback. The hourly window is enforced in two
 layers: the CF Rate Limiting binding only accepts `period: 10 | 60`, so the binding holds the per-60-seconds burst floor
 and an application-side KV-backed per-hour window in `SCORE_KV` (`mcp_audit:<ip>:<hour_bucket>` /
-`web_audit:<ip>:<hour_bucket>`, 2-hour TTL) enforces the 30-per-hour ceiling.
+`web_audit:<ip>:<hour_bucket>`, 2-hour TTL) enforces the 30-per-hour ceiling. `WEB_AUDIT_DOMAIN_LIMITER` protects third
+parties rather than anc's own capacity: every audit that follows a site's declarations, on any surface, draws one unit
+per declared registrable domain before its first request there, keyed on `sha256(registrable domain)`. The binding is
+the burst floor at 10 audits per 60 seconds, applied per Cloudflare location, and a KV-backed window in `SCORE_KV`
+(`web_audit_follow:<sha256(domain)>:<hour_bucket>`, 2-hour TTL) is the hourly ceiling at 30 audits. Both layers are
+approximate, and a refused domain's hosts receive nothing for that audit.
 
 **Cost gate: `score_cli` never bypasses the cache.** No `force_refresh` flag and no path through the surface that forces
 a fresh audit on an already-cached binary. `get_scorecard` is the cheap signal; `score_cli` is the metered one. The two
