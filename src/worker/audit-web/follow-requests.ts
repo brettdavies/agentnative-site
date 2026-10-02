@@ -178,7 +178,14 @@ export function sliceRequests(input: {
     const hop = resolveUrl(declaration.url, location);
     const refused = hopRefusal(hop, declaration.kind);
     if (refused !== null) return refused;
-    await enter(hop);
+    const stop = await stopped<Settled | null>(
+      async () => {
+        await enter(hop);
+        return null;
+      },
+      (cause) => hopStopped(hop, cause),
+    );
+    if (stop !== null) return stop;
     return { url: hop, response: stopped(() => getHop(hop, opts, declaration.kind), budgetExceeded) };
   };
 
@@ -245,6 +252,16 @@ export async function land(landing: Landing | Settled): Promise<Fetched | Settle
 
 export function budgetExceeded(cause: BudgetCause): Settled {
   return { outcome: 'budget-exceeded', cause };
+}
+
+/**
+ * A redirect hop the slice did not admit. One the domain budget refused
+ * records the hop as its final URL, as other refused hops do, so the rows
+ * and the trail name the domain whose budget was spent rather than the one
+ * that redirected there.
+ */
+function hopStopped(hop: string, cause: BudgetCause): Settled {
+  return cause === 'domain-budget' ? { final_url: hop, ...budgetExceeded(cause) } : budgetExceeded(cause);
 }
 
 /** Runs one declaration's requests, settling a cap or budget stop through `onStop`. */

@@ -766,6 +766,24 @@ describe('follow: caps and budgets', () => {
     expect(requestsTo(seen, 'mcp.capped.org')).toEqual([]);
     expect(reserved).toEqual(['example.net', 'capped.org']);
   });
+
+  test('a redirect hop the domain budget refused is the final URL, so the trail, the rows, and the hold name its domain', async () => {
+    const hop = 'https://mcp.capped.org/mcp';
+    const budget: DomainBudget = {
+      keyOf: (hostname) => hostname.split('.').slice(-2).join('.'),
+      reserve: async (key) => ({ admitted: key !== 'capped.org' }),
+    };
+    const { scorecard } = await audit(
+      router({ ...siteDeclaring(ENDPOINT), [`GET ${ENDPOINT}`]: () => redirect(hop) }, []),
+      { domainBudget: budget },
+    );
+    expect(scorecard.declared_hosts?.[0]).toMatchObject({ url: ENDPOINT, final_url: hop, outcome: 'budget-exceeded' });
+    expect(row(scorecard, 'mcp-initialize')).toMatchObject({
+      na_reason: 'declared-host-budget-exceeded',
+      host: 'mcp.capped.org',
+    });
+    expect(domainBudgetRefusal(scorecard)).toBe('capped.org');
+  });
 });
 
 describe('follow: redirects', () => {

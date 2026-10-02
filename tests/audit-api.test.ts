@@ -22,7 +22,18 @@ import {
   webRegistryJson,
 } from './helpers/audit-api-env';
 import { budgetKeyPrefix } from './helpers/domain-budget-fakes';
-import { html, requestsTo, router, type Seen, siteDeclaring } from './helpers/follow-fixtures';
+import {
+  html,
+  redirect,
+  requestsTo,
+  requestsTo,
+  router,
+  router,
+  type Seen,
+  type Seen,
+  siteDeclaring,
+  siteDeclaring,
+} from './helpers/follow-fixtures';
 import { captureLogs } from './helpers/log-capture';
 
 beforeEach(() => {
@@ -860,9 +871,9 @@ describe("POST /api/score: a run a declared domain's spent hourly budget limited
   const ENDPOINT = 'https://mcp.example.net/mcp';
   const KEY = () => webKeyFor('https://example.com/', SPEC_VERSION);
 
-  // The declared domain's hour and the next one spent, so a run that crosses the hour still finds it spent.
-  async function spentBudget(): Promise<Record<string, string>> {
-    const prefix = await budgetKeyPrefix('example.net');
+  // A declared domain's hour and the next one spent, so a run that crosses the hour still finds it spent.
+  async function spentBudget(domain = 'example.net'): Promise<Record<string, string>> {
+    const prefix = await budgetKeyPrefix(domain);
     const hour = Math.floor(Date.now() / 3_600_000);
     return { [`${prefix}${hour}`]: '9999', [`${prefix}${hour + 1}`]: '9999' };
   }
@@ -919,6 +930,16 @@ describe("POST /api/score: a run a declared domain's spent hourly budget limited
     expect(summary).toMatch(/Try again after <time datetime="[^"]+">\d{2}:00 UTC<\/time>\./);
     expect(env.puts).toEqual([]);
     expect(await storedText(env)).toBe(JSON.stringify(saved));
+  });
+
+  test('a redirect hop whose domain spent its hour is the domain the trail and the reason line name', async () => {
+    const hop = 'https://mcp.capped.example/mcp';
+    const probe = router({ ...siteDeclaring(ENDPOINT), [`GET ${ENDPOINT}`]: () => redirect(hop) }, []);
+    const env = await declaringEnv({ prior: prior(), kvSeed: await spentBudget('capped.example'), probe });
+    const body = await audit(env);
+    expect(body.scorecard.declared_hosts?.[0]).toMatchObject({ final_url: hop, cause: 'domain-budget' });
+    expect(String(body.summary_html)).toContain("Not saved: capped.example reached anc's hourly probe limit;");
+    expect(env.puts).toEqual([]);
   });
 
   test('a run whose declared host the follow slice ran out of time for saves as any audit', async () => {
