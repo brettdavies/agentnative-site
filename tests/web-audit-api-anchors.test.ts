@@ -9,7 +9,9 @@ import { loadRegistry } from '../scripts/web-audit/conformance-corpus';
 import type { WebAuditRegistry } from '../src/worker/audit-web/registry';
 import {
   audit,
+  cardDocument,
   html,
+  initializeResult,
   json,
   type Route,
   redirect,
@@ -17,6 +19,7 @@ import {
   router,
   row,
   type Seen,
+  sep2127Card,
   TARGET,
 } from './helpers/follow-fixtures';
 
@@ -297,6 +300,41 @@ describe('API category on api-catalog anchors', () => {
     expect(hygieneProbes(seen)).toEqual([`https://${API}${FALLBACK_PATH}`]);
     expect(row(scorecard, 'json-errors')).toMatchObject({ status: 'pass', host: API });
     expect(row(scorecard, 'mcp-initialize')).toMatchObject({ status: 'n_a', na_reason: 'antecedent-unmet' });
+  });
+
+  test('an MCP endpoint reached through a POST redirect keeps its host slot when the API anchors and descriptions span four other hosts', async () => {
+    const moved = 'https://mcp.example.com/mcp';
+    const mirrored = 'https://github.com/o/r/raw/main/openapi.json';
+    const seen: Seen[] = [];
+    const { scorecard } = await auditApi(
+      site(
+        () =>
+          linkset(
+            anchor(`https://${API}/`, mirrored),
+            anchor('https://files.example.net/', `https://${API}/openapi.json`),
+          ),
+        {
+          'POST https://example.com/mcp': () => redirect(moved, 307),
+          [`GET ${moved}/server-card`]: () => cardDocument(sep2127Card(moved)),
+          [`POST ${moved}`]: () => initializeResult(),
+          [`GET ${mirrored}`]: () => redirect('https://raw.githubusercontent.com/o/r/main/openapi.json'),
+          'GET https://raw.githubusercontent.com/o/r/main/openapi.json': () => json(OPENAPI),
+          [`GET https://${API}/openapi.json`]: () => json(OPENAPI),
+        },
+      ),
+      seen,
+      true,
+      apiRegistry('mcp-initialize'),
+    );
+    expect(scorecard.mcp_endpoint).toBe(moved);
+    expect(row(scorecard, 'mcp-initialize')).toMatchObject({ status: 'pass', host: 'mcp.example.com' });
+    expect(scorecard.declared_hosts?.map((entry) => [entry.kind, entry.host, entry.outcome])).toEqual([
+      ['api-anchor', API, 'followed'],
+      ['api-anchor', 'files.example.net', 'followed'],
+      ['api-description', 'github.com', 'budget-exceeded'],
+      ['api-description', API, 'followed'],
+      ['mcp-endpoint', 'mcp.example.com', 'followed'],
+    ]);
   });
 
   test('a hygiene probe of an off-origin anchor host takes no redirect to another origin', async () => {

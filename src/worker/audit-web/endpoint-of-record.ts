@@ -118,9 +118,10 @@ export function endpointOfRecord(
 /**
  * Discovery's POSTs and the follow slice, side by side, then where the
  * POSTs were redirected off the audited origin, on what is left of the
- * slice, then the endpoint of record. The hosts the documents declare are
- * followed only when the site answered the root or a document read; a
- * redirected POST is an answer of its own.
+ * slice, then the API catalog's declarations, then the endpoint of record.
+ * The hosts the documents declare are followed only when the site
+ * answered the root or a document read; a redirected POST is an answer of
+ * its own.
  */
 export async function settleEndpointOfRecord(
   documents: DiscoveryDocuments,
@@ -131,8 +132,8 @@ export async function settleEndpointOfRecord(
   const [discovery] = await Promise.all([
     documents.probeEndpoint(),
     session.settle(siteAnswered ? documents.declarations : []),
-    session.settleApi(siteAnswered ? apiDeclarations(documents.apiAnchors) : []),
   ]);
   await session.settle(discovery.redirected);
+  await session.settleApi(siteAnswered ? apiDeclarations(documents.apiAnchors) : []);
   return { discovery, declared: endpointOfRecord(follow.base, discovery, session.result()) };
 }

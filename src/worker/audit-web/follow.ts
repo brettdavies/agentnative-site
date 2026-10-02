@@ -17,10 +17,11 @@
 // endpoint is admitted.
 //
 // Declarations arrive in batches: what discovery's documents declare, then
-// the API catalog's anchors and descriptions (follow-api.ts), then where
-// its POSTs were redirected off the audited origin, which is known only
-// once they finish. A later batch settles after the earlier ones, on the
-// same slice clock, caps, and budgets, as if declared after them.
+// where its POSTs were redirected off the audited origin, which is known
+// only once they finish, then the API catalog's anchors and descriptions
+// (follow-api.ts), so no API host takes the host slot an MCP endpoint
+// needs. A later batch settles after the earlier ones, on the same slice
+// clock, caps, and budgets, as if declared after them.
 //
 // Every failure of an endpoint's reciprocity, from a dead host to a card
 // naming another URL, records one outcome, so the trail cannot be read as
