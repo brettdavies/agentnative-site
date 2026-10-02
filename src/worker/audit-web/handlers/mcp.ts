@@ -523,8 +523,9 @@ export function handshakeServed(outcome: ProbeOutcome | undefined): boolean {
  * server serving the modern revision can answer `server/discover` with a
  * JSON-RPC result, and `supported_versions` is written on that result
  * path alone, so its presence is the era signal. A probe that never got
- * an answer leaves the lane `unknown`, where the modern rows fall back to
- * probing rather than take a verdict on no evidence.
+ * an answer, or got one asking to be retried, ends `error` and leaves the
+ * lane `unknown`, where the modern rows fall back to probing rather than
+ * take a verdict on no evidence.
  */
 export function mcpModernLaneFrom(outcome: ProbeOutcome | undefined): McpModernLane {
   if (outcome === undefined || outcome.status === 'error' || outcome.status === 'na') return 'unknown';
@@ -587,12 +588,13 @@ function eraLaneUnavailable(op: McpOp, code: number | null, ctx: HandlerContext)
 
 /**
  * Whether a status is compatible with reading an answer as an era signal
- * at all. A 5xx and a retry-shaped status both describe the target's
- * condition rather than its protocol surface, so an answer delivered at
- * one cannot settle which eras the server serves.
+ * at all. A 5xx describes the target's condition rather than its protocol
+ * surface, so an answer delivered at one cannot settle which eras the
+ * server serves. A retry-shaped status says the same and never reaches
+ * here: it is settled first, as an operational error.
  */
 function eraReadableStatus(status: number | null): boolean {
-  return status === null || (status < 500 && !RETRY_SHAPED_STATUSES.includes(status));
+  return status === null || status < 500;
 }
 
 /**
@@ -603,10 +605,10 @@ function eraReadableStatus(status: number | null): boolean {
  * broken-surface penalty a server that tried and failed has earned.
  *
  * -32601 and -32022 name the absence unambiguously and are read at any
- * status. -32000 is JSON-RPC's reserved generic server error, whose
- * session-required meaning is one reading among many, so it counts only
- * where that reading is coherent: a server error or a rate limit
- * carrying it is reporting load, not an era.
+ * status that reaches here. -32000 is JSON-RPC's reserved generic server
+ * error, whose session-required meaning is one reading among many, so it
+ * counts only where that reading is coherent: a server error carrying it
+ * is reporting load, not an era.
  */
 function modernLaneRefused(status: number | null, code: number | null): boolean {
   if (code === SESSION_REQUIRED_CODE) return eraReadableStatus(status);
@@ -745,6 +747,16 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
   if (code === RATE_LIMITED_CODE) {
     ev.error_code = RATE_LIMITED_CODE;
     ev.why = ['rate limited by the target'];
+    return { status: 'error', evidence: [ev] };
+  }
+
+  // Settled on the status alone, ahead of every arm that reads a body: a
+  // retry-shaped answer reports the target's load at that moment, whichever
+  // layer sent it, so the body riding it (a JSON-RPC code included)
+  // describes the load rather than the surface or the era.
+  const retryReason = resp.status === null ? undefined : RETRY_SHAPED_STATUSES.get(resp.status);
+  if (retryReason !== undefined) {
+    ev.why = [`the target answered HTTP ${resp.status} ${retryReason}; not scored`];
     return { status: 'error', evidence: [ev] };
   }
 

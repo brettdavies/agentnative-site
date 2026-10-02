@@ -284,7 +284,9 @@ Two codes are excluded from the conformance matrix, recorded at `src/worker/audi
 - **`-32099` (rate limit)** can be forced, but forcing it against a third-party server is abusive. The auditor treats a
   received `-32099` as an operational condition and excludes the row from scoring rather than penalizing a target for
   defending itself (`RATE_LIMITED_CODE`, `src/worker/audit-web/handlers/mcp.ts:140`; pinned at
-  `tests/web-audit-handlers.test.ts:2202`).
+  `tests/web-audit-handlers.test.ts:2202`). An HTTP `408` or `429` answer reads the same way whatever body rides it
+  (`RETRY_SHAPED_STATUSES`, `src/worker/audit-web/handlers/shared.ts`), a `-32000` included, so a busy target never
+  reads as a missing modern lane.
 
 A third code appears in probe results without being probed for: **`-32000`**, JSON-RPC's reserved generic server error,
 which a stateful legacy server returns to a sessionless POST (`SESSION_REQUIRED_CODE`,

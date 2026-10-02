@@ -210,7 +210,7 @@
       "tier": "required",
       "principle": "P2",
       "status": "error",
-      "evidence": "error code -32099",
+      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
       "hosts": [
         {
           "host": "example.com"
@@ -228,7 +228,7 @@
       "tier": "recommended",
       "principle": "P2",
       "status": "error",
-      "evidence": "error code -32099",
+      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
       "hosts": [
         {
           "host": "example.com"
@@ -246,7 +246,7 @@
       "tier": "required",
       "principle": "P2",
       "status": "error",
-      "evidence": "error code -32099",
+      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
       "hosts": [
         {
           "host": "example.com"
@@ -278,7 +278,7 @@
       "tier": "required",
       "principle": "P2",
       "status": "error",
-      "evidence": "error code -32099",
+      "evidence": "https://example.com/mcp -> 408 (the target answered HTTP 408 Request Timeout; not scored)",
       "hosts": [
         {
           "host": "example.com"
@@ -296,7 +296,7 @@
       "tier": "recommended",
       "principle": "P2",
       "status": "error",
-      "evidence": "error code -32099",
+      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
       "hosts": [
         {
           "host": "example.com"
@@ -314,7 +314,7 @@
       "tier": "recommended",
       "principle": "P4",
       "status": "error",
-      "evidence": "error code -32099",
+      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
       "hosts": [
         {
           "host": "example.com"
@@ -332,7 +332,7 @@
       "tier": "recommended",
       "principle": "P4",
       "status": "error",
-      "evidence": "error code -32099",
+      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
       "hosts": [
         {
           "host": "example.com"
@@ -350,7 +350,7 @@
       "tier": "recommended",
       "principle": "P4",
       "status": "error",
-      "evidence": "error code -32099",
+      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
       "hosts": [
         {
           "host": "example.com"
@@ -368,7 +368,7 @@
       "tier": "recommended",
       "principle": "P4",
       "status": "error",
-      "evidence": "error code -32099",
+      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
       "hosts": [
         {
           "host": "example.com"
@@ -386,7 +386,7 @@
       "tier": "recommended",
       "principle": "P4",
       "status": "error",
-      "evidence": "error code -32099",
+      "evidence": "https://example.com/mcp -> 408 (the target answered HTTP 408 Request Timeout; not scored)",
       "hosts": [
         {
           "host": "example.com"
@@ -404,7 +404,7 @@
       "tier": "recommended",
       "principle": "P4",
       "status": "error",
-      "evidence": "error code -32099",
+      "evidence": "https://example.com/mcp -> 408 (the target answered HTTP 408 Request Timeout; not scored)",
       "hosts": [
         {
           "host": "example.com"
@@ -422,7 +422,7 @@
       "tier": "recommended",
       "principle": "P4",
       "status": "error",
-      "evidence": "error code -32099",
+      "evidence": "https://example.com/mcp -> 408 (the target answered HTTP 408 Request Timeout; not scored)",
       "hosts": [
         {
           "host": "example.com"
@@ -440,7 +440,7 @@
       "tier": "recommended",
       "principle": "P4",
       "status": "error",
-      "evidence": "error code -32099",
+      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
       "hosts": [
         {
           "host": "example.com"
@@ -472,7 +472,7 @@
       "tier": "recommended",
       "principle": "P4",
       "status": "error",
-      "evidence": "error code -32099",
+      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
       "hosts": [
         {
           "host": "example.com"
@@ -490,7 +490,7 @@
       "tier": "recommended",
       "principle": "P4",
       "status": "error",
-      "evidence": "error code -32099",
+      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
       "hosts": [
         {
           "host": "example.com"
