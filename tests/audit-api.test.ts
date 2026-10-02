@@ -999,6 +999,23 @@ describe("POST /api/score: a run a declared domain's spent hourly budget limited
     });
   });
 
+  test('a saved scorecard stands for a day: one 23 hours old is kept, one 25 hours old is replaced', async () => {
+    const run = async (hoursAgo: number) => {
+      const saved = { ...prior(), scored_at: new Date(Date.now() - hoursAgo * 3_600_000).toISOString() };
+      const env = await declaringEnv({ prior: saved, kvSeed: await spentBudget() });
+      const body = await audit(env);
+      return {
+        scorecard_url: body.scorecard_url,
+        puts: env.puts,
+        kept: (await storedText(env)) === JSON.stringify(saved),
+      };
+    };
+    expect({ 23: await run(23), 25: await run(25) }).toEqual({
+      23: { scorecard_url: null, puts: [], kept: true },
+      25: { scorecard_url: 'https://anc.dev/score/example.com', puts: [await KEY()], kept: false },
+    });
+  });
+
   test('a run whose declared host the follow slice ran out of time for saves as any audit', async () => {
     const saved = prior();
     const probe = router(

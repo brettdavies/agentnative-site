@@ -801,6 +801,17 @@ describe("a declared domain's spent hourly budget on the reflow", () => {
     });
   });
 
+  test('a saved scorecard stands for a day: one 23 hours old is kept, one 25 hours old is replaced', async () => {
+    const run = async (hoursAgo: number) => {
+      const { audited, skipped, kept } = await reflowSpent({ savedAgoMs: hoursAgo * HOUR_MS });
+      return { audited, skipped, kept };
+    };
+    expect({ 23: await run(23), 25: await run(25) }).toEqual({
+      23: { audited: [], skipped: ['example.com'], kept: true },
+      25: { audited: ['example.com'], skipped: [], kept: false },
+    });
+  });
+
   test('a seed whose saved scorecard the store cannot read is skipped, and nothing is written', async () => {
     const { audited, skipped, kept } = await reflowSpent({ savedAgoMs: 60_000, unreadable: true });
     expect({ audited, skipped, kept }).toEqual({ audited: [], skipped: ['example.com'], kept: true });

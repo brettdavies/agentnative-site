@@ -1,13 +1,28 @@
 // Whether a run a declared domain's spent hourly budget shaped may replace
 // the site's saved scorecard. That refusal says nothing about the site, so
-// a saved scorecard stands in its place; with none saved, the run is saved
-// like any audit. Every path that saves an audit asks here, so the curated
-// board and the on-demand surfaces hold the same runs.
+// a recent saved scorecard stands in its place; with none saved, or only an
+// old one, the run is saved like any audit. Every path that saves an audit
+// asks here, so the curated board and the on-demand surfaces hold the same
+// runs.
 
 import { SPEC_VERSION } from '../spec-version.gen';
-import { type CachedWebAudit, getForRequest, keyFor, type WebCacheEnv, WebCacheUnavailableError } from './cache';
+import {
+  type CachedWebAudit,
+  getForRequest,
+  isStale,
+  keyFor,
+  type WebCacheEnv,
+  WebCacheUnavailableError,
+} from './cache';
 import { domainBudgetRefusal } from './domain-budget';
 import type { WebScorecard } from './scorecard';
+
+/**
+ * How long a saved scorecard stands in place of a budget-limited run. Past
+ * it, the run replaces the scorecard as any audit would, so a third party
+ * that keeps a declared domain's budget spent cannot freeze a site's score.
+ */
+const DOMAIN_BUDGET_HOLD_MAX_AGE_MS = 24 * 60 * 60_000;
 
 export interface DomainBudgetHold {
   /** The registrable domain whose spent budget left rows unevaluated. */
@@ -35,5 +50,6 @@ export async function domainBudgetHold(
     if (err instanceof WebCacheUnavailableError) return { domain, saved: null };
     throw err;
   }
-  return saved === null ? null : { domain, saved };
+  if (saved === null || isStale(saved.scored_at, DOMAIN_BUDGET_HOLD_MAX_AGE_MS)) return null;
+  return { domain, saved };
 }

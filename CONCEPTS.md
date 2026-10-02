@@ -253,7 +253,9 @@ conflated. One controls whether an on-demand request serves the cached result or
 separate one controls how long an unseeded entry stays visible before it ages off the board's display, even though the
 underlying cached record persists. The two are tuned independently for different jobs, and a write path that restamps
 freshness for an unrelated reason resets both at once, whether or not that is intended. Distinct from the cadence a Web
-rescore batch uses to decide which curated domains are due for re-audit, a third, separately-tuned window.
+rescore batch uses to decide which curated domains are due for re-audit, a third, separately-tuned window. A fourth
+bounds how long a saved result stands in place of a re-audit that a declared domain's spent hourly budget limited; past
+it, that re-audit replaces the result as any audit would.
 
 ### Web rescore
 
