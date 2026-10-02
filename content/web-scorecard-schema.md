@@ -176,11 +176,11 @@ confirmed endpoint in declaration order is the endpoint of record unless the aud
 card document declared after it, or an endpoint confirmed while the site serves its own, reads `not-followed`. A URL the
 SSRF guard refuses, a private address or an IP literal, or a redirect hop to one, reads `blocked` and is never
 requested; its rows read `declared-host-blocked`. A URL anc cannot request at all, one that does not parse or whose
-scheme is not `http` or `https`, is never requested and reads `reciprocity-refused`. A URL or redirect hop on `http`
-that the guard admits is never requested either: it reads `not-followed` with reason `insecure-scheme`, and no row is
-evaluated at it. What a host publishes to confirm an endpoint is its consent to be probed, and consent read over
-plaintext could be forged by anyone on the network path, so every document anc reads to confirm an endpoint is read over
-`https`.
+scheme is not `http` or `https`, is never requested and reads `reciprocity-refused`. anc sends no plaintext request: an
+http URL, declared or linked, and any redirect to http, is never requested. A declared URL or redirect hop on `http`
+that the guard admits reads `not-followed` with reason `insecure-scheme`, and no row is evaluated at it. What a host
+publishes to confirm an endpoint is its consent to be probed, and consent read over plaintext could be forged by anyone
+on the network path, so every document anc reads to confirm an endpoint is read over `https`.
 
 An API catalog anchor is an API host the API rows evaluate when its `service-desc` names a description other than an MCP
 surface; an anchor with no such `service-desc` reads `not-followed` with reason `no-service-desc` and is never

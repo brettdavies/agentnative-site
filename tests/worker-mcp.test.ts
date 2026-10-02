@@ -284,6 +284,15 @@ describe('MCP instructions string (drift gate per KTD-8)', () => {
     expect(skill.replace(/\s+/g, ' ')).toContain(sentence);
   });
 
+  test('the methodology and the web scorecard schema state the same rule', async () => {
+    const sentence =
+      'anc sends no plaintext request: an http URL, declared or linked, and any redirect to http, is never requested.';
+    for (const path of ['content/methodology.md', 'content/web-scorecard-schema.md']) {
+      const doc = await readFile(join(import.meta.dir, '..', path), 'utf8');
+      expect({ path, states: doc.replace(/\s+/g, ' ').includes(sentence) }).toEqual({ path, states: true });
+    }
+  });
+
   test('instructions names both rate-limit bindings + both kill switches', async () => {
     const env = makeEnv();
     const result = await initialize(env);

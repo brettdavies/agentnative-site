@@ -248,8 +248,9 @@ toward the score, while the presence of the bundle file itself is a project-laye
 ## Web audits: scoring a website and its MCP server
 
 The [web audit](/audit?lane=web) applies the same eight principles to a different surface: a website and the MCP server
-it publishes. It runs entirely as network probes from the Worker, with no binary to install and nothing crawled. There
-are four probe types:
+it publishes. It runs entirely as network probes from the Worker, with no binary to install and nothing crawled. anc
+sends no plaintext request: an http URL, declared or linked, and any redirect to http, is never requested. There are
+four probe types:
 
 - **HTTP** — requests a path (or the first of several candidate paths) and asserts on status, content type, headers, or
   a body pattern. Covers `llms.txt`, OpenAPI, JSON Schemas, root-HTML affordances (meta description, `<link rel>`,
