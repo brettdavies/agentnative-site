@@ -101,19 +101,24 @@ mcp_lanes:
     label: In-page tools · WebMCP
     note: browser tools exposed by the site's HTML, not by the MCP server
 
-# Checks that are alternatives: mutually exclusive outcomes of one probe, so
-# no single site can earn every variant. A variant names antecedent tokens,
-# and every check gated on one of them belongs to it. The global score's
-# universe (src/worker/audit-web/score.ts) counts each variant the site
-# presents, meaning one of its rows reads anything but n_a or an n_a reason
-# only an applicable check carries, and the largest variant when the site
-# presents none. An endpoint that serves some probes without sign-in and
-# refuses others with a 401 presents both MCP access variants.
+# Alternatives: site designs that cannot both be satisfied at full access,
+# whatever the audit's vantage and whatever credential it holds. A
+# variant's checks are those gated on its `antecedents`, and a design may
+# have none of its own. It is presented when a check gated on one of its
+# `presented_by` tokens (default: its antecedents) applied: the check's
+# stored row reads anything but n_a, or an n_a reason only an applicable
+# check carries. The global universe (src/worker/audit-web/score.ts) counts
+# every check outside a group, plus each variant the site presents, or the
+# largest variant when it presents none. An access limit (sign-in the audit
+# cannot present, a private or unreachable host) never forms or joins a
+# group: a check it blocks reads n_a with its reason and stays in the
+# universe. An endpoint that answers a handshake without a token and
+# refuses other requests with a 401 presents both MCP access designs.
 alternatives:
   - group: mcp-access
     variants:
-      open: [mcp-session, mcp-resources]
-      protected: [mcp-auth-required]
+      open: { presented_by: [mcp-session] }
+      protected: { antecedents: [mcp-auth-required] }
 
 checks:
   # ---- API -----------------------------------------------------------------

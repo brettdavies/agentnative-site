@@ -92,7 +92,7 @@ const CHECK_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
  * error on any missing/invalid field so the build fails loudly.
  *
  * @param {object} doc — js-yaml load of src/data/web-audit/registry.yaml
- * @returns {{ version: number, mcp_discovery: object, category_order: string[], categories: Record<string,string>, mcp_lanes: Record<string,{label: string, note: string}>, alternatives: Array<{ group: string, variants: Record<string, string[]> }>, checks: Array<object> }}
+ * @returns {{ version: number, mcp_discovery: object, category_order: string[], categories: Record<string,string>, mcp_lanes: Record<string,{label: string, note: string}>, alternatives: Array<{ group: string, variants: Record<string, { antecedents: string[], presented_by: string[] }> }>, checks: Array<object> }}
  */
 export function normalizeWebAuditRegistry(doc) {
   if (!doc || typeof doc !== 'object') {
@@ -280,22 +280,49 @@ export function normalizeWebAuditRegistry(doc) {
   };
 }
 
+const VARIANT_FIELDS = new Set(['antecedents', 'presented_by']);
+
+/**
+ * A variant's token list: absent reads as none, and a present one is a
+ * non-empty array of known antecedent tokens.
+ *
+ * @param {unknown} value
+ * @param {string} name The `<group>.<variant>` label errors carry.
+ * @param {string} field
+ * @returns {string[]}
+ */
+function variantTokens(value, name, field) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`web-audit registry: alternatives variant "${name}" ${field} needs a non-empty array of tokens`);
+  }
+  for (const token of value) {
+    if (!WEB_AUDIT_ANTECEDENTS.has(token)) {
+      throw new Error(`web-audit registry: alternatives variant "${name}" names unknown antecedent "${token}"`);
+    }
+  }
+  return [...value];
+}
+
 /**
  * Validate the alternative groups against the normalized checks. Pure. A
- * variant is a set of antecedent tokens; the global score counts a group's
- * variants by the checks those tokens gate, so a token in two variants
- * would count its checks twice and a variant that gates no check could
- * never be presented.
+ * variant's checks are those gated on its `antecedents`, and it is
+ * presented when a check gated on one of its `presented_by` tokens applied
+ * (default: its antecedents). The global score counts a group by those
+ * tokens, so a token claimed by two variants would count its checks twice
+ * or present two designs from one row, and a variant whose presence tokens
+ * gate no check could never be presented.
  *
  * @param {unknown} groups The YAML `alternatives` value; absent means none.
  * @param {Array<{ antecedent: string }>} checks The normalized checks.
- * @returns {Array<{ group: string, variants: Record<string, string[]> }>}
+ * @returns {Array<{ group: string, variants: Record<string, { antecedents: string[], presented_by: string[] }> }>}
  */
 function normalizeAlternatives(groups, checks) {
   if (groups === undefined) return [];
   if (!Array.isArray(groups)) {
     throw new Error('web-audit registry: alternatives must be an array of groups');
   }
+  const gates = (tokens) => checks.some((check) => tokens.includes(check.antecedent));
   const groupIds = new Set();
   const claimedBy = new Map();
   return groups.map((entry) => {
@@ -312,30 +339,38 @@ function normalizeAlternatives(groups, checks) {
       throw new Error(`web-audit registry: alternatives group "${group}" needs at least two variants`);
     }
     const normalizedVariants = {};
-    for (const [variant, tokens] of Object.entries(variants)) {
+    for (const [variant, spec] of Object.entries(variants)) {
       const name = `${group}.${variant}`;
       if (!CHECK_ID_RE.test(variant)) {
         throw new Error(`web-audit registry: alternatives variant "${name}" must match /^[a-z0-9][a-z0-9-]*$/`);
       }
-      if (!Array.isArray(tokens) || tokens.length === 0) {
-        throw new Error(
-          `web-audit registry: alternatives variant "${name}" needs a non-empty array of antecedent tokens`,
-        );
+      if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
+        throw new Error(`web-audit registry: alternatives variant "${name}" must be a mapping`);
       }
-      for (const token of tokens) {
-        if (!WEB_AUDIT_ANTECEDENTS.has(token)) {
-          throw new Error(`web-audit registry: alternatives variant "${name}" names unknown antecedent "${token}"`);
-        }
+      const unknown = Object.keys(spec).find((key) => !VARIANT_FIELDS.has(key));
+      if (unknown !== undefined) {
+        throw new Error(`web-audit registry: alternatives variant "${name}" carries unknown field "${unknown}"`);
+      }
+      const antecedents = variantTokens(spec.antecedents, name, 'antecedents');
+      const presentedBy =
+        spec.presented_by === undefined ? [...antecedents] : variantTokens(spec.presented_by, name, 'presented_by');
+      if (antecedents.length > 0 && !gates(antecedents)) {
+        throw new Error(`web-audit registry: alternatives variant "${name}" gates no check`);
+      }
+      if (!gates(presentedBy)) {
+        throw new Error(`web-audit registry: alternatives variant "${name}" is presented by no check`);
+      }
+      for (const token of new Set([...antecedents, ...presentedBy])) {
         const prior = claimedBy.get(token);
         if (prior !== undefined) {
           throw new Error(`web-audit registry: antecedent "${token}" belongs to both "${prior}" and "${name}"`);
         }
         claimedBy.set(token, name);
       }
-      if (!checks.some((check) => tokens.includes(check.antecedent))) {
-        throw new Error(`web-audit registry: alternatives variant "${name}" gates no check`);
-      }
-      normalizedVariants[variant] = tokens;
+      normalizedVariants[variant] = { antecedents, presented_by: presentedBy };
+    }
+    if (Object.values(normalizedVariants).every((variant) => variant.antecedents.length === 0)) {
+      throw new Error(`web-audit registry: alternatives group "${group}" has no variant with checks of its own`);
     }
     return { group, variants: normalizedVariants };
   });

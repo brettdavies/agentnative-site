@@ -1,8 +1,11 @@
 // The global score's universe on the real registry: the most a single site
-// could earn, counting only the MCP access alternatives the site presents,
-// read from its rows alone so a stored scorecard recomputes the same value.
-// The protected shape takes its auth-required rows from the corpus's
-// correctly protected endpoint, so it is a shape the engine produces.
+// could earn, counting only the MCP access designs the site presents, read
+// from its rows alone so a stored scorecard recomputes the same value. The
+// sign-in checks are the only checks a design owns; the session checks count
+// for every site, so the rows sign-in keeps a public audit from reaching stay
+// in a protected endpoint's universe. The protected shape takes its
+// auth-required rows from the corpus's correctly protected endpoint, so it is
+// a shape the engine produces.
 
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
@@ -35,20 +38,20 @@ const registry = normalizeWebAuditRegistry(
   yaml.load(await readFile(REGISTRY_PATH, 'utf8')) as object,
 ) as unknown as WebAuditRegistry;
 
-const OPEN: ReadonlySet<AntecedentToken> = new Set(['mcp-session', 'mcp-resources']);
+const SESSION: ReadonlySet<AntecedentToken> = new Set(['mcp-session', 'mcp-resources']);
 const PROTECTED: ReadonlySet<AntecedentToken> = new Set(['mcp-auth-required']);
 const OTHER_MCP: ReadonlySet<AntecedentToken> = new Set(['mcp-present', 'mcp-auth']);
 
 const protectedFixture = JSON.parse(await readFile(PROTECTED_FIXTURE, 'utf8')) as WebScorecard;
 
-/** Rows outside the access alternatives that a correctly protected endpoint's 401s leave auth-required. */
-const REFUSED_OUTSIDE_ALTERNATIVES: ReadonlySet<string> = new Set(
+/** Rows outside the session and sign-in checks that a correctly protected endpoint's 401s leave auth-required. */
+const REFUSED_HANDSHAKE_ROWS: ReadonlySet<string> = new Set(
   protectedFixture.results
     .filter((row) => row.status === 'n_a' && row.na_reason === 'auth-required')
     .map((row) => row.id)
     .filter((id) => {
       const antecedent = registry.checks.find((check) => check.id === id)?.antecedent;
-      return antecedent !== undefined && !OPEN.has(antecedent) && !PROTECTED.has(antecedent);
+      return antecedent !== undefined && !SESSION.has(antecedent) && !PROTECTED.has(antecedent);
     }),
 );
 
@@ -59,16 +62,21 @@ const na = (reason?: NaReason): Outcome => ({ status: 'n_a', ...(reason !== unde
 
 /**
  * One row per registry check; checks outside MCP always pass. `refused`
- * reads on the rows a correctly protected endpoint answers with a 401
- * outside the access alternatives.
+ * reads on the handshake rows a correctly protected endpoint answers with
+ * a 401.
  */
-function siteRows(shape: { open: Outcome; protected: Outcome; otherMcp?: Outcome; refused?: Outcome }): EngineResult[] {
+function siteRows(shape: {
+  session: Outcome;
+  protected: Outcome;
+  otherMcp?: Outcome;
+  refused?: Outcome;
+}): EngineResult[] {
   return registry.checks.map((check) => {
-    const outcome = OPEN.has(check.antecedent)
-      ? shape.open
+    const outcome = SESSION.has(check.antecedent)
+      ? shape.session
       : PROTECTED.has(check.antecedent)
         ? shape.protected
-        : shape.refused !== undefined && REFUSED_OUTSIDE_ALTERNATIVES.has(check.id)
+        : shape.refused !== undefined && REFUSED_HANDSHAKE_ROWS.has(check.id)
           ? shape.refused
           : OTHER_MCP.has(check.antecedent)
             ? (shape.otherMcp ?? PASS)
@@ -89,11 +97,11 @@ function siteRows(shape: { open: Outcome; protected: Outcome; otherMcp?: Outcome
 }
 
 const SHAPES = {
-  open: siteRows({ open: PASS, protected: na('antecedent-unmet') }),
-  protected: siteRows({ open: na('auth-required'), protected: PASS, refused: na('auth-required') }),
-  hybrid: siteRows({ open: PASS, protected: PASS }),
+  open: siteRows({ session: PASS, protected: na('antecedent-unmet') }),
+  protected: siteRows({ session: na('auth-required'), protected: PASS, refused: na('auth-required') }),
+  hybrid: siteRows({ session: PASS, protected: PASS }),
   'no MCP': siteRows({
-    open: na('antecedent-unmet'),
+    session: na('antecedent-unmet'),
     protected: na('antecedent-unmet'),
     otherMcp: na('antecedent-unmet'),
   }),
@@ -110,17 +118,23 @@ function scorecardOf(rows: EngineResult[]): WebScorecard {
   });
 }
 
-describe('the global universe counts the MCP access alternatives a site presents', () => {
-  // Outside the group the registry weighs 124; open access weighs 31 and
-  // protected access 3. A site presenting neither counts the larger.
+describe('the global universe counts the MCP access designs a site presents', () => {
+  // Outside the group the registry weighs 155, session checks included; the
+  // protected design weighs 3 and the open design owns no checks. A site
+  // presenting neither counts the larger.
   test('open, protected, hybrid, and no-MCP sites each get their own universe', () => {
     const universes = Object.fromEntries(
       Object.entries(SHAPES).map(([shape, rows]) => [shape, universeMaxOf(registry, rows)]),
     );
-    expect(universes).toEqual({ open: 155, protected: 127, hybrid: 158, 'no MCP': 155 });
+    expect(universes).toEqual({ open: 155, protected: 158, hybrid: 158, 'no MCP': 158 });
   });
 
-  test('a variant is presented when one of its rows applied, whatever that row scored', () => {
+  test('sign-in limits what a public audit reaches, never the universe: a protected endpoint keeps the universe a credentialed audit of it scores against', () => {
+    const credentialed = siteRows({ session: PASS, protected: PASS });
+    expect(universeMaxOf(registry, SHAPES.protected)).toBe(universeMaxOf(registry, credentialed));
+  });
+
+  test('the open design is presented when a session row applied, whatever that row scored', () => {
     const appliedOutcomes: Outcome[] = [
       { status: 'broken' },
       { status: 'noncompliant' },
@@ -130,13 +144,13 @@ describe('the global universe counts the MCP access alternatives a site presents
       na('optional-absent'),
       na('posture-consistent'),
     ];
-    const universes = appliedOutcomes.map((protectedAccess) =>
-      universeMaxOf(registry, siteRows({ open: na('auth-required'), protected: protectedAccess })),
+    const universes = appliedOutcomes.map((session) =>
+      universeMaxOf(registry, siteRows({ session, protected: na('antecedent-unmet') })),
     );
-    expect(universes).toEqual(appliedOutcomes.map(() => 127));
+    expect(universes).toEqual(appliedOutcomes.map(() => 155));
   });
 
-  test('a variant whose every row reads n_a for a reason a non-applicable check carries is not presented', () => {
+  test('session rows that all read n_a for a reason a non-applicable check carries present no design', () => {
     const notApplied: Outcome[] = [
       na(),
       na('antecedent-unmet'),
@@ -147,19 +161,22 @@ describe('the global universe counts the MCP access alternatives a site presents
       na('declared-host-blocked'),
       na('declared-host-budget-exceeded'),
     ];
-    const universes = notApplied.map((open) => universeMaxOf(registry, siteRows({ open, protected: PASS })));
-    expect(universes).toEqual(notApplied.map(() => 127));
-  });
-
-  test('one applied row presents its whole variant', () => {
-    const rows = siteRows({ open: na('auth-required'), protected: PASS }).map(({ na_reason, ...row }) =>
-      row.id === 'mcp-server-discover' ? { ...row, status: 'pass' as const } : { ...row, na_reason },
+    const universes = notApplied.map((session) =>
+      universeMaxOf(registry, siteRows({ session, protected: na('antecedent-unmet') })),
     );
-    expect(universeMaxOf(registry, rows)).toBe(158);
+    expect(universes).toEqual(notApplied.map(() => 158));
   });
 
-  test('the rows a protected endpoint answers with a 401 outside the alternatives are the handshake and the conformance rows', () => {
-    expect([...REFUSED_OUTSIDE_ALTERNATIVES].sort()).toEqual([
+  test('one applied session row presents the open design', () => {
+    const rows = siteRows({ session: na('auth-required'), protected: na('antecedent-unmet') }).map(
+      ({ na_reason, ...row }) =>
+        row.id === 'mcp-server-discover' ? { ...row, status: 'pass' as const } : { ...row, na_reason },
+    );
+    expect(universeMaxOf(registry, rows)).toBe(155);
+  });
+
+  test('the rows a protected endpoint answers with a 401 outside the session and sign-in checks are the handshake and the conformance rows', () => {
+    expect([...REFUSED_HANDSHAKE_ROWS].sort()).toEqual([
       'mcp-batch-reject',
       'mcp-initialize',
       'mcp-modern-clientcaps',
@@ -169,20 +186,21 @@ describe('the global universe counts the MCP access alternatives a site presents
     ]);
   });
 
-  test('an open or hybrid site that passes every check it presents scores 100 global, a protected-only one tops out below it, and a site without MCP sees what MCP is worth', () => {
+  test('an open or hybrid site that passes every check it presents scores 100 global, a protected-only one tops out near 68 on a public audit, and a site without MCP sees what MCP is worth', () => {
     const scores = Object.fromEntries(
       Object.entries(SHAPES).map(([shape, rows]) => {
         const { score } = scorecardOf(rows);
         return [shape, `${score.relative}/${score.global}`];
       }),
     );
-    // Protected: the six rows its 401s answer stay in the 127-point
-    // universe, one MUST and five SHOULDs, so it earns 107 of 127.
-    // No MCP: 83 earned outside every MCP check, over 124 + the larger variant.
-    expect(scores).toEqual({ open: '100/100', protected: '100/84', hybrid: '100/100', 'no MCP': '100/54' });
+    // Protected: the session rows (31 points) and the six handshake rows
+    // its 401s answer (20 points) stay in the 158-point universe, so it
+    // earns 107 of 158. No MCP: 83 earned outside every MCP check, over 155
+    // + the larger design.
+    expect(scores).toEqual({ open: '100/100', protected: '100/68', hybrid: '100/100', 'no MCP': '100/53' });
     expect(scoreWebAudit(SHAPES.protected, universeMaxOf(registry, SHAPES.protected))).toEqual({
       relative: 100,
-      global: 84,
+      global: 68,
       earned: 107,
     });
   });

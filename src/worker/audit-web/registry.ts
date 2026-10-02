@@ -64,13 +64,18 @@ export interface WebCheck {
   with: Record<string, unknown>;
 }
 
-/**
- * Checks that are alternatives: mutually exclusive outcomes of one probe.
- * Each variant names the antecedent tokens whose checks form it.
- */
+/** One site design in a group of alternatives. */
+export interface WebAlternativeVariant {
+  /** The checks gated on these tokens form the variant; empty for a design with no checks of its own. */
+  antecedents: AntecedentToken[];
+  /** The variant is presented when a check gated on one of these tokens applied. */
+  presented_by: AntecedentToken[];
+}
+
+/** Site designs that cannot both be satisfied at full access, whatever the audit's vantage. */
 export interface WebAlternativeGroup {
   group: string;
-  variants: Record<string, AntecedentToken[]>;
+  variants: Record<string, WebAlternativeVariant>;
 }
 
 /** One protocol lane the MCP category's rows group under, keyed by lane id. */

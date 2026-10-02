@@ -85,10 +85,10 @@ function rowApplied(row: UniverseRow): boolean {
  * check counts at its tier weight whatever status the site's row reads, so
  * an n_a, skip, or error row costs global what an absent one does. A group
  * of alternatives is the exception: it counts each variant the site
- * presents, meaning one of the variant's rows shows its check applied, or
- * its largest variant when the site presents none. Presentation is read
- * from the rows alone so a stored scorecard recomputes the denominator it
- * was scored under.
+ * presents, meaning a row gated on one of the variant's presence tokens
+ * shows its check applied, or its largest variant when the site presents
+ * none. Presentation is read from the rows alone so a stored scorecard
+ * recomputes the denominator it was scored under.
  */
 export function universeMaxOf(
   registry: UniverseRegistry,
@@ -98,22 +98,25 @@ export function universeMaxOf(
   const weights = config.weights ?? DEFAULT_SCORE_WEIGHTS;
   const applied = new Set(rows.filter(rowApplied).map((row) => row.id));
   const groups = (registry.alternatives ?? []).map((group) =>
-    Object.values(group.variants).map((tokens) => ({ tokens, size: 0, presented: false })),
+    Object.values(group.variants).map((variant) => ({ ...variant, size: 0, presented: false })),
   );
-  const variantOf = new Map<string, { size: number; presented: boolean }>();
+  type Variant = (typeof groups)[number][number];
+  const memberOf = new Map<string, Variant>();
+  const presentedVia = new Map<string, Variant>();
   for (const variants of groups) {
-    for (const variant of variants) for (const token of variant.tokens) variantOf.set(token, variant);
+    for (const variant of variants) {
+      for (const token of variant.antecedents) memberOf.set(token, variant);
+      for (const token of variant.presented_by) presentedVia.set(token, variant);
+    }
   }
   let total = 0;
   for (const check of registry.checks) {
     const weight = weights[check.keyword];
-    const variant = variantOf.get(check.antecedent);
-    if (variant === undefined) {
-      total += weight;
-      continue;
-    }
-    variant.size += weight;
-    if (applied.has(check.id)) variant.presented = true;
+    const member = memberOf.get(check.antecedent);
+    if (member === undefined) total += weight;
+    else member.size += weight;
+    const presenting = presentedVia.get(check.antecedent);
+    if (presenting !== undefined && applied.has(check.id)) presenting.presented = true;
   }
   for (const variants of groups) {
     const shown = variants.filter((variant) => variant.presented);

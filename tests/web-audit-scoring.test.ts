@@ -47,7 +47,7 @@ interface NormalizedWebAuditRegistry {
   category_order: string[];
   categories: Record<string, string>;
   mcp_lanes: Record<string, { label: string; note: string }>;
-  alternatives: Array<{ group: string; variants: Record<string, string[]> }>;
+  alternatives: Array<{ group: string; variants: Record<string, { antecedents: string[]; presented_by: string[] }> }>;
   checks: NormalizedWebAuditCheck[];
 }
 
@@ -424,25 +424,44 @@ describe('web-audit registry shape', () => {
     );
   });
 
-  // The global universe counts a group by the checks its variants' tokens
-  // gate: a token in two variants would count its checks twice, and a
-  // variant that gates no check could never be presented.
+  // The global universe counts a group by the checks its variants'
+  // antecedents gate and presents each variant from the rows its presence
+  // tokens gate: a token claimed twice would count its checks twice or
+  // present two designs from one row, and a variant whose presence tokens
+  // gate no check could never be presented.
   describe('alternatives', () => {
     const gated = (id: string, antecedent: string) => ({ ...abortCheck, id, antecedent });
     const groupedChecks = [
-      gated('open-a', 'mcp-session'),
-      gated('open-b', 'mcp-resources'),
+      gated('session-a', 'mcp-session'),
+      gated('resources-a', 'mcp-resources'),
       gated('protected-a', 'mcp-auth-required'),
     ];
     const access = {
       group: 'mcp-access',
-      variants: { open: ['mcp-session', 'mcp-resources'], protected: ['mcp-auth-required'] },
+      variants: { open: { presented_by: ['mcp-session'] }, protected: { antecedents: ['mcp-auth-required'] } },
     };
     const withAlternatives = (alternatives: unknown) =>
       normalizeWebAuditRegistry({ ...abortBase, alternatives, checks: groupedChecks });
+    const accessWith = (variants: Record<string, unknown>) => [{ group: 'mcp-access', variants }];
 
-    test('a well-formed group normalizes as declared, and an absent block reads as none', () => {
-      expect(withAlternatives([access]).alternatives).toEqual([access]);
+    test('a variant with no checks of its own is presented by its tokens, and one with checks by its antecedents unless it names others', () => {
+      expect(withAlternatives([access]).alternatives).toEqual([
+        {
+          group: 'mcp-access',
+          variants: {
+            open: { antecedents: [], presented_by: ['mcp-session'] },
+            protected: { antecedents: ['mcp-auth-required'], presented_by: ['mcp-auth-required'] },
+          },
+        },
+      ]);
+      expect(
+        withAlternatives(
+          accessWith({
+            open: { antecedents: ['mcp-session'], presented_by: ['mcp-resources'] },
+            protected: { antecedents: ['mcp-auth-required'] },
+          }),
+        ).alternatives[0].variants.open,
+      ).toEqual({ antecedents: ['mcp-session'], presented_by: ['mcp-resources'] });
       expect(normalizeWebAuditRegistry({ ...abortBase, checks: groupedChecks }).alternatives).toEqual([]);
     });
 
@@ -453,33 +472,74 @@ describe('web-audit registry shape', () => {
       ['a group without variants', [{ group: 'mcp-access' }], /"mcp-access" needs at least two variants/],
       [
         'a group with one variant',
-        [{ group: 'mcp-access', variants: { open: ['mcp-session'] } }],
+        accessWith({ protected: { antecedents: ['mcp-auth-required'] } }),
         /"mcp-access" needs at least two variants/,
       ],
       [
-        'a variant with no tokens',
-        [{ group: 'mcp-access', variants: { open: [], protected: ['mcp-auth-required'] } }],
-        /"mcp-access\.open" needs a non-empty array of antecedent tokens/,
+        'a variant written as a bare token list',
+        accessWith({ open: ['mcp-session'], protected: { antecedents: ['mcp-auth-required'] } }),
+        /"mcp-access\.open" must be a mapping/,
+      ],
+      [
+        'a variant field outside antecedents and presented_by',
+        accessWith({ open: { presented_by: ['mcp-session'], checks: [] }, protected: access.variants.protected }),
+        /"mcp-access\.open" carries unknown field "checks"/,
+      ],
+      [
+        'an empty token list',
+        accessWith({ open: { antecedents: [] }, protected: access.variants.protected }),
+        /"mcp-access\.open" antecedents needs a non-empty array of tokens/,
+      ],
+      [
+        'a variant with neither antecedents nor presence tokens',
+        accessWith({ open: {}, protected: access.variants.protected }),
+        /"mcp-access\.open" is presented by no check/,
       ],
       [
         'an unknown antecedent token',
-        [{ group: 'mcp-access', variants: { open: ['mcp-session'], protected: ['mcp-signed-in'] } }],
+        accessWith({ open: access.variants.open, protected: { antecedents: ['mcp-signed-in'] } }),
         /"mcp-access\.protected" names unknown antecedent "mcp-signed-in"/,
       ],
       [
+        'an unknown presence token',
+        accessWith({ open: { presented_by: ['mcp-handshake'] }, protected: access.variants.protected }),
+        /"mcp-access\.open" names unknown antecedent "mcp-handshake"/,
+      ],
+      [
         'a token in two variants of one group',
-        [{ group: 'mcp-access', variants: { open: ['mcp-session'], protected: ['mcp-session'] } }],
+        accessWith({ open: { antecedents: ['mcp-session'] }, protected: { antecedents: ['mcp-session'] } }),
         /"mcp-session" belongs to both "mcp-access\.open" and "mcp-access\.protected"/,
       ],
       [
+        "a presence token that is another variant's antecedent",
+        accessWith({ open: { presented_by: ['mcp-auth-required'] }, protected: access.variants.protected }),
+        /"mcp-auth-required" belongs to both "mcp-access\.open" and "mcp-access\.protected"/,
+      ],
+      [
         'a token in two groups',
-        [access, { group: 'session', variants: { held: ['mcp-session'], refused: ['mcp-auth-required'] } }],
+        [
+          access,
+          {
+            group: 'session',
+            variants: { held: { antecedents: ['mcp-session'] }, refused: { antecedents: ['mcp-resources'] } },
+          },
+        ],
         /"mcp-session" belongs to both "mcp-access\.open" and "session\.held"/,
       ],
       [
-        'a variant that gates no check',
-        [{ group: 'mcp-access', variants: { open: ['mcp-session'], protected: ['mcp-auth'] } }],
+        'a variant whose antecedents gate no check',
+        accessWith({ open: access.variants.open, protected: { antecedents: ['mcp-auth'] } }),
         /"mcp-access\.protected" gates no check/,
+      ],
+      [
+        'a variant whose presence tokens gate no check',
+        accessWith({ open: { presented_by: ['mcp-auth'] }, protected: access.variants.protected }),
+        /"mcp-access\.open" is presented by no check/,
+      ],
+      [
+        'a group whose every variant has no checks of its own',
+        accessWith({ open: { presented_by: ['mcp-session'] }, protected: { presented_by: ['mcp-auth-required'] } }),
+        /"mcp-access" has no variant with checks of its own/,
       ],
     ];
     for (const [label, alternatives, message] of malformed) {
@@ -503,10 +563,19 @@ describe('web-audit registry shape', () => {
     }
   });
 
-  test('the registry declares MCP access as its one alternative group', async () => {
+  // Only the sign-in checks are a design alternative: the session checks
+  // score on any endpoint an agent can reach, and a protected endpoint's
+  // session rows are access-limited, not a different design.
+  test('the registry declares MCP access as its one alternative group, with the sign-in checks as its only checks', async () => {
     const registry = await loadNormalized();
     expect(registry.alternatives).toEqual([
-      { group: 'mcp-access', variants: { open: ['mcp-session', 'mcp-resources'], protected: ['mcp-auth-required'] } },
+      {
+        group: 'mcp-access',
+        variants: {
+          open: { antecedents: [], presented_by: ['mcp-session'] },
+          protected: { antecedents: ['mcp-auth-required'], presented_by: ['mcp-auth-required'] },
+        },
+      },
     ]);
   });
 
@@ -618,9 +687,9 @@ describe('scoring invariance under the API/MCP category split', () => {
     const registry = (await loadNormalized()) as unknown as WebAuditRegistry;
     // 4 MUST x5 + 37 SHOULD x3 + 27 MAY x1 = 158 across every check.
     expect(universeMaxOf({ checks: registry.checks }, [])).toBe(158);
-    // A site presenting neither MCP access variant counts the larger one,
-    // open (31) over protected (3): 158 - 3.
-    expect(universeMaxOf(registry, [])).toBe(155);
+    // A site presenting neither MCP access variant counts the larger one:
+    // protected (3) over open, which has no checks of its own.
+    expect(universeMaxOf(registry, [])).toBe(158);
   });
 
   test('the same outcomes score identically whether labeled mcp-api or split into api/mcp', () => {

@@ -424,18 +424,26 @@ describe('runWebRescore', () => {
 
     // An alternative group decides which checks a site's global universe
     // counts, so every stored global depends on it.
-    test('declaring or changing an alternative group reflows', async () => {
-      const grouped = (variants: Record<string, string[]>) => ({
+    test('declaring an alternative group, or changing which checks a design owns or what presents it, reflows', async () => {
+      type Variant = { antecedents: string[]; presented_by: string[] };
+      const grouped = (open: Variant) => ({
         ...registryWith({}),
-        alternatives: [{ group: 'mcp-access', variants }],
+        alternatives: [
+          {
+            group: 'mcp-access',
+            variants: { open, protected: { antecedents: ['mcp-auth-required'], presented_by: ['mcp-auth-required'] } },
+          },
+        ],
       });
       const base = await fpOf(registryWith({}));
-      const declared = await fpOf(grouped({ open: ['mcp-session'], protected: ['mcp-auth-required'] }));
-      const widened = await fpOf(grouped({ open: ['mcp-session', 'mcp-resources'], protected: ['mcp-auth-required'] }));
-      expect({ declared: declared === base, widened: widened === declared }).toEqual({
-        declared: false,
-        widened: false,
-      });
+      const declared = await fpOf(grouped({ antecedents: [], presented_by: ['mcp-session'] }));
+      const owning = await fpOf(grouped({ antecedents: ['mcp-session'], presented_by: ['mcp-session'] }));
+      const presented = await fpOf(grouped({ antecedents: [], presented_by: ['mcp-resources'] }));
+      expect({
+        declared: declared === base,
+        owning: owning === declared,
+        presented: presented === declared,
+      }).toEqual({ declared: false, owning: false, presented: false });
     });
   });
 
