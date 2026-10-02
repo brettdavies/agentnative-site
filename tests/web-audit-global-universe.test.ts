@@ -1,6 +1,8 @@
 // The global score's universe on the real registry: the most a single site
 // could earn, counting only the MCP access alternatives the site presents,
 // read from its rows alone so a stored scorecard recomputes the same value.
+// The protected shape takes its auth-required rows from the corpus's
+// correctly protected endpoint, so it is a shape the engine produces.
 
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
@@ -19,6 +21,15 @@ import {
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
 const REGISTRY_PATH = join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml');
+const PROTECTED_FIXTURE = join(
+  REPO_ROOT,
+  'tests',
+  'fixtures',
+  'web-audit-conformance',
+  'scenarios',
+  'auth-own-endpoint',
+  'scorecard.json',
+);
 
 const registry = normalizeWebAuditRegistry(
   yaml.load(await readFile(REGISTRY_PATH, 'utf8')) as object,
@@ -28,21 +39,40 @@ const OPEN: ReadonlySet<AntecedentToken> = new Set(['mcp-session', 'mcp-resource
 const PROTECTED: ReadonlySet<AntecedentToken> = new Set(['mcp-auth-required']);
 const OTHER_MCP: ReadonlySet<AntecedentToken> = new Set(['mcp-present', 'mcp-auth']);
 
+const protectedFixture = JSON.parse(await readFile(PROTECTED_FIXTURE, 'utf8')) as WebScorecard;
+
+/** Rows outside the access alternatives that a correctly protected endpoint's 401s leave auth-required. */
+const REFUSED_OUTSIDE_ALTERNATIVES: ReadonlySet<string> = new Set(
+  protectedFixture.results
+    .filter((row) => row.status === 'n_a' && row.na_reason === 'auth-required')
+    .map((row) => row.id)
+    .filter((id) => {
+      const antecedent = registry.checks.find((check) => check.id === id)?.antecedent;
+      return antecedent !== undefined && !OPEN.has(antecedent) && !PROTECTED.has(antecedent);
+    }),
+);
+
 type Outcome = { status: ScorecardStatus; na_reason?: NaReason };
 
 const PASS: Outcome = { status: 'pass' };
 const na = (reason?: NaReason): Outcome => ({ status: 'n_a', ...(reason !== undefined ? { na_reason: reason } : {}) });
 
-/** One row per registry check; checks outside MCP always pass. */
-function siteRows(shape: { open: Outcome; protected: Outcome; otherMcp?: Outcome }): EngineResult[] {
+/**
+ * One row per registry check; checks outside MCP always pass. `refused`
+ * reads on the rows a correctly protected endpoint answers with a 401
+ * outside the access alternatives.
+ */
+function siteRows(shape: { open: Outcome; protected: Outcome; otherMcp?: Outcome; refused?: Outcome }): EngineResult[] {
   return registry.checks.map((check) => {
     const outcome = OPEN.has(check.antecedent)
       ? shape.open
       : PROTECTED.has(check.antecedent)
         ? shape.protected
-        : OTHER_MCP.has(check.antecedent)
-          ? (shape.otherMcp ?? PASS)
-          : PASS;
+        : shape.refused !== undefined && REFUSED_OUTSIDE_ALTERNATIVES.has(check.id)
+          ? shape.refused
+          : OTHER_MCP.has(check.antecedent)
+            ? (shape.otherMcp ?? PASS)
+            : PASS;
     return {
       id: check.id,
       title: check.title,
@@ -60,7 +90,7 @@ function siteRows(shape: { open: Outcome; protected: Outcome; otherMcp?: Outcome
 
 const SHAPES = {
   open: siteRows({ open: PASS, protected: na('antecedent-unmet') }),
-  protected: siteRows({ open: na('auth-required'), protected: PASS }),
+  protected: siteRows({ open: na('auth-required'), protected: PASS, refused: na('auth-required') }),
   hybrid: siteRows({ open: PASS, protected: PASS }),
   'no MCP': siteRows({
     open: na('antecedent-unmet'),
@@ -128,15 +158,33 @@ describe('the global universe counts the MCP access alternatives a site presents
     expect(universeMaxOf(registry, rows)).toBe(158);
   });
 
-  test('a site that passes every check it presents scores 100 global, and a site without MCP sees what MCP is worth', () => {
+  test('the rows a protected endpoint answers with a 401 outside the alternatives are the handshake and the conformance rows', () => {
+    expect([...REFUSED_OUTSIDE_ALTERNATIVES].sort()).toEqual([
+      'mcp-batch-reject',
+      'mcp-initialize',
+      'mcp-modern-clientcaps',
+      'mcp-modern-header-mismatch',
+      'mcp-modern-unknown-method',
+      'mcp-unknown-method',
+    ]);
+  });
+
+  test('an open or hybrid site that passes every check it presents scores 100 global, a protected-only one tops out below it, and a site without MCP sees what MCP is worth', () => {
     const scores = Object.fromEntries(
       Object.entries(SHAPES).map(([shape, rows]) => {
         const { score } = scorecardOf(rows);
         return [shape, `${score.relative}/${score.global}`];
       }),
     );
+    // Protected: the six rows its 401s answer stay in the 127-point
+    // universe, one MUST and five SHOULDs, so it earns 107 of 127.
     // No MCP: 83 earned outside every MCP check, over 124 + the larger variant.
-    expect(scores).toEqual({ open: '100/100', protected: '100/100', hybrid: '100/100', 'no MCP': '100/54' });
+    expect(scores).toEqual({ open: '100/100', protected: '100/84', hybrid: '100/100', 'no MCP': '100/54' });
+    expect(scoreWebAudit(SHAPES.protected, universeMaxOf(registry, SHAPES.protected))).toEqual({
+      relative: 100,
+      global: 84,
+      earned: 107,
+    });
   });
 
   test('a stored scorecard recomputes its scores from its rows alone', () => {
