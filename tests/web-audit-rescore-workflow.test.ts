@@ -35,6 +35,7 @@ import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 import { budgetKeyPrefix, memoryRateLimit } from './helpers/domain-budget-fakes';
 import {
   aiCatalog,
+  cardDocument,
   cardEntry,
   followRegistry,
   html,
@@ -774,6 +775,30 @@ describe("a declared domain's spent hourly budget on the reflow", () => {
       [SPENT, 'budget-exceeded', 'domain-budget'],
       [ROOM, 'reciprocity-refused', undefined],
     ]);
+  });
+
+  test('a refused endpoint behind one that did not confirm decided the rows, so the seed is skipped', async () => {
+    const { audited, skipped, kept, roomProbed } = await reflowSpent({ endpoints: [ROOM, SPENT], savedAgoMs: 60_000 });
+    expect({ audited, skipped, kept, roomProbed }).toEqual({
+      audited: [],
+      skipped: ['example.com'],
+      kept: true,
+      roomProbed: false,
+    });
+  });
+
+  test('a refused endpoint in front of one admitted in its place decided the rows, so the seed is skipped', async () => {
+    const { audited, skipped, kept, roomProbed } = await reflowSpent({
+      endpoints: [SPENT, ROOM],
+      routes: { [`GET ${ROOM}/server-card`]: () => cardDocument(sep2127Card(ROOM)) },
+      savedAgoMs: 60_000,
+    });
+    expect({ audited, skipped, kept, roomProbed }).toEqual({
+      audited: [],
+      skipped: ['example.com'],
+      kept: true,
+      roomProbed: true,
+    });
   });
 
   test('a seed whose saved scorecard the store cannot read is skipped, and nothing is written', async () => {

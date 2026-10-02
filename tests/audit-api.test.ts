@@ -31,6 +31,11 @@ import {
   router,
   type Seen,
   type Seen,
+  aiCatalog,
+  cardDocument,
+  cardEntry,
+  type Route,
+  sep2127Card,
   siteDeclaring,
   siteDeclaring,
 } from './helpers/follow-fixtures';
@@ -955,6 +960,43 @@ describe("POST /api/score: a run a declared domain's spent hourly budget limited
     expect(body.scorecard_url).toBeNull();
     expect(String(body.summary_html)).toContain('<a href="/score/example.com">the saved scorecard</a> is unchanged.');
     expect(env.puts).toEqual([]);
+  });
+
+  describe('a refused endpoint that decided which endpoint the rows describe', () => {
+    const SPENT = 'https://mcp.spent.example/mcp';
+    const ROOM = 'https://mcp.room.example/mcp';
+
+    // A site whose ai-catalog declares `endpoints` in that order, run with spent.example's hour spent.
+    async function held(endpoints: string[], routes: Record<string, Route> = {}) {
+      const saved = prior();
+      const probe = router(
+        {
+          'GET https://example.com/': () => html(),
+          'GET https://example.com/.well-known/ai-catalog.json': () =>
+            aiCatalog(...endpoints.map((url) => cardEntry({ data: sep2127Card(url) }))),
+          ...routes,
+        },
+        [],
+      );
+      const env = await declaringEnv({ prior: saved, kvSeed: await spentBudget('spent.example'), probe });
+      const body = await audit(env);
+      return {
+        scorecard_url: body.scorecard_url,
+        endpoint: (body.scorecard as { mcp_endpoint?: unknown }).mcp_endpoint,
+        puts: env.puts,
+        kept: (await storedText(env)) === JSON.stringify(saved),
+      };
+    }
+
+    test('behind an endpoint that did not confirm, the run keeps the saved scorecard', async () => {
+      expect(await held([ROOM, SPENT])).toEqual({ scorecard_url: null, endpoint: null, puts: [], kept: true });
+    });
+
+    test('in front of an endpoint admitted in its place, the run keeps the saved scorecard', async () => {
+      expect(await held([SPENT, ROOM], { [`GET ${ROOM}/server-card`]: () => cardDocument(sep2127Card(ROOM)) })).toEqual(
+        { scorecard_url: null, endpoint: ROOM, puts: [], kept: true },
+      );
+    });
   });
 
   test('a run whose declared host the follow slice ran out of time for saves as any audit', async () => {

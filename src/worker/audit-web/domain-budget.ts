@@ -78,23 +78,48 @@ export function declaredDomainBudget(env: DomainBudgetEnv, options: { hourlyCeil
 
 const BUDGET_REASON = 'declared-host-budget-exceeded';
 
+const MCP_DECLARATION_KINDS: ReadonlySet<unknown> = new Set(['mcp-endpoint', 'card-document']);
+
+/**
+ * Whether the MCP rows were scored at the audited site's own endpoint. The
+ * endpoint of record is the site's own whenever discovery found one, and a
+ * declared endpoint the slice admitted is then recorded as beyond it, so a
+ * followed endpoint in the trail means the rows were scored off the site.
+ */
+function scoredAtOwnEndpoint(scorecard: Pick<WebScorecard, 'declared_hosts' | 'mcp_endpoint'>): boolean {
+  if (typeof scorecard.mcp_endpoint !== 'string') return false;
+  return !(scorecard.declared_hosts ?? []).some(
+    (entry) => entry.kind === 'mcp-endpoint' && entry.outcome === 'followed',
+  );
+}
+
 /**
  * The registrable domain whose spent hourly budget left rows of `scorecard`
  * unevaluated, or null when none did. That refusal says nothing about the
  * site, so a run it touched does not replace the site's saved scorecard. A
  * refusal no row depended on, and rows the per-audit cap or the slice kept
  * from a host, are a property of the run's own declarations and save as usual.
+ *
+ * A refused MCP endpoint or card document counts as a dependency of the MCP
+ * rows unless they were scored at the site's own endpoint: the slice tries
+ * those declarations only while it has admitted no endpoint, so the refusal
+ * decided which endpoint the rows describe, even when they name another host.
  */
-export function domainBudgetRefusal(scorecard: Pick<WebScorecard, 'declared_hosts' | 'results'>): string | null {
+export function domainBudgetRefusal(
+  scorecard: Pick<WebScorecard, 'declared_hosts' | 'results' | 'mcp_endpoint'>,
+): string | null {
   const refused = new Map<string, string>();
+  let mcpRefusal: string | null = null;
   for (const entry of scorecard.declared_hosts ?? []) {
     if (entry.outcome !== 'budget-exceeded' || entry.cause !== 'domain-budget') continue;
     const url = typeof entry.final_url === 'string' ? entry.final_url : entry.url;
     if (typeof url !== 'string' || !URL.canParse(url)) continue;
     const { host, hostname } = new URL(url);
     refused.set(host, hostname);
+    if (mcpRefusal === null && MCP_DECLARATION_KINDS.has(entry.kind)) mcpRefusal = hostname;
   }
   if (refused.size === 0) return null;
+  if (mcpRefusal !== null && !scoredAtOwnEndpoint(scorecard)) return registrableDomainOf(mcpRefusal);
   for (const row of scorecard.results) {
     const hosts = [
       ...(row.na_reason === BUDGET_REASON ? recordedHostsOf(row) : []),

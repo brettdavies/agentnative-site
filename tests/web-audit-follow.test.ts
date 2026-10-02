@@ -1530,16 +1530,19 @@ describe('follow: the hourly budget of each declared registrable domain', () => 
   }
 
   test('a run holds back from a saved scorecard only when a row depends on a host the spent hour refused', () => {
-    const refusedAt = (url: string, cause = 'domain-budget') => ({
+    const refusedAt = (url: string, cause = 'domain-budget', kind = 'mcp-endpoint') => ({
       surface: 'card',
-      kind: 'mcp-endpoint',
+      kind,
       url,
       outcome: 'budget-exceeded',
       cause,
     });
     const notRun = { id: 'mcp-initialize', status: 'n_a', na_reason: 'declared-host-budget-exceeded' };
-    const scorecard = (declared: unknown[], results: unknown[]) =>
-      ({ declared_hosts: declared, results }) as Pick<WebScorecard, 'declared_hosts' | 'results'>;
+    const scorecard = (declared: unknown[], results: unknown[], mcpEndpoint: string | null = null) =>
+      ({ declared_hosts: declared, results, mcp_endpoint: mcpEndpoint }) as Pick<
+        WebScorecard,
+        'declared_hosts' | 'results' | 'mcp_endpoint'
+      >;
     expect({
       row: domainBudgetRefusal(
         scorecard(
@@ -1549,7 +1552,7 @@ describe('follow: the hourly budget of each declared registrable domain', () => 
       ),
       anchor: domainBudgetRefusal(
         scorecard(
-          [refusedAt('https://api.b.example.org/')],
+          [refusedAt('https://api.b.example.org/', 'domain-budget', 'api-anchor')],
           [
             {
               id: 'json-errors',
@@ -1570,8 +1573,43 @@ describe('follow: the hourly budget of each declared registrable domain', () => 
       ),
       noDependentRow: domainBudgetRefusal(
         scorecard(
-          [refusedAt('https://mcp.a.example.net/mcp')],
+          [refusedAt('https://api.b.example.org/', 'domain-budget', 'api-anchor')],
           [{ ...notRun, hosts: [{ host: 'mcp.other.example' }] }],
+        ),
+      ),
+      ownEndpoint: domainBudgetRefusal(
+        scorecard(
+          [
+            refusedAt('https://mcp.a.example.net/mcp'),
+            refusedAt('https://cards.d.example/card', 'domain-budget', 'card-document'),
+          ],
+          [{ id: 'mcp-initialize', status: 'pass', hosts: [{ host: 'example.com' }] }],
+          'https://example.com/mcp',
+        ),
+      ),
+      earlierEndpointRefused: domainBudgetRefusal(
+        scorecard(
+          [
+            { ...refusedAt('https://mcp.room.example/mcp'), outcome: 'reciprocity-refused', cause: undefined },
+            refusedAt('https://mcp.spent.example/mcp'),
+          ],
+          [{ ...notRun, na_reason: 'reciprocity-refused', hosts: [{ host: 'mcp.room.example' }] }],
+        ),
+      ),
+      substitute: domainBudgetRefusal(
+        scorecard(
+          [
+            refusedAt('https://mcp.spent.example/mcp'),
+            { ...refusedAt('https://mcp.room.example/mcp'), outcome: 'followed', cause: undefined },
+          ],
+          [{ id: 'mcp-initialize', status: 'pass', hosts: [{ host: 'mcp.room.example' }] }],
+          'https://mcp.room.example/mcp',
+        ),
+      ),
+      cardDocument: domainBudgetRefusal(
+        scorecard(
+          [refusedAt('https://cards.d.example/card', 'domain-budget', 'card-document')],
+          [{ id: 'mcp-initialize', status: 'n_a', na_reason: 'antecedent-unmet', hosts: [] }],
         ),
       ),
       slice: domainBudgetRefusal(
@@ -1586,6 +1624,10 @@ describe('follow: the hourly budget of each declared registrable domain', () => 
       anchor: 'example.org',
       redirected: 'moved.example',
       noDependentRow: null,
+      ownEndpoint: null,
+      earlierEndpointRefused: 'spent.example',
+      substitute: 'spent.example',
+      cardDocument: 'd.example',
       slice: null,
       noTrail: null,
     });
