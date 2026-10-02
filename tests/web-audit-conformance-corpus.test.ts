@@ -64,6 +64,15 @@ describe('web-audit conformance corpus', () => {
     }
   });
 
+  // Saving an audit stamps the registry fingerprint; the engine never does,
+  // so the Rust port reproduces the goldens without hashing a registry.
+  test('no golden carries a registry fingerprint', () => {
+    const stamped = [...committedFiles()]
+      .filter(([, text]) => text.includes('registry_fingerprint'))
+      .map(([name]) => name);
+    expect(stamped).toEqual([]);
+  });
+
   // The index exists so a regeneration that moves a score reads as a short
   // diff of one file; it is only worth reading if it agrees with the goldens.
   test('scores.json indexes each golden: its scores and every row id, status, and na_reason', () => {
