@@ -341,7 +341,7 @@ Two rules shape how MCP results score:
   (`unprobed`), while a malformed result or a server error stays `broken`.
   A `-32000` refusal counts as that signal only at a status able to carry one; delivered with a 5xx it reports load
   rather than an era, and stays `broken`. A target asking to be retried reports load too: an HTTP `408` or `429` answer
-  to any MCP check reads `error`, like a JSON-RPC `-32099` rate-limit refusal, whatever body it carries. On
+  to any MCP JSON-RPC probe reads `error`, like a JSON-RPC `-32099` rate-limit refusal, whatever body it carries. On
   `server/discover` it leaves the modern lane undecided, so the other modern checks probe on their own answers rather
   than read `absent`. On the legacy lane, an era-shaped refusal (a
   well-formed `-32601` or `-32022`) reads `absent` on the checks that name a method the lane could be missing, unless
