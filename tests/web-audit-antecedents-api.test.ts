@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { resolveAntecedent } from '../src/worker/audit-web/antecedents';
-import { catalogAnchors, isApiAnchor } from '../src/worker/audit-web/api-catalog';
+import { apiDeclarations, catalogAnchors, isApiAnchor } from '../src/worker/audit-web/api-catalog';
 import type { ProbeResponse } from '../src/worker/audit-web/assert';
 import { ctx, htmlRoot, outcome } from './web-audit-antecedents-helpers';
 
@@ -72,6 +72,31 @@ describe('catalogAnchors: the linkset anchors the API category reads', () => {
     expect(catalogAnchors(retainedCatalog(MCP_ONLY, { status: 404 }))).toEqual([]);
     expect(catalogAnchors(retainedCatalog(MCP_ONLY, { truncated: true }))).toEqual([]);
     expect(catalogAnchors(retainedCatalog({ entries: [] }))).toEqual([]);
+  });
+
+  test('the declarations are every anchor, the ones without an API description not followed, then each description', () => {
+    const anchors = catalogAnchors(
+      retainedCatalog({
+        linkset: [
+          { anchor: 'https://api.example.net/', 'service-desc': [{ href: 'https://specs.example.org/openapi.json' }] },
+          { anchor: 'https://status.example.net/' },
+        ],
+      }),
+    );
+    expect(apiDeclarations(anchors)).toEqual([
+      { kind: 'api-anchor', url: 'https://api.example.net/', source: '/.well-known/api-catalog#/linkset/0' },
+      {
+        kind: 'api-anchor',
+        url: 'https://status.example.net/',
+        source: '/.well-known/api-catalog#/linkset/1',
+        not_followed: 'no-service-desc',
+      },
+      {
+        kind: 'api-description',
+        url: 'https://specs.example.org/openapi.json',
+        source: '/.well-known/api-catalog#/linkset/0/service-desc/0',
+      },
+    ]);
   });
 });
 

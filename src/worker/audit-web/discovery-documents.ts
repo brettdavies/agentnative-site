@@ -113,12 +113,18 @@ export function catalogCardEntries(catalog: JsonObject): CatalogCardEntry[] {
   return out;
 }
 
-/** An MCP endpoint or a card document that a discovery document names. */
-export interface McpDeclaration {
-  kind: 'mcp-endpoint' | 'card-document';
+/** A URL a discovery document names, which the follow slice settles when it is off the audited origin. */
+export interface Declaration {
+  kind: 'mcp-endpoint' | 'card-document' | 'api-anchor' | 'api-description';
   url: string;
-  /** Where it was declared: a path on the audited origin, or an AI catalog entry as a JSON Pointer. */
+  /** Where it was declared: a path on the audited origin, or a catalog entry as a JSON Pointer. */
   source: string;
+  not_followed?: 'templated-url' | 'beyond-endpoint-of-record' | 'no-service-desc';
+}
+
+/** An MCP endpoint or a card document that a discovery document names. */
+export interface McpDeclaration extends Declaration {
+  kind: 'mcp-endpoint' | 'card-document';
   not_followed?: 'templated-url' | 'beyond-endpoint-of-record';
 }
 

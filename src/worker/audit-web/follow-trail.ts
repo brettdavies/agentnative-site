@@ -3,7 +3,7 @@
 // the refusals settled before any request, which no response can change.
 
 import { CANONICAL_SITE_URL } from '../../shared/site-url';
-import { isTemplatedUrl, type McpDeclaration, sameOrigin } from './discovery-documents';
+import { type Declaration, isTemplatedUrl, sameOrigin } from './discovery-documents';
 import { hostOf } from './provenance';
 import { type AdmittedBy, normalizeEndpointUrl } from './reciprocity';
 import { parseIpv4Literal, validatePublicUrl } from './ssrf';
@@ -19,12 +19,17 @@ export type TrailOutcome =
   | 'unreachable'
   | 'budget-exceeded';
 export type BudgetCause = 'per-audit-cap' | 'slice' | 'domain-budget';
-export type NotFollowedReason = 'templated-url' | 'self-path' | 'beyond-endpoint-of-record' | 'follow-disabled';
+export type NotFollowedReason =
+  | 'templated-url'
+  | 'self-path'
+  | 'beyond-endpoint-of-record'
+  | 'follow-disabled'
+  | 'no-service-desc';
 
 /** One declared URL and how the audit treated it. */
 export type TrailEntry = {
   surface: string;
-  kind: McpDeclaration['kind'];
+  kind: Declaration['kind'];
   url: string;
   host?: string;
   final_url?: string;
@@ -37,16 +42,16 @@ export type TrailEntry = {
 export type Settled = Pick<TrailEntry, 'final_url' | 'outcome' | 'admitted_by' | 'cause' | 'reason'>;
 
 /** One trail entry per declared URL: the key a declaration and its entry share. */
-export function declarationKey(declaration: Pick<McpDeclaration, 'kind' | 'url'>): string {
+export function declarationKey(declaration: Pick<Declaration, 'kind' | 'url'>): string {
   return `${declaration.kind} ${normalizeEndpointUrl(declaration.url) ?? declaration.url}`;
 }
 
 /** A declaration names a host other than the audited one: off its origin, or a template it cannot be placed on. */
-export function declaresHost(declaration: McpDeclaration, base: string): boolean {
+export function declaresHost(declaration: Declaration, base: string): boolean {
   return !sameOrigin(declaration.url, base);
 }
 
-export function trailEntry(declaration: McpDeclaration, settled: Settled): TrailEntry {
+export function trailEntry(declaration: Declaration, settled: Settled): TrailEntry {
   const host = hostOf(declaration.url);
   return {
     surface: declaration.source,
@@ -82,7 +87,7 @@ const UNREQUESTABLE: Settled = { outcome: 'reciprocity-refused' };
  * Where the URL may not be requested at all, or null when it may. The
  * auditor's own zone admits only its canonical MCP endpoint.
  */
-export function refusal(url: string, kind: McpDeclaration['kind']): Settled | null {
+export function refusal(url: string, kind: Declaration['kind']): Settled | null {
   const validated = validatePublicUrl(url);
   if (!validated.ok) return validated.refused === 'host' ? { outcome: 'blocked' } : UNREQUESTABLE;
   if (isIpLiteral(validated.url.hostname)) return { outcome: 'blocked' };
@@ -100,7 +105,7 @@ export function refusal(url: string, kind: McpDeclaration['kind']): Settled | nu
  * hop that names a host records it as the final URL, so the rows read as the
  * host the redirect led to rather than the one that sent it there.
  */
-export function hopRefusal(hop: string, kind: McpDeclaration['kind']): Settled | null {
+export function hopRefusal(hop: string, kind: Declaration['kind']): Settled | null {
   const refused = hop === '' ? UNREQUESTABLE : refusal(hop, kind);
   if (refused === null) return null;
   return hostOf(hop) ? { final_url: hop, ...refused } : refused;
@@ -108,7 +113,7 @@ export function hopRefusal(hop: string, kind: McpDeclaration['kind']): Settled |
 
 /** What a declaration settles to before the slice runs, or null when the slice must request it. */
 export function settledUpfront(
-  declaration: McpDeclaration,
+  declaration: Declaration,
   input: { enabled: boolean; entryEndpointDeclared: boolean },
 ): Settled | null {
   if (declaration.not_followed !== undefined) return { outcome: 'not-followed', reason: declaration.not_followed };
@@ -119,7 +124,7 @@ export function settledUpfront(
 }
 
 /** The declarations in order, each URL kept at its first place. */
-export function unique(declarations: readonly McpDeclaration[]): McpDeclaration[] {
+export function unique<T extends Declaration>(declarations: readonly T[]): T[] {
   const keys = new Set<string>();
   return declarations.filter((declaration) => {
     const key = declarationKey(declaration);

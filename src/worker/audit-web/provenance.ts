@@ -2,12 +2,18 @@
 // and the tolerant reads every surface applies to a stored scorecard that
 // may predate the provenance, follow-state, trail, or registry fields.
 
-import type { EvidenceItem } from './handlers/types';
+import { type FindingStatus, NA_REASONS, type NaReason } from '../../shared/web-audit-findings';
+import { worstTargetStatus } from './handlers/shared';
+import type { EvidenceItem, ProbeStatus } from './handlers/types';
 
-/** One host a row's evidence was requested from. */
+/** One host a row's evidence was requested from; on a row over several targets, also that host's own outcome. */
 export interface RowHost {
   host: string;
+  status?: FindingStatus;
+  na_reason?: NaReason;
 }
+
+const TARGET_STATUSES: readonly ProbeStatus[] = ['pass', 'noncompliant', 'broken', 'absent', 'na', 'error'];
 
 /** One entry of the declared-hosts trail. */
 export type DeclaredHostEntry = Record<string, unknown>;
@@ -33,21 +39,44 @@ function itemHost(item: EvidenceItem): string | null {
   return typeof item.host === 'string' && item.host.length > 0 ? item.host : null;
 }
 
+type HostOutcome = { statuses: ProbeStatus[]; na_reason?: NaReason };
+
+function hostEntry(host: string, outcome: HostOutcome | undefined): RowHost {
+  if (outcome === undefined) return { host };
+  const status = worstTargetStatus(outcome.statuses);
+  if (status !== 'na') return { host, status };
+  return { host, status: 'n_a', ...(outcome.na_reason !== undefined ? { na_reason: outcome.na_reason } : {}) };
+}
+
 /**
  * The distinct hosts a row's evidence was requested from, in evidence
  * order, plus `host` when there is exactly one. An item the SSRF guard
  * refused never reached its host, so it names none. An item with no URL
  * that names a `host` is a row a declared host kept from being evaluated,
- * and it names that host.
+ * and it names that host. A row that evaluated several targets on more
+ * than one host (the API anchors) gives each host its own outcome, read
+ * from its items' `target_status`.
  */
 export function rowHostFields(evidence: readonly EvidenceItem[]): { hosts: RowHost[]; host?: string } {
   const hosts: string[] = [];
+  const outcomes = new Map<string, HostOutcome>();
   for (const item of evidence) {
     if (item.blocked !== undefined) continue;
     const host = itemHost(item);
-    if (host !== null && !hosts.includes(host)) hosts.push(host);
+    if (host === null) continue;
+    if (!hosts.includes(host)) hosts.push(host);
+    const status = TARGET_STATUSES.find((s) => s === item.target_status);
+    if (status === undefined) continue;
+    const outcome = outcomes.get(host) ?? { statuses: [] };
+    outcome.statuses.push(status);
+    outcome.na_reason ??= NA_REASONS.find((reason) => reason === item.na_reason);
+    outcomes.set(host, outcome);
   }
-  return { hosts: hosts.map((host) => ({ host })), ...(hosts.length === 1 ? { host: hosts[0] } : {}) };
+  const perHost = hosts.length > 1 && hosts.every((host) => outcomes.has(host));
+  return {
+    hosts: hosts.map((host) => (perHost ? hostEntry(host, outcomes.get(host)) : { host })),
+    ...(hosts.length === 1 ? { host: hosts[0] } : {}),
+  };
 }
 
 /** The audited host of a stored scorecard, read from its target URL. */

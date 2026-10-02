@@ -10,7 +10,7 @@ import { guardedFetch } from '../ssrf';
 import { endpointRedirects, resolveUrl, sameOriginRecoveryLink, substituteEndpoint, timeoutMsFor } from './shared';
 import type { EvidenceItem, HandlerContext, ProbeOutcome, ProbeStatus } from './types';
 
-type HttpWith = {
+export type HttpWith = {
   path?: string;
   path_any?: string[];
   method?: string;
@@ -32,7 +32,7 @@ type HttpWith = {
  * opted into an explicit hang-detection budget via `with.timeout` (e.g.
  * mcp-get-fast-fail, whose failure mode IS the held-open hang).
  */
-function classifyMiss(
+export function classifyMiss(
   resp: { status: number | null; error: string | null },
   expect: ExpectBlock,
   hasExplicitTimeout: boolean,
@@ -46,7 +46,7 @@ function classifyMiss(
 }
 
 /** One response asserted against the check's expectations, as its evidence row. */
-function assessResponse(
+export function assessResponse(
   url: string,
   resp: ProbeResponse,
   w: HttpWith,
@@ -69,6 +69,7 @@ function assessResponse(
       why: reasons,
       elapsed_ms: resp.elapsed_ms,
       error: resp.error,
+      ...(resp.truncated ? { truncated: true } : {}),
       ...(w.retain_body && ok ? { body: resp.body } : {}),
     },
   };

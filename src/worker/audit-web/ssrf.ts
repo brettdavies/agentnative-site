@@ -382,6 +382,8 @@ export const AUDIT_PROBE_MAX_BODY_BYTES = 64 * 1024;
 export const DOCUMENT_MAX_BODY_BYTES = 256 * 1024;
 /** Cap for an RFC 9728 protected-resource metadata document. */
 export const METADATA_MAX_BODY_BYTES = 64 * 1024;
+/** Cap for an OpenAPI description the API catalog declares. */
+export const OPENAPI_MAX_BODY_BYTES = 512 * 1024;
 
 type BodyRead = { body: string; truncated: boolean };
 

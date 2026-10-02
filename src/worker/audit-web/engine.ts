@@ -28,10 +28,12 @@ import {
   WAVE1_CHECK_IDS,
 } from './antecedents';
 import { isApiAnchor } from './api-catalog';
+import { apiTargets } from './api-targets';
 import type { ProbeResponse } from './assert';
 import { readDiscoveryDocuments } from './discovery';
 import { settleEndpointOfRecord } from './endpoint-of-record';
 import { ALWAYS_ADMIT_BUDGET, type DomainBudget } from './follow-requests';
+import { apiDescriptionBodies, runApiDescription } from './handlers/api-description';
 import { runApiHygiene } from './handlers/api-hygiene';
 import { runAuthMd } from './handlers/auth-md';
 import { runContentWithoutJs } from './handlers/content-without-js';
@@ -118,6 +120,7 @@ const HANDLERS: Partial<Record<WebCheck['handler'], Handler>> = {
 const EVAL_RULE_HANDLERS: Partial<Record<NonNullable<WebCheck['eval']>, Handler>> = {
   'legacy-alias-redirects': runLegacyAliasRedirects,
   'retained-document': runRetainedDocument,
+  'api-description': runApiDescription,
 };
 
 function retainedBody(sources: ReadonlyMap<string, ProbeOutcome>, checkId: string): string {
@@ -217,8 +220,9 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
     return `${decisive.url ?? check.id} -> ${decisive.status ?? 'error'}${note ? ` (${note})` : ''}`;
   }
 
-  // http
-  const evidenceItem = outcome.status === 'pass' ? (outcome.evidence.find((e) => e.ok) ?? first) : first;
+  // http. A row over several targets names the target that decided it.
+  const decisive = outcome.evidence.find((e) => e.target_status === outcome.status);
+  const evidenceItem = decisive ?? (outcome.status === 'pass' ? (outcome.evidence.find((e) => e.ok) ?? first) : first);
   if (evidenceItem.error) return `${evidenceItem.url}: ${evidenceItem.error}`;
   const why = (evidenceItem.why as string[] | undefined)?.[
     ((evidenceItem.why as string[] | undefined)?.length ?? 1) - 1
@@ -359,6 +363,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     ...phaseOptions,
   });
   yield { type: 'discovery', endpoint: declared.endpoint, evidence: discovery.evidence };
+  const api = apiTargets(base, discovery.apiAnchors, declared.api);
 
   // Nothing from the target itself answered: it is unreachable from the
   // auditor's vantage point. Any real response, even a 401 or 404, is
@@ -393,6 +398,8 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   let mcpAuth: McpAuthRequired | null = null;
   let mcpSignIn: HandlerContext['mcpSignIn'];
   const requestTimeoutMs = (): number => Math.min(perCheckTimeoutMs, Math.max(1, deadline - now()));
+  let descriptionBodies: ReadonlyMap<string, string> = new Map();
+  const apiHostProbes = new Map<string, Promise<ProbeResponse>>();
 
   const handlerCtx = (): HandlerContext => ({
     base,
@@ -405,6 +412,9 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     scopedDirs,
     retainedBodies,
     retainedDocuments: discovery.documents,
+    apiTargets: api,
+    apiDescriptionBodies: descriptionBodies,
+    apiHostProbes,
     fetchOptions: input.fetchOptions,
     mcpSessionId,
     mcpLanes,
@@ -481,6 +491,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   if (llmsTxtBody.length > 0) retainedBodies.set('llms-txt', llmsTxtBody);
   const openapiBody = retainedBody(sources, 'openapi');
   if (openapiBody.length > 0) retainedBodies.set('openapi', openapiBody);
+  descriptionBodies = apiDescriptionBodies(sources.get('openapi')?.evidence ?? []);
   mcpSessionId = mcpSessionIdFrom(sources.get('mcp-initialize'));
   mcpLanes = {
     modern: mcpModernLaneFrom(sources.get('mcp-server-discover')),

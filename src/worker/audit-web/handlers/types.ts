@@ -6,6 +6,7 @@
 
 import type { RetainedDocumentKey } from '../../../shared/web-audit-documents';
 import type { NaReason } from '../../../shared/web-audit-findings';
+import type { ApiTargets } from '../api-targets';
 import type { ProbeResponse } from '../assert';
 import type { RetainedDocument } from '../discovery-documents';
 import type { SignInChallenge } from '../mcp-auth';
@@ -124,6 +125,15 @@ export interface HandlerContext {
   retainedBodies?: ReadonlyMap<string, string>;
   /** Documents discovery read and kept; a `retained-document` check scores one with no request. */
   retainedDocuments?: ReadonlyMap<RetainedDocumentKey, RetainedDocument>;
+  /**
+   * Where the API rows evaluate when the API catalog lists API anchors;
+   * null or absent when it lists none and they evaluate the audited origin.
+   */
+  apiTargets?: ApiTargets | null;
+  /** The OpenAPI descriptions the wave-1 row retained, by declared URL, for the hygiene probes' URL. */
+  apiDescriptionBodies?: ReadonlyMap<string, string>;
+  /** The GET each API anchor host receives, by URL, which both hygiene rows read. */
+  apiHostProbes?: Map<string, Promise<ProbeResponse>>;
   /**
    * Session id from wave-1 MCP initialize (`Mcp-Session-Id`), or null when
    * the server is stateless. Wave-2 MCP probes send it when present.

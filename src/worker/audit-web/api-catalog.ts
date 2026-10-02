@@ -1,11 +1,20 @@
 // The RFC 9727 API catalog as the API category reads it: which linkset
-// anchors are API hosts, and which description each declares.
+// anchors are API hosts, which description each declares, and what the
+// catalog names for the follow slice to settle.
 //
 // An anchor is an API host when one of its `service-desc` targets is a
 // description other than an MCP surface: an MCP-first site points
-// service-desc at its server card, which describes no REST API.
+// service-desc at its server card, which describes no REST API. Every
+// other anchor is still declared, and recorded not followed, so the trail
+// shows what the catalog named and why the audit left it alone.
 
-import { isJsonObject, isTemplatedUrl, parseJsonObject, type RetainedDocument } from './discovery-documents';
+import {
+  type Declaration,
+  isJsonObject,
+  isTemplatedUrl,
+  parseJsonObject,
+  type RetainedDocument,
+} from './discovery-documents';
 import { resolveUrl } from './handlers/shared';
 
 // RFC 9727 fixes the API catalog's location.
@@ -30,6 +39,11 @@ export interface CatalogAnchor extends CatalogLink {
 
 /** An anchor the API category evaluates. */
 export type ApiAnchor = CatalogAnchor & { description: CatalogLink };
+
+export interface ApiDeclaration extends Declaration {
+  kind: 'api-anchor' | 'api-description';
+  not_followed?: 'no-service-desc';
+}
 
 export function isApiAnchor(anchor: CatalogAnchor): anchor is ApiAnchor {
   return anchor.description !== undefined;
@@ -65,4 +79,25 @@ export function catalogAnchors(catalog: RetainedDocument | undefined): CatalogAn
     anchors.push({ url, source: pointer, ...(description !== undefined ? { description } : {}) });
   }
   return anchors;
+}
+
+/** What the catalog declares, in the order the follow slice admits it: every anchor, then each API description. */
+export function apiDeclarations(anchors: readonly CatalogAnchor[]): ApiDeclaration[] {
+  return [
+    ...anchors.map(
+      (anchor): ApiDeclaration => ({
+        kind: 'api-anchor',
+        url: anchor.url,
+        source: anchor.source,
+        ...(isApiAnchor(anchor) ? {} : { not_followed: 'no-service-desc' as const }),
+      }),
+    ),
+    ...anchors.filter(isApiAnchor).map(
+      (anchor): ApiDeclaration => ({
+        kind: 'api-description',
+        url: anchor.description.url,
+        source: anchor.description.source,
+      }),
+    ),
+  ];
 }

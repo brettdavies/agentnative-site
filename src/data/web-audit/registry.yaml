@@ -34,7 +34,10 @@
 #   antecedent  runtime gate that flips the check to n_a when unmet
 #               (resolution table in src/worker/audit-web/antecedents.ts)
 #   eval        optional non-standard evaluation rule; retained-document scores
-#               the document discovery kept under with.retained, with no request
+#               the document discovery kept under with.retained, with no request;
+#               api-description scores the OpenAPI description each api-catalog
+#               API anchor declares, wherever it is hosted, and probes path_any on
+#               the audited origin only when the catalog lists no API anchor
 #   lane        mcp checks only: the protocol lane (a key of mcp_lanes) the
 #               row groups under on the result page and its markdown twin
 #   weight      integer registry weight (scoring uses per-tier config weights;
@@ -134,6 +137,7 @@ checks:
     weight: 2
     title: An OpenAPI description is published
     breadcrumb: OpenAPI description
+    eval: api-description
     handler: http
     with:
       path_any: [/openapi.json, /openapi.yaml, /.well-known/openapi.json]
