@@ -453,4 +453,33 @@ describe('API category on api-catalog anchors', () => {
     expect(requestsTo(seen, 'www.example.org')).toEqual([]);
     expect(row(scorecard, 'json-errors')).toMatchObject({ host: API });
   });
+
+  test("an anchor and a description in the auditor's own zone get no description read and no hygiene GET", async () => {
+    const seen: Seen[] = [];
+    const { scorecard } = await auditApi(
+      site(() => linkset(anchor('https://api.anc.dev/', 'https://anc.dev/openapi.json'))),
+      seen,
+    );
+    expect(seen.filter((r) => new URL(r.url).hostname.endsWith('anc.dev'))).toEqual([]);
+    expect(scorecard.declared_hosts?.map((entry) => [entry.kind, entry.outcome, entry.reason])).toEqual([
+      ['api-anchor', 'not-followed', 'self-path'],
+      ['api-description', 'not-followed', 'self-path'],
+    ]);
+    for (const id of ['openapi', 'json-errors', 'rate-limit-headers']) expect(row(scorecard, id).status).toBe('n_a');
+  });
+
+  test('an anchor on an IP literal and a description on localhost are blocked and never requested', async () => {
+    const seen: Seen[] = [];
+    const { scorecard } = await auditApi(
+      site(() => linkset(anchor('https://127.0.0.1/', 'http://localhost/openapi.json'))),
+      seen,
+    );
+    expect(seen.filter((r) => new URL(r.url).host !== 'example.com')).toEqual([]);
+    expect(scorecard.declared_hosts?.map((entry) => [entry.kind, entry.outcome])).toEqual([
+      ['api-anchor', 'blocked'],
+      ['api-description', 'blocked'],
+    ]);
+    expect(row(scorecard, 'openapi')).toMatchObject({ status: 'n_a', na_reason: 'declared-host-blocked' });
+    expect(row(scorecard, 'json-errors')).toMatchObject({ status: 'n_a', na_reason: 'declared-host-blocked' });
+  });
 });
