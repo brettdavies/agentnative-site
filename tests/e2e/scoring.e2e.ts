@@ -8,7 +8,8 @@
 // bounce, the verification wait state, the inline collision that survives a
 // reload, the website result that saved nothing rendering in place with Run
 // again repeating the opt-out, the entry form's opt-out reaching the POST,
-// a later followed submit superseding a kept opted-out result, and that the
+// a later followed submit superseding a kept opted-out result, a reload mid
+// opt-out run keeping the opt-out on the probe and on Start, and that the
 // page never loads the WebMCP script.
 
 import { expect, type Page, test } from '@playwright/test';
@@ -386,6 +387,45 @@ test.describe('/scoring progress page', () => {
     expect(posts[1]).toMatchObject({ target: 'stripe.dev', turnstile_token: 'fake-token' });
     expect(posts[1]).not.toHaveProperty('follow_declarations');
     await page.waitForURL('**/score/stripe.dev');
+  });
+
+  test('a reload mid opt-out run keeps the opt-out: the probe and Start both send follow_declarations false', async ({
+    page,
+  }) => {
+    await mockTurnstile(page);
+    const posts: Array<Record<string, unknown>> = [];
+    let release: () => void = () => {};
+    const running = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // The server's answer to a tokenless opted-out probe, then the run Start begins.
+    const later = [
+      json(403, { error: { code: 'turnstile_failed', message: 'Verification failed.', cta: 'Start the audit.' } }),
+      transientRun('stripe.dev'),
+    ];
+    await page.route('**/api/score', async (route) => {
+      const n = posts.push(route.request().postDataJSON() as Record<string, unknown>);
+      if (n === 1) {
+        // The first run is still going when the visitor reloads; the reload cancels this request.
+        await running;
+        await route.fulfill(transientRun('stripe.dev')).catch(() => {});
+        return;
+      }
+      await route.fulfill(later[Math.min(n - 2, later.length - 1)]);
+    });
+    await submitWebsite(page, 'stripe.dev', false);
+    await expect.poll(() => posts.length).toBe(1);
+    expect(posts[0]).toMatchObject({ follow_declarations: false });
+    await page.reload();
+    release();
+    await expect.poll(() => posts.length).toBe(2);
+    expect(posts[1]).toEqual({ target: 'stripe.dev', follow_declarations: false });
+    const start = page.locator('[data-scoring-start]');
+    await expect(start).toHaveText('Start');
+    await start.click();
+    await expect.poll(() => posts.length).toBe(3);
+    expect(posts[2]).toEqual({ target: 'stripe.dev', turnstile_token: 'fake-token', follow_declarations: false });
+    await expect(page.locator('.e2e-transient')).toBeVisible();
   });
 
   test('the page never loads the WebMCP script', async ({ page }) => {

@@ -7,9 +7,12 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { _resetStartAuditForTests, startAudit } from '../src/client/audit-start';
 import {
+  buildProbeBody,
   buildScoreBody,
   clearInlineResult,
   enteredLaneOf,
+  followOf,
+  rememberFollow,
   STASH_TTL_MS,
   stash,
   stashInlineResult,
@@ -105,6 +108,27 @@ describe('stash and take', () => {
     expect(takeInlineResult('other.dev')).toEqual({ html: '<article>kept</article>', follow: false });
   });
 
+  test('the follow choice outlives the single-use stash under its TTL, so a refresh mid-run repeats it', () => {
+    stash('stripe.dev', { token: 'tok', listing: null, follow: false, entered_lane: 'web', refresh: false });
+    take('stripe.dev');
+    expect(followOf('stripe.dev')).toBe(false);
+    stash('stripe.dev', { token: 'tok', listing: null, follow: true, entered_lane: 'web', refresh: false });
+    expect(followOf('stripe.dev')).toBe(true);
+    rememberFollow('stripe.dev', false);
+    expect(followOf('stripe.dev')).toBe(false);
+    expect(followOf('never.dev')).toBeNull();
+  });
+
+  test('an expired, corrupt, or malformed follow entry is absent and removed', () => {
+    rememberFollow('old.dev', false, Date.now() - STASH_TTL_MS - 1);
+    sessionStorage.setItem('audit-follow:corrupt.dev', 'not json');
+    sessionStorage.setItem('audit-follow:odd.dev', JSON.stringify({ follow: 'no', ts: Date.now() }));
+    for (const target of ['old.dev', 'corrupt.dev', 'odd.dev']) {
+      expect(followOf(target)).toBeNull();
+      expect(sessionStorage.getItem(`audit-follow:${target}`)).toBeNull();
+    }
+  });
+
   test('the follow choice round-trips through the stash, and a record without one follows', () => {
     stash('stripe.dev', { token: 'tok', listing: null, follow: false, entered_lane: 'web', refresh: false });
     expect(take('stripe.dev')).toMatchObject({ follow: false, listing: null });
@@ -155,6 +179,11 @@ describe('buildScoreBody', () => {
       { acquire: async () => 'tok', navigate: () => {} },
     );
     expect(take('stripe.dev')?.follow).toBe(true);
+  });
+
+  test('the tokenless probe carries an opt-out as false and omits the field when following', () => {
+    expect(buildProbeBody('stripe.dev', false)).toEqual({ target: 'stripe.dev', follow_declarations: false });
+    expect(buildProbeBody('stripe.dev', true)).toEqual({ target: 'stripe.dev' });
   });
 
   test('refresh rides only when set and the token and target are always present', () => {

@@ -4,12 +4,15 @@
 // and per origin, so a copied stash fails siteverify on second use and the
 // page shows Start instead.
 //
-// Three keys per target:
+// Four keys per target:
 //
 //   audit-stash:<target>   the click's record, taken once, dead after the TTL
 //   audit-lane:<target>    the lane the visitor had selected, kept under the
 //                          same TTL so a refreshed progress page can still
 //                          name the reclassification
+//   audit-follow:<target>  the follow choice of the run the tab last started,
+//                          kept under the same TTL so a progress page
+//                          refreshed mid-run repeats it on every request
 //   audit-inline:<target>  a result body with no URL of its own and the
 //                          follow choice that produced it, kept so a same-tab
 //                          refresh restores it instead of Start and Run again
@@ -22,6 +25,7 @@ import type { Lane } from '../shared/audit-routes';
 
 const STASH_PREFIX = 'audit-stash:';
 const LANE_PREFIX = 'audit-lane:';
+const FOLLOW_PREFIX = 'audit-follow:';
 const INLINE_PREFIX = 'audit-inline:';
 
 // A carried token must reach the progress page's POST inside Turnstile's
@@ -74,7 +78,13 @@ export function stash(target: string, record: StashRecord, now: number = Date.no
   const stored: StoredRecord = { ...record, ts: now };
   write(STASH_PREFIX + target, JSON.stringify(stored));
   write(LANE_PREFIX + target, JSON.stringify({ lane: record.entered_lane, ts: now }));
+  rememberFollow(target, record.follow, now);
   remove(INLINE_PREFIX + target);
+}
+
+/** Keep the follow choice of the run this tab is starting, so a refresh mid-run repeats it. */
+export function rememberFollow(target: string, follow: boolean, now: number = Date.now()): void {
+  write(FOLLOW_PREFIX + target, JSON.stringify({ follow, ts: now }));
 }
 
 function isLane(value: unknown): value is Lane {
@@ -107,19 +117,33 @@ export function take(target: string, now: number = Date.now()): StashRecord | nu
   return raw ? parseRecord(raw, now) : null;
 }
 
-/** The lane the visitor had selected for this target, if a click recorded one inside the TTL. */
-export function enteredLaneOf(target: string, now: number = Date.now()): Lane | null {
-  const key = LANE_PREFIX + target;
+type KeptRecord = { [field: string]: unknown };
+
+/** A value kept beside the stash under its TTL; an absent, stale, corrupt, or invalid entry is null and removed. */
+function readKept<T>(key: string, now: number, pick: (record: KeptRecord) => T | null): T | null {
   const raw = read(key);
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as { lane?: unknown; ts?: unknown };
-    if (isLane(parsed.lane) && typeof parsed.ts === 'number' && now - parsed.ts < STASH_TTL_MS) return parsed.lane;
+    const parsed = JSON.parse(raw) as KeptRecord | null;
+    if (parsed && typeof parsed.ts === 'number' && now - parsed.ts < STASH_TTL_MS) {
+      const value = pick(parsed);
+      if (value !== null) return value;
+    }
   } catch {
     // Corrupt entry: treated as absent and removed below.
   }
   remove(key);
   return null;
+}
+
+/** The lane the visitor had selected for this target, if a click recorded one inside the TTL. */
+export function enteredLaneOf(target: string, now: number = Date.now()): Lane | null {
+  return readKept(LANE_PREFIX + target, now, (record) => (isLane(record.lane) ? record.lane : null));
+}
+
+/** The follow choice of the run this tab last started for the target inside the TTL; null when none. */
+export function followOf(target: string, now: number = Date.now()): boolean | null {
+  return readKept(FOLLOW_PREFIX + target, now, (record) => (typeof record.follow === 'boolean' ? record.follow : null));
 }
 
 /** A result body with no URL of its own, and the follow choice of the run that produced it. */
@@ -147,6 +171,17 @@ export function takeInlineResult(target: string): InlineResult | null {
 /** Drop the kept result body; every terminal event calls this. */
 export function clearInlineResult(target: string): void {
   remove(INLINE_PREFIX + target);
+}
+
+export type ProbeRequestBody = { target: string; follow_declarations?: false };
+
+/**
+ * The tokenless probe body. An opt-out rides on it as on a click, so the
+ * server answers the probe as the run the visitor chose: an opted-out probe
+ * is never served a stored followed result or joined to a followed run.
+ */
+export function buildProbeBody(target: string, follow: boolean): ProbeRequestBody {
+  return follow ? { target } : { target, follow_declarations: false };
 }
 
 export type ScoreRequestBody = {

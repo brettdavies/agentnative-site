@@ -6,6 +6,9 @@
 //     |-- a result kept for this target (no URL of its own) ... restore it
 //     |-- a stashed click ...................................... POST with its token
 //     '-- otherwise ............................................ POST without one (probe)
+//   every request carries the follow choice of the run the tab last started,
+//   so a refresh mid-run neither drops an opt-out nor answers it with a
+//   followed result
 //   answer
 //     |-- JSON 200 envelope ....... hit: the reward or cached line, forward after the floor
 //     |-- JSON 202 in progress .... ask again every 3 s until the answer changes
@@ -27,9 +30,12 @@ import { apiScorePath, type Lane, scoreMarkdownPath } from '../shared/audit-rout
 import { ndjsonValues } from '../shared/ndjson';
 import { CLI_PHASE_LABEL, LANE_EXPECTATION, LANE_LABEL, RECLASSIFIED } from '../shared/scoring-copy';
 import {
+  buildProbeBody,
   buildScoreBody,
   clearInlineResult,
   enteredLaneOf,
+  followOf,
+  rememberFollow,
   stashInlineResult,
   take,
   takeInlineResult,
@@ -84,6 +90,7 @@ class ScoringRun {
   ) {}
 
   begin(): void {
+    this.follow = followOf(this.target) ?? true;
     const kept = takeInlineResult(this.target);
     if (kept) {
       this.follow = kept.follow;
@@ -106,7 +113,8 @@ class ScoringRun {
   }
 
   private async post(token: string | null, choice: Choice | null): Promise<void> {
-    const body = token && choice ? buildScoreBody(this.target, token, choice) : { target: this.target };
+    const body =
+      token && choice ? buildScoreBody(this.target, token, choice) : buildProbeBody(this.target, this.follow);
     // Each attempt owns the floor and the count: a second run behind Run again
     // would otherwise forward at once and carry the first run's checks on.
     this.requestedAt = Date.now();
@@ -386,6 +394,7 @@ class ScoringRun {
     this.view.state('running');
     this.view.actions({ start: null, other: false });
     this.view.say('Queued…');
+    rememberFollow(this.target, this.follow);
     await this.post(token, { listing: null, refresh: this.refresh, follow: this.follow });
   }
 }
