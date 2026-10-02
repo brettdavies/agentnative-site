@@ -612,8 +612,8 @@ The funnel's shared surfaces carry this plan's fields, and the units edit them i
   single site could earn at full access: every registry check, except that checks forming alternatives (site designs
   that cannot both be satisfied at full access; an access limit never forms or joins a group, KTD25) count only the
   alternatives the site presents, or the largest alternative when it presents none. MCP access is the one group:
-  `protected` (the `mcp-auth-required` checks) and `open` (no checks of its own, presented when a handshake answered
-  without sign-in). The session checks count for every site, so an open server's universe is 155, a protected or hybrid
+  `protected` (the `mcp-auth-required` checks) and `open` (no checks of its own, presented when any session check
+  was evaluated). The session checks count for every site, so an open server's universe is 155, a protected or hybrid
   server's 158, and a site without MCP 158, since the maximal site requires sign-in. On a public audit a protected
   server's session and handshake rows read auth-required and stay in its denominator like every access-limited row, so
   its public global tops out near 68; a local credentialed run evaluates them and can reach 100. Presentation is read
@@ -1149,7 +1149,7 @@ Phase C:
   6. Add corpus scenarios for a protected endpoint and an open one so each new check id is some scenario's subject, and
      regenerate (KTD22).
   7. Apply KTD24 and KTD25: declare the MCP access group in the registry (`protected` the sign-in checks; `open`
-     presented by a handshake answered without sign-in), make `universeMaxOf` count the alternatives the site presents
+     presented when any session check was evaluated), make `universeMaxOf` count the alternatives the site presents
      (or the largest when it presents none), cap global at 100, price `mcp-auth-servers` failures by what an agent at
      the vantage can use, write `vantage` public/false on every scorecard, and state the access rules and the protected
      public ceiling in the published scoring copy. Open MCP sites keep their universe, sites without MCP gain 3 points,
