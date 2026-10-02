@@ -7,8 +7,9 @@
 //   patchWebListing ........ the listing-only write, scored_at preserved
 //   runWebAuditStream ...... the engine as shared events, R2 write, purge,
 //                            aggregate rebuild, one terminal event; a run
-//                            that does not follow declared hosts writes
-//                            nothing and ends on a transient envelope
+//                            that does not follow declared hosts, or one a
+//                            declared domain's spent budget held back,
+//                            writes nothing and ends on a transient envelope
 //
 // The core never reads a token, a session, or a limiter; admission is the
 // caller's. It keeps stale-serve-when-disabled (a caller decides to serve
@@ -33,10 +34,11 @@ import {
   WEB_AUDIT_STALE_AFTER_MS,
 } from './cache';
 import { enrichWebScorecardForDisplay } from './display';
-import { type DomainBudgetEnv, declaredDomainBudget } from './domain-budget';
+import { type DomainBudgetEnv, declaredDomainBudget, domainBudgetRefusal } from './domain-budget';
 import { runWebAudit } from './engine';
 import { effectiveFollow, type FollowSwitchEnv } from './follow-switch';
 import { queueHitMinPurge, webDomainTag, webTag } from './hit-min-purge';
+import { hourWindowEndsAt } from './limiter';
 import { rowHostFields } from './provenance';
 import {
   decidePublicListingWrite,
@@ -247,14 +249,39 @@ function checkEvent(result: EngineResult): AuditEvent {
 }
 
 /**
+ * Why a followed run is not saved: a declared domain's spent hourly budget
+ * left rows unevaluated, so the site's saved scorecard stands. A site with
+ * none saved gets this run saved like any audit; the one-minute reuse
+ * window then bounds how long the budget-limited result is served.
+ */
+async function domainBudgetHold(
+  env: WebCoreEnv,
+  target: WebTarget,
+  scorecard: WebScorecard,
+): Promise<TransientReason | undefined> {
+  const domain = domainBudgetRefusal(scorecard);
+  if (domain === null) return undefined;
+  const saved = await readStoredWebAudit(env, target);
+  if (saved === null) return undefined;
+  return {
+    kind: 'domain-budget',
+    domain,
+    host: target.host,
+    savedScoredAt: saved.scored_at ?? null,
+    retryAt: hourWindowEndsAt(Date.now()),
+  };
+}
+
+/**
  * Run the engine and yield shared events: `discovery`, one `check` per
  * result, then one terminal event. A complete run is written to R2, the
  * board tags are queued for purge, the seeded aggregates are rebuilt, and
  * the terminal is `complete` carrying the live envelope; a complete run the
- * caller opted out of following writes, purges, and rebuilds nothing and
- * ends on the transient envelope; a deadline-bound run yields `incomplete`
- * and is never persisted; an unreachable target or a thrown engine yields
- * `error`.
+ * caller opted out of following, or one a declared domain's spent hourly
+ * budget held back from replacing a saved scorecard, writes, purges, and
+ * rebuilds nothing and ends on the transient envelope; a deadline-bound run
+ * yields `incomplete` and is never persisted; an unreachable target or a
+ * thrown engine yields `error`.
  */
 export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerator<AuditEvent> {
   const { env, target } = input;
@@ -298,7 +325,9 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
     const scoredAt = complete && scorecard ? new Date().toISOString() : null;
     if (scorecard && scoredAt) {
       const stamped = await withRegistryFingerprint(scorecard, registry);
-      const transient: TransientReason | undefined = input.followDeclarations ? undefined : { kind: 'opt-out' };
+      const transient: TransientReason | undefined = input.followDeclarations
+        ? await domainBudgetHold(env, target, stamped)
+        : { kind: 'opt-out' };
       if (!transient) {
         const wrote = await cachePut(env, target.canonical, stamped, SPEC_VERSION, scoredAt);
         if (wrote) queueHitMinPurge([webTag(), webDomainTag(target.host)]);

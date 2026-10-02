@@ -22,6 +22,8 @@ import { getDomain } from 'tldts';
 import { sha256Hex } from './cache';
 import type { DomainBudget, Reservation } from './follow-requests';
 import { readDeclaredDomainWindow } from './limiter';
+import { recordedHostsOf, rowHostOutcomes } from './provenance';
+import type { WebScorecard } from './scorecard';
 
 export interface DomainBudgetEnv {
   SCORE_KV?: KVNamespace;
@@ -72,4 +74,34 @@ export function declaredDomainBudget(env: DomainBudgetEnv, options: { hourlyCeil
       return { admitted: true };
     },
   };
+}
+
+const BUDGET_REASON = 'declared-host-budget-exceeded';
+
+/**
+ * The registrable domain whose spent hourly budget left rows of `scorecard`
+ * unevaluated, or null when none did. That refusal says nothing about the
+ * site, so a run it touched does not replace the site's saved scorecard. A
+ * refusal no row depended on, and rows the per-audit cap or the slice kept
+ * from a host, are a property of the run's own declarations and save as usual.
+ */
+export function domainBudgetRefusal(scorecard: Pick<WebScorecard, 'declared_hosts' | 'results'>): string | null {
+  const refused = new Map<string, string>();
+  for (const entry of scorecard.declared_hosts ?? []) {
+    if (entry.outcome !== 'budget-exceeded' || entry.cause !== 'domain-budget') continue;
+    const url = typeof entry.final_url === 'string' ? entry.final_url : entry.url;
+    if (typeof url !== 'string' || !URL.canParse(url)) continue;
+    const { host, hostname } = new URL(url);
+    refused.set(host, hostname);
+  }
+  if (refused.size === 0) return null;
+  for (const row of scorecard.results) {
+    const hosts = [
+      ...(row.na_reason === BUDGET_REASON ? recordedHostsOf(row) : []),
+      ...rowHostOutcomes(row).flatMap((outcome) => (outcome.na_reason === BUDGET_REASON ? [outcome.host] : [])),
+    ];
+    const hostname = hosts.map((host) => refused.get(host)).find((name) => name !== undefined);
+    if (hostname !== undefined) return registrableDomainOf(hostname);
+  }
+  return null;
 }

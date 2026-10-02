@@ -23,6 +23,7 @@ import {
 } from '../src/worker/audit-web/registry';
 import {
   auditDomainToCache,
+  type RescoreAuditOutcome,
   type RescoreStep,
   runWebRescore,
   type WebRescoreEnv,
@@ -31,7 +32,17 @@ import {
 import { isSeededDomain, loadWebSeed, resetWebSeedCacheForTests } from '../src/worker/audit-web/seed';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 import { budgetKeyPrefix, memoryRateLimit } from './helpers/domain-budget-fakes';
-import { aiCatalog, cardEntry, html, requestsTo, router, type Seen, sep2127Card } from './helpers/follow-fixtures';
+import {
+  aiCatalog,
+  cardEntry,
+  followRegistry,
+  html,
+  requestsTo,
+  router,
+  type Seen,
+  sep2127Card,
+} from './helpers/follow-fixtures';
+import { captureLogs } from './helpers/log-capture';
 
 function seedEntry(domain: string) {
   return { domain, url: `https://${domain}/`, name: domain, description: `about ${domain}` };
@@ -102,6 +113,28 @@ function makeKv(initial: Record<string, string> = {}): { kv: KVNamespace; map: M
   return { kv, map };
 }
 
+/**
+ * Fake WorkflowStep that retries a throwing closure as many times as the
+ * step's config allows, as the Workflows runtime does, so a test can count
+ * the audits a refusal costs.
+ */
+function makeRetryingStep(): RescoreStep {
+  return {
+    async do<T>(_name: string, configOrFn: unknown, maybeFn?: () => Promise<T>): Promise<T> {
+      const fn = (typeof configOrFn === 'function' ? configOrFn : maybeFn) as () => Promise<T>;
+      const limit =
+        typeof configOrFn === 'function' ? 0 : ((configOrFn as { retries?: { limit?: number } }).retries?.limit ?? 0);
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await fn();
+        } catch (err) {
+          if (attempt >= limit) throw err;
+        }
+      }
+    },
+  } as RescoreStep;
+}
+
 /** Fake WorkflowStep: records step names in execution order, runs closures inline. */
 function makeStep(): { step: RescoreStep; names: string[] } {
   const names: string[] = [];
@@ -128,10 +161,11 @@ function scorecardFor(domain: string, globalScore: number, relative = globalScor
 
 /** Injected audit: caches a deterministic scorecard, throwing for listed domains. */
 function stubAudit(scores: Record<string, number>, failFor: Set<string> = new Set()) {
-  return async (env: WebRescoreEnv, targetUrl: string): Promise<void> => {
+  return async (env: WebRescoreEnv, targetUrl: string): Promise<RescoreAuditOutcome> => {
     const domain = new URL(targetUrl).host;
     if (failFor.has(domain)) throw new Error(`boom: ${domain}`);
     await cachePut(env, targetUrl, scorecardFor(domain, scores[domain] ?? 0), SPEC_VERSION);
+    return { kind: 'saved' };
   };
 }
 
@@ -660,6 +694,55 @@ describe('the declared-domain budget on rescore audits', () => {
     const { trail, sent } = await rescoreDeclaring(env);
     expect(trail[0]).toMatchObject({ outcome: 'budget-exceeded', cause: 'domain-budget' });
     expect(sent).toBe(0);
+  });
+});
+
+describe("a declared domain's spent hourly budget on the reflow", () => {
+  const SPENT = 'https://mcp.spent.example/mcp';
+  const ROOM = 'https://mcp.room.example/mcp';
+
+  test('the seed is skipped on its one audit, keeps its saved scorecard, and charges its other domain once', async () => {
+    const { env, store } = makeEnv([seedEntry('example.com')], { registry: followRegistry() });
+    env.WEB_AUDIT_FOLLOW_ENABLED = 'true';
+    const hour = Math.floor(Date.now() / HOUR_MS);
+    const spent = await budgetKeyPrefix('spent.example');
+    const { kv, map } = makeKv({
+      'web_rescore:registry_fp': 'OLD',
+      [`${spent}${hour}`]: '9999',
+      [`${spent}${hour + 1}`]: '9999',
+    });
+    env.SCORE_KV = kv;
+    await primeCache(store, 'example.com', 60_000, 40);
+    const key = await keyFor('https://example.com/', SPEC_VERSION);
+    const saved = store.get(key);
+
+    const original = globalThis.fetch;
+    globalThis.fetch = router(
+      {
+        'GET https://example.com/': () => html(),
+        'GET https://example.com/.well-known/ai-catalog.json': () =>
+          aiCatalog(cardEntry({ data: sep2127Card(SPENT) }), cardEntry({ data: sep2127Card(ROOM) })),
+      },
+      [],
+    );
+    const logs = captureLogs();
+    let result: Awaited<ReturnType<typeof runWebRescore>>;
+    try {
+      result = await runWebRescore(env, makeRetryingStep(), { fingerprint: async () => 'NEW' });
+    } finally {
+      logs.restore();
+      globalThis.fetch = original;
+    }
+
+    expect({ audited: result.audited, skipped: result.skipped }).toEqual({ audited: [], skipped: ['example.com'] });
+    expect(store.get(key)).toBe(saved);
+    const records = logs.records.map((r) => r.record);
+    expect(records.filter((r) => r.scope === 'web-audit.run')).toHaveLength(1);
+    expect(records.filter((r) => r.scope === 'web-rescore')).toEqual([
+      { scope: 'web-rescore', domain: 'example.com', cause: 'domain-budget' },
+    ]);
+    const room = await budgetKeyPrefix('room.example');
+    expect([...map.entries()].filter(([k]) => k.startsWith(room)).map(([, units]) => units)).toEqual(['1']);
   });
 });
 

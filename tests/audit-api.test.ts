@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import type { AuditEvent } from '../src/shared/audit-events';
 import { streamedResultLine, streamedRowHost } from '../src/shared/scoring-copy';
 import { isAuditApiPath } from '../src/worker/audit/api';
-import { keyFor as webKeyFor } from '../src/worker/audit-web/cache';
+import { WEB_AUDIT_STALE_AFTER_MS, keyFor as webKeyFor, keyFor as webKeyFor } from '../src/worker/audit-web/cache';
 import { rowHostsOf } from '../src/worker/audit-web/provenance';
 import { registryFingerprintPrefix, type WebAuditRegistry } from '../src/worker/audit-web/registry';
 import { keyFor as cliKeyFor } from '../src/worker/score/cache';
@@ -853,6 +853,120 @@ describe('POST /api/score: the declared-domain budget', () => {
     const { trail, sent } = await followed({ kvSeed });
     expect(trail[0]).toMatchObject({ outcome: 'budget-exceeded', cause: 'domain-budget' });
     expect(sent).toBe(0);
+  });
+});
+
+describe("POST /api/score: a run a declared domain's spent hourly budget limited", () => {
+  const ENDPOINT = 'https://mcp.example.net/mcp';
+  const KEY = () => webKeyFor('https://example.com/', SPEC_VERSION);
+
+  // The declared domain's hour and the next one spent, so a run that crosses the hour still finds it spent.
+  async function spentBudget(): Promise<Record<string, string>> {
+    const prefix = await budgetKeyPrefix('example.net');
+    const hour = Math.floor(Date.now() / 3_600_000);
+    return { [`${prefix}${hour}`]: '9999', [`${prefix}${hour + 1}`]: '9999' };
+  }
+
+  // The endpoint env over a site declaring ENDPOINT, every R2 write recorded.
+  async function declaringEnv(opts: { prior?: unknown; kvSeed?: Record<string, string>; probe?: typeof fetch } = {}) {
+    const env = makeEnv({
+      followSwitch: 'true',
+      kvSeed: opts.kvSeed,
+      cacheContent: opts.prior === undefined ? {} : { [await KEY()]: opts.prior },
+      deps: { probeFetch: opts.probe ?? router(siteDeclaring(ENDPOINT), []) },
+    });
+    const puts: string[] = [];
+    const bucket = env.SCORE_CACHE;
+    const put = bucket.put.bind(bucket);
+    bucket.put = ((key: string, ...rest: Parameters<R2Bucket['put']> extends [string, ...infer R] ? R : never) => {
+      puts.push(key);
+      return put(key, ...rest);
+    }) as R2Bucket['put'];
+    return Object.assign(env, { puts });
+  }
+
+  async function audit(env: ReturnType<typeof makeEnv>) {
+    const { res, ctx } = await call(post({ target: 'example.com', turnstile_token: 'x' }), env);
+    expect(res.status).toBe(200);
+    await Promise.all(ctx._promises);
+    return (await res.json()) as Record<string, unknown> & {
+      scorecard: { follow_declarations?: boolean; declared_hosts?: Array<Record<string, unknown>> };
+    };
+  }
+
+  async function stored(env: ReturnType<typeof makeEnv>) {
+    const object = await env.SCORE_CACHE.get(await KEY());
+    return (await object?.json()) as { scored_at: string; scorecard: { declared_hosts?: unknown[] } } | undefined;
+  }
+
+  // The stored object's bytes, to show a run left it untouched.
+  async function storedText(env: ReturnType<typeof makeEnv>): Promise<string | undefined> {
+    return (await env.SCORE_CACHE.get(await KEY()))?.text();
+  }
+
+  const prior = () => ({ ...WEB_RECORD('example.com'), scored_at: new Date(Date.now() - 600_000).toISOString() });
+
+  test('returns the fresh result in place, keeps the saved scorecard, and writes nothing', async () => {
+    const saved = prior();
+    const env = await declaringEnv({ prior: saved, kvSeed: await spentBudget() });
+    const body = await audit(env);
+    expect(body).toMatchObject({ kind: 'web', tier: 'live', scorecard_url: null, markdown_url: null, json_url: null });
+    expect(body.scorecard.follow_declarations).toBe(true);
+    expect(body.scorecard.declared_hosts?.[0]).toMatchObject({ outcome: 'budget-exceeded', cause: 'domain-budget' });
+    const summary = String(body.summary_html);
+    expect(summary).toContain("Not saved: example.net reached anc's hourly probe limit;");
+    expect(summary).toContain('<a href="/score/example.com">the saved scorecard from');
+    expect(summary).toMatch(/Try again after <time datetime="[^"]+">\d{2}:00 UTC<\/time>\./);
+    expect(env.puts).toEqual([]);
+    expect(await storedText(env)).toBe(JSON.stringify(saved));
+  });
+
+  test('a run whose declared host the follow slice ran out of time for saves as any audit', async () => {
+    const saved = prior();
+    const probe = router(
+      {
+        ...siteDeclaring(ENDPOINT),
+        [`GET ${ENDPOINT}`]: () => {
+          setSystemTime(new Date(Date.now() + 7_000));
+          return new Response('not found', { status: 404 });
+        },
+      },
+      [],
+    );
+    const env = await declaringEnv({ prior: saved, probe });
+    try {
+      const body = await audit(env);
+      expect(body.scorecard_url).toBe('https://anc.dev/score/example.com');
+      expect(body.scorecard.declared_hosts?.[0]).toMatchObject({ outcome: 'budget-exceeded', cause: 'slice' });
+    } finally {
+      setSystemTime();
+    }
+    expect(env.puts).toEqual([await KEY()]);
+    expect((await stored(env))?.scorecard.declared_hosts?.[0]).toMatchObject({ cause: 'slice' });
+  });
+
+  test('a first audit saves as any audit: served inside the reuse window, audited again after it', async () => {
+    const env = await declaringEnv({ kvSeed: await spentBudget() });
+    try {
+      const first = await audit(env);
+      expect(first).toMatchObject({ tier: 'live', scorecard_url: 'https://anc.dev/score/example.com' });
+      const saved = await stored(env);
+      expect(saved?.scorecard.declared_hosts?.[0]).toMatchObject({
+        outcome: 'budget-exceeded',
+        cause: 'domain-budget',
+      });
+
+      setSystemTime(new Date(Date.now() + 30_000));
+      expect(await audit(env)).toMatchObject({ tier: 'cache', scorecard_url: 'https://anc.dev/score/example.com' });
+
+      const savedText = await storedText(env);
+      setSystemTime(new Date(Date.parse(saved?.scored_at ?? '') + WEB_AUDIT_STALE_AFTER_MS + 1_000));
+      const again = await audit(env);
+      expect(again).toMatchObject({ tier: 'live', scorecard_url: null });
+      expect(await storedText(env)).toBe(savedText);
+    } finally {
+      setSystemTime();
+    }
   });
 });
 

@@ -28,7 +28,7 @@ import { emitLog } from '../telemetry/log';
 import { rebuildWebAggregates, type WebAggregateEnv } from './aggregate';
 import { type AuditLogEnv, instrumentAuditEvents } from './audit-log';
 import { get as cacheGet, put as cachePut, canonicalTargetOf, isStale, keyFor } from './cache';
-import { type DomainBudgetEnv, declaredDomainBudget } from './domain-budget';
+import { type DomainBudgetEnv, declaredDomainBudget, domainBudgetRefusal } from './domain-budget';
 import { runWebAudit } from './engine';
 import { effectiveFollow, type FollowSwitchEnv } from './follow-switch';
 import { homeTag, invokeCachedPurge, webDomainTag, webTag } from './hit-min-purge';
@@ -53,9 +53,18 @@ export type WebRescoreWorkflowBinding = {
 
 export type RescoreStep = Pick<WorkflowStep, 'do'>;
 
+/**
+ * What one seeded domain's audit did: saved its scorecard, or held it back
+ * because a declared domain's spent hourly budget left rows unevaluated.
+ * A hold is an answer, not a failure, so the Workflow step does not retry
+ * it: each retry would audit the site again and charge every other domain
+ * it declares, inside an hour whose refusal cannot change.
+ */
+export type RescoreAuditOutcome = { kind: 'saved' } | { kind: 'deferred'; cause: 'domain-budget' };
+
 export interface RescoreDeps {
   /** Audits one canonical target to completion and caches it; throws on failure. */
-  audit?: (env: WebRescoreEnv, targetUrl: string) => Promise<void>;
+  audit?: (env: WebRescoreEnv, targetUrl: string) => Promise<RescoreAuditOutcome>;
   rebuild?: (env: WebRescoreEnv, specVersion: string) => Promise<unknown>;
   /** One HIT-min purge after a rebuild cycle. Receives the union of tags. */
   purgeTags?: (tags: string[]) => Promise<void>;
@@ -119,8 +128,13 @@ const REGISTRY_FINGERPRINT_KEY = 'web_rescore:registry_fp';
 // so staging and production, whose switches differ, agree on that.
 const FOLLOW_STATE_KEY = 'web_rescore:follow_enabled';
 
-/** Run one seeded domain's audit to completion and cache the scorecard. */
-export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string): Promise<void> {
+/**
+ * Run one seeded domain's audit to completion and cache the scorecard,
+ * unless a declared domain's spent hourly budget left rows unevaluated: the
+ * saved scorecard then stands, and its unchanged scored_at keeps the domain
+ * eligible for the next rescore.
+ */
+export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string): Promise<RescoreAuditOutcome> {
   const registry = await loadWebAuditRegistry(env);
   // Curated seeds are always listed; deriving the flag here keeps a rescore
   // or reflow re-audit from resetting the stored opt-in to the default in
@@ -153,7 +167,9 @@ export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string):
   if (!complete || !scorecard) {
     throw new Error(`audit did not complete within the deadline for ${targetUrl}`);
   }
+  if (domainBudgetRefusal(scorecard) !== null) return { kind: 'deferred', cause: 'domain-budget' };
   await cachePut(env, targetUrl, await withRegistryFingerprint(scorecard, registry), SPEC_VERSION);
+  return { kind: 'saved' };
 }
 
 async function currentRegistryFingerprint(env: WebRescoreEnv): Promise<string> {
@@ -193,7 +209,9 @@ async function selectStaleBatch(
  * The Workflow body, extracted so tests can drive it with a fake step and
  * injected audit/rebuild. A per-domain failure (after step retries) is
  * logged and skipped — the domain drops off that board rebuild and, because
- * its scored_at never advanced, is retried by the next run.
+ * its scored_at never advanced, is retried by the next run. A domain-budget
+ * deferral is logged with its cause and skipped on the first attempt; the
+ * board keeps its saved scorecard, and the next run picks it up by age.
  */
 export async function runWebRescore(
   env: WebRescoreEnv,
@@ -243,9 +261,12 @@ export async function runWebRescore(
     for (const { domain, target } of batch) {
       attempted.add(domain);
       try {
-        await step.do(`audit:${domain}`, AUDIT_STEP_CONFIG, async () => {
-          await audit(env, target);
-        });
+        const outcome = await step.do(`audit:${domain}`, AUDIT_STEP_CONFIG, async () => audit(env, target));
+        if (outcome.kind === 'deferred') {
+          emitLog({ scope: 'web-rescore' }, { domain, cause: outcome.cause });
+          skipped.push(domain);
+          continue;
+        }
         audited.push(domain);
         cycleAudited.push(domain);
       } catch (err) {

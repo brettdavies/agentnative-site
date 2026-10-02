@@ -1502,6 +1502,44 @@ describe('audit_website: the declared-domain budget', () => {
     expect(sent).toBeGreaterThan(0);
   });
 
+  test("a run a declared domain's spent hour limited returns in place and keeps the saved scorecard", async () => {
+    const prefix = await budgetKeyPrefix('example.net');
+    const hour = Math.floor(Date.now() / 3_600_000);
+    const env = await makeEnv({
+      followSwitch: 'true',
+      kvSeed: { [`${prefix}${hour}`]: '9999', [`${prefix}${hour + 1}`]: '9999' },
+    });
+    const key = await keyFor('https://example.com/', SPEC_VERSION);
+    const saved = JSON.stringify({
+      spec_version: SPEC_VERSION,
+      target_url: 'https://example.com/',
+      scorecard: { target_url: 'https://example.com/', score_pct: 64, results: [] },
+      scored_at: new Date(Date.now() - 600_000).toISOString(),
+    });
+    const store = new Map([[key, saved]]);
+    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(store);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = router(
+      {
+        'GET https://example.com/': () => html(),
+        'GET https://example.com/.well-known/ai-catalog.json': () =>
+          aiCatalog(cardEntry({ data: sep2127Card(ENDPOINT) })),
+      },
+      [],
+    );
+    let body: Record<string, unknown>;
+    try {
+      body = jsonContent(
+        (await withLogCapture(() => callTool(env, 'audit_website', { url: 'example.com' }, IP))).result,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(body).toMatchObject({ audited: true, scorecard_url: null, markdown_url: null, json_url: null });
+    expect(String(body.summary_html)).toContain("Not saved: example.net reached anc's hourly probe limit;");
+    expect(store.get(key)).toBe(saved);
+  });
+
   test('a declared domain over its burst floor is budget-exceeded and receives nothing', async () => {
     const env = await makeEnv({ minimalRegistry: true, followSwitch: 'true' });
     (env as McpEnv & DomainBudgetEnv).WEB_AUDIT_DOMAIN_LIMITER = memoryRateLimit(0);

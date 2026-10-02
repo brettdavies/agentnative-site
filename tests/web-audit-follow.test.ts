@@ -6,7 +6,7 @@ import { describe, expect, test } from 'bun:test';
 import { resultLine } from '../src/shared/web-audit-result-line';
 import { instrumentAuditEvents } from '../src/worker/audit-web/audit-log';
 import { sha256Hex } from '../src/worker/audit-web/cache';
-import { declaredDomainBudget, registrableDomainOf } from '../src/worker/audit-web/domain-budget';
+import { declaredDomainBudget, domainBudgetRefusal, registrableDomainOf } from '../src/worker/audit-web/domain-budget';
 import { runWebAudit } from '../src/worker/audit-web/engine';
 import { ALWAYS_ADMIT_BUDGET, type DomainBudget } from '../src/worker/audit-web/follow-requests';
 import { endpointRedirects, mcpEndpointRedirects } from '../src/worker/audit-web/handlers/shared';
@@ -1510,6 +1510,68 @@ describe('follow: the hourly budget of each declared registrable domain', () => 
       logs.restore();
     }
   }
+
+  test('a run holds back from a saved scorecard only when a row depends on a host the spent hour refused', () => {
+    const refusedAt = (url: string, cause = 'domain-budget') => ({
+      surface: 'card',
+      kind: 'mcp-endpoint',
+      url,
+      outcome: 'budget-exceeded',
+      cause,
+    });
+    const notRun = { id: 'mcp-initialize', status: 'n_a', na_reason: 'declared-host-budget-exceeded' };
+    const scorecard = (declared: unknown[], results: unknown[]) =>
+      ({ declared_hosts: declared, results }) as Pick<WebScorecard, 'declared_hosts' | 'results'>;
+    expect({
+      row: domainBudgetRefusal(
+        scorecard(
+          [refusedAt('https://mcp.a.example.net/mcp')],
+          [{ ...notRun, hosts: [{ host: 'mcp.a.example.net' }] }],
+        ),
+      ),
+      anchor: domainBudgetRefusal(
+        scorecard(
+          [refusedAt('https://api.b.example.org/')],
+          [
+            {
+              id: 'json-errors',
+              status: 'pass',
+              hosts: [
+                { host: 'api.c.example', status: 'pass' },
+                { host: 'api.b.example.org', status: 'n_a', na_reason: 'declared-host-budget-exceeded' },
+              ],
+            },
+          ],
+        ),
+      ),
+      redirected: domainBudgetRefusal(
+        scorecard(
+          [{ ...refusedAt('https://mcp.a.example.net/mcp'), final_url: 'https://mcp.moved.example/mcp' }],
+          [{ ...notRun, hosts: [{ host: 'mcp.moved.example' }] }],
+        ),
+      ),
+      noDependentRow: domainBudgetRefusal(
+        scorecard(
+          [refusedAt('https://mcp.a.example.net/mcp')],
+          [{ ...notRun, hosts: [{ host: 'mcp.other.example' }] }],
+        ),
+      ),
+      slice: domainBudgetRefusal(
+        scorecard(
+          [refusedAt('https://mcp.a.example.net/mcp', 'slice')],
+          [{ ...notRun, hosts: [{ host: 'mcp.a.example.net' }] }],
+        ),
+      ),
+      noTrail: domainBudgetRefusal(scorecard([], [{ ...notRun, hosts: [{ host: 'mcp.a.example.net' }] }])),
+    }).toEqual({
+      row: 'example.net',
+      anchor: 'example.org',
+      redirected: 'moved.example',
+      noDependentRow: null,
+      slice: null,
+      noTrail: null,
+    });
+  });
 
   test('registrable domains come from the public suffix list with its private section', () => {
     expect(
