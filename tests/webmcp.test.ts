@@ -880,18 +880,22 @@ describe('catalog prompts fit the WebMCP output cap (R21, KTD4)', () => {
     const ids = Object.keys(catalog);
     expect(ids.length).toBeGreaterThan(0);
     // Worst case is the biggest catalog entry carrying a maximal evidence
-    // block, because that is what a real audited row assembles to. Proving
-    // the static text alone would leave the block's budget unaccounted for.
+    // block and the longest host a DNS name can be, because that is what a
+    // real audited row assembles to. Proving the static text alone would
+    // leave the block's budget unaccounted for.
     const worstEvidence = 'e'.repeat(PROMPT_EVIDENCE_MAX * 2);
+    const worstHost = `${'h'.repeat(63)}.`.repeat(4).slice(0, 253);
     let largest = { id: ids[0], prompt: '' };
     for (const id of ids) {
       const { prompt } = assembleRemediation(catalog[id], {
         checkId: id,
         origin: 'https://anc.dev',
         evidence: worstEvidence,
+        host: worstHost,
       });
       if (prompt.length > largest.prompt.length) largest = { id, prompt };
     }
+    expect(largest.prompt).toContain(`Host: ${worstHost}`);
     const doc = resultDoc([{ id: largest.id, keyword: 'must', status: 'absent', prompt: largest.prompt }]);
 
     const direct = getFixPrompt(doc, { id: largest.id });

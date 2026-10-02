@@ -30,14 +30,16 @@ export interface AssembledRemediation {
   skill_url: string;
   resources: WebRemediationResource[];
   /**
-   * The one dynamic, target-controlled member: this run's observation,
-   * verbatim. Every other field is site-owned catalog text that is
-   * identical for every audit of a given check id, so a consumer can cache
-   * those by id and treat this alone as untrusted per-run data. `prompt`
-   * embeds a length-bounded rendering of it for paste-ability; this field
-   * is the untruncated value.
+   * This run's observation, verbatim: with `host`, the dynamic,
+   * target-controlled members. Every other field is site-owned catalog text
+   * that is identical for every audit of a given check id, so a consumer can
+   * cache those by id and treat these alone as untrusted per-run data.
+   * `prompt` embeds a length-bounded rendering of both for paste-ability;
+   * these fields are the untruncated values.
    */
   evidence: string | null;
+  /** The host the row's evidence came from, when it came from exactly one. */
+  host: string | null;
   prompt: string;
 }
 
@@ -86,15 +88,38 @@ const EVIDENCE_CLOSE = '--- end evidence ---';
  */
 export const PROMPT_EVIDENCE_MAX = 140;
 
-/** Worst-case characters the evidence block can add to a prompt. */
-export const PROMPT_EVIDENCE_BLOCK_MAX =
-  EVIDENCE_LABEL.length + EVIDENCE_OPEN.length + EVIDENCE_CLOSE.length + PROMPT_EVIDENCE_MAX + 4;
+// A DNS name is at most 253 characters, but the URL parser accepts longer
+// labels, so the prompt bounds the host the way it bounds evidence.
+const PROMPT_HOST_MAX = 253;
 
-function evidenceBlock(evidence: string): string {
-  const flattened = evidence.replace(/\s*\n\s*/g, ' ').trim();
-  const bounded =
-    flattened.length > PROMPT_EVIDENCE_MAX ? `${flattened.slice(0, PROMPT_EVIDENCE_MAX - 1)}…` : flattened;
-  return `${EVIDENCE_LABEL}\n${EVIDENCE_OPEN}\n${bounded}\n${EVIDENCE_CLOSE}`;
+const HOST_LABEL = 'Host: ';
+
+/** Worst-case characters the observed block can add to a prompt. */
+export const PROMPT_EVIDENCE_BLOCK_MAX =
+  EVIDENCE_LABEL.length +
+  EVIDENCE_OPEN.length +
+  EVIDENCE_CLOSE.length +
+  HOST_LABEL.length +
+  PROMPT_HOST_MAX +
+  PROMPT_EVIDENCE_MAX +
+  5;
+
+function bounded(text: string, max: number): string {
+  const flattened = text.replace(/\s*\n\s*/g, ' ').trim();
+  return flattened.length > max ? `${flattened.slice(0, max - 1)}…` : flattened;
+}
+
+function present(value: string | null | undefined): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+/** The run's own facts, as a delimited data block, or null when it observed none to quote. */
+function observedBlock(host: string | null | undefined, evidence: string | null | undefined): string | null {
+  const lines: string[] = [];
+  if (present(host)) lines.push(`${HOST_LABEL}${bounded(host, PROMPT_HOST_MAX)}`);
+  if (present(evidence)) lines.push(bounded(evidence, PROMPT_EVIDENCE_MAX));
+  if (lines.length === 0) return null;
+  return [EVIDENCE_LABEL, EVIDENCE_OPEN, ...lines, EVIDENCE_CLOSE].join('\n');
 }
 
 export interface AssembleInput {
@@ -103,6 +128,8 @@ export interface AssembleInput {
   origin: string;
   /** The run's evidence for this row; omitted leaves the prompt without an evidence block. */
   evidence?: string | null;
+  /** The host the row's evidence came from; it opens the evidence block when set. */
+  host?: string | null;
 }
 
 /**
@@ -130,15 +157,15 @@ export function assembleRemediation(
   if (resources.length > 0) {
     lines.push(`Docs: ${resources.map((r) => r.url).join(', ')}`);
   }
-  if (input.evidence && input.evidence.trim().length > 0) {
-    lines.push(evidenceBlock(input.evidence));
-  }
+  const observed = observedBlock(input.host, input.evidence);
+  if (observed !== null) lines.push(observed);
   return {
     goal,
     fix: entry?.fix.trim() ?? fix,
     skill_url: skillUrl,
     resources,
-    evidence: input.evidence && input.evidence.trim().length > 0 ? input.evidence : null,
+    evidence: present(input.evidence) ? input.evidence : null,
+    host: present(input.host) ? input.host : null,
     prompt: lines.join('\n'),
   };
 }

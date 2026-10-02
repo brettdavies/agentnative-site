@@ -38,9 +38,9 @@ export function registerWebRemediationTool(server: McpServer, env: WebRemediatio
       description:
         'Return the canonical remediation for a web-audit check by id (e.g. "llms-txt", "mcp-initialize"). Returns ' +
         'isError:false for both outcomes: found returns { found:true, remediation: { check_id, title, goal, fix, ' +
-        "skill_url, resources, prompt } }, not-found returns { found:false, message }. Pass the failing row's " +
-        'evidence to append it to the prompt as a delimited, length-bounded data block; omit it for the catalog ' +
-        'text alone.',
+        'skill_url, resources, host, evidence, prompt } }, not-found returns { found:false, message }. Pass the ' +
+        "failing row's host and evidence to append them to the prompt as a delimited, length-bounded data block, " +
+        'the same prompt the row carries inline; omit both for the catalog text alone.',
       inputSchema: {
         check_id: z.string().describe('The check id from the web scorecard results, e.g. "llms-txt".'),
         evidence: z
@@ -50,10 +50,16 @@ export function registerWebRemediationTool(server: McpServer, env: WebRemediatio
             "Optional: this run's evidence line for the check. It is embedded as untrusted data in a delimited " +
               `block, flattened to one line and truncated past ${PROMPT_EVIDENCE_MAX} characters.`,
           ),
+        host: z
+          .string()
+          .optional()
+          .describe(
+            "Optional: the row's host, the host its evidence came from. It opens the delimited block as a Host line.",
+          ),
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ check_id, evidence }) => {
+    async ({ check_id, evidence, host }) => {
       let catalog: WebRemediationCatalog;
       try {
         catalog = await loadWebRemediationCatalog(env);
@@ -67,7 +73,7 @@ export function registerWebRemediationTool(server: McpServer, env: WebRemediatio
       if (!entry) {
         return textContent({ found: false, message: `no remediation for check id: ${check_id}` });
       }
-      const assembled = assembleRemediation(entry, { checkId: check_id, origin: siteOrigin(), evidence });
+      const assembled = assembleRemediation(entry, { checkId: check_id, origin: siteOrigin(), evidence, host });
       return textContent({
         found: true,
         remediation: { check_id, title: entry.title, ...assembled },
