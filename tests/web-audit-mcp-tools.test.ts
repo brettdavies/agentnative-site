@@ -108,6 +108,8 @@ interface WebEnvOpts {
   // Serve the zero-check registry so a fresh audit finishes without probing.
   minimalRegistry?: boolean;
   kvSeed?: Record<string, string>;
+  /** Receives the key of every SCORE_KV write. */
+  kvPuts?: string[];
   jobs?: DurableObjectNamespace<AuditJob>;
   /** The WEB_AUDIT_FOLLOW_ENABLED value; absent leaves the binding unset. */
   followSwitch?: string;
@@ -165,7 +167,9 @@ async function makeEnv(opts: WebEnvOpts = {}): Promise<McpEnv> {
       async get(key: string) {
         return opts.kvSeed?.[key] ?? null;
       },
-      async put() {},
+      async put(key: string) {
+        opts.kvPuts?.push(key);
+      },
       async delete() {},
     } as unknown as KVNamespace,
     AUDIT_JOB: opts.jobs,
@@ -1559,6 +1563,60 @@ describe('audit_website with follow_declarations false', () => {
       expect(String(disabled.body?.message)).toContain('disabled');
       expect(disabled.body).not.toHaveProperty('scorecard');
     }
+  });
+
+  test('beside a followed run in flight it runs its own transient audit and never attaches', async () => {
+    const startedAt = new Date().toISOString();
+    const jobs = fakeJobNamespace();
+    const job = jobs.get(jobs.idFromName('web:anc.dev'));
+    const claim = await job.claim(startedAt, 90_000);
+    if (!claim.claimed) throw new Error('expected a fresh claim');
+    await job.append(claim.run, { type: 'accepted', lane: 'web', target: 'anc.dev', started_at: startedAt });
+    const followed = {
+      type: 'complete',
+      kind: 'web',
+      tier: 'live',
+      target: 'anc.dev',
+      scorecard_url: 'https://anc.dev/score/anc.dev',
+      markdown_url: 'https://anc.dev/score/anc.dev/md',
+      json_url: 'https://anc.dev/score/anc.dev/json',
+      freshness: { cached: false, scored_at: startedAt, refresh_after: null },
+      spec_version: SPEC_VERSION,
+      scorecard: { target_url: 'https://anc.dev/', score_pct: 64, results: [], follow_declarations: true },
+    } as unknown as AuditEvent;
+    setTimeout(() => void job.append(claim.run, followed), 20);
+    const out = await run(
+      { follow_declarations: false },
+      { jobs, kvSeed: { 'inflight:web:anc.dev': JSON.stringify({ started_at: startedAt, job: 'web:anc.dev' }) } },
+    );
+    expect(out.body).toMatchObject({
+      audited: true,
+      source: 'fresh-audit',
+      scorecard_url: null,
+      markdown_url: null,
+      json_url: null,
+    });
+    expect(out.body).not.toHaveProperty('attached');
+    expect((out.body?.scorecard as { follow_declarations: boolean }).follow_declarations).toBe(false);
+    expect(out.runRecord?.follow_declarations).toBe(false);
+  });
+
+  test('it claims no job and writes no in-flight flag, so no followed caller can join it', async () => {
+    const jobs = fakeJobNamespace();
+    const claims = countClaims(jobs);
+    const kvPuts: string[] = [];
+    const out = await run({ follow_declarations: false }, { jobs, kvPuts });
+    expect(out.body).toMatchObject({ audited: true, scorecard_url: null });
+    expect(claims).toEqual([]);
+    expect(jobs.jobs.size).toBe(0);
+    expect(kvPuts.filter((key) => key.startsWith('inflight:'))).toEqual([]);
+    // Control: the same call following its declarations claims the site's job and marks its flag.
+    const followedJobs = fakeJobNamespace();
+    const followedClaims = countClaims(followedJobs);
+    const followedPuts: string[] = [];
+    await run({}, { jobs: followedJobs, kvPuts: followedPuts });
+    expect(followedClaims).toEqual(['web:anc.dev']);
+    expect(followedPuts).toContain('inflight:web:anc.dev');
   });
 
   test('a public_listing that differs from the stored choice is rejected; the stored choice runs', async () => {
