@@ -64,6 +64,8 @@ export interface SliceRequests {
   readonly source: ArtifactSource;
   readonly evidence: EvidenceItem[];
   count(): number;
+  /** Requests sent, per domain budget key. */
+  countByDomain(): Readonly<Record<string, number>>;
 }
 
 export function sliceRequests(input: {
@@ -75,6 +77,7 @@ export function sliceRequests(input: {
   const hosts: string[] = [];
   const reservations = new Map<string, Promise<boolean>>();
   const responseCache = new Map<string, Promise<ProbeResponse>>();
+  const byDomain = new Map<string, number>();
   let requests = 0;
 
   const admitHost = (hostname: string): boolean => {
@@ -105,6 +108,8 @@ export function sliceRequests(input: {
     if (slice === null) throw new FollowStop('slice');
     if (requests >= MAX_FOLLOW_REQUESTS) throw new FollowStop('per-audit-cap');
     requests += 1;
+    const domain = input.budget.keyOf(new URL(url).hostname);
+    byDomain.set(domain, (byDomain.get(domain) ?? 0) + 1);
     const response = await guardedFetch(url, opts.accept === undefined ? {} : { headers: { accept: opts.accept } }, {
       ...input.fetchOptions,
       timeoutMs: Math.min(slice, opts.timeoutCapMs ?? slice),
@@ -168,6 +173,7 @@ export function sliceRequests(input: {
     source: { get, decline: (url, why) => evidence.push({ url, blocked: why }) },
     evidence,
     count: () => requests,
+    countByDomain: () => Object.fromEntries(byDomain),
   };
 }
 

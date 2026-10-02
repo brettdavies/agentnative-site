@@ -213,7 +213,11 @@ Every audit, on every surface (the streaming route, the `audit_website` MCP tool
 summary line to Workers Logs (`observability.enabled` with 100% head sampling in `wrangler.jsonc`):
 
 - `scope: web-audit.run`: target, surface (`stream` | `mcp` | `rescore`), terminal state (`complete` | `incomplete` |
-  `unreachable` | `none` when the engine threw), discovered MCP endpoint, elapsed ms, and a per-status check count.
+  `unreachable` | `none` when the engine threw), discovered MCP endpoint, elapsed ms, and a per-status check count. A run
+  that reaches a terminal scorecard also carries what its follow phase spent: `follow_outcomes` (declared-hosts trail
+  entries per outcome), `follow_budget_causes` (`budget-exceeded` entries per cause), `follow_requests`,
+  `follow_elapsed_ms`, and `follow_domain_requests` (requests per declared registrable domain, keyed by the domain's
+  SHA-256, the same hash its budget key carries).
 - `scope: web-audit.error`: the engine or stream task threw; carries the target, surface, and message.
 
 Query them in the dashboard under Workers & Pages -> agentnative-site -> Logs, filtering on the `scope` field.
