@@ -1513,6 +1513,11 @@ export const SCENARIOS: Record<string, Scenario> = {
     get('/llms.txt', text(LLMS_TXT_FULL)),
     get('/docs/guide.md', md(GUIDE_MD)),
   ]),
+  'llms-quality-dead-and-http-link': scenario(
+    'an llms.txt that lists a dead link and an http link: the http link is never requested, though it would answer, and the dead link decides the links row, which reads absent',
+    ['llms-txt-links'],
+    [...baseline(), get('/llms.txt', text(LLMS_TXT_HTTP_LINK)), get('/docs/guide.md', md(GUIDE_MD)), get(HTTP_LINK, md(GUIDE_MD))],
+  ),
   'llms-quality-http-link': scenario(
     'an llms.txt that lists an http link beside resolving https links: the http link is never requested, though it would answer, and the links row reads noncompliant naming it',
     ['llms-txt-links'],
