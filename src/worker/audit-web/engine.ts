@@ -159,7 +159,8 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
     ) {
       return (first.why as string[]).join('; ');
     }
-    if (op === 'initialize') {
+    // An errored handshake never answered, so it has no serverInfo to name.
+    if (op === 'initialize' && outcome.status !== 'error') {
       const si = first.serverInfo as { name?: string } | null;
       return si?.name
         ? `serverInfo ${si.name}, protocol ${first.protocolVersion}`

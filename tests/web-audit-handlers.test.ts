@@ -2051,7 +2051,12 @@ describe('era lanes resolved across a whole audit (engine)', () => {
           ? new Response('slow down', { status, headers: { 'retry-after': '30' } })
           : dualStackAnswer(headers, body),
       );
-      expect(`${status}: ${settled(await auditRows(busy)).join(', ')}`).toBe(`${status}: ${unanswered.join(', ')}`);
+      const rows = await auditRows(busy);
+      expect(`${status}: ${settled(rows).join(', ')}`).toBe(`${status}: ${unanswered.join(', ')}`);
+      // The published line names the busy answer, not a missing serverInfo.
+      expect(rows.find((r) => r.id === 'mcp-initialize')?.evidence).toContain(
+        `${status} (the target answered HTTP ${status}`,
+      );
     }
   });
 
