@@ -47,32 +47,32 @@
   "follow_declarations": true,
   "declared_hosts": [],
   "summary": {
-    "pass": 13,
+    "pass": 30,
     "noncompliant": 0,
     "broken": 1,
     "absent": 7,
-    "n_a": 29,
+    "n_a": 27,
     "skip": 0,
-    "error": 18
+    "error": 3
   },
   "coverage_summary": {
     "must": {
-      "total": 1,
-      "verified": 0
+      "total": 4,
+      "verified": 3
     },
     "should": {
-      "total": 15,
-      "verified": 8
+      "total": 29,
+      "verified": 22
     },
     "may": {
       "total": 5,
       "verified": 5
     }
   },
-  "score_pct": 58,
+  "score_pct": 81,
   "score": {
-    "relative": 58,
-    "global": 17
+    "relative": 81,
+    "global": 54
   },
   "categories": [
     {
@@ -102,8 +102,8 @@
     {
       "id": "mcp",
       "name": "MCP",
-      "passed": 5,
-      "counted": 5
+      "passed": 22,
+      "counted": 22
     },
     {
       "id": "agent-discovery-auth",
@@ -209,8 +209,8 @@
       "keyword": "must",
       "tier": "required",
       "principle": "P2",
-      "status": "error",
-      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
+      "status": "pass",
+      "evidence": "serverInfo example, protocol 2025-06-18",
       "hosts": [
         {
           "host": "example.com"
@@ -227,8 +227,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P2",
-      "status": "error",
-      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
+      "status": "pass",
+      "evidence": "serverInfo example, protocol 2025-06-18",
       "hosts": [
         {
           "host": "example.com"
@@ -245,8 +245,8 @@
       "keyword": "must",
       "tier": "required",
       "principle": "P2",
-      "status": "error",
-      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
+      "status": "pass",
+      "evidence": "2 tools, 1 with input schema",
       "hosts": [
         {
           "host": "example.com"
@@ -263,10 +263,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P2",
-      "status": "n_a",
-      "na_reason": "antecedent-unmet",
-      "evidence": "neither initialize nor server/discover advertises capabilities.resources",
-      "hosts": []
+      "status": "pass",
+      "evidence": "https://example.com/mcp -> 200",
+      "hosts": [
+        {
+          "host": "example.com"
+        }
+      ],
+      "host": "example.com"
     },
     {
       "id": "mcp-modern-tools-list",
@@ -277,8 +281,8 @@
       "keyword": "must",
       "tier": "required",
       "principle": "P2",
-      "status": "error",
-      "evidence": "https://example.com/mcp -> 408 (the target answered HTTP 408 Request Timeout; not scored)",
+      "status": "pass",
+      "evidence": "2 tools, 1 with input schema",
       "hosts": [
         {
           "host": "example.com"
@@ -295,8 +299,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P2",
-      "status": "error",
-      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
+      "status": "pass",
+      "evidence": "supports 2026-07-28, serverInfo example",
       "hosts": [
         {
           "host": "example.com"
@@ -313,8 +317,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "error",
-      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
+      "status": "pass",
+      "evidence": "error code -32601",
       "hosts": [
         {
           "host": "example.com"
@@ -331,8 +335,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "error",
-      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
+      "status": "pass",
+      "evidence": "error code -32700",
       "hosts": [
         {
           "host": "example.com"
@@ -349,8 +353,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "error",
-      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
+      "status": "pass",
+      "evidence": "error code -32600",
       "hosts": [
         {
           "host": "example.com"
@@ -367,8 +371,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "error",
-      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
+      "status": "pass",
+      "evidence": "error code -32602",
       "hosts": [
         {
           "host": "example.com"
@@ -385,8 +389,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "error",
-      "evidence": "https://example.com/mcp -> 408 (the target answered HTTP 408 Request Timeout; not scored)",
+      "status": "pass",
+      "evidence": "error code -32601",
       "hosts": [
         {
           "host": "example.com"
@@ -403,8 +407,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "error",
-      "evidence": "https://example.com/mcp -> 408 (the target answered HTTP 408 Request Timeout; not scored)",
+      "status": "pass",
+      "evidence": "error code -32602",
       "hosts": [
         {
           "host": "example.com"
@@ -421,8 +425,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "error",
-      "evidence": "https://example.com/mcp -> 408 (the target answered HTTP 408 Request Timeout; not scored)",
+      "status": "pass",
+      "evidence": "error code -32020",
       "hosts": [
         {
           "host": "example.com"
@@ -439,8 +443,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "error",
-      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
+      "status": "pass",
+      "evidence": "error code -32022",
       "hosts": [
         {
           "host": "example.com"
@@ -457,10 +461,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "antecedent-unmet",
-      "evidence": "neither initialize nor server/discover advertises capabilities.resources",
-      "hosts": []
+      "status": "pass",
+      "evidence": "error code -32602",
+      "hosts": [
+        {
+          "host": "example.com"
+        }
+      ],
+      "host": "example.com"
     },
     {
       "id": "mcp-accept-json",
@@ -471,8 +479,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "error",
-      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
+      "status": "pass",
+      "evidence": "https://example.com/mcp -> 200",
       "hosts": [
         {
           "host": "example.com"
@@ -489,8 +497,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "error",
-      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
+      "status": "pass",
+      "evidence": "https://example.com/mcp -> 406",
       "hosts": [
         {
           "host": "example.com"
@@ -507,8 +515,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "pass",
-      "evidence": "https://example.com/mcp -> 405",
+      "status": "error",
+      "evidence": "https://example.com/mcp -> 429 (the target answered HTTP 429 Too Many Requests; not scored)",
       "hosts": [
         {
           "host": "example.com"
@@ -526,7 +534,7 @@
       "tier": "recommended",
       "principle": "P6",
       "status": "error",
-      "evidence": "preflight 204 allow-origin absent; post 429 allow-origin absent",
+      "evidence": "preflight 429 allow-origin *; post 200 allow-origin *",
       "hosts": [
         {
           "host": "example.com"
@@ -543,8 +551,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P6",
-      "status": "error",
-      "evidence": "preflight 204 allow-origin absent; post 429 allow-origin absent",
+      "status": "pass",
+      "evidence": "preflight 429 allow-origin *; post 200 allow-origin *",
       "hosts": [
         {
           "host": "example.com"

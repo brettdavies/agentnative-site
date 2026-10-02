@@ -78,6 +78,10 @@ const json = (body: object, status = 200) =>
 const rpcError = (code: number, status = 200, data?: Record<string, unknown>) =>
   json({ jsonrpc: '2.0', id: 1, error: { code, message: 'nope', ...(data !== undefined ? { data } : {}) } }, status);
 const toolsResult = () => json({ jsonrpc: '2.0', id: 1, result: { tools: [{ name: 'a', inputSchema: {} }] } });
+const RETRY_SHAPED: ReadonlyArray<readonly [number, string]> = [
+  [408, 'Request Timeout'],
+  [429, 'Too Many Requests'],
+];
 
 describe('runHttp', () => {
   test('passes on a 200 /llms.txt with url + status evidence', async () => {
@@ -233,6 +237,29 @@ describe('runHttp', () => {
       ctx({ fetchImpl: timeoutFetch, mcpEndpoint: 'https://example.com/mcp' }),
     );
     expect(outcome.status).toBe('broken');
+  });
+
+  test('mcp-get-fast-fail: an HTTP 408 or 429 answer is an operational error, not a fast answer', async () => {
+    for (const [status, reason] of RETRY_SHAPED) {
+      const fetchImpl = stubFetch(() => new Response('slow down', { status, headers: { 'retry-after': '30' } }));
+      const outcome = await runHttp(
+        check({ with: { path: '{mcp_endpoint}', method: 'GET', timeout: 8, expect: { status_below: 500 } } }),
+        ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+      );
+      expect(`${status}:${outcome.status}`).toBe(`${status}:error`);
+      expect(outcome.evidence[0].why).toEqual([`the target answered HTTP ${status} ${reason}; not scored`]);
+    }
+  });
+
+  test('a 408 or 429 on a document off the MCP endpoint keeps its own classification', async () => {
+    for (const [status] of RETRY_SHAPED) {
+      const fetchImpl = stubFetch(() => new Response('slow down', { status }));
+      const outcome = await runHttp(
+        check({ with: { path: '/llms.txt', expect: { status: [200] } } }),
+        ctx({ fetchImpl }),
+      );
+      expect(`${status}:${outcome.status}`).toBe(`${status}:broken`);
+    }
   });
 
   test('substitutes {mcp_endpoint} in the path', async () => {
@@ -454,6 +481,53 @@ describe('runCorsPreflight posture pair', () => {
     const pre = await classify('preflight', postDown);
     expect(pre.status).toBe('error');
     expect(pre.na_reason).toBeUndefined();
+  });
+
+  const busy =
+    (status: number, headers: Record<string, string> = {}) =>
+    () =>
+      new Response('slow down', { status, headers: { 'retry-after': '30', ...headers } });
+  const ACAO_ONLY = { 'access-control-allow-origin': '*' };
+
+  test('a probe answered HTTP 408 or 429 leaves its own row unscored, whatever headers ride it', async () => {
+    for (const [status, reason] of RETRY_SHAPED) {
+      const why = [`the target answered HTTP ${status} ${reason}; not scored`];
+      for (const preflight of [busy(status), busy(status, ACAO_ONLY)]) {
+        const pre = await classify('preflight', pairFetch(preflight, postAcao()));
+        expect(`${status}:${pre.status}`).toBe(`${status}:error`);
+        expect(pre.evidence[0].why).toEqual(why);
+      }
+      for (const post of [busy(status), busy(status, ACAO_ONLY)]) {
+        const act = await classify('actual', pairFetch(preflightAcao(), post));
+        expect(`${status}:${act.status}`).toBe(`${status}:error`);
+        expect(act.evidence[0].why).toEqual(why);
+      }
+    }
+  });
+
+  test('a busy sibling leaves a row its own Allow-Origin settles, and unscores one that needs the sibling', async () => {
+    for (const [status, reason] of RETRY_SHAPED) {
+      expect((await classify('preflight', pairFetch(preflightAcao(), busy(status)))).status).toBe('pass');
+      expect((await classify('preflight', pairFetch(preflightAcao(500), busy(status)))).status).toBe('broken');
+      expect((await classify('actual', pairFetch(busy(status), postAcao()))).status).toBe('pass');
+
+      // Without Allow-Origin of its own, the row turns on the sibling's
+      // headers, and a busy answer's headers describe the load, not the posture.
+      for (const sibling of [busy(status), busy(status, ACAO_ONLY)]) {
+        const pre = await classify('preflight', pairFetch(preflightBare(), sibling));
+        expect(`${status}:${pre.status}`).toBe(`${status}:error`);
+        expect(pre.na_reason).toBeUndefined();
+        expect(pre.evidence[0].why).toEqual([
+          `the POST probe answered HTTP ${status} ${reason}, so the no-CORS posture cannot be confirmed`,
+        ]);
+        const act = await classify('actual', pairFetch(sibling, postBare()));
+        expect(`${status}:${act.status}`).toBe(`${status}:error`);
+        expect(act.na_reason).toBeUndefined();
+        expect(act.evidence[0].why).toEqual([
+          `the preflight probe answered HTTP ${status} ${reason}, so the no-CORS posture cannot be confirmed`,
+        ]);
+      }
+    }
   });
 
   test('one run issues exactly the OPTIONS preflight and the Origin-bearing POST', async () => {

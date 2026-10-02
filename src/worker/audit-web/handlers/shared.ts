@@ -20,6 +20,23 @@ export const RETRY_SHAPED_STATUSES: ReadonlyMap<number, string> = new Map([
   [429, 'Too Many Requests'],
 ]);
 
+/** `HTTP <status> <reason>` for a retry-shaped status, else null. */
+export function retryShapedAnswer(status: number | null): string | null {
+  const reason = status === null ? undefined : RETRY_SHAPED_STATUSES.get(status);
+  return reason === undefined ? null : `HTTP ${status} ${reason}`;
+}
+
+/**
+ * The `why` of a row its own retry-shaped answer settles as `error`, else
+ * null. Such an answer reports the target's load at that moment, whichever
+ * layer sent it, so neither its body nor its headers describe the surface
+ * the row asks about.
+ */
+export function retryShapedWhy(status: number | null): string | null {
+  const answer = retryShapedAnswer(status);
+  return answer === null ? null : `the target answered ${answer}; not scored`;
+}
+
 /** Join a path to the base, or pass an absolute URL through unchanged. */
 export function resolveUrl(base: string, pathOrUrl: string): string {
   if (pathOrUrl.length === 0) return '';

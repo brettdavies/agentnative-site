@@ -13,7 +13,7 @@
 import { parseJsonRpc } from '../assert';
 import type { WebCheck } from '../registry';
 import { AUDIT_PROBE_MAX_BODY_BYTES, type GuardedFetchOptions, guardedFetch } from '../ssrf';
-import { mcpEndpointRedirects, RETRY_SHAPED_STATUSES, remainingDeadlineMs, timeoutMsFor } from './shared';
+import { mcpEndpointRedirects, remainingDeadlineMs, retryShapedWhy, timeoutMsFor } from './shared';
 import type { EvidenceItem, HandlerContext, McpLaneEvidence, McpModernLane, ProbeOutcome } from './types';
 
 /**
@@ -754,9 +754,9 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
   // retry-shaped answer reports the target's load at that moment, whichever
   // layer sent it, so the body riding it (a JSON-RPC code included)
   // describes the load rather than the surface or the era.
-  const retryReason = resp.status === null ? undefined : RETRY_SHAPED_STATUSES.get(resp.status);
-  if (retryReason !== undefined) {
-    ev.why = [`the target answered HTTP ${resp.status} ${retryReason}; not scored`];
+  const busy = retryShapedWhy(resp.status);
+  if (busy !== null) {
+    ev.why = [busy];
     return { status: 'error', evidence: [ev] };
   }
 

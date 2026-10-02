@@ -846,6 +846,15 @@ export const SCENARIOS: Record<string, Scenario> = {
     ...modernMcp(),
     ...legacyMcp(),
   ]),
+  'cors-post-rate-limited-no-cors': scenario('a bare preflight beside a POST answered HTTP 408 is an operational unknown on both rows, not a declared posture', ['mcp-cors-preflight', 'mcp-cors-actual'], [
+    ...baseline(),
+    ...cardSurface(),
+    options(MCP_PATH, res(204, {}, '')),
+    get(MCP_PATH, text('Method Not Allowed', {}, 405)),
+    post(MCP_PATH, text('Request Timeout', {}, 408), { headers: { origin: CORS_ORIGIN } }),
+    ...modernMcp(),
+    ...legacyMcp(),
+  ]),
 
   // ---- mcp handler -----------------------------------------------------------
   'mcp-dual-stack': scenario('a dual-stack server passes every legacy, modern, conformance and negotiation row', MCP_IDS, [
@@ -986,6 +995,18 @@ export const SCENARIOS: Record<string, Scenario> = {
       ...cardSurface(),
       post(MCP_PATH, text('Too Many Requests', { 'retry-after': '60' }, 429), { headers: { 'mcp-method': 'server/discover' } }),
       ...dualStackMcp(),
+    ],
+  ),
+  'mcp-edges-rate-limited': scenario(
+    'the GET and the preflight answer HTTP 429, the preflight with Allow-Origin, while the Origin-bearing POST carries Allow-Origin: the GET fast-fail and preflight rows are operational errors, and the actual row, which its own Allow-Origin settles, passes',
+    ['mcp-get-fast-fail', 'mcp-cors-preflight', 'mcp-cors-actual'],
+    [
+      ...baseline(),
+      ...cardSurface(),
+      options(MCP_PATH, text('Too Many Requests', { ...ACAO, 'retry-after': '60' }, 429)),
+      get(MCP_PATH, text('Too Many Requests', { 'retry-after': '60' }, 429)),
+      ...modernMcp(),
+      ...legacyMcp({ cors: 'post-only' }),
     ],
   ),
   'mcp-www-authenticate': scenario(

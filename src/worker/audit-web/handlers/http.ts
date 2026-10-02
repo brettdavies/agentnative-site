@@ -7,7 +7,14 @@ import type { RetainedDocumentKey } from '../../../shared/web-audit-documents';
 import { assertHttp, classifyAliasProbe, type ExpectBlock, type ProbeResponse } from '../assert';
 import type { WebCheck } from '../registry';
 import { guardedFetch } from '../ssrf';
-import { endpointRedirects, resolveUrl, sameOriginRecoveryLink, substituteEndpoint, timeoutMsFor } from './shared';
+import {
+  endpointRedirects,
+  resolveUrl,
+  retryShapedWhy,
+  sameOriginRecoveryLink,
+  substituteEndpoint,
+  timeoutMsFor,
+} from './shared';
 import type { EvidenceItem, HandlerContext, ProbeOutcome, ProbeStatus } from './types';
 
 export type HttpWith = {
@@ -96,6 +103,22 @@ export async function runHttp(check: WebCheck, ctx: HandlerContext): Promise<Pro
           { method, headers },
           { ...ctx.fetchOptions, timeoutMs, ...endpointRedirects(rawPath, ctx.mcpEndpointFollowed, method) },
         );
+    // Settled ahead of the assertion, as on every other probe of the MCP
+    // endpoint: an expectation like `status_below: 500` would read a busy
+    // answer as the fast refusal it asks for.
+    const busy = rawPath.includes('{mcp_endpoint}') ? retryShapedWhy(resp.status) : null;
+    if (busy !== null) {
+      evidence.push({
+        url,
+        status: resp.status,
+        ok: false,
+        why: [busy],
+        elapsed_ms: resp.elapsed_ms,
+        error: resp.error,
+      });
+      misses.push('error');
+      continue;
+    }
     const { ok, item } = assessResponse(url, resp, w, ctx.base);
     evidence.push(item);
     if (ok) return { status: 'pass', evidence };
