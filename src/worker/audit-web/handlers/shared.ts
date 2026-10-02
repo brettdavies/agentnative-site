@@ -1,10 +1,18 @@
 // Shared helpers for the probe handlers and the discovery and follow
 // phases: base-relative URL resolution, `{mcp_endpoint}`/`{host}`
 // substitution, per-check timeout derivation (registry `with.timeout` is
-// in seconds), redirect handling for probes of the MCP endpoint, and a
-// phase's share of the per-audit deadline.
+// in seconds), redirect handling for probes of the MCP endpoint, the
+// statuses that ask for a retry, and a phase's share of the per-audit
+// deadline.
 
 import type { GuardedFetchOptions } from '../ssrf';
+
+/**
+ * Statuses whose shape is "not now" rather than "not here": a target
+ * asking to be retried is reporting its own load, not answering what the
+ * request asked.
+ */
+export const RETRY_SHAPED_STATUSES: readonly number[] = [408, 429];
 
 /** Join a path to the base, or pass an absolute URL through unchanged. */
 export function resolveUrl(base: string, pathOrUrl: string): string {

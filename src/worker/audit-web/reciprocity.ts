@@ -21,7 +21,7 @@ import {
   MCP_SERVER_CARD_TYPE,
   parseJsonObject,
 } from './discovery-documents';
-import { resolveUrl } from './handlers/shared';
+import { RETRY_SHAPED_STATUSES, resolveUrl } from './handlers/shared';
 import { hostOf } from './provenance';
 import type { WebAuditDiscoveryConfig } from './registry';
 import { DOCUMENT_MAX_BODY_BYTES, METADATA_MAX_BODY_BYTES, validatePublicUrl } from './ssrf';
@@ -151,14 +151,17 @@ function challengeMetadataUrl(source: ArtifactSource, endpoint: string, challeng
 /**
  * Whether the nonsense-path metadata read rules out a gateway that echoes
  * any requested path: it must have answered, below 500, without naming
- * that path. A read that failed, timed out, ran out of budget, or hit a
- * server error leaves the echo unchecked, so it confirms nothing.
+ * that path. A read that failed, timed out, ran out of budget, hit a
+ * server error, or was asked to retry (408, 429) said nothing about the
+ * path, so it leaves the echo unchecked and confirms nothing.
  */
 async function echoRuledOut(source: ArtifactSource, origin: string): Promise<boolean> {
   const response = await source.get(`${origin}${PROTECTED_RESOURCE_PATH}${ECHO_PROBE_PATH}`, {
     maxBodyBytes: METADATA_MAX_BODY_BYTES,
   });
-  if (response.status === null || response.status >= 500) return false;
+  if (response.status === null || response.status >= 500 || RETRY_SHAPED_STATUSES.includes(response.status)) {
+    return false;
+  }
   const echoed = response.status === 200 ? resourceOf(parseJsonObject(response)) : null;
   return echoed !== normalizeEndpointUrl(`${origin}${ECHO_PROBE_PATH}`);
 }

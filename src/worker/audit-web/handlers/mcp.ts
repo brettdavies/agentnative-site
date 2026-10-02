@@ -13,7 +13,7 @@
 import { parseJsonRpc } from '../assert';
 import type { WebCheck } from '../registry';
 import { AUDIT_PROBE_MAX_BODY_BYTES, type GuardedFetchOptions, guardedFetch } from '../ssrf';
-import { mcpEndpointRedirects, remainingDeadlineMs, timeoutMsFor } from './shared';
+import { mcpEndpointRedirects, RETRY_SHAPED_STATUSES, remainingDeadlineMs, timeoutMsFor } from './shared';
 import type { EvidenceItem, HandlerContext, McpLaneEvidence, McpModernLane, ProbeOutcome } from './types';
 
 /**
@@ -200,10 +200,6 @@ const SESSION_REQUIRED_CODE = -32000;
 // request was rejected, not mishandled. 404 is deliberately outside the
 // set so a dead endpoint earns nothing on any row that consults it.
 const TYPED_REFUSAL_STATUSES: readonly number[] = [400, 415];
-
-// Statuses whose shape is "not now" rather than "not here": a target
-// asking to be retried is reporting load, not a protocol era.
-const RETRY_SHAPED_STATUSES: readonly number[] = [408, 429];
 
 const CLIENT_INFO = { name: 'agent-web-audit', version: '1.0' };
 

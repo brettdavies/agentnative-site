@@ -269,6 +269,18 @@ describe('presence with auth required', () => {
     expect(seen.map((r) => r.url)).toEqual([suffixed, ECHO_PROBE]);
   });
 
+  test('an echo read drawing a 408 or a 429 is no answer about the path, while every other status below 500 is one', async () => {
+    const suffixed = `${SAME_METADATA}/mcp`;
+    const standsAt = async (status: number): Promise<boolean> => {
+      const routes = { ...protectedServer(SAME, suffixed), [`GET ${ECHO_PROBE}`]: () => new Response('', { status }) };
+      const source = directArtifactSource(() => 1_000, { fetchImpl: router(routes, []) });
+      return (await resolveProtectedResourceMetadata(SAME, source)) !== null;
+    };
+    const statuses = [400, 401, 403, 404, 408, 410, 429];
+    const stands = Object.fromEntries(await Promise.all(statuses.map(async (s) => [s, await standsAt(s)] as const)));
+    expect(stands).toEqual({ 400: true, 401: true, 403: true, 404: true, 408: false, 410: true, 429: false });
+  });
+
   test('a card-declared endpoint on the audited origin answering 401 with matching metadata reads auth-required, not broken', async () => {
     const { scorecard } = await audit(
       router({ ...ROOT, ...siteDeclaring(SAME), ...protectedServer(SAME, SAME_METADATA) }, []),
