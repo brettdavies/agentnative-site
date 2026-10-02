@@ -28,7 +28,18 @@ import type { AuditEnvelope } from '../shared/audit-envelope';
 import type { AuditError, AuditEvent, CompleteEvent } from '../shared/audit-events';
 import { apiScorePath, type Lane, scoreMarkdownPath } from '../shared/audit-routes';
 import { ndjsonValues } from '../shared/ndjson';
-import { CLI_PHASE_LABEL, LANE_EXPECTATION, LANE_LABEL, RECLASSIFIED } from '../shared/scoring-copy';
+import {
+  CLI_PHASE_LABEL,
+  discoveryLine,
+  endpointHostOf,
+  LANE_EXPECTATION,
+  LANE_LABEL,
+  RECLASSIFIED,
+  rowHostPhrase,
+  streamedResultLine,
+  streamedRowHost,
+  webReadingLine,
+} from '../shared/scoring-copy';
 import {
   buildProbeBody,
   buildScoreBody,
@@ -79,6 +90,8 @@ class ScoringRun {
   private startBound = false;
   // The visitor's follow choice, repeated by Run again.
   private follow = true;
+  // The host of the endpoint the status line names; a row on it needs no host phrase.
+  private endpointHost: string | null = null;
 
   constructor(
     private readonly view: ScoringView,
@@ -236,16 +249,12 @@ class ScoringRun {
         this.view.say(`${CLI_PHASE_LABEL[event.phase]}…`);
         return false;
       case 'discovery':
-        this.view.sayProgress(
-          event.mcp_endpoint
-            ? `MCP endpoint found at ${event.mcp_endpoint}. Checks:`
-            : 'No MCP endpoint found. Checks:',
-          this.progressText(),
-        );
+        this.endpointHost = endpointHostOf(event.mcp_endpoint);
+        this.view.sayProgress(`${discoveryLine(event.mcp_endpoint, this.target)} Checks:`, this.progressText());
         return false;
       case 'check':
         this.checks += 1;
-        this.view.check(event.id, event.principle, event.status, event.evidence);
+        this.check(event);
         this.view.progress(this.progressText());
         return false;
       case 'heartbeat':
@@ -263,6 +272,14 @@ class ScoringRun {
     }
   }
 
+  /** A finished check, with the result line the saved page shows for the same row. */
+  private check(event: Extract<AuditEvent, { type: 'check' }>): void {
+    this.view.check(event.id, event.principle, event.status, streamedResultLine(event, this.target), {
+      host: streamedRowHost(event, this.target),
+      phrase: rowHostPhrase(event, this.target, this.endpointHost),
+    });
+  }
+
   private progressText(): string {
     return this.checkTotal ? `${this.checks} of ${this.checkTotal}` : `${this.checks}`;
   }
@@ -270,7 +287,8 @@ class ScoringRun {
   private accepted(startedAt: string): void {
     this.view.state('running');
     this.view.actions({ start: null, other: false });
-    this.view.say('Started.');
+    this.endpointHost = null;
+    this.view.say(this.lane === 'web' ? webReadingLine(this.target, this.follow) : 'Started.');
     // An attached tab joins a run already under way, so the counter reads from
     // when the run started rather than from when this page reached it.
     const parsed = Date.parse(startedAt);

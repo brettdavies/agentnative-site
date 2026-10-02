@@ -9,6 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
+import { getWorksheet } from '../src/client/webmcp-result';
 import type { AuditEvent } from '../src/shared/audit-events';
 import type { AuditJob } from '../src/worker/audit/job';
 import { _resetResultCaches, handleResultRoute, type ResultEnv } from '../src/worker/audit/result';
@@ -17,11 +18,23 @@ import { keyFor, WEB_AUDIT_STALE_AFTER_MS } from '../src/worker/audit-web/cache'
 import { flushHitMinPurge, runWithHitMinPurge } from '../src/worker/audit-web/hit-min-purge';
 import { enforcePublicListingFlipLimit } from '../src/worker/audit-web/public-listing';
 import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
+import { buildWebSummaryMarkdown } from '../src/worker/audit-web/summary-markdown';
+import { buildWebSummaryBody } from '../src/worker/audit-web/summary-render';
 import { resetCatalogCacheForTests } from '../src/worker/mcp/catalog';
 import type { McpEnv } from '../src/worker/mcp/server';
 import { resetWebRemediationCacheForTests } from '../src/worker/mcp/tools/web-remediation';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 import { countClaims, fakeJobNamespace } from './helpers/audit-job-state';
+import {
+  at,
+  REGISTRY,
+  REMEDIATION,
+  row,
+  scorecardOf,
+  stripeShaped,
+  twoAnchorShaped,
+} from './helpers/declared-host-scorecards';
+import { parseHtml } from './helpers/html-elements';
 import { withLogCapture } from './helpers/log-capture';
 import { getJsonToolContent, type JsonRpcBody, mcpInitialize, mcpRpc, resetMcpTestState } from './helpers/mcp-rpc';
 import { stubFetch } from './helpers/stub-fetch';
@@ -1811,5 +1824,207 @@ describe('a website is audited and read at its https origin', () => {
       expect(res.result?.isError).toBe(true);
       expect(res.result?.content?.[0]?.text).toBe('scheme ftp: is not http(s)');
     }
+  });
+});
+
+describe('provenance reaches every reader of a stored website result', () => {
+  const STORED_AT = '2026-09-10T17:20:00.000Z';
+
+  async function storedEnv(host: string, scorecard: unknown) {
+    const key = await keyFor(`https://${host}/`, SPEC_VERSION);
+    return makeEnv({
+      cachePrefill: {
+        [key]: { spec_version: SPEC_VERSION, target_url: `https://${host}/`, scored_at: STORED_AT, scorecard },
+      },
+    });
+  }
+
+  type ReadRow = {
+    id: string;
+    host?: string;
+    hosts?: Array<{ host: string; status?: string }>;
+    na_reason?: string;
+    evidence: string | null;
+    result: string;
+    access_remedy?: string;
+    remediation?: { prompt: string; host: string | null };
+  };
+  type Read = {
+    scorecard: { results: ReadRow[]; access_note?: string; declared_hosts?: unknown; follow_declarations?: unknown };
+  };
+
+  async function read(host: string, scorecard: unknown): Promise<Read & { env: McpEnv }> {
+    const env = await storedEnv(host, scorecard);
+    return { env, ...(jsonContent(await callTool(env, 'get_website_audit', { url: host })) as unknown as Read) };
+  }
+
+  function rendered(host: string, scorecard: unknown) {
+    const input = {
+      scorecard: scorecard as never,
+      domain: host,
+      targetUrl: `https://${host}/`,
+      remediation: REMEDIATION,
+      registry: REGISTRY,
+      origin: 'https://anc.dev',
+    };
+    return { html: buildWebSummaryBody(input), md: buildWebSummaryMarkdown(input) };
+  }
+
+  // Two API hosts, so no single host heads the category and each row names its own.
+  function twoHostScorecard() {
+    return scorecardOf('example.com', [
+      row('openapi', 'pass', { evidence: 'https://api.example.net/openapi.json -> 200', ...at('api.example.net') }),
+      row('rate-limit-headers', 'n_a', {
+        na_reason: 'optional-absent',
+        evidence: 'https://files.example.net/x -> 404',
+        ...at('files.example.net'),
+      }),
+      row('json-errors', 'n_a', { na_reason: 'declared-host-unreachable', ...at('files.example.net') }),
+    ]);
+  }
+
+  test('for a followed-host check, the twin, the page, the MCP read, and the worksheet name the same host and reason', async () => {
+    const stored = twoHostScorecard();
+    const { scorecard } = await read('example.com', stored);
+    const { html, md } = rendered('example.com', stored);
+    const worksheet = JSON.parse(getWorksheet(await parseHtml(html), { statuses: ['n_a'], limit: 25 })) as {
+      items: Array<{ id: string; host: string | null; result: string | null }>;
+    };
+    for (const [id, phrase] of [
+      ['rate-limit-headers', 'Not implemented, optional'],
+      ['json-errors', 'Not evaluated: files.example.net did not answer'],
+    ] as const) {
+      const mcp = scorecard.results.find((r) => r.id === id);
+      const item = worksheet.items.find((i) => i.id === id);
+      expect({ id, host: mcp?.host, result: mcp?.result.startsWith(phrase) }).toEqual({
+        id,
+        host: 'files.example.net',
+        result: true,
+      });
+      expect({ id, host: item?.host, result: item?.result }).toEqual({
+        id,
+        host: 'files.example.net',
+        result: mcp?.result ?? '',
+      });
+      expect(html).toMatch(new RegExp(`data-id="${id}"[^>]*data-host="files\\.example\\.net"`));
+      expect(md).toContain(`- Result: ${mcp?.result}`);
+    }
+    const section = md.slice(md.indexOf('API responses advertise rate-limit headers'), md.indexOf('API client errors'));
+    expect(section).toContain('- Host: `files.example.net`');
+  });
+
+  /** What get_web_remediation answers for a row read through get_website_audit, given the inputs its docs name. */
+  async function standaloneFor(env: McpEnv, row: ReadRow | undefined) {
+    const host = row?.remediation?.host;
+    return jsonContent(
+      await callTool(env, 'get_web_remediation', {
+        check_id: row?.id,
+        evidence: row?.evidence,
+        ...(host === null || host === undefined ? {} : { host }),
+      }),
+    ) as { remediation: { prompt: string; host: string | null } };
+  }
+
+  test("get_web_remediation given the row's remediation host returns the inline prompt byte for byte", async () => {
+    const { env, scorecard } = await read('stripe.dev', stripeShaped());
+    const inline = scorecard.results.find((r) => r.id === 'rate-limit-headers');
+    expect(inline?.remediation?.prompt).toContain('Host: api.stripe.com');
+    const standalone = await standaloneFor(env, inline);
+    expect(standalone.remediation.prompt).toBe(inline?.remediation?.prompt ?? '');
+    expect(standalone.remediation.host).toBe('api.stripe.com');
+    const carrier = /data-id="rate-limit-headers"[\s\S]*?data-copy-text="([^"]*)"/.exec(
+      rendered('stripe.dev', stripeShaped()).html,
+    );
+    expect(
+      (await parseHtml(`<p data-x="${carrier?.[1]}"></p>`)).querySelector('[data-x]')?.getAttribute('data-x'),
+    ).toBe(standalone.remediation.prompt);
+  });
+
+  test('a fixable row stored before provenance gets its inline prompt back from its remediation host and evidence', async () => {
+    const stored = stripeShaped();
+    const old = { ...stored, results: stored.results.map(({ hosts: _h, host: _x, ...r }) => r) };
+    const { env, scorecard } = await read('stripe.dev', old);
+    const inline = scorecard.results.find((r) => r.id === 'rate-limit-headers');
+    expect({ host: inline?.host, remediationHost: inline?.remediation?.host }).toEqual({
+      host: 'stripe.dev',
+      remediationHost: null,
+    });
+    expect(inline?.remediation?.prompt).not.toContain('Host:');
+    expect((await standaloneFor(env, inline)).remediation.prompt).toBe(inline?.remediation?.prompt ?? '');
+  });
+
+  test('a fixable row over two hosts gets its inline prompt back from its remediation host and evidence', async () => {
+    const { env, scorecard } = await read('example.com', twoAnchorShaped());
+    const inline = scorecard.results.find((r) => r.id === 'json-errors');
+    expect(inline?.hosts?.map((h) => h.host)).toEqual(['api.example.net', 'files.example.net']);
+    expect(inline?.remediation?.host).toBeNull();
+    expect((await standaloneFor(env, inline)).remediation.prompt).toBe(inline?.remediation?.prompt ?? '');
+  });
+
+  test('a row over two hosts carries each host with its own outcome in the MCP read', async () => {
+    const { scorecard } = await read('example.com', twoAnchorShaped());
+    const jsonErrors = scorecard.results.find((r) => r.id === 'json-errors');
+    expect(jsonErrors?.hosts).toEqual([
+      { host: 'api.example.net', status: 'pass' },
+      { host: 'files.example.net', status: 'broken' },
+    ]);
+    expect(jsonErrors?.result).toBe(
+      'Present but broken (https://files.example.net/x -> 404 (HTML)); api.example.net: pass, files.example.net: broken',
+    );
+  });
+
+  test('the MCP read carries the not-run sentences the page and the twin show', async () => {
+    const { scorecard } = await read('stripe.dev', stripeShaped());
+    const { md } = rendered('stripe.dev', stripeShaped());
+    expect(scorecard.access_note).toBe(
+      'Global keeps the 18 checks this audit could not run in its maximum; run `anc web stripe.dev` to evaluate them from your own network, with `ANC_WEB_TOKEN` set for the ones that need sign-in.',
+    );
+    expect(md).toContain(scorecard.access_note ?? 'missing');
+    const corsActual = scorecard.results.find((r) => r.id === 'mcp-cors-actual');
+    expect(corsActual?.access_remedy).toBe(
+      "anc's public audit holds no sign-in for mcp.stripe.com. Run `anc web stripe.dev` with `ANC_WEB_TOKEN` set to a token for mcp.stripe.com to evaluate this check from your own network.",
+    );
+    expect(md).toContain(`- Note: ${corsActual?.access_remedy}`);
+    expect(scorecard.results.filter((r) => r.access_remedy !== undefined)).toHaveLength(18);
+  });
+
+  test('a scorecard stored before provenance reads with no trail, no follow state, and no host on any surface', async () => {
+    const stored = stripeShaped() as Record<string, unknown> & { results: Array<Record<string, unknown>> };
+    const { follow_declarations: _f, declared_hosts: _d, ...rest } = stored;
+    const old = { ...rest, results: stored.results.map(({ hosts: _h, host: _x, ...r }) => r) };
+    const { scorecard } = await read('stripe.dev', old);
+    expect('declared_hosts' in scorecard).toBe(false);
+    expect('follow_declarations' in scorecard).toBe(false);
+    for (const r of scorecard.results) expect(r.remediation?.prompt ?? '').not.toContain('Host:');
+    const { html, md } = rendered('stripe.dev', old);
+    for (const text of [html, md]) {
+      expect(text).toContain('Declared hosts: not recorded for this audit.');
+      expect(text).not.toContain('Evaluated at');
+      expect(text).not.toContain('Host:');
+    }
+    const context = (await parseHtml(html)).querySelector('[data-web-audit-context]');
+    expect(context?.getAttribute('data-follow-declarations')).toBeNull();
+    expect(context?.getAttribute('data-declared-hosts')).toBeNull();
+  });
+
+  test('a trail carrying markup reads as data in the MCP read and as escaped text on the page and the twin', async () => {
+    const hostile = [
+      {
+        surface: '/<script>x</script>',
+        kind: 'mcp-endpoint',
+        url: 'https://{tenant}.example.org/<img src=x>',
+        host: '{tenant}.example.org',
+        outcome: 'not-followed',
+        reason: 'templated-url',
+      },
+    ];
+    const stored = { ...twoHostScorecard(), follow_declarations: true, declared_hosts: hostile };
+    const { scorecard } = await read('example.com', stored);
+    expect(scorecard.declared_hosts).toEqual(hostile);
+    const { html, md } = rendered('example.com', stored);
+    expect(html).not.toContain('<img src=x>');
+    expect(html).not.toContain('<script>x</script>');
+    expect(html).toContain('&lt;img src=x&gt;');
+    expect(md).toContain('(`https://{tenant}.example.org/<img src=x>`)');
   });
 });

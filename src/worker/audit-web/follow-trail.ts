@@ -3,8 +3,8 @@
 // the refusals settled before any request, which no response can change.
 
 import { CANONICAL_SITE_URL } from '../../shared/site-url';
+import { hostOf } from '../../shared/url-host';
 import { type Declaration, isTemplatedUrl, sameOrigin } from './discovery-documents';
-import { hostOf } from './provenance';
 import { type AdmittedBy, normalizeEndpointUrl } from './reciprocity';
 import { parseIpv4Literal, validatePublicUrl } from './ssrf';
 

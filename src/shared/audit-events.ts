@@ -21,6 +21,8 @@
 
 import type { AuditEnvelope } from './audit-envelope';
 import { type Lane, REJECTION_MESSAGES } from './audit-routes';
+import type { NaReason } from './web-audit-findings';
+import type { HostOutcome } from './web-audit-result-line';
 
 export type AuditErrorCode =
   // Input the classifier or the lane validator refused.
@@ -193,7 +195,19 @@ export type AuditEvent =
   | { type: 'accepted'; lane: Lane; target: string; started_at: string }
   | { type: 'phase'; phase: CliPhase; at: string }
   | { type: 'discovery'; mcp_endpoint: string | null }
-  | { type: 'check'; id: string; principle: string; keyword: string; status: string; evidence: string | null }
+  | {
+      type: 'check';
+      id: string;
+      principle: string;
+      keyword: string;
+      status: string;
+      evidence: string | null;
+      /** The host the check's evidence came from, when it came from exactly one. */
+      host?: string;
+      /** Each host the check's evidence came from, with its own outcome, when there were several. */
+      hosts?: HostOutcome[];
+      na_reason?: NaReason;
+    }
   | { type: 'heartbeat'; at: string }
   | ({ type: 'complete' } & AuditEnvelope)
   | { type: 'incomplete'; scorecard: unknown; reason?: string }

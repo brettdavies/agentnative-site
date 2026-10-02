@@ -2,7 +2,8 @@
 // and the tolerant reads every surface applies to a stored scorecard that
 // may predate the provenance, follow-state, trail, or registry fields.
 
-import { type FindingStatus, NA_REASONS, type NaReason } from '../../shared/web-audit-findings';
+import { hostOf } from '../../shared/url-host';
+import { FINDING_STATUSES, type FindingStatus, NA_REASONS, type NaReason } from '../../shared/web-audit-findings';
 import { worstTargetStatus } from './handlers/shared';
 import type { EvidenceItem, ProbeStatus } from './handlers/types';
 
@@ -20,14 +21,6 @@ export type DeclaredHostEntry = Record<string, unknown>;
 
 /** Whether an audit followed the hosts its target declares, as a reader sees it. */
 export type FollowState = 'on' | 'off' | 'not-evaluated';
-
-export function hostOf(url: string): string | null {
-  try {
-    return new URL(url).host;
-  } catch {
-    return null;
-  }
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -93,18 +86,52 @@ export function recordsRowHosts(row: { hosts?: unknown; host?: unknown }): boole
   return Array.isArray(row.hosts) || typeof row.host === 'string';
 }
 
-/** A row's hosts, or the audited host for a row that recorded none. */
-function readRowHosts(row: { hosts?: unknown; host?: unknown }, entryHost: string | null): string[] {
-  if (Array.isArray(row.hosts)) {
-    return row.hosts.flatMap((entry) => (isRecord(entry) && typeof entry.host === 'string' ? [entry.host] : []));
-  }
-  if (typeof row.host === 'string') return [row.host];
+/**
+ * The hosts a row reads as evaluated at: the ones it recorded, else the
+ * audited host. A row whose evidence named no host was read from the
+ * audited site's own documents.
+ */
+export function rowHostsOf(row: { hosts?: unknown; host?: unknown }, entryHost: string | null): string[] {
+  const recorded = Array.isArray(row.hosts)
+    ? row.hosts.flatMap((entry) => (isRecord(entry) && typeof entry.host === 'string' ? [entry.host] : []))
+    : typeof row.host === 'string'
+      ? [row.host]
+      : [];
+  if (recorded.length > 0) return recorded;
   return entryHost === null ? [] : [entryHost];
 }
 
 /** The host a row's result line names: its first host, else the audited host, else empty. */
 export function rowHostOf(row: { hosts?: unknown; host?: unknown }, entryHost: string | null): string {
-  return readRowHosts(row, entryHost)[0] ?? entryHost ?? '';
+  return rowHostsOf(row, entryHost)[0] ?? '';
+}
+
+/** The hosts the row recorded, without the audited-host reading a row that recorded none gets. */
+export function recordedHostsOf(row: { hosts?: unknown; host?: unknown }): string[] {
+  return rowHostsOf(row, null);
+}
+
+/** The one host the row recorded, or null for a row that recorded none or several. */
+export function recordedHostOf(row: { hosts?: unknown; host?: unknown }): string | null {
+  const hosts = recordedHostsOf(row);
+  return hosts.length === 1 ? hosts[0] : null;
+}
+
+/** Each host's own outcome on a row over several hosts, as recorded; empty otherwise. */
+export function rowHostOutcomes(row: { hosts?: unknown }): RowHost[] {
+  if (!Array.isArray(row.hosts)) return [];
+  return row.hosts.flatMap((entry): RowHost[] => {
+    if (!isRecord(entry) || typeof entry.host !== 'string') return [];
+    const status = FINDING_STATUSES.find((s) => s === entry.status);
+    const reason = NA_REASONS.find((r) => r === entry.na_reason);
+    return [
+      {
+        host: entry.host,
+        ...(status !== undefined ? { status } : {}),
+        ...(reason !== undefined ? { na_reason: reason } : {}),
+      },
+    ];
+  });
 }
 
 /** Only a recorded `true` reads as on; a missing or malformed value was never evaluated. */

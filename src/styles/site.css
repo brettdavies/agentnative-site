@@ -87,10 +87,10 @@ p {
   --band-surface-border: var(--border-subtle);
   --seg-bg: var(--bg);
   --field-bg: var(--bg);
-  /* Protocol-lane head captions. Dark --fg-secondary reads APCA Lc 47 on the
-   * page ground, under the Lc 60 these captions hold, so dark lifts them to
-   * the body shade. */
-  --lane-caption: var(--fg-secondary);
+  /* Result-page captions: lane heads, host notes, and the declared-hosts
+   * list. Dark --fg-secondary reads APCA Lc 47 on the page ground, under the
+   * Lc 60 these captions hold, so dark lifts them to the body shade. */
+  --caption-text: var(--fg-secondary);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -103,7 +103,7 @@ p {
     --band-surface-border: oklch(26% 0.02 250);
     --seg-bg: oklch(20% 0.016 250);
     --field-bg: oklch(11% 0.012 250);
-    --lane-caption: var(--fg-body);
+    --caption-text: var(--fg-body);
   }
 }
 :root[data-theme="dark"] {
@@ -116,7 +116,7 @@ p {
   --band-surface-border: oklch(26% 0.02 250);
   --seg-bg: oklch(20% 0.016 250);
   --field-bg: oklch(11% 0.012 250);
-  --lane-caption: var(--fg-body);
+  --caption-text: var(--fg-body);
 }
 
 /* Token-based focus ring. :where() keeps specificity at zero so any
@@ -2145,7 +2145,8 @@ body:has(.scorecard-page) main {
 }
 
 /* Eight principles, scored. */
-.pscore h2 {
+.pscore h2,
+.declared-hosts h2 {
   margin: 0;
   font-size: clamp(1.4rem, 1.2rem + 0.8vw, 1.7rem);
   letter-spacing: -0.02em;
@@ -2402,6 +2403,8 @@ main .remediation__body {
   padding: 0 var(--space-5);
   font-size: 0.9rem;
   color: var(--fg-secondary);
+  /* Evidence quotes URLs the target serves, which can outrun a phone row. */
+  overflow-wrap: anywhere;
 }
 .web-check__resources a {
   color: var(--accent);
@@ -2434,7 +2437,7 @@ main .remediation__body {
   font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
   font-size: 0.82rem;
   font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
-  color: var(--lane-caption);
+  color: var(--caption-text);
   white-space: nowrap;
 }
 .web-lane__note {
@@ -2442,7 +2445,103 @@ main .remediation__body {
   padding: 0 var(--space-5) var(--space-3);
   border-bottom: 1px solid var(--border-subtle);
   font-size: 0.85rem;
-  color: var(--lane-caption);
+  color: var(--caption-text);
+}
+
+/* A category's host line keeps the rollup line's treatment in the caption
+ * shade, which holds Lc 60 in dark. */
+.pscore__evidence--host {
+  color: var(--caption-text);
+}
+
+/* A caption line at the top of a check's body, under its label: the host
+ * the row reached, or why the audit could not run it. */
+.web-check__note {
+  margin: 0 0 var(--space-2);
+  padding: 0 var(--space-5);
+  font-size: var(--text-caption);
+  color: var(--caption-text);
+}
+
+/* Rows the audit could not run for one reason, as one closed group that
+ * still holds every row. */
+.web-check__group {
+  margin: 0 0 var(--space-3) var(--space-5);
+}
+
+/* Declared hosts: an unboxed list of the hosts a site points agents to and
+ * what the audit did with each. Outcomes are captions, off the grading
+ * axis; only the two a reader has to act on take the mid band. */
+.declared-hosts {
+  margin: var(--space-6) 0 0;
+}
+.declared-hosts h2 {
+  margin-bottom: var(--space-2);
+}
+.declared-hosts__lede {
+  margin: 0 0 var(--space-3);
+  max-width: var(--measure);
+  font-size: var(--text-secondary);
+  color: var(--caption-text);
+}
+.declared-hosts__list {
+  max-width: 44rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.declared-hosts__entry {
+  display: grid;
+  grid-template-columns: 13rem minmax(0, 1fr) auto;
+  column-gap: var(--space-4);
+  align-items: baseline;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.declared-hosts__entry p {
+  margin: 0;
+}
+.declared-hosts__surface,
+.declared-hosts__url,
+.declared-hosts__outcome,
+.declared-hosts__why,
+.declared-hosts__guidance,
+.declared-hosts__state {
+  font-size: var(--text-caption);
+  color: var(--caption-text);
+}
+.declared-hosts__surface {
+  grid-column: 1;
+  grid-row: 1;
+}
+.declared-hosts__host,
+.declared-hosts__url {
+  grid-column: 2;
+}
+.declared-hosts__outcome {
+  grid-column: 3;
+  grid-row: 1;
+  text-align: right;
+}
+.declared-hosts__outcome--attention {
+  color: var(--band-mid);
+}
+.declared-hosts__why,
+.declared-hosts__guidance {
+  grid-column: 2 / -1;
+}
+.declared-hosts__state {
+  margin: var(--space-6) 0 0;
+}
+@media (max-width: 40rem) {
+  .declared-hosts__entry {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .declared-hosts__entry > p {
+    grid-column: 1;
+    grid-row: auto;
+    text-align: left;
+  }
 }
 
 /* The scoring page's header. */
@@ -2801,6 +2900,14 @@ main .remediation__body {
   font-size: 0.82rem;
   color: var(--fg-secondary);
 }
+.scoring__host {
+  font-size: var(--text-caption);
+  color: var(--caption-text);
+}
+/* A streamed row's line quotes the URL the target served, which can outrun a phone row. */
+.scoring__title {
+  overflow-wrap: anywhere;
+}
 .scoring__trail {
   display: inline-flex;
   align-items: center;
@@ -3027,9 +3134,13 @@ main .remediation__body {
   .web-check__fix,
   .web-check__resources,
   .web-check__prompt-label,
+  .web-check__note,
   .web-lane__head,
   .web-lane__note {
     padding-inline: var(--space-2);
+  }
+  .web-check__group {
+    margin-left: var(--space-2);
   }
   .web-check pre {
     margin-inline: var(--space-2);

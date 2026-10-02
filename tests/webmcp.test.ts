@@ -179,6 +179,7 @@ type ResultRow = {
   tier?: string;
   unprobed?: boolean;
   prompt?: string;
+  host?: string;
 };
 
 const CONTEXT_DEFAULTS = {
@@ -203,6 +204,7 @@ function resultDoc(rows: ResultRow[], context: Partial<typeof CONTEXT_DEFAULTS> 
       'data-tier': row.tier ?? 'required',
       'data-status': row.status,
       'data-unprobed': row.unprobed === true ? 'true' : 'false',
+      ...(row.host !== undefined ? { 'data-host': row.host } : {}),
     };
     const children = row.prompt
       ? [
@@ -430,6 +432,7 @@ describe('execute helpers (Document stub)', () => {
       status: 'broken',
       unprobed: false,
       result: null,
+      host: null,
       remediable: true,
     });
     expect({ total: page.total, returned: page.returned, omitted: page.omitted, next: page.next_offset }).toEqual({
@@ -437,6 +440,26 @@ describe('execute helpers (Document stub)', () => {
       returned: 5,
       omitted: 0,
       next: null,
+    });
+  });
+
+  test("get_worksheet reads each row's host from the row root", () => {
+    const doc = resultDoc([
+      { id: 'mcp-initialize', keyword: 'must', status: 'absent', prompt: 'fix', host: 'mcp.example.net' },
+      {
+        id: 'json-errors',
+        keyword: 'should',
+        status: 'broken',
+        prompt: 'fix',
+        host: 'api.example.net files.example.net',
+      },
+      { id: 'llms-txt', keyword: 'should', status: 'absent', prompt: 'fix' },
+    ]);
+    const items = JSON.parse(getWorksheet(doc, {})).items as Array<{ id: string; host: string | null }>;
+    expect(Object.fromEntries(items.map((item) => [item.id, item.host]))).toEqual({
+      'mcp-initialize': 'mcp.example.net',
+      'json-errors': 'api.example.net files.example.net',
+      'llms-txt': null,
     });
   });
 
@@ -857,18 +880,22 @@ describe('catalog prompts fit the WebMCP output cap (R21, KTD4)', () => {
     const ids = Object.keys(catalog);
     expect(ids.length).toBeGreaterThan(0);
     // Worst case is the biggest catalog entry carrying a maximal evidence
-    // block, because that is what a real audited row assembles to. Proving
-    // the static text alone would leave the block's budget unaccounted for.
+    // block and the longest host a DNS name can be, because that is what a
+    // real audited row assembles to. Proving the static text alone would
+    // leave the block's budget unaccounted for.
     const worstEvidence = 'e'.repeat(PROMPT_EVIDENCE_MAX * 2);
+    const worstHost = `${'h'.repeat(63)}.`.repeat(4).slice(0, 253);
     let largest = { id: ids[0], prompt: '' };
     for (const id of ids) {
       const { prompt } = assembleRemediation(catalog[id], {
         checkId: id,
         origin: 'https://anc.dev',
         evidence: worstEvidence,
+        host: worstHost,
       });
       if (prompt.length > largest.prompt.length) largest = { id, prompt };
     }
+    expect(largest.prompt).toContain(`Host: ${worstHost}`);
     const doc = resultDoc([{ id: largest.id, keyword: 'must', status: 'absent', prompt: largest.prompt }]);
 
     const direct = getFixPrompt(doc, { id: largest.id });

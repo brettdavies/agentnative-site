@@ -10,8 +10,9 @@ import type { WebAuditFreshness } from './cache';
 import type { WebRemediationCatalog } from './remediation';
 import type { FreshnessState } from './summary-freshness';
 import { freshnessState, resolveFreshness } from './summary-freshness';
-import { type SummaryRegistry, type WebScorecardShape, type WebSummaryModel, webSummaryModel } from './summary-model';
+import { type SummaryRegistry, type WebScorecardShape, webSummaryModel } from './summary-model';
 import type { TransientReason } from './summary-transient';
+import type { WebSummaryModel } from './summary-types';
 
 export interface WebSummaryInput {
   scorecard: WebScorecardShape;
@@ -65,6 +66,8 @@ export function webSummaryView(input: WebSummaryInput): WebSummaryView {
       remediation: input.remediation,
       registry: input.registry,
       origin: input.origin ?? CANONICAL_SITE_URL,
+      transient: input.transient !== undefined,
+      scoredAt: freshness.scored_at,
     }),
     freshness,
     freshnessState: freshnessState(freshness, input.now ?? Date.now()),

@@ -5,6 +5,7 @@
 // share of what the slice settled, and the reason the rows that need an
 // endpoint were not evaluated when a declared host is why there is none.
 
+import { hostOf } from '../../shared/url-host';
 import type { NaReason } from '../../shared/web-audit-findings';
 import { apiDeclarations } from './api-catalog';
 import type { DiscoveryDocuments, DiscoveryResult } from './discovery';
@@ -13,7 +14,6 @@ import { type FollowInput, type FollowResult, openFollow } from './follow';
 import type { ApiFollowResult } from './follow-api';
 import { declarationKey, declaresHost, type TrailEntry, type TrailOutcome, trailEntry } from './follow-trail';
 import type { SignInChallenge } from './mcp-auth';
-import { hostOf } from './provenance';
 import type { MetadataMatch } from './reciprocity';
 
 /** A declared host the rows that need an endpoint could not be evaluated at, and why. */

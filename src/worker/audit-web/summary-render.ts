@@ -7,44 +7,33 @@
 // per-check Goal / Result / Fix / Resources details. The CLI renderer
 // groups by the P1-P8 principles instead, which are a hidden tag here.
 //
-// The copy-paste prompt is never rendered: renderCheck emits it in a hidden
-// `data-copy-text` carrier and the site-wide clipboard.js attaches a
-// Copy-prompt button client-side, so a no-JS render shows the prose and
-// resource links with no dead control. The markdown twin keeps the fenced
-// prompt so fetch-only agents lose nothing.
+// Between the score note and the checks sits the Declared hosts slot, the
+// hosts the site points agents to and what the audit did with each. The
+// markdown twin keeps the fenced prompt the page withholds, so fetch-only
+// agents lose nothing.
 
 import { escHtml } from '../../shared/esc-html';
 import { bandOf } from '../../shared/meter';
 import { renderBigScore, renderResultSpine, type SpineInput } from '../../shared/result-spine';
 import type { WebAuditFreshness } from './cache';
-import { WEB_CTA_NOTE_HTML } from './copy';
+import { WEB_CTA_NOTE_HOSTS_HTML, WEB_CTA_NOTE_HTML } from './copy';
+import { notRunCategoryNote, notRunCount } from './provenance-copy';
+import { richHtml } from './rich-text';
 import { freshnessHtml } from './summary-freshness';
 import { type WebSummaryInput, webSummaryView } from './summary-input';
-import {
-  RELATIVE_LABEL,
-  RELATIVE_SUBLABEL,
-  STATUS_ORDER,
-  type SummaryCategory,
-  type SummaryLane,
-  type SummaryRow,
-  statusLabel,
-  statusMark,
-  TIER_LABELS,
-  type WebSummaryModel,
-} from './summary-model';
+import { RELATIVE_LABEL, RELATIVE_SUBLABEL, STATUS_ORDER } from './summary-labels';
+import { renderItems, renderLane } from './summary-render-checks';
+import { declaredHostsHtml } from './summary-render-hosts';
 import { transientReasonHtml } from './summary-transient';
-
-function tierChip(keyword: string | undefined): string {
-  if (!keyword || !(keyword in TIER_LABELS)) return '';
-  return `<span class="tier tier-${keyword}">${TIER_LABELS[keyword]}</span> `;
-}
+import type { SummaryCategory, WebSummaryModel } from './summary-types';
 
 /**
  * One hidden page-level record of what the page renders: both scores, the
- * complete per-status counts, and the freshness envelope. The counts come from
- * the same model the visible page renders, so a machine reader and a human
- * reader cannot disagree. A null instant omits its attribute rather than
- * emitting an empty string, so a reader gets null instead of "".
+ * complete per-status counts, the freshness envelope, and the follow state
+ * and declared-hosts trail as stored. The counts come from the same model the
+ * visible page renders, so a machine reader and a human reader cannot
+ * disagree. A value the scorecard never recorded omits its attribute rather
+ * than emitting an empty string, so a reader gets null instead of "".
  */
 function auditContextEl(model: WebSummaryModel, freshness: WebAuditFreshness): string {
   const attrs = [
@@ -56,6 +45,10 @@ function auditContextEl(model: WebSummaryModel, freshness: WebAuditFreshness): s
   if (freshness.scored_at) attrs.push(`data-scored-at="${escHtml(freshness.scored_at)}"`);
   if (freshness.refresh_after) attrs.push(`data-refresh-after="${escHtml(freshness.refresh_after)}"`);
   for (const status of STATUS_ORDER) attrs.push(`data-count-${status}="${model.counts[status]}"`);
+  if (model.followDeclarations !== 'not-evaluated') {
+    attrs.push(`data-follow-declarations="${model.followDeclarations === 'on' ? 'true' : 'false'}"`);
+  }
+  if (model.declaredHosts !== null) attrs.push(`data-declared-hosts="${escHtml(JSON.stringify(model.declaredHosts))}"`);
   return `<div ${attrs.join(' ')} hidden></div>`;
 }
 
@@ -67,6 +60,43 @@ function categoryPill(category: SummaryCategory): CategoryPill {
   if (category.passed === category.counted) return { cls: 'pass', text: 'pass' };
   if (category.passed === 0) return { cls: 'fail', text: 'fail' };
   return { cls: 'warn', text: 'partial' };
+}
+
+function scoreNoteHtml(model: WebSummaryModel): string {
+  const clause = model.hostsClause === null ? '' : richHtml(model.hostsClause);
+  const notRun = model.notRunNote === null ? '' : ` ${richHtml(model.notRunNote)}`;
+  return `<p class="result-score__note">${escHtml(RELATIVE_SUBLABEL)}${clause}; global measures it against a maximally agent-ready site. Website <a href="${escHtml(model.targetUrl)}">${escHtml(model.targetUrl)}</a>.${notRun}</p>`;
+}
+
+function categoryHtml(category: SummaryCategory, index: number): string {
+  const empty = category.counted === 0;
+  const pill = categoryPill(category);
+  const rollupBand = empty ? '' : ` ${bandOf((category.passed / category.counted) * 100)}`;
+  const notRun = category.notRun > 0 ? ` · ${notRunCount(category.notRun)}` : '';
+  let html = `    <li class="pscore__row pscore__row--category${empty ? ' pscore__row--empty' : ''}" data-category="${escHtml(category.id)}">
+      <span class="spec__id">C${index}</span>
+      <div class="pscore__body">
+        <h3 class="spec__title audit-group__title">${escHtml(category.name)}</h3>
+        <p class="pscore__evidence"><span class="audit-group__rollup${rollupBand}">${category.passed} / ${category.counted}</span> checks pass${notRun}</p>
+`;
+  if (category.hostLine !== null) {
+    html += `        <p class="pscore__evidence pscore__evidence--host">${richHtml(category.hostLine)}</p>\n`;
+  }
+  if (empty) {
+    const note =
+      category.emptyReason === null
+        ? 'No checks in this category apply to this site.'
+        : richHtml(notRunCategoryNote(category.emptyReason));
+    html += `        <p class="audit-group__note">${note}</p>\n`;
+  }
+  if (category.rows.length > 0) {
+    const rows = category.lanes ? category.lanes.map(renderLane).join('') : renderItems(category.items);
+    html += `        <div class="pscore__checks">\n${rows}        </div>\n`;
+  }
+  return `${html}      </div>
+      <span class="stpill stpill--${pill.cls}">${pill.text}</span>
+    </li>
+`;
 }
 
 /** HTML body for a website result page. */
@@ -96,99 +126,23 @@ export function buildWebSummaryBody(input: WebSummaryInput): string {
       label: RELATIVE_LABEL,
       secondary: { value: String(model.global), label: 'global-ready' },
     },
-  )}<p class="result-score__note">${escHtml(RELATIVE_SUBLABEL)}; global measures it against a maximally agent-ready site. Website <a href="${escHtml(model.targetUrl)}">${escHtml(model.targetUrl)}</a>.</p>
+  )}${scoreNoteHtml(model)}
 ${auditContextEl(model, freshness)}
-<section class="pscore scorecard-audits" aria-labelledby="pscore-heading">
+${declaredHostsHtml(model.declaredHostsView)}<section class="pscore scorecard-audits" aria-labelledby="pscore-heading">
   <h2 id="pscore-heading">Checks by category</h2>
   <ol class="pscore__list">
-`;
-
-  let catIndex = 0;
-  for (const category of model.categories) {
-    catIndex += 1;
-    const empty = category.counted === 0;
-    const pill = categoryPill(category);
-    const rollupBand = empty ? '' : ` ${bandOf((category.passed / category.counted) * 100)}`;
-    html += `    <li class="pscore__row pscore__row--category${empty ? ' pscore__row--empty' : ''}" data-category="${escHtml(category.id)}">
-      <span class="spec__id">C${catIndex}</span>
-      <div class="pscore__body">
-        <h3 class="spec__title audit-group__title">${escHtml(category.name)}</h3>
-        <p class="pscore__evidence"><span class="audit-group__rollup${rollupBand}">${category.passed} / ${category.counted}</span> checks pass</p>
-`;
-    if (empty) html += `        <p class="audit-group__note">No checks in this category apply to this site.</p>\n`;
-    if (category.rows.length > 0) {
-      html += `        <div class="pscore__checks">\n`;
-      if (category.lanes) {
-        for (const lane of category.lanes) html += renderLane(lane);
-      } else {
-        for (const row of category.rows) html += renderCheck(row);
-      }
-      html += `        </div>\n`;
-    }
-    html += `      </div>
-      <span class="stpill stpill--${pill.cls}">${pill.text}</span>
-    </li>
-`;
-  }
-
-  html += `  </ol>
+${model.categories.map((category, i) => categoryHtml(category, i + 1)).join('')}  </ol>
 </section>
 `;
   // A result rendered in place has no page to re-audit from and runs on a
   // page that loads no in-page tools.
   if (!input.transient) {
     html += `<section class="scorecard-cta">
-  <p class="scorecard-cta__note">${WEB_CTA_NOTE_HTML}</p>
+  <p class="scorecard-cta__note">${model.hostsClause === null ? WEB_CTA_NOTE_HTML : WEB_CTA_NOTE_HOSTS_HTML}</p>
 </section>
 <script defer src="/js/webmcp.js"></script>
 `;
   }
   html += '</article>';
   return html;
-}
-
-/**
- * One protocol lane: its heading, its own rollup, the line saying what the
- * lane covers, then its rows. A lane with nothing counted shows no rollup,
- * since "0 / 0" would read as a lane that failed.
- */
-function renderLane(lane: SummaryLane): string {
-  const count = lane.counted > 0 ? `<span class="web-lane__count">${lane.passed} / ${lane.counted} pass</span>` : '';
-  let html = `    <div class="web-lane" data-mcp-lane="${escHtml(lane.id)}">
-      <div class="web-lane__head"><h4 class="web-lane__title">${escHtml(lane.label)}</h4>${count}</div>
-      <p class="web-lane__note">${escHtml(lane.note)}</p>
-`;
-  for (const row of lane.rows) html += renderCheck(row);
-  html += `    </div>
-`;
-  return html;
-}
-
-function renderCheck(row: SummaryRow): string {
-  const resourceLinks = [
-    ...row.resources.map((r) => `<a href="${escHtml(r.url)}" rel="noopener">${escHtml(r.label)}</a>`),
-    `<a href="${escHtml(row.skillUrl)}">Fix skill</a>`,
-  ].join(' · ');
-
-  let body = `      <p class="web-check__goal"><strong>Goal:</strong> ${escHtml(row.goal)}.</p>
-      <p class="web-check__result"><strong>Result:</strong> ${escHtml(row.result)}</p>
-`;
-  if (row.fixable) {
-    body += `      <p class="web-check__fix"><strong>Fix:</strong> ${escHtml(row.fix)}</p>\n`;
-  }
-  body += `      <p class="web-check__resources"><strong>Resources:</strong> ${resourceLinks}</p>\n`;
-  if (row.fixable) {
-    body += `      <span class="web-check__prompt" data-copy-text="${escHtml(row.prompt)}" data-keyword="${escHtml(row.keyword ?? '')}" data-status="${escHtml(row.status)}" hidden></span>\n`;
-  }
-
-  // The row root is the canonical record: keyword, tier, status, and unprobed
-  // ride here on every row, including the ones that carry no prompt, so a
-  // reader never has to infer priority from a conditional child that only
-  // actionable rows emit.
-  const rootMeta = ` data-keyword="${escHtml(row.keyword ?? '')}" data-tier="${escHtml(row.tier ?? '')}" data-status="${escHtml(row.status)}" data-unprobed="${row.unprobed ? 'true' : 'false'}"`;
-
-  return `    <details class="web-check web-check--${row.status}"${row.fixable ? ' open' : ''} data-id="${escHtml(row.id)}"${rootMeta}>
-      <summary><span class="web-check__mark" aria-hidden="true">${statusMark(row.status)}</span> <span class="web-check__label">${escHtml(row.label)}</span> ${tierChip(row.keyword)}<span class="audit__status">${escHtml(statusLabel(row.status))}</span></summary>
-${body}    </details>
-`;
 }

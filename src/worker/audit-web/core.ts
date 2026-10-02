@@ -36,6 +36,7 @@ import { enrichWebScorecardForDisplay } from './display';
 import { runWebAudit } from './engine';
 import { effectiveFollow, type FollowSwitchEnv } from './follow-switch';
 import { queueHitMinPurge, webDomainTag, webTag } from './hit-min-purge';
+import { rowHostFields } from './provenance';
 import {
   decidePublicListingWrite,
   enforcePublicListingFlipLimit,
@@ -230,6 +231,7 @@ export type RunWebAuditInput = {
 };
 
 function checkEvent(result: EngineResult): AuditEvent {
+  const { host, hosts } = rowHostFields(result.raw_evidence);
   return {
     type: 'check',
     id: result.id,
@@ -237,6 +239,9 @@ function checkEvent(result: EngineResult): AuditEvent {
     keyword: result.keyword,
     status: result.status,
     evidence: result.evidence,
+    ...(host !== undefined ? { host } : {}),
+    ...(hosts.length > 1 ? { hosts } : {}),
+    ...(result.na_reason !== undefined ? { na_reason: result.na_reason } : {}),
   };
 }
 

@@ -52,8 +52,9 @@ An MCP client can run the audit without the form. The [anc.dev MCP server](/mcp)
   and returns a result that is never saved or listed.
 - `get_website_audit(url)`: read a cached scorecard without re-running.
 - `list_website_audits(view?)`: the web leaderboard, curated by default.
-- `get_web_remediation(check_id, evidence?)`: the canonical fix for any check, with a ready-to-paste prompt. Pass the
-  failing row's evidence and it is appended to the prompt as a delimited, untrusted data block.
+- `get_web_remediation(check_id, evidence?, host?)`: the canonical fix for any check, with a ready-to-paste prompt. Pass
+  the failing row's evidence and its `remediation.host` (omitted when null) and they are appended to the prompt as a
+  delimited, untrusted data block.
 
 Every response carrying a scorecard also carries `cached`, `scored_at`, and `refresh_after` beside it. A cached entry
 younger than one minute is served as-is; past `refresh_after` a repeat request tries a fresh audit instead. That is

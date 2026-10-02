@@ -444,4 +444,55 @@ describe('provenance on stored scorecards', () => {
     }) as ProvenanceShape;
     expect(out.vantage).toEqual({ network: 'public', credentialed: false });
   });
+
+  test('a prompt names the host a row recorded, and a row stored before provenance gets no Host line', () => {
+    const stored = {
+      target_url: 'https://example.com/',
+      results: [
+        {
+          id: 'openapi',
+          status: 'absent',
+          evidence: 'missing',
+          hosts: [{ host: 'api.example.net' }],
+          host: 'api.example.net',
+        },
+        { id: 'mcp-tools-list', status: 'broken', evidence: 'no tools array' },
+      ],
+    };
+    const out = enrichWebScorecardForDisplay(stored, {
+      registry: SPLIT_REGISTRY,
+      catalog: CATALOG,
+      origin: 'https://anc.dev',
+    }) as { results: Array<{ id: string; host?: string; remediation?: { prompt: string; host: string | null } }> };
+    const [openapi, tools] = out.results;
+    expect(openapi.remediation?.prompt).toContain('--- begin evidence ---\nHost: api.example.net\nmissing\n');
+    expect(tools.remediation?.prompt).not.toContain('Host:');
+    expect(tools.remediation?.host).toBeNull();
+    // The audited host still reaches the row itself, as every surface reads it.
+    expect(tools.host).toBe('example.com');
+  });
+
+  test('rows the audit could not run carry their remedy, and the scorecard the score note sentence', () => {
+    const stored = {
+      target_url: 'https://example.com/',
+      results: [
+        { id: 'mcp-tools-list', status: 'n_a', na_reason: 'declared-host-blocked', evidence: null, host: '10.0.0.1' },
+        { id: 'openapi', status: 'n_a', na_reason: 'optional-absent', evidence: null },
+      ],
+    };
+    const out = attachInlineRemediation(stored, CATALOG, 'https://anc.dev') as {
+      access_note?: string;
+      results: Array<{ id: string; access_remedy?: string }>;
+    };
+    expect(out.results[0].access_remedy).toBe(
+      "anc's public audit never contacts 10.0.0.1, a private or IP address. Run `anc web example.com` to evaluate this check from your own network.",
+    );
+    expect(out.results[1].access_remedy).toBeUndefined();
+    expect(out.access_note).toBe(
+      'Global keeps the 1 check this audit could not run in its maximum; run `anc web example.com` to evaluate it from your own network.',
+    );
+    expect('access_note' in (attachInlineRemediation({ results: [] }, CATALOG, 'https://anc.dev') as object)).toBe(
+      false,
+    );
+  });
 });

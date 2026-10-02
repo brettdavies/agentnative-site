@@ -3,9 +3,9 @@
 // session can have one. With no endpoint, a declared host that was not
 // evaluated names why.
 
+import { hostOf } from '../../../shared/url-host';
 import { advertisesResources } from '../handlers/mcp';
 import { laneRefused, servedWithoutSignIn } from '../mcp-auth';
-import { hostOf } from '../provenance';
 import type { AntecedentToken } from '../registry';
 import {
   type AntecedentContext,
