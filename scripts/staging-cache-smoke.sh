@@ -40,8 +40,8 @@
 # Cloudflare Access (added 2026-05-19): the staging Worker URL is now
 # gated by a CF Access Self-Hosted Application. CLI clients must send
 # CF-Access-Client-Id + CF-Access-Client-Secret headers from a service
-# token. This script reads them from 1Password by item title:
-#   "Cloudflare Access Service Token - agentnative-site-staging"
+# token. This script reads them from 1Password by item UUID:
+#   iuutxdlnh3ujmylvzmuflraeia (CF Service Token - Staging CLI (agentnative-site))
 # A missing service-token item OR a missing op CLI surfaces as an
 # instant 302 redirect to `*.cloudflareaccess.com` on every request,
 # which the harness reports as a clear FAIL rather than a confusing
@@ -70,7 +70,8 @@ fi
 # never enter the script's logged output; they live in shell variables
 # scoped to this process and are passed to curl via -H. The 1Password
 # helper script picks up the operator's default vault.
-OP_ITEM="Cloudflare Access Service Token - agentnative-site-staging"
+# CF Service Token - Staging CLI (agentnative-site)
+OP_ITEM="iuutxdlnh3ujmylvzmuflraeia"
 OP_READ="${OP_READ:-$HOME/.claude/skills/1password/scripts/read_field.sh}"
 if [ ! -x "$OP_READ" ]; then
   echo "FATAL: 1Password helper not found at $OP_READ. Export OP_READ to point at it, or install the 1password skill." >&2
