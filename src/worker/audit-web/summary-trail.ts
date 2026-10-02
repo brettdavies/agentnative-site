@@ -3,9 +3,10 @@
 // to show. The scorecard JSON and the MCP reads keep the machine values;
 // only the page and its twin read this.
 
+import { hostOf } from '../../shared/url-host';
 import { cardSuffixUrl } from './discovery-documents';
 import { resolveUrl } from './handlers/shared';
-import { type DeclaredHostEntry, type FollowState, hostOf } from './provenance';
+import type { DeclaredHostEntry, FollowState } from './provenance';
 import {
   admittedByWhy,
   budgetOutcome,

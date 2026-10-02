@@ -11,6 +11,7 @@
 // other path, scheme, or port. A 405, an Allow header, or a JSON-RPC
 // envelope is what any POST-only route answers, so none of them admits.
 
+import { hostOf } from '../../shared/url-host';
 import type { ProbeResponse } from './assert';
 import {
   cardShape,
@@ -22,7 +23,6 @@ import {
   parseJsonObject,
 } from './discovery-documents';
 import { RETRY_SHAPED_STATUSES, resolveUrl } from './handlers/shared';
-import { hostOf } from './provenance';
 import type { WebAuditDiscoveryConfig } from './registry';
 import { DOCUMENT_MAX_BODY_BYTES, METADATA_MAX_BODY_BYTES, validatePublicUrl } from './ssrf';
 

@@ -2,6 +2,7 @@
 // and the tolerant reads every surface applies to a stored scorecard that
 // may predate the provenance, follow-state, trail, or registry fields.
 
+import { hostOf } from '../../shared/url-host';
 import { FINDING_STATUSES, type FindingStatus, NA_REASONS, type NaReason } from '../../shared/web-audit-findings';
 import { worstTargetStatus } from './handlers/shared';
 import type { EvidenceItem, ProbeStatus } from './handlers/types';
@@ -20,14 +21,6 @@ export type DeclaredHostEntry = Record<string, unknown>;
 
 /** Whether an audit followed the hosts its target declares, as a reader sees it. */
 export type FollowState = 'on' | 'off' | 'not-evaluated';
-
-export function hostOf(url: string): string | null {
-  try {
-    return new URL(url).host;
-  } catch {
-    return null;
-  }
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

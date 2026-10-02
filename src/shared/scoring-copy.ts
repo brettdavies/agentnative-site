@@ -5,6 +5,7 @@
 import type { AuditEvent, CliPhase } from './audit-events';
 import type { Lane } from './audit-routes';
 import { escHtml } from './esc-html';
+import { hostOf } from './url-host';
 import { FINDING_STATUSES, isNotRunReason } from './web-audit-findings';
 import { resultLine } from './web-audit-result-line';
 
@@ -17,14 +18,6 @@ export const LANE_EXPECTATION: Readonly<Record<Lane, string>> = {
 /** The website lane's status line once the run starts, until its first event arrives. */
 export function webReadingLine(target: string): string {
   return `Reading ${target} and any hosts it declares…`;
-}
-
-function hostOf(url: string): string | null {
-  try {
-    return new URL(url).host;
-  } catch {
-    return null;
-  }
 }
 
 /** The host a discovered endpoint sits on, or null when there is none to name. */
