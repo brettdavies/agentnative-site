@@ -17,8 +17,10 @@
 // not here — the run is idempotent and re-triggerable.
 //
 // A registry-shape change (a check retiered, a category split, a new check)
-// is detected via a KV fingerprint and forces one full reflow so every
-// cached scorecard re-renders under the new shape; see REGISTRY_FINGERPRINT_KEY.
+// or a flip of the follow kill switch is detected against what KV recorded
+// on the last run and forces one full reflow, so every cached scorecard is
+// re-scored under the new shape and follow state; see
+// REGISTRY_FINGERPRINT_KEY and FOLLOW_STATE_KEY.
 
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
 import { SPEC_VERSION } from '../spec-version.gen';
@@ -109,6 +111,14 @@ const RESCORE_MAX_CYCLES = 200;
 // age out.
 const REGISTRY_FINGERPRINT_KEY = 'web_rescore:registry_fp';
 
+// KV marker for the follow state the last rescore ran with: "true" or
+// "false", the switch as audits read it, so "TRUE" and an unset secret
+// record one state rather than minting a reflow between them. A flip
+// changes what every seed's declared-host rows can hold, so it forces a
+// reflow as a registry change does. It is kept apart from the fingerprint
+// so staging and production, whose switches differ, agree on that.
+const FOLLOW_STATE_KEY = 'web_rescore:follow_enabled';
+
 /** Run one seeded domain's audit to completion and cache the scorecard. */
 export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string): Promise<void> {
   const registry = await loadWebAuditRegistry(env);
@@ -197,23 +207,25 @@ export async function runWebRescore(
 
   const seed = await step.do('load-seed', async () => loadWebSeed(env));
 
-  // Registry-change gate: when the current registry fingerprint differs
-  // from the one KV recorded on the last run, reflow every cached scorecard
-  // (eligibility 0) so the board re-renders under the new shape, then record
-  // the new fingerprint below. An explicit deps.eligibleAfterMs (tests)
+  // Registry-change gate: when the current registry fingerprint or follow
+  // state differs from the one KV recorded on the last run, reflow every
+  // cached scorecard (eligibility 0) so the board re-renders under the new
+  // shape, then record both below. An explicit deps.eligibleAfterMs (tests)
   // bypasses the gate; a missing SCORE_KV degrades to plain staleness batching.
   let eligibleAfterMs = deps.eligibleAfterMs ?? RESCORE_ELIGIBLE_AFTER_MS;
-  let fingerprintToRecord: string | null = null;
+  let shapeToRecord: { fingerprint: string; follow: string } | null = null;
   if (deps.eligibleAfterMs === undefined && env.SCORE_KV) {
     const kv = env.SCORE_KV;
     const compute = deps.fingerprint ?? currentRegistryFingerprint;
     const currentFp = await step.do('registry-fingerprint', async () => compute(env));
+    const currentFollow = await step.do('follow-switch', async () => String(effectiveFollow(env, true)));
     const priorFp = await step.do('registry-fingerprint:prior', async () =>
       kv.get(REGISTRY_FINGERPRINT_KEY).catch(() => null),
     );
-    if (priorFp !== currentFp) {
+    const priorFollow = await step.do('follow-switch:prior', async () => kv.get(FOLLOW_STATE_KEY).catch(() => null));
+    if (priorFp !== currentFp || priorFollow !== currentFollow) {
       eligibleAfterMs = 0;
-      fingerprintToRecord = currentFp;
+      shapeToRecord = { fingerprint: currentFp, follow: currentFollow };
     }
   }
 
@@ -259,14 +271,15 @@ export async function runWebRescore(
     if (deps.purgeTags) await deps.purgeTags([homeTag(), webTag()]);
   }
 
-  // Record the new fingerprint only after the reflow drains, so a run that
-  // dies partway re-forces on the next trigger instead of stranding the
-  // remaining domains under the old shape.
-  if (fingerprintToRecord !== null && env.SCORE_KV) {
+  // Record the new fingerprint and follow state only after the reflow
+  // drains, so a run that dies partway re-forces on the next trigger instead
+  // of stranding the remaining domains under the old shape.
+  if (shapeToRecord !== null && env.SCORE_KV) {
     const kv = env.SCORE_KV;
-    const fp = fingerprintToRecord;
+    const { fingerprint, follow } = shapeToRecord;
     await step.do('registry-fingerprint:record', async () => {
-      await kv.put(REGISTRY_FINGERPRINT_KEY, fp);
+      await kv.put(REGISTRY_FINGERPRINT_KEY, fingerprint);
+      await kv.put(FOLLOW_STATE_KEY, follow);
     });
   }
   return { audited, skipped, cycles: cycle };

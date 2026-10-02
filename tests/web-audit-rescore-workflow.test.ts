@@ -473,9 +473,9 @@ describe('runWebRescore', () => {
     expect(await kv.get('web_rescore:registry_fp')).toBe('NEW'); // recorded after the reflow
   });
 
-  test('an unchanged fingerprint keeps incremental batching: fresh skipped, stale audited', async () => {
+  test('an unchanged fingerprint and follow state keep incremental batching: fresh skipped, stale audited', async () => {
     const { env, store } = makeEnv([seedEntry('fresh.dev'), seedEntry('stale.dev')]);
-    const { kv } = makeKv({ 'web_rescore:registry_fp': 'SAME' });
+    const { kv } = makeKv({ 'web_rescore:registry_fp': 'SAME', 'web_rescore:follow_enabled': 'false' });
     env.SCORE_KV = kv;
     await primeCache(store, 'fresh.dev', 60_000, 40); // fresh — skipped incrementally
     await primeCache(store, 'stale.dev', 3 * HOUR_MS, 40); // > 2h — audited
@@ -501,6 +501,48 @@ describe('runWebRescore', () => {
     });
     expect(result.audited).toEqual(['fresh.dev']);
     expect(await kv.get('web_rescore:registry_fp')).toBe('FP1');
+  });
+});
+
+describe('the follow switch in the registry-change gate', () => {
+  const FP_KEY = 'web_rescore:registry_fp';
+  const FOLLOW_KEY = 'web_rescore:follow_enabled';
+
+  test('every value but "true" records one follow state, and the fingerprint is the same with the switch on and off', async () => {
+    const recorded = async (followSwitch: string | undefined) => {
+      const { env } = makeEnv([seedEntry('a.dev')], { registry: MINIMAL_REGISTRY });
+      const { kv, map } = makeKv();
+      env.SCORE_KV = kv;
+      if (followSwitch !== undefined) env.WEB_AUDIT_FOLLOW_ENABLED = followSwitch;
+      const { step } = makeStep();
+      await withStubbedFetch(() => runWebRescore(env, step));
+      return { fingerprint: map.get(FP_KEY), follow: map.get(FOLLOW_KEY) };
+    };
+    const off = [await recorded(undefined), await recorded('false'), await recorded('TRUE')];
+    const on = await recorded('true');
+    expect(off.map((r) => r.follow)).toEqual(['false', 'false', 'false']);
+    expect(on.follow).toBe('true');
+    const fingerprint = await registryFingerprint(MINIMAL_REGISTRY as WebAuditRegistry);
+    expect([...off, on].map((r) => r.fingerprint)).toEqual([fingerprint, fingerprint, fingerprint, fingerprint]);
+  });
+
+  test('a flipped switch reflows every domain under an unchanged fingerprint; a value that reads the same does not', async () => {
+    const run = async (recordedFollow: string, followSwitch: string | undefined) => {
+      const { env, store } = makeEnv([seedEntry('fresh.dev')]);
+      const { kv } = makeKv({ [FP_KEY]: 'SAME', [FOLLOW_KEY]: recordedFollow });
+      env.SCORE_KV = kv;
+      if (followSwitch !== undefined) env.WEB_AUDIT_FOLLOW_ENABLED = followSwitch;
+      await primeCache(store, 'fresh.dev', 60_000, 40);
+      const { step } = makeStep();
+      const result = await runWebRescore(env, step, {
+        audit: stubAudit({ 'fresh.dev': 70 }),
+        fingerprint: async () => 'SAME',
+      });
+      return { audited: result.audited, follow: await kv.get(FOLLOW_KEY) };
+    };
+    expect(await run('false', 'true')).toEqual({ audited: ['fresh.dev'], follow: 'true' });
+    expect(await run('true', undefined)).toEqual({ audited: ['fresh.dev'], follow: 'false' });
+    expect(await run('false', 'TRUE')).toEqual({ audited: [], follow: 'false' });
   });
 });
 

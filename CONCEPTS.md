@@ -297,9 +297,11 @@ another host.
 
 ### Registry fingerprint
 
-The hash of the normalized web-audit registry, widened with the follow policy version and the follow kill-switch state,
-that the rescore Workflow compares against its stored value to decide whether the curated seeds must reflow. Its prefix
-is stamped on each scorecard as the registry it was scored under.
+The hash of the normalized web-audit registry, minus its site-only fields, together with the follow policy version. The
+rescore Workflow compares it, and the follow kill-switch state it records beside it, against the values it stored on its
+last run to decide whether the curated seeds must reflow. The switch stays out of the hash, so staging and production
+agree on the fingerprint. Its first 12 characters are stamped on each saved scorecard as the registry it was scored
+under.
 
 ### Watched source
 

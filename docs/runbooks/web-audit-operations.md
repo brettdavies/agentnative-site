@@ -121,10 +121,12 @@ curated seed. Stale `/score/<domain>` pages keep serving the previous row set un
 omitted, not shown as ghost rows.
 
 **The follow switch and the rescore.** The rescore follows the hosts each site declares only while
-`WEB_AUDIT_FOLLOW_ENABLED` is on. While it is off, the next rescore (weekly, post-deploy, or a registry reflow) rewrites
-each seeded scorecard it re-audits as not followed: `follow_declarations: false`, with every row that needs a declared
-host `n_a` for reason `follow-disabled`. Turning the switch back on restores followed scores only through another
-rescore: the weekly run, or a manual run once the seeded scorecards are past the 2-hour eligibility window.
+`WEB_AUDIT_FOLLOW_ENABLED` is on. While it is off, a re-audit saves each seeded scorecard as not followed:
+`follow_declarations: false`, with every row that needs a declared host `n_a` for reason `follow-disabled`. Beside the
+fingerprint, KV records the follow state the last rescore ran with (`web_rescore:follow_enabled`, `true` or `false`; any
+value but `true` reads as `false`), and a flip in either direction forces the same full reflow a registry change does.
+A flip reflows nothing until the next rescore trigger, so after flipping the switch, fire the manual trigger below to
+re-score the board under the new state at once.
 
 **Secrets.** `WEB_RESCORE_SECRET` is a `wrangler secret put` value on both Workers (`--env staging` and production) and
 lives in the GitHub environment secret `ANC_WEB_RESCORE_SECRET` for the deploy hook. Rotate by setting a new value in
