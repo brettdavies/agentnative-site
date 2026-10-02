@@ -5,6 +5,7 @@
 import { describe, expect, test } from 'bun:test';
 import { resultLine } from '../src/shared/web-audit-result-line';
 import { instrumentAuditEvents } from '../src/worker/audit-web/audit-log';
+import { sha256Hex } from '../src/worker/audit-web/cache';
 import { declaredDomainBudget, registrableDomainOf } from '../src/worker/audit-web/domain-budget';
 import { runWebAudit } from '../src/worker/audit-web/engine';
 import { ALWAYS_ADMIT_BUDGET, type DomainBudget } from '../src/worker/audit-web/follow-requests';
@@ -1677,6 +1678,14 @@ describe('follow: the hourly budget of each declared registrable domain', () => 
     });
     expect(record).toMatchObject({ terminal: 'complete', follow_budget_causes: { 'domain-budget': 1 } });
     expect(record?.follow_budget_errors).toEqual({ 'read-refused': 1 });
+  });
+
+  test("the burst floor is keyed by the registrable domain's hash, never the domain itself", async () => {
+    const keys: string[] = [];
+    const budget = declaredDomainBudget({ WEB_AUDIT_DOMAIN_LIMITER: memoryRateLimit(10, Date.now, keys) });
+    expect((await declaring('https://mcp.victim.example/mcp', budget)).entry?.outcome).toBe('reciprocity-refused');
+    expect(keys).toEqual([await sha256Hex('victim.example')]);
+    expect(keys.join(' ')).not.toContain('victim');
   });
 
   test('a burst floor that throws refuses the domain before KV is read, and the run record counts it', async () => {

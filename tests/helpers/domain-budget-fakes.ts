@@ -34,13 +34,16 @@ export function memoryKv(log: string[] = [], options: { sameKeyWriteClock?: () =
   } as unknown as KVNamespace;
 }
 
+/** `keys` receives every key the binding is asked about, in call order. */
 export function memoryRateLimit(
   limit: number,
   now: () => number = Date.now,
+  keys: string[] = [],
 ): { limit(o: { key: string }): Promise<{ success: boolean }> } {
   const windows = new Map<string, { start: number; count: number }>();
   return {
     async limit({ key }) {
+      keys.push(key);
       const at = now();
       let window = windows.get(key);
       if (window === undefined || at - window.start >= 60_000) {

@@ -138,7 +138,7 @@ describe('instrumentAuditEvents', () => {
     }
   });
 
-  test("the run summary records the follow slice's outcome counts, requests, and elapsed time", async () => {
+  test("the run summary records the follow slice's outcome counts, requests, and elapsed time, and no declared domain in the clear", async () => {
     // One endpoint its host does not confirm, then one on a domain whose
     // hourly budget is spent. Only requests to the declared host move the
     // clock, so the slice's elapsed time is 100 ms per request it sent.
@@ -187,8 +187,11 @@ describe('instrumentAuditEvents', () => {
         follow_budget_causes: { 'domain-budget': 1 },
         follow_requests: sent,
         follow_elapsed_ms: sent * 100,
-        follow_domain_requests: { [await sha256Hex('example.net')]: sent },
       });
+      expect(summary?.follow_domain_requests).toEqual({ [await sha256Hex('example.net')]: sent });
+      const serialized = JSON.stringify(summary);
+      expect(serialized).not.toContain('example.net');
+      expect(serialized).not.toContain('capped.org');
     } finally {
       logs.restore();
     }
