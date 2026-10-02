@@ -52,6 +52,8 @@ export interface McpAuthRequired {
   endpoint: string;
   /** The 401's WWW-Authenticate value; null when the 401 carried none. */
   challenge: string | null;
+  /** The handshake lane whose probe drew the 401, which the token-less refusal row asks on. */
+  lane: 'legacy' | 'modern';
   /** Where the metadata naming the endpoint was read. */
   metadataUrl: string;
   metadata: Record<string, unknown>;

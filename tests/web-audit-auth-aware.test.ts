@@ -321,6 +321,57 @@ describe('rows on a protected endpoint', () => {
   });
 });
 
+const MODERN = '2026-07-28';
+
+/**
+ * A modern-only server behind OAuth: every header-routed modern request
+ * draws a 401 naming its metadata, while every legacy request is refused at
+ * HTTP 200 with a JSON-RPC error before any token is read.
+ */
+function modernOnlyProtectedServer(endpoint: string, metadataUrl: string): Record<string, Route> {
+  return {
+    ...protectedServer(endpoint, metadataUrl),
+    [`POST ${endpoint}`]: (init) => {
+      const headers = new Headers(init?.headers);
+      const body = String(init?.body ?? '');
+      const version = headers.get('mcp-protocol-version');
+      if (body.startsWith('not-json')) {
+        return json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } }, 400);
+      }
+      if (version === UNSUPPORTED_VERSION) {
+        return json(
+          { jsonrpc: '2.0', id: 1, error: { code: -32022, message: 'unsupported', data: { supported: [MODERN] } } },
+          400,
+        );
+      }
+      if (version === MODERN) return unauthorized(bearer(metadataUrl));
+      return json(
+        { jsonrpc: '2.0', id: 1, error: { code: -32022, message: 'unsupported', data: { supported: [MODERN] } } },
+        200,
+        headers.get('origin') !== null ? ACAO : {},
+      );
+    },
+  };
+}
+
+describe('a modern-only server behind OAuth', () => {
+  test('a legacy lane refused at HTTP 200 serves nothing without sign-in, so the session rows read auth-required and the refusal row asks on the modern lane', async () => {
+    const { scorecard } = await audit(router({ ...ROOT, ...modernOnlyProtectedServer(SAME, SAME_METADATA) }, []), {
+      registry: mcpRegistry(),
+    });
+    expect(scorecard.mcp_endpoint).toBe(SAME);
+    for (const id of SESSION_ROWS) {
+      expect({ id, reading: [row(scorecard, id).status, row(scorecard, id).na_reason] }).toEqual({
+        id,
+        reading: ['n_a', 'auth-required'],
+      });
+    }
+    // Only the modern lane answers 401, so a pass shows where the row asked.
+    expect(row(scorecard, 'mcp-auth-enforced')).toMatchObject({ status: 'pass', evidence: 'refused with 401' });
+    expect(scorecard.results.filter((r) => r.status === 'broken').map((r) => r.id)).toEqual([]);
+  });
+});
+
 /** Which antecedent each MCP row on the MCP endpoint declares, by what it needs from a protected server. */
 const MCP_ROW_CLASSES: Record<string, AntecedentToken> = {
   'mcp-initialize': 'mcp-present',

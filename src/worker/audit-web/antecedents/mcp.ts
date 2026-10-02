@@ -4,11 +4,10 @@
 // evaluated names why.
 
 import { advertisesResources } from '../handlers/mcp';
-import { WIRE_PROBES } from '../mcp-auth';
+import { servedWithoutSignIn } from '../mcp-auth';
 import { hostOf } from '../provenance';
 import type { AntecedentToken } from '../registry';
 import {
-  type AntecedentContext,
   type AntecedentResolver,
   cardDeclaresAuth,
   evidenceShowsAuthChallenge,
@@ -25,20 +24,14 @@ const mcpAuth: AntecedentResolver = (ctx) => {
   return evidenceShowsAuthChallenge(sourceEvidence(ctx, 'mcp-initialize')) || cardDeclaresAuth(ctx) ? 'apply' : 'n_a';
 };
 
-/** A wave-1 wire probe got a 2xx answer: the endpoint served a request that carried no token. */
-function answeredWithoutSignIn(ctx: AntecedentContext): boolean {
-  return WIRE_PROBES.some((id) => {
-    const status = sourceEvidence(ctx, id)[0]?.status;
-    return typeof status === 'number' && status >= 200 && status < 300;
-  });
-}
-
 // A row that needs a session asks the server for something only a signed-in
 // client receives, so on an endpoint that requires sign-in it is not
-// evaluated rather than read as absent or broken.
+// evaluated rather than read as absent or broken. A handshake answered with
+// a JSON-RPC error is a lane refusing the request, not serving it, so only
+// a result shows the endpoint serves clients without a token.
 const mcpSession: AntecedentResolver = (ctx) => {
   if (ctx.mcpEndpoint === null) return noMcpEndpoint(ctx);
-  if (!ctx.mcpAuth || answeredWithoutSignIn(ctx)) return 'apply';
+  if (!ctx.mcpAuth || servedWithoutSignIn(ctx.sources)) return 'apply';
   return {
     outcome: 'n_a',
     reason: 'auth-required',

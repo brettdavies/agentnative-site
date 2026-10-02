@@ -7,6 +7,7 @@
 // admitting the endpoint is not read again.
 
 import type { ProbeResponse } from './assert';
+import { handshakeServed } from './handlers/mcp';
 import type { McpAuthRequired, ProbeOutcome } from './handlers/types';
 import {
   type ArtifactSource,
@@ -17,8 +18,22 @@ import {
 } from './reciprocity';
 import { type GuardedFetchOptions, guardedFetch } from './ssrf';
 
-/** The wave-1 wire probes whose answer decides it, in the order a 401's challenge is read. */
-export const WIRE_PROBES = ['mcp-initialize', 'mcp-server-discover'] as const;
+/** The wave-1 wire probes whose answer decides it, in the order a 401's challenge is read, with the lane each asks on. */
+const WIRE_PROBES = [
+  { id: 'mcp-initialize', lane: 'legacy' },
+  { id: 'mcp-server-discover', lane: 'modern' },
+] as const satisfies ReadonlyArray<{ id: string; lane: McpAuthRequired['lane'] }>;
+
+/** A 401 the endpoint answered, with the challenge it carried and the handshake lane that drew it. */
+export interface SignInChallenge {
+  challenge: string | null;
+  lane: McpAuthRequired['lane'];
+}
+
+/** A wave-1 wire probe was served a JSON-RPC result: the endpoint answered a request that carried no token. */
+export function servedWithoutSignIn(sources: ReadonlyMap<string, ProbeOutcome>): boolean {
+  return WIRE_PROBES.some(({ id }) => handshakeServed(sources.get(id)));
+}
 
 /**
  * Where metadata is read outside the follow slice: one GET per location,
@@ -83,13 +98,13 @@ export async function signInEndpoint(
   return null;
 }
 
-/** The 401 a wave-1 wire probe drew from the endpoint, with the challenge it carried; null when none did. */
-function wireChallenge(sources: ReadonlyMap<string, ProbeOutcome>): { challenge: string | null } | null {
-  for (const id of WIRE_PROBES) {
+/** The 401 a wave-1 wire probe drew from the endpoint; null when none did. */
+function wireChallenge(sources: ReadonlyMap<string, ProbeOutcome>): SignInChallenge | null {
+  for (const { id, lane } of WIRE_PROBES) {
     const outcome = sources.get(id);
     const first = outcome?.evidence[0];
     if (outcome !== undefined && outcome.status !== 'error' && first?.status === 401) {
-      return { challenge: typeof first.www_authenticate === 'string' ? first.www_authenticate : null };
+      return { challenge: typeof first.www_authenticate === 'string' ? first.www_authenticate : null, lane };
     }
   }
   return null;
@@ -118,5 +133,11 @@ export async function settleMcpAuth(input: {
       ? input.known
       : await resolveProtectedResourceMetadata(endpoint, input.source, answer.challenge ?? undefined);
   if (match === null) return null;
-  return { endpoint: input.endpoint, challenge: answer.challenge, metadataUrl: match.url, metadata: match.metadata };
+  return {
+    endpoint: input.endpoint,
+    challenge: answer.challenge,
+    lane: answer.lane,
+    metadataUrl: match.url,
+    metadata: match.metadata,
+  };
 }

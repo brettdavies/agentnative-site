@@ -6,16 +6,11 @@
   "mcp_discovery": [
     {
       "source": "/.well-known/mcp.json",
-      "document": "server-card",
-      "status": 200,
-      "shape": "sep-1649",
-      "endpoint": "https://example.com/mcp"
+      "status": 404
     },
     {
       "source": "/.well-known/mcp/server-card.json",
-      "status": 200,
-      "shape": "sep-1649",
-      "endpoint": "https://example.com/mcp"
+      "status": 404
     },
     {
       "source": "/.well-known/ai-catalog.json",
@@ -26,6 +21,42 @@
       "source": "/.well-known/api-catalog",
       "document": "api-catalog",
       "status": 404
+    },
+    {
+      "source": "/mcp",
+      "status": 200,
+      "probed": "initialize (no serverInfo)"
+    },
+    {
+      "source": "/sse",
+      "status": 404,
+      "probed": "initialize (no serverInfo)"
+    },
+    {
+      "source": "/message",
+      "status": 404,
+      "probed": "initialize (no serverInfo)"
+    },
+    {
+      "source": "/mcp",
+      "status": 401,
+      "probed": "modern-tools-list (no tools)"
+    },
+    {
+      "source": "/sse",
+      "status": 404,
+      "probed": "modern-tools-list (no tools)"
+    },
+    {
+      "source": "/message",
+      "status": 404,
+      "probed": "modern-tools-list (no tools)"
+    },
+    {
+      "source": "/mcp",
+      "endpoint": "https://example.com/mcp",
+      "probed": "modern-tools-list (auth required)",
+      "resource_metadata": "https://example.com/.well-known/oauth-protected-resource"
     },
     {
       "source": "/mcp/server-card",
@@ -43,32 +74,32 @@
   "follow_declarations": true,
   "declared_hosts": [],
   "summary": {
-    "pass": 16,
+    "pass": 17,
     "noncompliant": 1,
     "broken": 1,
-    "absent": 11,
+    "absent": 10,
     "n_a": 38,
     "skip": 0,
     "error": 1
   },
   "coverage_summary": {
     "must": {
-      "total": 1,
+      "total": 2,
       "verified": 0
     },
     "should": {
-      "total": 19,
-      "verified": 8
+      "total": 21,
+      "verified": 11
     },
     "may": {
-      "total": 9,
-      "verified": 8
+      "total": 6,
+      "verified": 6
     }
   },
-  "score_pct": 54,
+  "score_pct": 56,
   "score": {
-    "relative": 54,
-    "global": 24
+    "relative": 56,
+    "global": 30
   },
   "categories": [
     {
@@ -98,14 +129,14 @@
     {
       "id": "mcp",
       "name": "MCP",
-      "passed": 7,
-      "counted": 12
+      "passed": 9,
+      "counted": 13
     },
     {
       "id": "agent-discovery-auth",
       "name": "Agent discovery & auth",
-      "passed": 1,
-      "counted": 1
+      "passed": 0,
+      "counted": 0
     }
   ],
   "results": [
@@ -205,9 +236,8 @@
       "keyword": "must",
       "tier": "required",
       "principle": "P2",
-      "status": "n_a",
-      "na_reason": "auth-required",
-      "evidence": "HTTP 401 from https://example.com/mcp",
+      "status": "absent",
+      "evidence": "no serverInfo in initialize result",
       "hosts": [
         {
           "host": "example.com"
@@ -319,9 +349,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "auth-required",
-      "evidence": "HTTP 401 from https://example.com/mcp",
+      "status": "absent",
+      "evidence": "error code -32022",
       "hosts": [
         {
           "host": "example.com"
@@ -338,9 +367,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "auth-required",
-      "evidence": "HTTP 401 from https://example.com/mcp",
+      "status": "pass",
+      "evidence": "error code -32700",
       "hosts": [
         {
           "host": "example.com"
@@ -357,9 +385,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "auth-required",
-      "evidence": "HTTP 401 from https://example.com/mcp",
+      "status": "noncompliant",
+      "evidence": "expected error code -32600, got -32022",
       "hosts": [
         {
           "host": "example.com"
@@ -395,9 +422,9 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "absent",
-      "unprobed": true,
-      "evidence": "no modern lane: server/discover returned no result",
+      "status": "n_a",
+      "na_reason": "auth-required",
+      "evidence": "HTTP 401 from https://example.com/mcp",
       "hosts": [
         {
           "host": "example.com"
@@ -414,9 +441,9 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "absent",
-      "unprobed": true,
-      "evidence": "no modern lane: server/discover returned no result",
+      "status": "n_a",
+      "na_reason": "auth-required",
+      "evidence": "HTTP 401 from https://example.com/mcp",
       "hosts": [
         {
           "host": "example.com"
@@ -433,9 +460,9 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "absent",
-      "unprobed": true,
-      "evidence": "no modern lane: server/discover returned no result",
+      "status": "n_a",
+      "na_reason": "auth-required",
+      "evidence": "HTTP 401 from https://example.com/mcp",
       "hosts": [
         {
           "host": "example.com"
@@ -452,9 +479,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "absent",
-      "unprobed": true,
-      "evidence": "no modern lane: server/discover returned no result",
+      "status": "pass",
+      "evidence": "error code -32022",
       "hosts": [
         {
           "host": "example.com"
@@ -529,7 +555,7 @@
       "tier": "recommended",
       "principle": "P4",
       "status": "pass",
-      "evidence": "https://example.com/mcp -> 405",
+      "evidence": "https://example.com/mcp -> 401",
       "hosts": [
         {
           "host": "example.com"
@@ -546,9 +572,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P6",
-      "status": "n_a",
-      "na_reason": "posture-consistent",
-      "evidence": "no Allow-Origin on the preflight or the POST: consistent no-CORS posture",
+      "status": "pass",
+      "evidence": "preflight 204 allow-origin *; post 200 allow-origin *",
       "hosts": [
         {
           "host": "example.com"
@@ -565,9 +590,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P6",
-      "status": "n_a",
-      "na_reason": "posture-consistent",
-      "evidence": "no Allow-Origin on the preflight or the POST: consistent no-CORS posture",
+      "status": "pass",
+      "evidence": "preflight 204 allow-origin *; post 200 allow-origin *",
       "hosts": [
         {
           "host": "example.com"
@@ -584,8 +608,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P8",
-      "status": "pass",
-      "evidence": "https://example.com/.well-known/mcp/server-card.json -> 200",
+      "status": "absent",
+      "evidence": "https://example.com/.well-known/mcp/server-card.json -> 404 (status 404 not in [200])",
       "hosts": [
         {
           "host": "example.com"
@@ -602,8 +626,9 @@
       "keyword": "may",
       "tier": "optional",
       "principle": "P8",
-      "status": "pass",
-      "evidence": "https://example.com/.well-known/mcp -> 301 (301 -> /.well-known/mcp/server-card.json)",
+      "status": "n_a",
+      "na_reason": "optional-absent",
+      "evidence": "https://example.com/.well-known/mcp -> 404 (404 alias not published)",
       "hosts": [
         {
           "host": "example.com"
@@ -620,8 +645,9 @@
       "keyword": "may",
       "tier": "optional",
       "principle": "P8",
-      "status": "pass",
-      "evidence": "https://example.com/mcp-skill.md -> 200",
+      "status": "n_a",
+      "na_reason": "optional-absent",
+      "evidence": "https://example.com/mcp-skill.md -> 404 (status 404 not in [200])",
       "hosts": [
         {
           "host": "example.com"
@@ -638,8 +664,8 @@
       "keyword": "may",
       "tier": "optional",
       "principle": "P1",
-      "status": "noncompliant",
-      "evidence": "the Bearer challenge names no resource_metadata",
+      "status": "pass",
+      "evidence": "resource_metadata names https://example.com/.well-known/oauth-protected-resource",
       "hosts": [
         {
           "host": "example.com"
@@ -657,7 +683,7 @@
       "tier": "optional",
       "principle": "P1",
       "status": "pass",
-      "evidence": "authorization_servers: https://example.com",
+      "evidence": "authorization_servers: https://auth.example.com",
       "hosts": [
         {
           "host": "example.com"
@@ -1254,14 +1280,9 @@
       "tier": "optional",
       "principle": "P1",
       "status": "n_a",
-      "na_reason": "optional-absent",
-      "evidence": "https://example.com/.well-known/openid-configuration -> 404 (status 404 not in [200])",
-      "hosts": [
-        {
-          "host": "example.com"
-        }
-      ],
-      "host": "example.com"
+      "na_reason": "antecedent-unmet",
+      "evidence": "no auth surface detected",
+      "hosts": []
     },
     {
       "id": "oauth-protected-resource",
@@ -1272,14 +1293,10 @@
       "keyword": "may",
       "tier": "optional",
       "principle": "P1",
-      "status": "pass",
-      "evidence": "https://example.com/.well-known/oauth-protected-resource -> 200",
-      "hosts": [
-        {
-          "host": "example.com"
-        }
-      ],
-      "host": "example.com"
+      "status": "n_a",
+      "na_reason": "antecedent-unmet",
+      "evidence": "MCP endpoint does not challenge for auth",
+      "hosts": []
     },
     {
       "id": "auth-md",
@@ -1291,14 +1308,9 @@
       "tier": "optional",
       "principle": "P1",
       "status": "n_a",
-      "na_reason": "optional-absent",
-      "evidence": "https://example.com/.well-known/auth.md -> 404",
-      "hosts": [
-        {
-          "host": "example.com"
-        }
-      ],
-      "host": "example.com"
+      "na_reason": "antecedent-unmet",
+      "evidence": "no auth surface detected",
+      "hosts": []
     }
   ]
 }

@@ -48,24 +48,38 @@ describe('resolveAntecedent: mcp', () => {
   const SIGN_IN = {
     endpoint: ENDPOINT,
     challenge: 'Bearer resource_metadata="https://x.dev/.well-known/oauth-protected-resource"',
+    lane: 'legacy' as const,
     metadataUrl: 'https://x.dev/.well-known/oauth-protected-resource',
     metadata: { resource: ENDPOINT, authorization_servers: ['https://auth.x.dev'] },
   };
   const challenged = () => new Map([['mcp-initialize', outcome('na', [{ url: ENDPOINT, status: 401 }])]]);
 
-  test('mcp-session holds unless the endpoint requires sign-in and no wire probe answered without it', () => {
+  const AUTH_REQUIRED = { outcome: 'n_a', reason: 'auth-required', host: 'x.dev', evidence: ENDPOINT } as const;
+
+  test('mcp-session holds unless the endpoint requires sign-in and no wire probe was served a result without it', () => {
     const base = { mcpEndpoint: ENDPOINT };
     expect(resolveAntecedent('mcp-session', ctx(base))).toBe('apply');
-    expect(resolveAntecedent('mcp-session', ctx({ ...base, sources: challenged(), mcpAuth: SIGN_IN }))).toEqual({
-      outcome: 'n_a',
-      reason: 'auth-required',
-      host: 'x.dev',
-      evidence: ENDPOINT,
-    });
+    expect(resolveAntecedent('mcp-session', ctx({ ...base, sources: challenged(), mcpAuth: SIGN_IN }))).toEqual(
+      AUTH_REQUIRED,
+    );
     const answered = challenged();
-    answered.set('mcp-server-discover', outcome('pass', [{ url: ENDPOINT, status: 200 }]));
+    answered.set('mcp-server-discover', outcome('pass', [{ url: ENDPOINT, status: 200, capabilities: ['tools'] }]));
     expect(resolveAntecedent('mcp-session', ctx({ ...base, sources: answered, mcpAuth: SIGN_IN }))).toBe('apply');
     expect(resolveAntecedent('mcp-session', ctx())).toBe('n_a');
+  });
+
+  test('a handshake answered at a 2xx with a JSON-RPC error is a lane refusal, not a request served without sign-in', () => {
+    for (const refusal of [
+      outcome('absent', [{ url: ENDPOINT, status: 200, error_code: -32601 }]),
+      outcome('absent', [{ url: ENDPOINT, status: 200, error_code: -32022 }]),
+      outcome('broken', [{ url: ENDPOINT, status: 200, why: ['no parseable JSON-RPC response'] }]),
+    ]) {
+      const sources = challenged();
+      sources.set('mcp-server-discover', refusal);
+      expect(resolveAntecedent('mcp-session', ctx({ mcpEndpoint: ENDPOINT, sources, mcpAuth: SIGN_IN }))).toEqual(
+        AUTH_REQUIRED,
+      );
+    }
   });
 
   test('mcp-auth-required holds only when the endpoint requires sign-in, never on a card declaration alone', () => {

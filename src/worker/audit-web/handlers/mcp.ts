@@ -474,7 +474,10 @@ function framingOf(resp: { status: number | null; headers: Record<string, string
   };
 }
 
-function buildBody(op: McpOp, method: string, protocolVersion: string): string {
+function buildBody(op: McpOp, method: string, protocolVersion: string, modernMethod: string | undefined): string {
+  if (modernMethod !== undefined) {
+    return modernProbeBody(modernMethod);
+  }
   if (op === 'initialize') {
     return legacyInitializeBody(protocolVersion);
   }
@@ -483,10 +486,6 @@ function buildBody(op: McpOp, method: string, protocolVersion: string): string {
   }
   if (op === 'resources-list') {
     return JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'resources/list', params: {} });
-  }
-  const modernMethod = specOf(op).method;
-  if (modernMethod !== undefined) {
-    return modernProbeBody(modernMethod);
   }
   return JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: {} });
 }
@@ -505,6 +504,18 @@ export function advertisedCapabilities(items: EvidenceItem[]): readonly string[]
 /** A `capabilities` evidence row advertising the resources group. */
 export function advertisesResources(items: EvidenceItem[]): boolean {
   return advertisedCapabilities(items).includes('resources');
+}
+
+/**
+ * Whether a handshake probe (initialize or server/discover) was served a
+ * JSON-RPC result at a 2xx. Both write their capability advertisement on
+ * the result path alone, so an error envelope, an unparseable body, and a
+ * refusal carry none.
+ */
+export function handshakeServed(outcome: ProbeOutcome | undefined): boolean {
+  const first = outcome?.evidence[0];
+  const status = first?.status;
+  return typeof status === 'number' && status >= 200 && status < 300 && Array.isArray(first?.capabilities);
 }
 
 /**
@@ -665,7 +676,11 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
   const spec = specOf(w.op);
   const conformance = conformanceFor(w.op);
   const negotiation = negotiationFor(w.op);
-  const modernMethod = spec.method;
+  // The token-less refusal is asked on the lane whose handshake drew the
+  // 401: a server that refuses the other lane before reading any token has
+  // not served that request without one.
+  const modernMethod =
+    spec.family === 'enforcement' && ctx.mcpAuth?.lane === 'modern' ? MCP_OPS['modern-tools-list'].method : spec.method;
   // Modern probes stay sessionless (no Mcp-Session-Id) and carry no
   // Mcp-Name: neither op is a tools/call or resources/read. Conformance
   // probes open fully table-shaped, and only the legacy three re-ask with
@@ -688,7 +703,7 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     ? LEGACY_TOOLS_LIST_BODY
     : conformance
       ? conformance.body()
-      : buildBody(w.op, w.method ?? '', ctx.protocolVersion);
+      : buildBody(w.op, w.method ?? '', ctx.protocolVersion, modernMethod);
   // Every MCP probe reads at most a small JSON-RPC envelope, so the
   // shared audit cap bounds what a hostile endpoint can make the auditor
   // buffer.

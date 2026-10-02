@@ -954,7 +954,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     post(MCP_PATH, rpcError(-32099)),
   ]),
   'mcp-www-authenticate': scenario(
-    'an endpoint that answers legacy POSTs with a 401 whose challenge names no metadata, while root RFC 9728 metadata names it: the rows those 401s answer read auth-required, its modern lane answers token-less probes with a method-not-found so the session rows still apply and it presents both MCP access alternatives, and the challenge satisfies the mcp-auth antecedent',
+    'an endpoint that answers legacy POSTs with a 401 whose challenge names no metadata, while root RFC 9728 metadata names it: it requires sign-in, and its modern lane refuses token-less probes with a method-not-found, a lane refusal that serves nothing, so the session rows read auth-required and it presents only the protected MCP access alternative; the rows the 401s answer read auth-required, and the challenge satisfies the mcp-auth antecedent',
     ['mcp-initialize', 'mcp-auth-challenge', 'oauth-protected-resource', 'auth-md'],
     [
       ...baseline(),
@@ -1180,6 +1180,25 @@ export const SCENARIOS: Record<string, Scenario> = {
       post(MCP_PATH, rpcResult(TOOLS_RESULT), { body_json_method: 'tools/list' }),
       post(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH))),
       get(PROTECTED_RESOURCE_PATH, json({ resource: u(MCP_PATH), authorization_servers: ['http://auth.example.com'] })),
+    ],
+  ),
+  'auth-modern-only': scenario(
+    "a modern-only server behind OAuth at the audited site's /mcp refuses every legacy POST at HTTP 200 with a JSON-RPC error before reading a token, while every modern POST draws a 401 naming same-host RFC 9728 metadata that names it: the endpoint is found with sign-in required and presents only the protected MCP access alternative, the session rows read auth-required, and the refusal row is asked on the modern lane, where it passes",
+    ['mcp-server-discover', 'mcp-modern-tools-list', 'mcp-auth-enforced'],
+    [
+      ...baseline(),
+      post(MCP_PATH, rpcError(-32700, 400), { body_contains: 'not-json{{' }),
+      post(MCP_PATH, rpcError(-32022, 400, { supported: [MODERN_PROTOCOL] }), {
+        headers: { 'mcp-protocol-version': UNSUPPORTED_PROTOCOL },
+      }),
+      post(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH)), { headers: { 'mcp-protocol-version': MODERN_PROTOCOL } }),
+      post(MCP_PATH, { ...rpcError(-32022, 200, { supported: [MODERN_PROTOCOL] }), headers: { 'content-type': 'application/json', ...ACAO } }, {
+        headers: { origin: CORS_ORIGIN },
+      }),
+      post(MCP_PATH, rpcError(-32022, 200, { supported: [MODERN_PROTOCOL] })),
+      options(MCP_PATH, res(204, ACAO, '')),
+      get(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH))),
+      get(PROTECTED_RESOURCE_PATH, json({ resource: u(MCP_PATH), authorization_servers: [AUTH_SERVER] })),
     ],
   ),
   'auth-open-endpoint': scenario(
