@@ -106,6 +106,11 @@ describe('wrangler.jsonc — inherited-property overrides (anc.dev routing-drift
     expect(patterns).toEqual(['anc.dev', 'www.anc.dev']);
   });
 
+  test('every request reaches the Worker before the asset layer, so www.anc.dev redirects static paths too', () => {
+    const assets = config.assets as Record<string, unknown> | undefined;
+    expect(assets?.run_worker_first).toBe(true);
+  });
+
   test('top-level `route` singular is NOT used (same hazard shape as `routes`; staging would inherit silently)', () => {
     // The Wrangler config supports both `route` (single) and `routes`
     // (array). Both are inheritable. If a future PR ever switches to the
