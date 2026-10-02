@@ -1097,7 +1097,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     ...noModernLane(),
     ...legacyMcp(),
   ]),
-  'mcp-card-no-endpoint-field': scenario('a card with neither a SEP-2127 remotes array nor a SEP-1649 endpoint field is held to SEP-2127 and reads broken, while discovery falls through to initialize', ['mcp-server-card', 'mcp-initialize'], [
+  'mcp-card-no-endpoint-field': scenario('a card without an endpoint field that names its server in serverInfo is SEP-1649-shaped and passes the card check with the superseded advisory, while discovery falls through to initialize', ['mcp-server-card', 'mcp-initialize'], [
     ...baseline(),
     get(CARD_PATH, json({ name: 'example', serverInfo: { name: 'example' } })),
     ...mcpEdges(),

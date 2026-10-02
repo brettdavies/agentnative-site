@@ -1,11 +1,13 @@
 // `server-card` handler: scores the server card discovery kept as the card
 // of record, with no request of its own. A SEP-1649-shaped card passes with
-// the superseded advisory; any other card is held to SEP-2127 and passes
+// the superseded advisory, and so does one that names its server in
+// `serverInfo`, a SEP-1649 field SEP-2127 does not have, with no endpoint
+// field for discovery to read; any other card is held to SEP-2127 and passes
 // when it carries every field the extension schema requires, at its top
 // level and in each `remotes[]` item, with the JSON type the schema gives.
 // The field lists arrive in `with`, read from the vendored schema at build.
 
-import { cardShape, isJsonObject, type JsonObject, parseJsonObject } from '../discovery-documents';
+import { type CardShape, cardShape, isJsonObject, type JsonObject, parseJsonObject } from '../discovery-documents';
 import type { WebCheck } from '../registry';
 import type { EvidenceItem, HandlerContext, ProbeOutcome } from './types';
 
@@ -68,6 +70,10 @@ export function sep2127Problems(card: JsonObject, w: Pick<ServerCardWith, 'requi
   return problems;
 }
 
+function scoredShape(card: JsonObject | null, discovered: CardShape): CardShape {
+  return discovered === 'unrecognized' && isJsonObject(card?.serverInfo) ? 'sep-1649' : discovered;
+}
+
 export async function runServerCard(check: WebCheck, ctx: HandlerContext): Promise<ProbeOutcome> {
   const w = check.with as unknown as ServerCardWith;
   const doc = ctx.retainedDocuments?.get(w.retained);
@@ -75,7 +81,7 @@ export async function runServerCard(check: WebCheck, ctx: HandlerContext): Promi
     return { status: 'absent', evidence: [{ retained: w.retained, why: ['discovery found no server card'] }] };
   }
   const card = parseJsonObject(doc.response);
-  const shape = doc.shape ?? cardShape(card);
+  const shape = scoredShape(card, doc.shape ?? cardShape(card));
   const item: EvidenceItem = { url: doc.url, status: doc.response.status, retained: w.retained, shape };
   if (card === null) {
     return { status: 'broken', evidence: [{ ...item, ok: false, why: ['the card is not a JSON object'] }] };

@@ -1299,6 +1299,33 @@ describe('mcp-server-card scores the card discovery kept', () => {
     expect({ status: row.status, advisory: row.advisory }).toEqual({ status: 'pass', advisory: 'superseded' });
   });
 
+  test('a card that names its server in serverInfo, with no endpoint field, is SEP-1649-shaped and passes superseded', async () => {
+    const row = await cardRow(
+      stubFetch((url) =>
+        url.endsWith('/.well-known/mcp/server-card.json')
+          ? json({ name: 'example', serverInfo: { name: 'example' } })
+          : url === 'https://example.com/mcp'
+            ? initializeResponse()
+            : new Response('', { status: 404 }),
+      ),
+    );
+    expect({ status: row.status, advisory: row.advisory }).toEqual({ status: 'pass', advisory: 'superseded' });
+  });
+
+  test('a card with neither shape is held to SEP-2127', async () => {
+    const row = await cardRow(
+      stubFetch((url) =>
+        url.endsWith('/.well-known/mcp/server-card.json')
+          ? json({ name: 'example' })
+          : url === 'https://example.com/mcp'
+            ? initializeResponse()
+            : new Response('', { status: 404 }),
+      ),
+    );
+    expect(row.status).toBe('broken');
+    expect(row.evidence).toContain('missing required fields');
+  });
+
   test('no card reads absent at the recommended tier', async () => {
     const row = await cardRow(
       stubFetch((url, init) =>

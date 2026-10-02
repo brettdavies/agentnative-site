@@ -6586,8 +6586,8 @@
     ]
   },
   "mcp-card-no-endpoint-field": {
-    "score_pct": 58,
-    "score": {"relative":58,"global":35},
+    "score_pct": 64,
+    "score": {"relative":64,"global":38},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -6614,7 +6614,7 @@
       {"id":"mcp-get-fast-fail","status":"pass"},
       {"id":"mcp-cors-preflight","status":"n_a","na_reason":"posture-consistent"},
       {"id":"mcp-cors-actual","status":"n_a","na_reason":"posture-consistent"},
-      {"id":"mcp-server-card","status":"broken"},
+      {"id":"mcp-server-card","status":"pass"},
       {"id":"mcp-card-legacy-aliases","status":"n_a","na_reason":"optional-absent"},
       {"id":"mcp-usage-doc","status":"n_a","na_reason":"optional-absent"},
       {"id":"mcp-auth-challenge","status":"n_a","na_reason":"antecedent-unmet"},
