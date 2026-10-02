@@ -165,7 +165,7 @@ to on another origin, in probe order. A URL declared twice keeps its first entry
 | `outcome`     | string           | `followed`, `reciprocity-refused`, `not-followed`, `blocked`, `unreachable`, or `budget-exceeded`.                                                                                                                     |
 | `admitted_by` | string, optional | On a followed `mcp-endpoint`, what its own host publishes naming it: `card`, `ai-catalog`, or `metadata`.                                                                                                              |
 | `cause`       | string, optional | On `budget-exceeded`, the limit reached: `per-audit-cap`, `slice`, or `domain-budget`.                                                                                                                                 |
-| `reason`      | string, optional | On `not-followed`, why: `templated-url`, `self-path`, `beyond-endpoint-of-record`, `follow-disabled`, or `no-service-desc`.                                                                                            |
+| `reason`      | string, optional | On `not-followed`, why: `templated-url`, `self-path`, `beyond-endpoint-of-record`, `follow-disabled`, `no-service-desc`, or `insecure-scheme`.                                                                         |
 
 An MCP endpoint on another host receives a wire probe only after that host confirms it: a SEP-2127 card at
 `<endpoint>/server-card`, an entry in the host's own `/.well-known/ai-catalog.json`, or RFC 9728 protected-resource
@@ -176,7 +176,11 @@ confirmed endpoint in declaration order is the endpoint of record unless the aud
 card document declared after it, or an endpoint confirmed while the site serves its own, reads `not-followed`. A URL the
 SSRF guard refuses, a private address or an IP literal, or a redirect hop to one, reads `blocked` and is never
 requested; its rows read `declared-host-blocked`. A URL anc cannot request at all, one that does not parse or whose
-scheme is not `http` or `https`, is never requested and reads `reciprocity-refused`.
+scheme is not `http` or `https`, is never requested and reads `reciprocity-refused`. A URL or redirect hop on `http`
+that the guard admits is never requested either: it reads `not-followed` with reason `insecure-scheme`, and no row is
+evaluated at it. What a host publishes to confirm an endpoint is its consent to be probed, and consent read over
+plaintext could be forged by anyone on the network path, so every document anc reads to confirm an endpoint is read over
+`https`.
 
 An API catalog anchor is an API host the API rows evaluate when its `service-desc` names a description other than an MCP
 surface; an anchor with no such `service-desc` reads `not-followed` with reason `no-service-desc` and is never
