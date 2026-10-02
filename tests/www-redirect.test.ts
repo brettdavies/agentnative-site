@@ -41,6 +41,12 @@ describe('www.anc.dev redirects to anc.dev', () => {
     expect(seen).toHaveLength(0);
   });
 
+  test('a GET redirect is readable cross-origin, so a browser fetch of a discovery document on www follows it', async () => {
+    const { response } = await send('https://www.anc.dev/.well-known/mcp/server-card.json');
+    expect(response.status).toBe(301);
+    expect(response.headers.get('access-control-allow-origin')).toBe('*');
+  });
+
   test('the bare host redirects to the apex root', async () => {
     const { response } = await send('https://www.anc.dev/');
     expect(response.status).toBe(301);
@@ -61,6 +67,7 @@ describe('www.anc.dev redirects to anc.dev', () => {
     });
     expect(response.status).toBe(308);
     expect(response.headers.get('location')).toBe('https://anc.dev/mcp');
+    expect(response.headers.get('access-control-allow-origin')).toBeNull();
     expect(seen).toHaveLength(0);
   });
 
