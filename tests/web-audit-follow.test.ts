@@ -7,7 +7,7 @@ import { resultLine } from '../src/shared/web-audit-result-line';
 import { instrumentAuditEvents } from '../src/worker/audit-web/audit-log';
 import { declaredDomainBudget, registrableDomainOf } from '../src/worker/audit-web/domain-budget';
 import { runWebAudit } from '../src/worker/audit-web/engine';
-import type { DomainBudget } from '../src/worker/audit-web/follow-requests';
+import { ALWAYS_ADMIT_BUDGET, type DomainBudget } from '../src/worker/audit-web/follow-requests';
 import { endpointRedirects, mcpEndpointRedirects } from '../src/worker/audit-web/handlers/shared';
 import type { WebScorecard } from '../src/worker/audit-web/scorecard';
 import { budgetKeyPrefix, memoryKv, memoryRateLimit } from './helpers/domain-budget-fakes';
@@ -1454,7 +1454,12 @@ describe('follow: sequencing and determinism', () => {
       if (new URL(url).host === 'example.com') throw new TypeError('connection refused');
       return cardDocument(sep2127Card(ENDPOINT));
     });
-    for await (const event of runWebAudit({ url: TARGET, registry: followRegistry(), fetchOptions: { fetchImpl } })) {
+    for await (const event of runWebAudit({
+      url: TARGET,
+      registry: followRegistry(),
+      fetchOptions: { fetchImpl },
+      domainBudget: ALWAYS_ADMIT_BUDGET,
+    })) {
       events.push(event.type);
     }
     expect(events).toContain('unreachable');

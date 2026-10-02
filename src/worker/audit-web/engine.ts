@@ -33,7 +33,7 @@ import type { ProbeResponse } from './assert';
 import { readDiscoveryDocuments } from './discovery';
 import { settleEndpointOfRecord } from './endpoint-of-record';
 import type { FollowStats } from './follow';
-import { ALWAYS_ADMIT_BUDGET, type DomainBudget } from './follow-requests';
+import type { DomainBudget } from './follow-requests';
 import { apiDescriptionBodies, runApiDescription } from './handlers/api-description';
 import { runApiHygiene } from './handlers/api-hygiene';
 import { runAuthMd } from './handlers/auth-md';
@@ -84,8 +84,13 @@ export interface RunWebAuditInput {
   fetchOptions?: Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects'>;
   /** Follow the hosts the site declares; absent means follow. */
   followDeclarations?: boolean;
-  /** The per-domain hourly budget the follow slice draws on; absent admits every domain. */
-  domainBudget?: DomainBudget;
+  /**
+   * The per-domain hourly budget the follow slice draws on. Required: an
+   * audit that skipped the budget other audits share would reach their
+   * declared domains uncapped. A runner that shares none with other audits
+   * passes ALWAYS_ADMIT_BUDGET.
+   */
+  domainBudget: DomainBudget;
   /** Injectable clock for deterministic deadline tests. */
   now?: () => number;
 }
@@ -367,7 +372,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     apiRowsApply: input.siteType === null || input.siteType === undefined || input.siteType === 'api',
     enabled: following,
     discovery: discoveryConfig,
-    budget: input.domainBudget ?? ALWAYS_ADMIT_BUDGET,
+    budget: input.domainBudget,
     ...phaseOptions,
   });
   yield { type: 'discovery', endpoint: declared.endpoint, evidence: discovery.evidence };

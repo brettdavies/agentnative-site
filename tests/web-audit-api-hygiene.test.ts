@@ -3,6 +3,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
+import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
 import { stubFetch } from './helpers/stub-fetch';
 
@@ -149,7 +150,12 @@ describe('API hygiene + MCP resources + ARD', () => {
     });
     const rows = resultsOf(
       await collect(
-        runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+        runWebAudit({
+          url: 'https://example.com/',
+          registry: registryOf(CHECKS),
+          fetchOptions: { fetchImpl },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
+        }),
       ),
     );
     expect(rows.find((r) => r.id === 'json-errors')?.status).toBe('n_a');
@@ -170,7 +176,12 @@ describe('API hygiene + MCP resources + ARD', () => {
     });
     const rows = resultsOf(
       await collect(
-        runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+        runWebAudit({
+          url: 'https://example.com/',
+          registry: registryOf(CHECKS),
+          fetchOptions: { fetchImpl },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
+        }),
       ),
     );
     expect(rows.find((r) => r.id === 'openapi')?.status).toBe('pass');
@@ -194,7 +205,12 @@ describe('API hygiene + MCP resources + ARD', () => {
     });
     const rows = resultsOf(
       await collect(
-        runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+        runWebAudit({
+          url: 'https://example.com/',
+          registry: registryOf(CHECKS),
+          fetchOptions: { fetchImpl },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
+        }),
       ),
     );
     expect(rows.find((r) => r.id === 'json-errors')?.status).toBe('pass');
@@ -212,7 +228,12 @@ describe('API hygiene + MCP resources + ARD', () => {
     });
     const rows = resultsOf(
       await collect(
-        runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+        runWebAudit({
+          url: 'https://example.com/',
+          registry: registryOf(CHECKS),
+          fetchOptions: { fetchImpl },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
+        }),
       ),
     );
     expect(rows.find((r) => r.id === 'mcp-resources-list')?.status).toBe('n_a');
@@ -230,7 +251,12 @@ describe('API hygiene + MCP resources + ARD', () => {
     });
     const rows = resultsOf(
       await collect(
-        runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+        runWebAudit({
+          url: 'https://example.com/',
+          registry: registryOf(CHECKS),
+          fetchOptions: { fetchImpl },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
+        }),
       ),
     );
     expect(rows.find((r) => r.id === 'mcp-resources-list')?.status).toBe('broken');
@@ -279,7 +305,12 @@ describe('API hygiene + MCP resources + ARD', () => {
     });
     const rows = resultsOf(
       await collect(
-        runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+        runWebAudit({
+          url: 'https://example.com/',
+          registry: registryOf(CHECKS),
+          fetchOptions: { fetchImpl },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
+        }),
       ),
     );
     expect(methods).toContain('notifications/initialized');
@@ -294,7 +325,12 @@ describe('API hygiene + MCP resources + ARD', () => {
     });
     const rows = resultsOf(
       await collect(
-        runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+        runWebAudit({
+          url: 'https://example.com/',
+          registry: registryOf(CHECKS),
+          fetchOptions: { fetchImpl },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
+        }),
       ),
     );
     const row = rows.find((r) => r.id === 'ai-catalog');

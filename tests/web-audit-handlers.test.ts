@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { RetainedDocumentKey } from '../src/shared/web-audit-documents';
 import type { RetainedDocument } from '../src/worker/audit-web/discovery-documents';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
+import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
 import { runApiHygiene } from '../src/worker/audit-web/handlers/api-hygiene';
 import { deriveApiProbeUrl } from '../src/worker/audit-web/handlers/api-probe-url';
 import { runAuthMd } from '../src/worker/audit-web/handlers/auth-md';
@@ -1886,6 +1887,7 @@ describe('mcp-resources antecedent resolves era-neutrally (engine)', () => {
       url: BASE,
       registry,
       fetchOptions: { fetchImpl },
+      domainBudget: ALWAYS_ADMIT_BUDGET,
     }) as AsyncGenerator<AuditEvent>) {
       if (event.type === 'result') rows.push(event.result);
     }
@@ -2040,6 +2042,7 @@ describe('era lanes resolved across a whole audit (engine)', () => {
       url: BASE,
       registry,
       fetchOptions: { fetchImpl },
+      domainBudget: ALWAYS_ADMIT_BUDGET,
     }) as AsyncGenerator<AuditEvent>) {
       if (event.type === 'result') rows.push(event.result);
     }
@@ -2926,6 +2929,7 @@ describe('evidence lines name the fact that decided the verdict', () => {
       url: BASE,
       registry: registryOf(checks),
       fetchOptions: { fetchImpl },
+      domainBudget: ALWAYS_ADMIT_BUDGET,
     }) as AsyncGenerator<AuditEvent>) {
       if (event.type === 'result') rows.push(event.result);
     }
@@ -3032,6 +3036,7 @@ describe('mcp-card-legacy-aliases (MAY, one correct redirect is enough)', () => 
         checks: [aliasCheck],
       },
       fetchOptions: { fetchImpl },
+      domainBudget: ALWAYS_ADMIT_BUDGET,
     }) as AsyncGenerator<AuditEvent>) {
       if (event.type === 'result') rows.push(event.result);
     }
