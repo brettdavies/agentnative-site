@@ -93,6 +93,18 @@ describe('stash and take', () => {
     expect(takeInlineResult('corrupt.dev')).toBeNull();
   });
 
+  test('a new click drops the result kept for its target, so a followed submit is never answered by an opted-out one', async () => {
+    stashInlineResult('stripe.dev', { html: '<article>not saved</article>', follow: false });
+    stashInlineResult('other.dev', { html: '<article>kept</article>', follow: false });
+    await startAudit(
+      { target: 'stripe.dev', lane: 'web', listing: null },
+      { acquire: async () => 'tok', navigate: () => {} },
+    );
+    expect(takeInlineResult('stripe.dev')).toBeNull();
+    expect(take('stripe.dev')).toMatchObject({ token: 'tok', follow: true });
+    expect(takeInlineResult('other.dev')).toEqual({ html: '<article>kept</article>', follow: false });
+  });
+
   test('the follow choice round-trips through the stash, and a record without one follows', () => {
     stash('stripe.dev', { token: 'tok', listing: null, follow: false, entered_lane: 'web', refresh: false });
     expect(take('stripe.dev')).toMatchObject({ follow: false, listing: null });

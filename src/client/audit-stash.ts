@@ -13,7 +13,7 @@
 //   audit-inline:<target>  a result body with no URL of its own and the
 //                          follow choice that produced it, kept so a same-tab
 //                          refresh restores it instead of Start and Run again
-//                          repeats the choice
+//                          repeats the choice; the next click drops it
 //
 // No in-flight marker lives in the tab: the server's in-flight pointer is
 // the one place a running audit is recorded.
@@ -65,11 +65,16 @@ function remove(key: string): void {
   }
 }
 
-/** Stash a click's record for the progress page, keyed by the normalized target. */
+/**
+ * Stash a click's record for the progress page, keyed by the normalized
+ * target. The click supersedes any result kept for the target, which may
+ * have been produced under a different follow choice.
+ */
 export function stash(target: string, record: StashRecord, now: number = Date.now()): void {
   const stored: StoredRecord = { ...record, ts: now };
   write(STASH_PREFIX + target, JSON.stringify(stored));
   write(LANE_PREFIX + target, JSON.stringify({ lane: record.entered_lane, ts: now }));
+  remove(INLINE_PREFIX + target);
 }
 
 function isLane(value: unknown): value is Lane {

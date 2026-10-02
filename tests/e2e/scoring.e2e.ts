@@ -8,7 +8,8 @@
 // bounce, the verification wait state, the inline collision that survives a
 // reload, the website result that saved nothing rendering in place with Run
 // again repeating the opt-out, the entry form's opt-out reaching the POST,
-// and that the page never loads the WebMCP script.
+// a later followed submit superseding a kept opted-out result, and that the
+// page never loads the WebMCP script.
 
 import { expect, type Page, test } from '@playwright/test';
 
@@ -116,6 +117,32 @@ function transientRun(target: string): Answer {
       summary_html: `<article class="e2e-transient"><span data-web-audit-transient>${NOT_SAVED}</span></article>`,
     }),
   ]);
+}
+
+// A saved website result the endpoint answers a followed request with.
+function webHit(target: string): Answer {
+  return json(
+    200,
+    envelope({
+      kind: 'web',
+      tier: 'cache',
+      target,
+      scorecard_url: `/score/${target}`,
+      markdown_url: `/score/${target}/md`,
+      json_url: `/score/${target}/json`,
+      freshness: { cached: true, scored_at: AT, refresh_after: null },
+    }),
+  );
+}
+
+// The entry form's submit of a website target, following declared hosts or not.
+async function submitWebsite(page: Page, target: string, follow: boolean): Promise<void> {
+  await page.goto('/audit');
+  await page.locator('label[for="s-web"]').click();
+  await page.fill('[data-audit-target]', target);
+  await page.locator('[data-audit-follow]').setChecked(follow);
+  await page.click('[data-audit-submit]');
+  await page.waitForURL(`**/scoring?target=${target}`);
 }
 
 test.describe('/scoring progress page', () => {
@@ -344,6 +371,21 @@ test.describe('/scoring progress page', () => {
     await page.waitForURL('**/scoring?target=stripe.dev');
     await expect(page.locator('.e2e-transient')).toBeVisible();
     expect(posts[0]).toEqual({ target: 'stripe.dev', turnstile_token: 'fake-token', follow_declarations: false });
+  });
+
+  test('an opted-out result kept in the tab does not answer a later followed submit of the same site', async ({
+    page,
+  }) => {
+    await mockTurnstile(page);
+    const posts = await mockScore(page, [transientRun('stripe.dev'), webHit('stripe.dev')]);
+    await submitWebsite(page, 'stripe.dev', false);
+    await expect(page.locator('.e2e-transient')).toBeVisible();
+    await submitWebsite(page, 'stripe.dev', true);
+    await expect(page.locator('.e2e-transient')).toHaveCount(0);
+    await expect.poll(() => posts.length).toBe(2);
+    expect(posts[1]).toMatchObject({ target: 'stripe.dev', turnstile_token: 'fake-token' });
+    expect(posts[1]).not.toHaveProperty('follow_declarations');
+    await page.waitForURL('**/score/stripe.dev');
   });
 
   test('the page never loads the WebMCP script', async ({ page }) => {
