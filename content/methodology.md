@@ -341,21 +341,23 @@ Two rules shape how MCP results score:
   (`unprobed`), while a malformed result or a server error stays `broken`.
   A `-32000` refusal counts as that signal only at a status able to carry one; delivered with a 5xx it reports load
   rather than an era, and stays `broken`. A target asking to be retried reports load too: an HTTP `408` or `429` answer
-  to any MCP JSON-RPC probe reads `error`, like a JSON-RPC `-32099` rate-limit refusal, whatever body it carries. On
-  `server/discover` it leaves the modern lane undecided, so the other modern checks probe on their own answers rather
-  than read `absent`. On the legacy lane, an era-shaped refusal (a
-  well-formed `-32601` or `-32022`) reads `absent` on the checks that name a method the lane could be missing, unless
-  the lane's own handshake advertised the capability it is refusing, which contradicts the handshake and stays `broken`.
-  The error-code conformance checks ask about a request the lane has already proven it accepts, so no era softening
-  reaches them. How a wrong answer scores turns on whether an agent can still use the surface: a well-formed refusal
-  carrying a code the taxonomy does not name, or a correct refusal missing a required payload field, reads
-  `noncompliant` and earns partial credit, because the caller learns the call failed and can move on. A result where a
-  refusal was required, an envelope with no numeric code, a malformed body, and a server error all read `broken`,
-  because each leaves the caller believing something untrue. The same split governs the unknown-method check on either
-  lane.
+  to any probe of the MCP endpoint (the JSON-RPC checks, the GET fast-fail check, and the CORS pair) reads `error`, like
+  a JSON-RPC `-32099` rate-limit refusal, whatever body it carries. On `server/discover` it leaves the modern lane
+  undecided, so the other modern checks probe on their own answers rather than read `absent`. On the legacy lane, an
+  era-shaped refusal (a well-formed `-32601` or `-32022`) reads `absent` on the checks that name a method the lane could
+  be missing, unless the lane's own handshake advertised the capability it is refusing, which contradicts the handshake
+  and stays `broken`. The error-code conformance checks ask about a request the lane has already proven it accepts, so
+  no era softening reaches them. How a wrong answer scores turns on whether an agent can still use the surface: a
+  well-formed refusal carrying a code the taxonomy does not name, or a correct refusal missing a required payload field,
+  reads `noncompliant` and earns partial credit, because the caller learns the call failed and can move on. A result
+  where a refusal was required, an envelope with no numeric code, a malformed body, and a server error all read
+  `broken`, because each leaves the caller believing something untrue. The same split governs the unknown-method check
+  on either lane.
 - The two CORS checks are posture-aware: a consistent no-CORS posture on both the preflight and the actual POST is a
   deliberate choice and reads `n_a`, excluded from the relative score and kept in the global denominator like every
-  `n_a` row; only partial or misconfigured CORS is penalized.
+  `n_a` row; only partial or misconfigured CORS is penalized. A probe answered HTTP `408` or `429` is never read as a
+  posture: the check whose own probe drew that answer reads `error`, and so does the other unless its own probe carries
+  `Access-Control-Allow-Origin`, which settles it alone.
 
 ## Re-running the same audits locally
 

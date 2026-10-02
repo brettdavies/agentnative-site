@@ -362,9 +362,9 @@ One object per check.
   - `declared-host-budget-exceeded`: anc's hourly probe limit for the declared host was reached.
   - `auth-required`: sign-in blocked the check, because the endpoint asks for a credential the audit does not hold.
 - `skip` — the per-audit deadline passed before the check ran.
-- `error` — an operational failure: a network error, a timeout, or an MCP JSON-RPC probe's answer asking to be retried
-  (HTTP `408` or `429` whatever its body, or a JSON-RPC `-32099` rate-limit refusal). Never credited, never penalized in
-  the relative score, and kept in the global denominator like `n_a` and `skip`.
+- `error` — an operational failure: a network error, a timeout, or an answer from the MCP endpoint asking to be retried
+  (HTTP `408` or `429` to any probe of it, whatever the body, or a JSON-RPC `-32099` rate-limit refusal). Never
+  credited, never penalized in the relative score, and kept in the global denominator like `n_a` and `skip`.
 
 `auth-required`, `declared-host-blocked`, and `declared-host-unreachable` mark a check the audit could not reach from
 its vantage. Such a row, like every `n_a` row, earns nothing, is excluded from the relative score, and stays in the

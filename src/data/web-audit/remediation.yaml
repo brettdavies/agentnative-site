@@ -230,7 +230,8 @@ remediation:
       `405 Method Not Allowed` and an `Allow: POST` header; or serve a documented surface on `GET`
       (a human- and agent-readable docs page, or a redirect to your `.well-known` MCP server card)
       so the `GET` returns content rather than a rejection. Any prompt, completed response passes
-      (a fast-fail status, or a documented `2xx`/redirect); only a held-open hang or a `5xx` fails.
+      (a fast-fail status, or a documented `2xx`/redirect) except a `408` or `429`, which asks to be
+      retried and is not scored; only a held-open hang or a `5xx` fails.
     resources:
       - { label: MCP transports, url: "https://modelcontextprotocol.io/specification/2025-06-18/basic/transports" }
   mcp-cors-preflight:
