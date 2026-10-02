@@ -1430,6 +1430,37 @@ describe('follow: only https is requested', () => {
     expect(requestsTo(seen, NET)).toEqual([]);
   });
 
+  test('a card document whose redirect hop goes to http is not followed for its scheme, and the hop is never requested', async () => {
+    const card = 'https://cards.example.org/mcp-card';
+    const hop = 'http://cards.example.org/mcp-card';
+    const seen: Seen[] = [];
+    const { scorecard } = await audit(
+      router(
+        {
+          [`GET ${TARGET}`]: () => html(),
+          'GET https://example.com/.well-known/ai-catalog.json': () => aiCatalog(cardEntry({ url: card })),
+          [`GET ${card}`]: () => redirect(hop),
+          [`GET ${hop}`]: () => cardDocument(sep2127Card(ENDPOINT)),
+          ...confirming(ENDPOINT),
+        },
+        seen,
+      ),
+    );
+    expect(scorecard.declared_hosts).toEqual([
+      {
+        surface: '/.well-known/ai-catalog.json#/entries/0',
+        kind: 'card-document',
+        url: card,
+        host: 'cards.example.org',
+        final_url: hop,
+        outcome: 'not-followed',
+        reason: 'insecure-scheme',
+      },
+    ]);
+    expect(plaintext(seen)).toEqual([]);
+    expect(requestsTo(seen, NET)).toEqual([]);
+  });
+
   test('a redirect hop to http is refused before it is requested, and records the hop as the final URL', async () => {
     for (const hop of [HTTP_ENDPOINT, 'http://mcp.example.org/mcp']) {
       const seen: Seen[] = [];
@@ -1474,6 +1505,39 @@ describe('follow: reciprocity artifacts are read over https only', () => {
     expect(scorecard.declared_hosts?.[0]?.outcome).toBe('reciprocity-refused');
     expect(seen.filter((r) => r.url.startsWith('http:'))).toEqual([]);
     expect(wireProbesTo(seen, NET)).toEqual([]);
+  });
+
+  test('an https endpoint whose own card, catalog entry, or metadata names its http variant is not confirmed', async () => {
+    /** Each artifact on the endpoint host, naming `named`; naming the endpoint itself, each one admits it. */
+    const artifacts: Record<string, (named: string) => Record<string, Route>> = {
+      card: (named) => ({ [`GET ${ENDPOINT}/server-card`]: () => cardDocument(sep2127Card(named)) }),
+      'ai-catalog': (named) => ({
+        [`GET https://${NET}/.well-known/ai-catalog.json`]: () => aiCatalog(cardEntry({ data: sep2127Card(named) })),
+      }),
+      metadata: (named) => ({
+        [`GET https://${NET}/.well-known/oauth-protected-resource/mcp`]: () => json({ resource: named }),
+      }),
+    };
+    const run = async (routes: Record<string, Route>) => {
+      const seen: Seen[] = [];
+      const { scorecard } = await audit(
+        router({ ...siteDeclaring(ENDPOINT), ...routes, [`POST ${ENDPOINT}`]: () => initializeResult() }, seen),
+      );
+      return {
+        outcome: scorecard.declared_hosts?.[0]?.outcome,
+        wire: wireProbesTo(seen, NET).length,
+        plaintext: seen.filter((r) => r.url.startsWith('http:')),
+      };
+    };
+    for (const [artifact, naming] of Object.entries(artifacts)) {
+      expect({ artifact, ...(await run(naming(`http://${NET}/mcp`))) }).toEqual({
+        artifact,
+        outcome: 'reciprocity-refused',
+        wire: 0,
+        plaintext: [],
+      });
+      expect({ artifact, outcome: (await run(naming(ENDPOINT))).outcome }).toEqual({ artifact, outcome: 'followed' });
+    }
   });
 
   test('an endpoint that is not https has no artifact read for it', async () => {
