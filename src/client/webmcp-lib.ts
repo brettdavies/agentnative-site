@@ -150,15 +150,20 @@ export function getPageState(doc: Document, pathname: string): string {
   else if (cli?.checked) surface = 'cli';
 
   const target = (doc.querySelector('[data-audit-target]') as HTMLInputElement | null)?.value ?? '';
+  const followEl = doc.querySelector('[data-audit-follow]') as HTMLInputElement | null;
+  const follow_declarations = followEl ? followEl.checked : null;
+  // A disabled listing box carries no choice: the submit sends none.
   const listingEl = doc.querySelector('[data-audit-listing]') as HTMLInputElement | null;
-  const listing = listingEl ? listingEl.checked : null;
-  return capExecute(JSON.stringify({ path, surface, target, listing }));
+  const listing = listingEl && !listingEl.disabled ? listingEl.checked : null;
+  return capExecute(JSON.stringify({ path, surface, target, follow_declarations, listing }));
 }
 
 function pageStateTool(pathname: string, opts: ToolsForOpts): WebMcpTool {
   return {
     name: 'get_page_state',
-    description: 'Return this page path, CLI/web surface, filled target, and public-listing checkbox.',
+    description:
+      'Return this page path, CLI/web surface, filled target, the follow-declarations checkbox, and the ' +
+      'public-listing checkbox (null while it is disabled).',
     inputSchema: emptyObjectSchema(),
     annotations: { readOnlyHint: true },
     execute() {

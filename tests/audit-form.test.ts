@@ -30,10 +30,34 @@ describe('the audit entry form', () => {
   test('the listing checkbox and the website examples sit in the website pane only', () => {
     const html = renderAuditForm({ idPrefix: 'p' });
     expect(html).toMatch(
-      /<label class="audit-hero__optin" data-s="web">\s*<input type="checkbox" name="public_listing"/,
+      /<div class="audit-form__web" data-s="web">[\s\S]*<input type="checkbox" name="public_listing"[\s\S]*<\/div>/,
     );
     expect(html).toMatch(/<span data-s="web">[^<]*<button[^>]*data-audit-example="anc\.dev"/);
     expect(html).toMatch(/<span data-s="cli">[^<]*<button[^>]*data-audit-example="ripgrep"/);
+  });
+
+  test('the follow checkbox sits in the website pane, checked by default, described by its help line', () => {
+    const html = renderAuditForm({ idPrefix: 'p' });
+    const pane = html.slice(
+      html.indexOf('<div class="audit-form__web" data-s="web">'),
+      html.indexOf('</div>', html.indexOf('audit-form__web')),
+    );
+    expect(pane).toMatch(
+      /<input type="checkbox" name="follow_declarations" value="true" checked aria-describedby="p-follow-help" data-audit-follow \/>\s*Include hosts this site declares \(MCP server, API\)/,
+    );
+    expect(pane).toContain(
+      '<p id="p-follow-help" class="audit-form__note">anc sends a few requests to each host the site points to. Unchecked, the result is not saved or listed.</p>',
+    );
+    // The follow choice comes before the listing choice it gates.
+    expect(pane.indexOf('data-audit-follow')).toBeLessThan(pane.indexOf('data-audit-listing'));
+  });
+
+  test('the note the listing box points at while following is off starts hidden and undescribed', () => {
+    const html = renderAuditForm({ idPrefix: 'p' });
+    expect(html).toContain(
+      '<p id="p-listing-note" class="audit-form__note" data-audit-listing-note hidden>Results without declared hosts are not saved or listed.</p>',
+    );
+    expect(html).toMatch(/<input type="checkbox" name="public_listing" value="true" data-audit-listing \/>/);
   });
 
   test('the target input carries no length cap, so an over-long paste reaches the rejection message', () => {

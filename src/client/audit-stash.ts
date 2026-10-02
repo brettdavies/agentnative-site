@@ -1,6 +1,6 @@
 // The single-use sessionStorage stash that carries a transact click's
-// Turnstile token, listing choice, entered lane, and refresh intent to the
-// progress page, keyed by the normalized target. sessionStorage is per tab
+// Turnstile token, listing choice, follow choice, entered lane, and refresh
+// intent to the progress page, keyed by the normalized target. sessionStorage is per tab
 // and per origin, so a copied stash fails siteverify on second use and the
 // page shows Start instead.
 //
@@ -10,8 +10,10 @@
 //   audit-lane:<target>    the lane the visitor had selected, kept under the
 //                          same TTL so a refreshed progress page can still
 //                          name the reclassification
-//   audit-inline:<target>  a result body with no URL of its own, kept so a
-//                          same-tab refresh restores it instead of Start
+//   audit-inline:<target>  a result body with no URL of its own and the
+//                          follow choice that produced it, kept so a same-tab
+//                          refresh restores it instead of Start and Run again
+//                          repeats the choice
 //
 // No in-flight marker lives in the tab: the server's in-flight pointer is
 // the one place a running audit is recorded.
@@ -31,6 +33,8 @@ export type StashRecord = {
   token: string;
   /** The visitor's explicit listing choice; null when the lane has no checkbox. */
   listing: boolean | null;
+  /** False when the visitor chose not to follow the hosts the site declares. */
+  follow: boolean;
   entered_lane: Lane;
   refresh: boolean;
 };
@@ -81,6 +85,7 @@ function parseRecord(raw: string, now: number): StashRecord | null {
     return {
       token: parsed.token,
       listing: typeof parsed.listing === 'boolean' ? parsed.listing : null,
+      follow: parsed.follow !== false,
       entered_lane: parsed.entered_lane,
       refresh: parsed.refresh === true,
     };
@@ -112,17 +117,26 @@ export function enteredLaneOf(target: string, now: number = Date.now()): Lane | 
   return null;
 }
 
+/** A result body with no URL of its own, and the follow choice of the run that produced it. */
+export type InlineResult = { html: string; follow: boolean };
+
 /** Keep a result body that has no URL of its own so a same-tab refresh can restore it. */
-export function stashInlineResult(target: string, html: string): void {
-  write(INLINE_PREFIX + target, html);
+export function stashInlineResult(target: string, result: InlineResult): void {
+  write(INLINE_PREFIX + target, JSON.stringify(result));
 }
 
-/** Read and remove the kept result body (single-use); null when absent. */
-export function takeInlineResult(target: string): string | null {
+/** Read and remove the kept result (single-use); null when absent or corrupt. */
+export function takeInlineResult(target: string): InlineResult | null {
   const key = INLINE_PREFIX + target;
   const raw = read(key);
   remove(key);
-  return raw;
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<InlineResult>;
+    return typeof parsed.html === 'string' ? { html: parsed.html, follow: parsed.follow !== false } : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Drop the kept result body; every terminal event calls this. */
@@ -134,6 +148,7 @@ export type ScoreRequestBody = {
   target: string;
   turnstile_token: string;
   public_listing?: boolean;
+  follow_declarations?: false;
   refresh?: true;
 };
 
@@ -141,15 +156,17 @@ export type ScoreRequestBody = {
  * The transact POST body. An explicit listing choice rides as the boolean;
  * null omits the field, because the server treats an omitted flag as
  * "preserve the stored choice" while an explicit false erases an opt-in.
- * `refresh` rides only when set.
+ * `follow_declarations` rides only when the visitor opted out, and
+ * `refresh` only when set: both default on the server.
  */
 export function buildScoreBody(
   target: string,
   token: string,
-  choice: { listing: boolean | null; refresh: boolean },
+  choice: { listing: boolean | null; refresh: boolean; follow: boolean },
 ): ScoreRequestBody {
   const body: ScoreRequestBody = { target, turnstile_token: token };
   if (choice.listing !== null) body.public_listing = choice.listing;
+  if (!choice.follow) body.follow_declarations = false;
   if (choice.refresh) body.refresh = true;
   return body;
 }

@@ -6,7 +6,9 @@
 // init script. Asserts the stashed click, the tokenless probe and the Start
 // gesture, streamed rows and the ?v= forward, the 2 s floor on hits, the
 // bounce, the verification wait state, the inline collision that survives a
-// reload, and that the page never loads the WebMCP script.
+// reload, the website result that saved nothing rendering in place with Run
+// again repeating the opt-out, the entry form's opt-out reaching the POST,
+// and that the page never loads the WebMCP script.
 
 import { expect, type Page, test } from '@playwright/test';
 
@@ -77,20 +79,43 @@ async function mockScore(page: Page, answers: Answer[]): Promise<Array<Record<st
 
 // What an entry page's click leaves behind: the token record and the lane
 // the visitor had selected. Seeded once, so a reload finds the stash spent.
-async function seedStash(page: Page, target: string, lane: 'cli' | 'web'): Promise<void> {
+async function seedStash(page: Page, target: string, lane: 'cli' | 'web', follow = true): Promise<void> {
   await page.addInitScript(
-    ([t, l]) => {
+    ([t, l, f]) => {
       if (location.pathname !== '/scoring' || sessionStorage.getItem('e2e-seeded')) return;
       sessionStorage.setItem('e2e-seeded', '1');
       const ts = Date.now();
       sessionStorage.setItem(
         `audit-stash:${t}`,
-        JSON.stringify({ token: 'stashed-token', listing: null, entered_lane: l, refresh: false, ts }),
+        JSON.stringify({ token: 'stashed-token', listing: null, follow: f, entered_lane: l, refresh: false, ts }),
       );
       sessionStorage.setItem(`audit-lane:${t}`, JSON.stringify({ lane: l, ts }));
     },
-    [target, lane],
+    [target, lane, follow] as const,
   );
+}
+
+const NOT_SAVED = 'Not saved: declared hosts were not followed for this run.';
+
+// What the endpoint streams for a website run that did not follow the hosts
+// the site declares: rows, then a complete line with no URLs and the body.
+function transientRun(target: string): Answer {
+  return stream([
+    { type: 'accepted', lane: 'web', target, started_at: AT },
+    { type: 'discovery', mcp_endpoint: null },
+    { type: 'check', id: 'robots-txt', principle: 'P7', keyword: 'should', status: 'pass', evidence: null },
+    envelope({
+      type: 'complete',
+      kind: 'web',
+      tier: 'live',
+      target,
+      scorecard_url: null,
+      markdown_url: null,
+      json_url: null,
+      freshness: { cached: false, scored_at: AT, refresh_after: null },
+      summary_html: `<article class="e2e-transient"><span data-web-audit-transient>${NOT_SAVED}</span></article>`,
+    }),
+  ]);
 }
 
 test.describe('/scoring progress page', () => {
@@ -260,6 +285,65 @@ test.describe('/scoring progress page', () => {
     await page.goto('/scoring?target=rg');
     await expect(page.locator('.e2e-cached-inline')).toBeVisible();
     await expect(page).toHaveURL(/\/scoring\?target=rg$/);
+  });
+
+  test('a website run that saved nothing renders in place, never navigates, and Run again repeats the opt-out', async ({
+    page,
+  }) => {
+    await mockTurnstile(page);
+    const posts = await mockScore(page, [transientRun('stripe.dev')]);
+    await seedStash(page, 'stripe.dev', 'web', false);
+    await page.goto('/scoring?target=stripe.dev');
+    await expect(page.locator('.e2e-transient')).toContainText(NOT_SAVED);
+    await expect(page.locator('[data-scoring-subline]')).toHaveText('This result was not saved.');
+    await expect(page).toHaveURL(/\/scoring\?target=stripe\.dev$/);
+    expect(posts[0]).toEqual({ target: 'stripe.dev', turnstile_token: 'stashed-token', follow_declarations: false });
+    const start = page.locator('[data-scoring-start]');
+    await expect(start).toHaveText('Run again');
+    await start.click();
+    await expect.poll(() => posts.length).toBe(2);
+    expect(posts[1]).toEqual({ target: 'stripe.dev', turnstile_token: 'fake-token', follow_declarations: false });
+    await expect(page.locator('.e2e-transient')).toBeVisible();
+    // A same-tab reload restores the result and keeps the opt-out for the next Run again.
+    await page.reload();
+    await expect(page.locator('.e2e-transient')).toBeVisible();
+    expect(posts).toHaveLength(2);
+    await page.locator('[data-scoring-start]').click();
+    await expect.poll(() => posts.length).toBe(3);
+    expect(posts[2]).toMatchObject({ follow_declarations: false });
+    await expect(page).toHaveURL(/\/scoring\?target=stripe\.dev$/);
+  });
+
+  test('unticking follow on the form disables the listing box with its note, and the opt-out posts with no listing', async ({
+    page,
+  }) => {
+    await mockTurnstile(page);
+    const posts = await mockScore(page, [transientRun('stripe.dev')]);
+    await page.goto('/audit');
+    await page.locator('label[for="s-web"]').click();
+    await page.fill('[data-audit-target]', 'stripe.dev');
+    const follow = page.locator('[data-audit-follow]');
+    const listing = page.locator('[data-audit-listing]');
+    const note = page.locator('[data-audit-listing-note]');
+    await expect(follow).toBeChecked();
+    await expect(follow).toHaveAttribute('aria-describedby', /-follow-help$/);
+    await expect(listing).toBeEnabled();
+    await expect(note).toBeHidden();
+    await follow.uncheck();
+    await expect(listing).toBeDisabled();
+    await expect(note).toBeVisible();
+    await expect(note).toHaveText('Results without declared hosts are not saved or listed.');
+    const noteId = await note.getAttribute('id');
+    await expect(listing).toHaveAttribute('aria-describedby', noteId ?? '');
+    await follow.check();
+    await expect(listing).toBeEnabled();
+    await expect(note).toBeHidden();
+    await expect(listing).not.toHaveAttribute('aria-describedby', /.+/);
+    await follow.uncheck();
+    await page.click('[data-audit-submit]');
+    await page.waitForURL('**/scoring?target=stripe.dev');
+    await expect(page.locator('.e2e-transient')).toBeVisible();
+    expect(posts[0]).toEqual({ target: 'stripe.dev', turnstile_token: 'fake-token', follow_declarations: false });
   });
 
   test('the page never loads the WebMCP script', async ({ page }) => {

@@ -36,8 +36,14 @@ afterAll(() => restoreSessionStorage());
 
 describe('stash and take', () => {
   test('take returns the record once and null on the second call', () => {
-    stash('anc.dev', { token: 'tok', listing: true, entered_lane: 'web', refresh: false });
-    expect(take('anc.dev')).toMatchObject({ token: 'tok', listing: true, entered_lane: 'web', refresh: false });
+    stash('anc.dev', { token: 'tok', listing: true, follow: true, entered_lane: 'web', refresh: false });
+    expect(take('anc.dev')).toMatchObject({
+      token: 'tok',
+      listing: true,
+      follow: true,
+      entered_lane: 'web',
+      refresh: false,
+    });
     expect(take('anc.dev')).toBeNull();
   });
 
@@ -45,55 +51,104 @@ describe('stash and take', () => {
     expect(STASH_TTL_MS).toBe(240_000);
     stash(
       'anc.dev',
-      { token: 'tok', listing: null, entered_lane: 'web', refresh: false },
+      { token: 'tok', listing: null, follow: true, entered_lane: 'web', refresh: false },
       Date.now() - STASH_TTL_MS - 1,
     );
     expect(take('anc.dev')).toBeNull();
     stash(
       'anc.dev',
-      { token: 'tok', listing: null, entered_lane: 'web', refresh: false },
+      { token: 'tok', listing: null, follow: true, entered_lane: 'web', refresh: false },
       Date.now() - STASH_TTL_MS + 5_000,
     );
     expect(take('anc.dev')).not.toBeNull();
   });
 
   test('the stash is keyed by normalized target and survives a corrupt neighbour', () => {
-    stash('anc.dev', { token: 'a', listing: null, entered_lane: 'web', refresh: false });
+    stash('anc.dev', { token: 'a', listing: null, follow: true, entered_lane: 'web', refresh: false });
     sessionStorage.setItem('audit-stash:other.example', 'not json');
     expect(take('other.example')).toBeNull();
     expect(take('anc.dev')?.token).toBe('a');
   });
 
   test('the entered lane is kept per target beyond the single-use record', () => {
-    stash('ripgrep', { token: 'a', listing: null, entered_lane: 'web', refresh: false });
+    stash('ripgrep', { token: 'a', listing: null, follow: true, entered_lane: 'web', refresh: false });
     take('ripgrep');
     expect(enteredLaneOf('ripgrep')).toBe('web');
     expect(enteredLaneOf('other')).toBeNull();
   });
 
   test('a stored inline result is returned once by take and cleared by the next terminal event', () => {
-    stashInlineResult('ouch', '<article>body</article>');
-    expect(takeInlineResult('ouch')).toBe('<article>body</article>');
+    stashInlineResult('ouch', { html: '<article>body</article>', follow: true });
+    expect(takeInlineResult('ouch')).toEqual({ html: '<article>body</article>', follow: true });
     expect(takeInlineResult('ouch')).toBeNull();
-    stashInlineResult('ouch', '<article>again</article>');
+    stashInlineResult('ouch', { html: '<article>again</article>', follow: true });
     clearInlineResult('ouch');
     expect(takeInlineResult('ouch')).toBeNull();
+  });
+
+  test('an inline result keeps the follow choice that produced it, so Run again repeats it after a refresh', () => {
+    stashInlineResult('stripe.dev', { html: '<article>not saved</article>', follow: false });
+    expect(takeInlineResult('stripe.dev')).toEqual({ html: '<article>not saved</article>', follow: false });
+    sessionStorage.setItem('audit-inline:corrupt.dev', 'not json');
+    expect(takeInlineResult('corrupt.dev')).toBeNull();
+  });
+
+  test('the follow choice round-trips through the stash, and a record without one follows', () => {
+    stash('stripe.dev', { token: 'tok', listing: null, follow: false, entered_lane: 'web', refresh: false });
+    expect(take('stripe.dev')).toMatchObject({ follow: false, listing: null });
+    sessionStorage.setItem(
+      'audit-stash:older.dev',
+      JSON.stringify({ token: 't', listing: null, entered_lane: 'web', refresh: false, ts: Date.now() }),
+    );
+    expect(take('older.dev')?.follow).toBe(true);
   });
 });
 
 describe('buildScoreBody', () => {
   test('a null listing is omitted and false is sent as false', () => {
-    const omitted = buildScoreBody('anc.dev', 'tok', { listing: null, refresh: false });
+    const omitted = buildScoreBody('anc.dev', 'tok', { listing: null, refresh: false, follow: true });
     expect('public_listing' in omitted).toBe(false);
     expect(JSON.stringify(omitted)).not.toContain('public_listing');
-    expect(buildScoreBody('anc.dev', 'tok', { listing: false, refresh: false }).public_listing).toBe(false);
-    expect(buildScoreBody('anc.dev', 'tok', { listing: true, refresh: false }).public_listing).toBe(true);
+    expect(buildScoreBody('anc.dev', 'tok', { listing: false, refresh: false, follow: true }).public_listing).toBe(
+      false,
+    );
+    expect(buildScoreBody('anc.dev', 'tok', { listing: true, refresh: false, follow: true }).public_listing).toBe(true);
+  });
+
+  test('follow_declarations rides only as false, when the visitor opted out; following on omits it', () => {
+    const on = buildScoreBody('stripe.dev', 'tok', { listing: null, refresh: false, follow: true });
+    expect('follow_declarations' in on).toBe(false);
+    expect(buildScoreBody('stripe.dev', 'tok', { listing: null, refresh: false, follow: false })).toEqual({
+      target: 'stripe.dev',
+      turnstile_token: 'tok',
+      follow_declarations: false,
+    });
+  });
+
+  test('an opt-out from the form reaches the POST body: startAudit stashes it and the progress page sends it', async () => {
+    await startAudit(
+      { target: 'stripe.dev', lane: 'web', listing: null, follow: false },
+      { acquire: async () => 'tok', navigate: () => {} },
+    );
+    const record = take('stripe.dev');
+    if (!record) throw new Error('nothing stashed');
+    expect(record.follow).toBe(false);
+    expect(buildScoreBody('stripe.dev', record.token, record)).toEqual({
+      target: 'stripe.dev',
+      turnstile_token: 'tok',
+      follow_declarations: false,
+    });
+    await startAudit(
+      { target: 'stripe.dev', lane: 'web', listing: null },
+      { acquire: async () => 'tok', navigate: () => {} },
+    );
+    expect(take('stripe.dev')?.follow).toBe(true);
   });
 
   test('refresh rides only when set and the token and target are always present', () => {
-    const body = buildScoreBody('ouch', 'tok', { listing: null, refresh: true });
+    const body = buildScoreBody('ouch', 'tok', { listing: null, refresh: true, follow: true });
     expect(body).toEqual({ target: 'ouch', turnstile_token: 'tok', refresh: true });
-    expect('refresh' in buildScoreBody('ouch', 'tok', { listing: null, refresh: false })).toBe(false);
+    expect('refresh' in buildScoreBody('ouch', 'tok', { listing: null, refresh: false, follow: true })).toBe(false);
   });
 });
 
