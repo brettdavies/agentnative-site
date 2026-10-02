@@ -47,6 +47,7 @@ import {
   type WebRescoreTriggerEnv,
 } from './audit-web/rescore-trigger';
 import type { WebRescoreWorkflowBinding } from './audit-web/rescore-workflow';
+import { canonicalHostRedirect } from './canonical-host';
 import { applyHeaders, isRepresentationPinned } from './headers';
 import { getWarmCatalog, loadCatalog } from './mcp/catalog';
 import { coerceMcpJsonResponse, stripCorsHeaders } from './mcp/coerce-json-response';
@@ -1026,7 +1027,8 @@ const WEB_RESCORE_CRON = '0 9 * * SUN';
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const started = Date.now();
-    const response = await loopbackCachedFetch(ctx, env, classifyGatewayRequest(request));
+    const response =
+      canonicalHostRedirect(request) ?? (await loopbackCachedFetch(ctx, env, classifyGatewayRequest(request)));
     recordPageRequest(request, response, Date.now() - started);
     return response;
   },
