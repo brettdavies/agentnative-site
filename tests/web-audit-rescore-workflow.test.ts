@@ -545,6 +545,26 @@ describe('rebuildWebAggregates', () => {
     expect(board?.entries.map((e) => e.domain)).toEqual(['a.dev']);
   });
 
+  test('a seeded domain whose cached scorecard ran from a local vantage is left off the board', async () => {
+    const { env } = makeEnv([seedEntry('a.dev'), seedEntry('local.dev'), seedEntry('unstamped.dev')]);
+    await cachePut(
+      env,
+      'https://a.dev/',
+      { ...scorecardFor('a.dev', 70), vantage: { network: 'public', credentialed: false } },
+      SPEC_VERSION,
+    );
+    await cachePut(
+      env,
+      'https://local.dev/',
+      { ...scorecardFor('local.dev', 90), vantage: { network: 'local', credentialed: true } },
+      SPEC_VERSION,
+    );
+    await cachePut(env, 'https://unstamped.dev/', scorecardFor('unstamped.dev', 60), SPEC_VERSION);
+    await rebuildWebAggregates(env, SPEC_VERSION);
+    const board = await getAggregate(env, 'leaderboard', SPEC_VERSION);
+    expect(board?.entries.map((e) => e.domain)).toEqual(['a.dev', 'unstamped.dev']);
+  });
+
   test('an empty seed writes empty aggregates (cold-start shape, not an error)', async () => {
     const { env } = makeEnv([]);
     await rebuildWebAggregates(env, SPEC_VERSION);
