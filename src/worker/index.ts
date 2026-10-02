@@ -47,6 +47,8 @@ import {
   type WebRescoreTriggerEnv,
 } from './audit-web/rescore-trigger';
 import type { WebRescoreWorkflowBinding } from './audit-web/rescore-workflow';
+import { canonicalHostRedirect } from './canonical-host';
+import { DISCOVERY_CORS_HEADERS } from './discovery-cors';
 import { applyHeaders, isRepresentationPinned } from './headers';
 import { getWarmCatalog, loadCatalog } from './mcp/catalog';
 import { coerceMcpJsonResponse, stripCorsHeaders } from './mcp/coerce-json-response';
@@ -413,11 +415,6 @@ const DISCOVERY_GET_ONLY_PATHS = new Set([
   '/.well-known/oauth-authorization-server',
   '/.well-known/api-catalog',
 ]);
-
-/** Read-only discovery JSON may be fetched cross-origin by agent tools and scanners. */
-const DISCOVERY_CORS_HEADERS = {
-  'access-control-allow-origin': '*',
-} as const;
 
 async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
@@ -1026,7 +1023,8 @@ const WEB_RESCORE_CRON = '0 9 * * SUN';
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const started = Date.now();
-    const response = await loopbackCachedFetch(ctx, env, classifyGatewayRequest(request));
+    const response =
+      canonicalHostRedirect(request) ?? (await loopbackCachedFetch(ctx, env, classifyGatewayRequest(request)));
     recordPageRequest(request, response, Date.now() - started);
     return response;
   },

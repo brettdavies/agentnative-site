@@ -110,10 +110,11 @@ designed for browser traffic. Do not add a wildcard CORS header to this endpoint
 ### Host validation
 
 `POST /mcp` checks the `Host` header against a fixed allowlist declared as `MCP_ALLOWED_HOSTNAMES` in
-`src/worker/mcp/server.ts`: `anc.dev`, `www.anc.dev`, `agentnative-site-staging.brettdavies.workers.dev`, `localhost`,
-`127.0.0.1`. Anything else is answered with HTTP 403 and a JSON-RPC `-32000` envelope before the handler runs. That
-closes DNS rebinding: with no list passed, the SDK derives a default only for localhost and `workers.dev` endpoints, so
-a custom domain accepts whatever hostname resolves to the Worker.
+`src/worker/mcp/server.ts`: `anc.dev`, `agentnative-site-staging.brettdavies.workers.dev`, `localhost`, `127.0.0.1`.
+Anything else is answered with HTTP 403 and a JSON-RPC `-32000` envelope before the handler runs. That closes DNS
+rebinding: with no list passed, the SDK derives a default only for localhost and `workers.dev` endpoints, so a custom
+domain accepts whatever hostname resolves to the Worker. `www.anc.dev` never reaches the handler: the Worker redirects
+every request on it to `anc.dev` first (308 for a POST, so the method and body survive).
 
 The compare strips the port, so the bare `localhost` entry covers every port the local surfaces bind: `wrangler dev` on
 8787, the Playwright `webServer`, and `preflight.sh` in local mode.

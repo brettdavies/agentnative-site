@@ -23,13 +23,7 @@ const SERVER_VERSION = '0.1.0';
 // `validateHostHeader` compares with the port stripped, so bare `localhost`
 // admits the dev server and the Playwright `webServer` on whatever port they
 // bind.
-const MCP_ALLOWED_HOSTNAMES = [
-  'anc.dev',
-  'www.anc.dev',
-  'agentnative-site-staging.brettdavies.workers.dev',
-  'localhost',
-  '127.0.0.1',
-];
+const MCP_ALLOWED_HOSTNAMES = ['anc.dev', 'agentnative-site-staging.brettdavies.workers.dev', 'localhost', '127.0.0.1'];
 
 const CACHE_HINTS = {
   'tools/list': { ttlMs: 3_600_000, cacheScope: 'public' as const },
