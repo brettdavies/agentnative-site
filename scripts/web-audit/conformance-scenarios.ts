@@ -169,6 +169,10 @@ const OPENAPI = {
 };
 const API_PROBE_PATH = '/v1/items/anc-web-audit-no-such';
 const API_FALLBACK_PATH = '/anc-web-audit-no-such-api';
+const OPENAPI_YAML = 'openapi: 3.1.0\ninfo:\n  title: Example files API\n  version: 1.0.0\npaths: {}\n';
+const API_ERROR = { error: { type: 'invalid_request_error', message: 'Unrecognized request URL' } };
+const linkset = (...contexts: unknown[]): ExchangeResponse =>
+  res(200, { 'content-type': 'application/linkset+json' }, JSON.stringify({ linkset: contexts }));
 
 const SERVER_CARD = {
   name: 'example',
@@ -1454,4 +1458,30 @@ export const SCENARIOS: Record<string, Scenario> = {
     get('/openapi.json', json(OPENAPI)),
     get(API_PROBE_PATH, json({ items: [] })),
   ]),
+  'api-anchor-hosts': scenario(
+    'a Stripe-shaped api-catalog anchors two API hosts and an MCP endpoint with no service-desc: the OpenAPI row scores each declared description where it is hosted (JSON on one host, YAML on the other), the hygiene rows probe each anchor host once (the documented 4xx path, then the nonsense path) and list both hosts in anchor order, JSON errors pass and rate-limit headers are missing at both, the third anchor is recorded not followed and never requested, and no hygiene probe reaches the audited site',
+    ['openapi', 'api-catalog', 'json-errors', 'rate-limit-headers'],
+    [
+      ...baseline(),
+      get(
+        '/.well-known/api-catalog',
+        linkset(
+          {
+            anchor: 'https://api.example.net/',
+            'service-desc': [{ href: 'https://api.example.net/openapi.json', type: 'application/openapi+json' }],
+            'service-doc': [{ href: 'https://example.com/docs/api', type: 'text/html' }],
+          },
+          {
+            anchor: 'https://files.example.net/',
+            'service-desc': [{ href: 'https://files.example.net/openapi.yaml', type: 'application/openapi+yaml' }],
+          },
+          { anchor: 'https://mcp.example.net/mcp', 'service-doc': [{ href: 'https://example.com/docs/mcp', type: 'text/html' }] },
+        ),
+      ),
+      get('https://api.example.net/openapi.json', json(OPENAPI)),
+      get(`https://api.example.net${API_PROBE_PATH}`, json(API_ERROR, 404)),
+      get('https://files.example.net/openapi.yaml', res(200, { 'content-type': 'application/yaml' }, OPENAPI_YAML)),
+      get(`https://files.example.net${API_FALLBACK_PATH}`, json(API_ERROR, 404)),
+    ],
+  ),
 };
