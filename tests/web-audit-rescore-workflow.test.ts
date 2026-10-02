@@ -668,6 +668,35 @@ describe('public listing on re-audit writes', () => {
   });
 });
 
+describe('a rescore of a root that redirects to http', () => {
+  test('stores nothing and keeps the previous board entry', async () => {
+    const { env, store } = makeEnv([seedEntry('a.dev')], { registry: MINIMAL_REGISTRY });
+    await primeCache(store, 'a.dev', 3 * HOUR_MS, 50);
+    const { step } = makeStep();
+    const sent: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = input instanceof Request ? input.url : String(input);
+      sent.push(url);
+      return new Response(null, { status: 301, headers: { location: url.replace('https:', 'http:') } });
+    }) as unknown as typeof fetch;
+    let result: Awaited<ReturnType<typeof runWebRescore>>;
+    try {
+      result = await runWebRescore(env, step);
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(sent.filter((url) => url.startsWith('http:'))).toEqual([]);
+    expect(result.skipped).toEqual(['a.dev']);
+    const cached = (await cacheGet(env, await keyFor('https://a.dev/', SPEC_VERSION))) as CachedWebAudit;
+    expect((cached.scorecard as { score: { global: number } }).score.global).toBe(50);
+    const board = await getAggregate(env, 'leaderboard', SPEC_VERSION);
+    expect(board?.entries.map((e) => ({ domain: e.domain, score: e.score }))).toEqual([
+      { domain: 'a.dev', score: { relative: 55, global: 50 } },
+    ]);
+  });
+});
+
 describe('the follow kill switch on rescore writes', () => {
   test('an absent or off switch stores follow_declarations false with an empty trail; "true" stores true', async () => {
     const stored = async (followSwitch: string | undefined) => {

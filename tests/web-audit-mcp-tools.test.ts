@@ -2155,4 +2155,23 @@ describe('provenance reaches every reader of a stored website result', () => {
     expect(html).toContain('&lt;img src=x&gt;');
     expect(md).toContain('(`https://{tenant}.example.org/<img src=x>`)');
   });
+
+  test('a declaration over http reads "not followed: not https" on the page and the twin, and insecure-scheme in the MCP read', async () => {
+    const trail = [
+      {
+        surface: '/.well-known/mcp.json',
+        kind: 'mcp-endpoint',
+        url: 'http://mcp.example.net/mcp',
+        host: 'mcp.example.net',
+        outcome: 'not-followed',
+        reason: 'insecure-scheme',
+      },
+    ];
+    const stored = { ...twoHostScorecard(), follow_declarations: true, declared_hosts: trail };
+    const { scorecard } = await read('example.com', stored);
+    expect(scorecard.declared_hosts).toEqual(trail);
+    const { html, md } = rendered('example.com', stored);
+    expect(html).toContain('<p class="declared-hosts__outcome">not followed: not https</p>');
+    expect(md).toContain('- server card: `mcp.example.net` (`http://mcp.example.net/mcp`), not followed: not https\n');
+  });
 });

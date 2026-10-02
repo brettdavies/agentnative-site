@@ -1,17 +1,27 @@
 // llms.txt quality trio (format / links / when-to-use). Reads the retained
 // wave-1 `/llms.txt` body so format and when-to-use issue no extra fetch.
-// Link probes are SSRF-guarded and budgeted like scoped-llms.
+// Link probes are SSRF-guarded and budgeted like scoped-llms. An http link,
+// or one that redirects to http, is never requested: llmstxt.org asks for a
+// markdown link per item and never for plaintext, so such a link is present
+// but not usable over https.
 
 import type { WebCheck } from '../registry';
 import { guardedFetch, STATUS_ONLY_BODY_BYTES, validatePublicUrl } from '../ssrf';
-import { remainingDeadlineMs, timeoutMsFor } from './shared';
-import type { HandlerContext, ProbeOutcome, ProbeStatus } from './types';
+import { plaintextItem, redirectsToHttp, redirectsToHttpItem, remainingDeadlineMs, timeoutMsFor } from './shared';
+import type { EvidenceItem, HandlerContext, ProbeOutcome, ProbeStatus } from './types';
 
 const MARKDOWN_LINK_RE = /\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 const DEFAULT_MAX_LINKS = 8;
 const WHEN_TO_USE_HEADING = /^#{1,3}\s+.*(when\s+to\s+use|programmatic access|when to (?:connect|call) (?:the )?mcp)/im;
 
 type QualityOp = 'format' | 'links' | 'when-to-use';
+
+/**
+ * Which miss decides the links row when several links miss. A dead link
+ * outranks an http one because noncompliant earns credit and absent does
+ * not: listing an http link must never lift a row a dead link decides.
+ */
+const MISS_ORDER = ['broken', 'absent', 'noncompliant', 'error'] as const;
 
 function formatWhy(body: string): { ok: boolean; why: string[] } {
   const hasH1 = /^#\s+\S/m.test(body);
@@ -42,6 +52,30 @@ function hrefsFrom(body: string, base: string): string[] {
     out.push(href);
   }
   return out;
+}
+
+/** One link's evidence and its own verdict, which the row's evidence line reads to name the link that decided it. */
+async function probeLink(
+  href: string,
+  timeoutMs: number,
+  ctx: HandlerContext,
+): Promise<{ verdict: Exclude<ProbeStatus, 'na'>; item: EvidenceItem }> {
+  const validation = validatePublicUrl(href);
+  if (!validation.ok) return { verdict: 'absent', item: { url: href, blocked: validation.reason, ok: false } };
+  if (validation.url.protocol !== 'https:') {
+    return {
+      verdict: 'noncompliant',
+      item: { url: href, ...plaintextItem('not https') },
+    };
+  }
+  const resp = await guardedFetch(href, {}, { ...ctx.fetchOptions, timeoutMs, maxBodyBytes: STATUS_ONLY_BODY_BYTES });
+  if (redirectsToHttp(resp)) return { verdict: 'noncompliant', item: redirectsToHttpItem(href, resp.status) };
+  if (resp.error !== null || resp.status === null) {
+    return { verdict: 'error', item: { url: href, status: resp.status, error: resp.error, ok: false } };
+  }
+  const ok = resp.status >= 200 && resp.status < 400;
+  const verdict = ok ? 'pass' : resp.status === 404 || resp.status === 410 ? 'absent' : 'broken';
+  return { verdict, item: { url: href, status: resp.status, ok } };
 }
 
 export async function runLlmsTxtQuality(check: WebCheck, ctx: HandlerContext): Promise<ProbeOutcome> {
@@ -88,29 +122,13 @@ export async function runLlmsTxtQuality(check: WebCheck, ctx: HandlerContext): P
       misses.push('error');
       break;
     }
-    const validation = validatePublicUrl(href);
-    if (!validation.ok) {
-      evidence.push({ url: href, blocked: validation.reason, ok: false });
-      misses.push('absent');
-      continue;
-    }
-    const resp = await guardedFetch(
-      href,
-      {},
-      { ...ctx.fetchOptions, timeoutMs: slice, maxBodyBytes: STATUS_ONLY_BODY_BYTES },
-    );
-    if (resp.error !== null || resp.status === null) {
-      evidence.push({ url: href, status: resp.status, error: resp.error, ok: false });
-      misses.push('error');
-      continue;
-    }
-    const ok = resp.status >= 200 && resp.status < 400;
-    evidence.push({ url: href, status: resp.status, ok });
-    if (!ok) misses.push(resp.status === 404 || resp.status === 410 ? 'absent' : 'broken');
+    const { verdict, item } = await probeLink(href, slice, ctx);
+    evidence.push({ ...item, link_verdict: verdict });
+    if (verdict !== 'pass') misses.push(verdict);
   }
 
   if (misses.length === 0) return { status: 'pass', evidence };
-  const status = misses.includes('broken') ? 'broken' : misses.includes('absent') ? 'absent' : 'error';
+  const status = MISS_ORDER.find((miss) => misses.includes(miss)) ?? 'error';
   const exhausted = evidence.some((row) => Array.isArray(row.why) && row.why.includes('nested-probe budget exhausted'));
   return { status, evidence, ...(exhausted ? { incomplete: true } : {}) };
 }

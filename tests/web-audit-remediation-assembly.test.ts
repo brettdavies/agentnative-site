@@ -220,6 +220,24 @@ describe('resultLine', () => {
     expect(resultLine('broken', '404', undefined, 'a', unknown)).toBe('Present but broken (404)');
   });
 
+  test('only a noncompliant row whose evidence says anc sent no plaintext request leads without "Works"', () => {
+    expect(
+      resultLine('noncompliant', 'http://x.dev/a.md: not https; anc sends no plaintext request', undefined, 'x.dev'),
+    ).toBe('Listed, but not over https (http://x.dev/a.md: not https; anc sends no plaintext request)');
+    expect(resultLine('noncompliant', 'error code -32603', undefined, 'x.dev')).toBe(
+      'Works but does not conform (error code -32603)',
+    );
+    expect(resultLine('noncompliant', null, undefined, 'x.dev')).toBe('Works but does not conform');
+    expect(
+      resultLine(
+        'absent',
+        'https://x.dev/llms.txt -> 301 (redirects to http; anc sends no plaintext request)',
+        undefined,
+        'x.dev',
+      ),
+    ).toBe('Not found (https://x.dev/llms.txt -> 301 (redirects to http; anc sends no plaintext request))');
+  });
+
   test('skip and error read as not-evaluated', () => {
     expect(resultLine('skip', null, undefined, 'x.dev')).toContain('Not evaluated');
     expect(resultLine('error', null, undefined, 'x.dev')).toBe('Not evaluated');

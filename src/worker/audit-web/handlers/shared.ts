@@ -2,12 +2,38 @@
 // phases: base-relative URL resolution, `{mcp_endpoint}`/`{host}`
 // substitution, per-check timeout derivation (registry `with.timeout` is
 // in seconds), redirect handling for probes of the MCP endpoint, the
-// statuses that ask for a retry, a phase's share of the per-audit
-// deadline, and the outcome of a row that evaluates several targets.
+// statuses that ask for a retry, a URL that answered only with a redirect
+// to http, a phase's share of the per-audit deadline, and the outcome of a
+// row that evaluates several targets.
 
 import type { NaReason } from '../../../shared/web-audit-findings';
+import { NO_PLAINTEXT_REQUEST } from '../../../shared/web-audit-result-line';
+import type { ProbeResponse } from '../assert';
 import type { GuardedFetchOptions } from '../ssrf';
 import type { EvidenceItem, ProbeOutcome, ProbeStatus } from './types';
+
+const REDIRECTS_TO_HTTP_WHY = `redirects to http; ${NO_PLAINTEXT_REQUEST}`;
+
+/**
+ * The URL answered, but only with a redirect to http, whose hop the guard
+ * refused: nothing it serves is readable over https.
+ */
+export function redirectsToHttp(resp: Pick<ProbeResponse, 'status' | 'refused'>): boolean {
+  return resp.refused === 'insecure-scheme' && resp.status !== null;
+}
+
+/** Why a declared URL was not requested over plaintext: as written, or by its redirect. */
+export type PlaintextReason = 'not https' | 'redirects to http';
+
+/** The evidence item for a declared URL anc did not request over plaintext. */
+export function plaintextItem(reason: PlaintextReason): EvidenceItem & { why: string[] } {
+  return { blocked: reason, ok: false, why: [`${reason}; ${NO_PLAINTEXT_REQUEST}`] };
+}
+
+/** The evidence item for a URL that answered only with a redirect to http. */
+export function redirectsToHttpItem(url: string, status: number | null): EvidenceItem & { why: string[] } {
+  return { url, status, ok: false, why: [REDIRECTS_TO_HTTP_WHY] };
+}
 
 /**
  * Statuses whose shape is "not now" rather than "not here": a target

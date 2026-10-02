@@ -83,6 +83,7 @@ const NOT_FOLLOWED: Readonly<Record<NotFollowedReason, string>> = {
   'no-service-desc': 'no service description',
   'self-path': 'self path',
   'follow-disabled': 'following off for this audit',
+  'insecure-scheme': 'not https',
 };
 
 export function notFollowedOutcome(reason: string): string {

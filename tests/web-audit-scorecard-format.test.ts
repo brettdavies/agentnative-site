@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import { WEB_AUDIT_STALE_AFTER_MS } from '../src/worker/audit-web/cache';
+import { NOT_FOLLOWED_REASONS } from '../src/worker/audit-web/follow-trail';
 import type { WebAuditRegistry } from '../src/worker/audit-web/registry';
 import { assembleRemediation } from '../src/worker/audit-web/remediation';
 import {
@@ -875,6 +876,15 @@ describe('web scorecard schema doc drift guard (U16)', () => {
     const example = doc.slice(doc.indexOf('## Top-level fields'), doc.indexOf('| Field'));
     const documented = [...example.matchAll(/^\s*"([a-z_]+)":/gm)].map((m) => m[1]);
     expect(documented.sort()).toEqual([...DOCUMENTED_TOP_LEVEL].sort());
+  });
+
+  test('the declared-hosts reason row lists every reason a declaration is not followed', async () => {
+    const doc = await readFile(DOC_PATH, 'utf8');
+    const reasonRow = doc.split('\n').find((line) => line.startsWith('| `reason`')) ?? '';
+    const listed = [...reasonRow.matchAll(/`([a-z-]+)`/g)]
+      .map((m) => m[1])
+      .filter((v) => !['reason', 'not-followed'].includes(v));
+    expect(listed.sort()).toEqual([...NOT_FOLLOWED_REASONS].sort());
   });
 });
 

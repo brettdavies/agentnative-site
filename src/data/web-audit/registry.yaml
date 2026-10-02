@@ -656,7 +656,7 @@ checks:
     breadcrumb: llms.txt links
     handler: llms-txt-quality
     with: { op: links, max_candidates: 8 }
-    hint: 'Keep every markdown href in /llms.txt fetchable (2xx/3xx). Dead index links waste an agent round-trip.'
+    hint: 'Keep every markdown href in /llms.txt https and fetchable (2xx/3xx). An http link, or one that redirects to http, is never requested; a dead index link wastes an agent round-trip.'
 
   - id: llms-txt-when-to-use
     category: content-for-agents

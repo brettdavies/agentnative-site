@@ -8,7 +8,7 @@
 
 import type { WebCheck } from '../registry';
 import { guardedFetch } from '../ssrf';
-import { resolveUrl, timeoutMsFor } from './shared';
+import { redirectsToHttp, redirectsToHttpItem, resolveUrl, timeoutMsFor } from './shared';
 import type { HandlerContext, ProbeOutcome } from './types';
 
 type MarkdownFrontmatterWith = {
@@ -31,6 +31,7 @@ export async function runMarkdownFrontmatter(check: WebCheck, ctx: HandlerContex
   if (!url) return { status: 'error', evidence: [{ why: ['no resolvable probe URL'] }] };
 
   const resp = await guardedFetch(url, { headers }, { ...ctx.fetchOptions, timeoutMs });
+  if (redirectsToHttp(resp)) return { status: 'absent', evidence: [redirectsToHttpItem(url, resp.status)] };
   if (resp.error !== null || resp.status === null) {
     return { status: 'error', evidence: [{ url, status: resp.status, error: resp.error }] };
   }

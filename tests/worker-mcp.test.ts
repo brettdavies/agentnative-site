@@ -275,6 +275,24 @@ describe('MCP instructions string (drift gate per KTD-8)', () => {
     expect(await flat('content/_audit-web.md')).toContain(perDomain);
   });
 
+  test('the disclosure and the client skill say anc sends no plaintext request', async () => {
+    const sentence =
+      'anc sends no plaintext request: an http URL, declared or linked, and any redirect to http, is never requested.';
+    const result = await initialize(makeEnv());
+    expect(result.result?.instructions ?? '').toContain(sentence);
+    const skill = await readFile(join(import.meta.dir, '..', 'content/mcp-skill.md'), 'utf8');
+    expect(skill.replace(/\s+/g, ' ')).toContain(sentence);
+  });
+
+  test('the methodology, the web scorecard schema, and the website audit page state the same rule', async () => {
+    const sentence =
+      'anc sends no plaintext request: an http URL, declared or linked, and any redirect to http, is never requested.';
+    for (const path of ['content/methodology.md', 'content/web-scorecard-schema.md', 'content/_audit-web.md']) {
+      const doc = await readFile(join(import.meta.dir, '..', path), 'utf8');
+      expect({ path, states: doc.replace(/\s+/g, ' ').includes(sentence) }).toEqual({ path, states: true });
+    }
+  });
+
   test('instructions names both rate-limit bindings + both kill switches', async () => {
     const env = makeEnv();
     const result = await initialize(env);

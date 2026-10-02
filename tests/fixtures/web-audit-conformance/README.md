@@ -38,18 +38,21 @@ parser; `headers` is a subset match on lowercase names with exact values; `body_
 request body as JSON and compares its top-level `method`; `body_contains` is a substring match on the raw
 body.
 
-Responses carry lowercase header names with single string values and a UTF-8 text body exactly as the engine
-reads it. No response carries `content-encoding`: decompression is pinned by transport tests, not by the
-corpus. A transport failure is `{"error": "Name: message"}`, the string `ProbeResponse.error` carries at the
-seam; a `TimeoutError` is always recorded as `TimeoutError: deadline exceeded`. Redirects are ordinary
-exchanges (a 3xx with a `location` header) that the guarded fetch above the seam follows with a new request,
-except where the engine keeps a probe off hosts nothing confirmed. A request to the MCP endpoint on the audited
-origin (discovery's common-path POSTs and every probe of that endpoint) takes only hops that keep the scheme, host,
-and port: discovery records a redirect to another origin with its target and declares the target, and any other probe
-reads it as a refused redirect. A probe of an endpoint on a declared host takes no redirect at all, and neither does a
-probe of a document on that endpoint's origin (a registry path written with `{mcp_origin}`, which the engine replaces
-with the endpoint's scheme, host, and port). The GET an API anchor host off the audited origin receives takes only hops
-that keep the scheme, host, and port, and a redirect to another origin is its answer.
+Responses carry lowercase header names with single string values and a UTF-8 text body exactly as the engine reads it.
+No response carries `content-encoding`: decompression is pinned by transport tests, not by the corpus. A transport
+failure is `{"error": "Name: message"}`, the string `ProbeResponse.error` carries at the seam; a `TimeoutError` is
+always recorded as `TimeoutError: deadline exceeded`. Redirects are ordinary exchanges (a 3xx with a `location`
+header) that the guarded fetch above the seam follows with a new request, except where the engine keeps a probe off
+hosts nothing confirmed. The guarded fetch sends nothing over `http`: a request URL on `http` never reaches the seam
+and reads as a failure with the error `not requested: not https`, and a redirect to `http` it would otherwise follow
+is not taken, so the probe's answer is that redirect's status and headers with an empty body and the error `redirect
+refused: <status> to <location>: not https`. A request to the MCP endpoint on the audited origin (discovery's
+common-path POSTs and every probe of that endpoint) takes only hops that keep the scheme, host, and port: discovery
+records a redirect to another origin with its target and declares the target, and any other probe reads it as a
+refused redirect. A probe of an endpoint on a declared host takes no redirect at all, and neither does a probe of a
+document on that endpoint's origin (a registry path written with `{mcp_origin}`, which the engine replaces with the
+endpoint's scheme, host, and port). The GET an API anchor host off the audited origin receives takes only hops that
+keep the scheme, host, and port, and a redirect to another origin is its answer.
 
 ## scorecard.json
 
@@ -66,17 +69,17 @@ failures. Every scenario is a public-vantage audit holding no credential, so eve
 that vantage.
 
 Each row's `hosts` lists the distinct hosts its raw evidence items were requested from, in evidence order, as
-`{"host": ...}` objects. Only an item with no `blocked` marker counts: a request the SSRF guard refused never
-reached a host. An item with a string `url` counts that URL's host; one with no `url` and a non-empty string
-`host` counts that value, which is how a row a declared host kept from being evaluated names that host. The host is
-the WHATWG URL `host`, which keeps a non-default port (`example.com:8443`), so an engine whose URL library drops the
-port must add it back. An item whose `url` does not parse contributes nothing, and a row with no counting item has
-`hosts: []`. `host` is present, holding the same value, exactly when `hosts` has one entry. A row that evaluates
-several targets (the API rows when the api-catalog lists API anchors: one per declared description, one per anchor
-host) marks each target's items with its outcome, and when those items name more than one host each `hosts` entry
-also carries `status`: the worst outcome among that host's targets (`broken`, then `noncompliant`, `absent`,
-`error`, `pass`), or `n_a` with the first such target's `na_reason` when none on that host was evaluated. The row's
-own status is the same rule over all its targets.
+`{"host": ...}` objects. Only an item with no `blocked` marker counts: a URL the SSRF guard refused, or one never
+requested because it is not `https`, reached no host. An item with a string `url` counts that URL's host; one with no
+`url` and a non-empty string `host` counts that value, which is how a row a declared host kept from being evaluated
+names that host. The host is the WHATWG URL `host`, which keeps a non-default port (`example.com:8443`), so an engine
+whose URL library drops the port must add it back. An item whose `url` does not parse contributes nothing, and a row
+with no counting item has `hosts: []`. `host` is present, holding the same value, exactly when `hosts` has one entry.
+A row that evaluates several targets (the API rows when the api-catalog lists API anchors: one per declared
+description, one per anchor host) marks each target's items with its outcome, and when those items name more than one
+host each `hosts` entry also carries `status`: the worst outcome among that host's targets (`broken`, then
+`noncompliant`, `absent`, `error`, `pass`), or `n_a` with the first such target's `na_reason` when none on that host
+was evaluated. The row's own status is the same rule over all its targets.
 
 `declared_hosts` holds one entry per URL the target's discovery documents declare off its origin, in declaration
 order (the AI catalog's card entries, the card under the discovered endpoint, then the well-known cards; the endpoints a
@@ -86,7 +89,8 @@ followed card document names come right after that document's entry), then the a
 targets the common-path POSTs were redirected to off the origin, in probe order and with the redirecting path as
 their `surface`, never in the order requests complete. A URL declared twice keeps its first entry. Endpoints are tried
 one at a time in that order and the first that its own host confirms becomes the endpoint, so every later endpoint
-reads `not-followed`.
+reads `not-followed`. A declared URL or redirect hop on `http` that the guard admits is never requested and
+reads `not-followed` with reason `insecure-scheme`, a refused hop recorded as its `final_url`.
 
 ## scores.json
 
@@ -157,6 +161,7 @@ the first two, `im` for the body patterns) and `results[i] = new RegExp(pattern,
 | `follow-card-admit` | the card names an endpoint on another host, whose own card at `<endpoint>/server-card` names it: the MCP rows are scored there | `mcp-initialize`, `mcp-tools-list`, `mcp-cors-preflight`, `mcp-cors-actual`, `mcp-get-fast-fail` |
 | `follow-disabled` | the same declared endpoint as follow-card-admit with following off: nothing off the audited origin is requested and the MCP rows read follow-disabled | `mcp-initialize`, `mcp-tools-list`, `mcp-cors-preflight`, `mcp-cors-actual`, `mcp-get-fast-fail` |
 | `follow-host-cap` | four declared hosts each redirect into a private range and are blocked; the fifth exceeds the per-audit host cap and is never requested | `mcp-initialize` |
+| `follow-http-declarations` | the AI catalog names an https endpoint that redirects to http, the card names an http endpoint, and the api-catalog anchors an http API host whose description is http, each host answering as one the audit would follow: nothing is requested over http, every entry reads not-followed with reason insecure-scheme (the redirected one with its hop as the final URL), and no MCP or API row is evaluated at any of them: the API rows read absent, as nothing declared over http earns more than a missing API | `mcp-initialize`, `openapi`, `json-errors` |
 | `follow-own-redirect-admit` | the audited site's /mcp answers the discovery POSTs with a 307 to another host whose card at `<endpoint>/server-card` names it: no POST follows the redirect, the target is confirmed like a declared endpoint, and the MCP rows are scored there | `mcp-initialize`, `mcp-tools-list`, `mcp-cors-preflight`, `mcp-cors-actual`, `mcp-get-fast-fail` |
 | `follow-own-redirect-refused` | the audited site's /mcp answers the discovery POSTs with a 307 to another host that publishes nothing naming that URL: no POST or OPTIONS reaches the host, and the MCP rows name the host that did not confirm it | `mcp-initialize`, `mcp-tools-list`, `mcp-cors-preflight`, `mcp-cors-actual`, `mcp-get-fast-fail` |
 | `follow-reciprocity-refused` | the declared endpoint answers GET with 405 and Allow: POST but publishes no card, catalog entry, or metadata naming it: no wire probe, and the MCP rows name the host that did not confirm it | `mcp-initialize`, `mcp-tools-list`, `mcp-cors-preflight`, `mcp-cors-actual`, `mcp-get-fast-fail` |
@@ -188,8 +193,10 @@ the first two, `im` for the body patterns) and `results[i] = new RegExp(pattern,
 | `http-ua-negotiation` | the CLI and AI user-agent probes receive the markdown twin while the default probe receives HTML | `markdown-cli-ua`, `markdown-agent-ua`, `accept-markdown`, `markdown-accept-plain`, `agent-ua-reachable` |
 | `http-ua-negotiation-absent` | every markdown-shaped request receives HTML, so the twin family is absent | `markdown-cli-ua`, `markdown-agent-ua`, `accept-markdown`, `markdown-accept-plain` |
 | `llms-quality-broken-link` | a link that answers 5xx makes the links row broken | `llms-txt-links` |
+| `llms-quality-dead-and-http-link` | an llms.txt that lists a dead link and an http link: the http link is never requested, though it would answer with a server error that would read broken, and the dead link decides the links row, which reads absent | `llms-txt-links` |
 | `llms-quality-dead-link` | a link that answers 404 makes the links row absent | `llms-txt-links` |
 | `llms-quality-h1-only` | an llms.txt with only an H1 misses format, has no links to follow, and has no when-to-use heading | `llms-txt-format`, `llms-txt-links`, `llms-txt-when-to-use` |
+| `llms-quality-http-link` | an llms.txt that lists an http link beside resolving https links: the http link is never requested, though it would answer, and the links row reads noncompliant naming it | `llms-txt-links` |
 | `llms-quality-pass` | an llms.txt with an H1, a summary, resolving links and a when-to-use heading passes the trio | `llms-txt-format`, `llms-txt-links`, `llms-txt-when-to-use` |
 | `mcp-capabilities-empty` | an initialize result with empty capabilities passes initialize but is broken on the capabilities row | `mcp-initialize`, `mcp-capabilities` |
 | `mcp-card-no-endpoint-field` | a card without an endpoint field passes the card check while discovery falls through to initialize | `well-known-mcp-card`, `mcp-initialize` |
@@ -214,11 +221,13 @@ the first two, `im` for the body patterns) and `results[i] = new RegExp(pattern,
 | `run-all-pass` | every surface answers as the registry wants it to | `openapi`, `json-schemas`, `api-catalog`, `json-errors`, `rate-limit-headers`, `mcp-initialize`, `mcp-capabilities`, `mcp-tools-list`, `mcp-resources-list`, `mcp-modern-tools-list`, `mcp-server-discover`, `mcp-unknown-method`, `mcp-malformed-body`, `mcp-batch-reject`, `mcp-unknown-tool`, `mcp-modern-unknown-method`, `mcp-modern-clientcaps`, `mcp-modern-header-mismatch`, `mcp-modern-version-reject`, `mcp-modern-resources-miss`, `mcp-accept-json`, `mcp-accept-unsatisfiable`, `mcp-get-fast-fail`, `mcp-cors-preflight`, `mcp-cors-actual`, `well-known-mcp-card`, `mcp-card-legacy-aliases`, `mcp-usage-doc`, `webmcp`, `llms-txt`, `llms-txt-format`, `llms-txt-links`, `llms-txt-when-to-use`, `llms-full-txt`, `llms-txt-scoped`, `llms-full-txt-scoped`, `accept-markdown`, `markdown-cli-ua`, `markdown-agent-ua`, `agent-ua-reachable`, `markdown-accept-plain`, `markdown-vary`, `markdown-frontmatter`, `root-meta-description`, `schema-org-jsonld`, `content-without-js`, `semantic-html`, `noscript-fallback`, `robots`, `sitemap`, `agent-friendly-404`, `agent-friendly-404-md`, `link-headers`, `root-link-rel`, `dns-aid`, `robots-ai-rules`, `content-signals`, `web-bot-auth`, `security-txt`, `a2a-agent-card`, `ai-catalog`, `agent-skills`, `oauth-discovery`, `oauth-protected-resource`, `auth-md` |
 | `run-antecedent-unmet` | a bare HTML site: no llms.txt, no API surface, no MCP endpoint, so every gated check is `n_a` | `llms-txt-format`, `llms-txt-links`, `llms-txt-when-to-use`, `llms-txt-scoped`, `llms-full-txt-scoped`, `json-schemas`, `api-catalog`, `json-errors`, `rate-limit-headers`, `mcp-cors-preflight`, `mcp-cors-actual`, `well-known-mcp-card`, `mcp-card-legacy-aliases`, `mcp-usage-doc`, `oauth-protected-resource`, `robots-ai-rules`, `content-signals`, `auth-md`, `mcp-initialize`, `mcp-capabilities`, `mcp-tools-list`, `mcp-resources-list`, `mcp-modern-tools-list`, `mcp-server-discover`, `mcp-unknown-method`, `mcp-malformed-body`, `mcp-batch-reject`, `mcp-unknown-tool`, `mcp-modern-unknown-method`, `mcp-modern-clientcaps`, `mcp-modern-header-mismatch`, `mcp-modern-version-reject`, `mcp-modern-resources-miss`, `mcp-accept-json`, `mcp-accept-unsatisfiable`, `mcp-get-fast-fail` |
 | `run-body-over-cap` | bodies past the 64 KiB probe cap are truncated: a huge tools/list no longer parses and a huge JSON error body reads as non-JSON | `mcp-tools-list`, `json-errors` |
+| `run-document-redirects-to-http` | the audited site answers /llms.txt and its API catalog with a redirect to the same path over http, where each would answer: neither hop is taken, and each document reads as missing (llms.txt absent, the optional API catalog n_a), its evidence naming the redirect to http | `llms-txt`, `api-catalog` |
 | `run-edge-530` | every probe comes back as a Cloudflare edge error, which is not the target answering | `robots`, `llms-txt` |
 | `run-healthy` | a healthy site with a handful of misses across tiers | `content-signals`, `security-txt`, `web-bot-auth`, `noscript-fallback`, `mcp-cors-preflight`, `mcp-cors-actual`, `rate-limit-headers` |
 | `run-redirects` | redirect chains: a two-hop public chain is followed, a hop into the metadata range is refused, a cross-origin hop lands on a 404, and a five-hop chain exceeds the cap | `llms-txt`, `robots`, `sitemap`, `security-txt` |
 | `run-root-401` | a root that challenges for auth still audits, and the challenge satisfies the auth antecedent | `auth-md`, `oauth-discovery`, `agent-ua-reachable` |
 | `run-root-not-html` | the root is JSON, so every HTML-root check and the markdown twin family are `n_a` | `webmcp`, `accept-markdown`, `markdown-vary`, `markdown-frontmatter`, `root-meta-description`, `schema-org-jsonld`, `content-without-js`, `semantic-html`, `noscript-fallback`, `root-link-rel` |
+| `run-root-redirects-to-http` | every https request, the root included, redirects to the http root, which would answer: the run ends unreachable after the root request alone, and nothing is requested over http | `agent-ua-reachable`, `content-without-js` |
 | `run-site-type-api` | the full site declared as an API: content-only checks are `n_a` at the type filter | `llms-full-txt`, `llms-txt-scoped`, `llms-full-txt-scoped`, `openapi`, `json-errors` |
 | `run-site-type-content` | the full site declared as content: API-only checks are `n_a` at the type filter, MCP still applies on discovery | `openapi`, `json-schemas`, `api-catalog`, `json-errors`, `rate-limit-headers`, `llms-full-txt`, `mcp-initialize` |
 | `run-unreachable` | nothing answers at the network level | `robots`, `llms-txt` |

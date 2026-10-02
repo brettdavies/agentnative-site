@@ -12,7 +12,7 @@ import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import type { ProbeResponse } from '../src/worker/audit-web/assert';
 import type { ProbeOutcome } from '../src/worker/audit-web/handlers/types';
-import { type SignInChallenge, settleMcpAuth, signInResolver } from '../src/worker/audit-web/mcp-auth';
+import { type SignInChallenge, settleMcpAuth, signInEndpoint, signInResolver } from '../src/worker/audit-web/mcp-auth';
 import type { ArtifactSource } from '../src/worker/audit-web/reciprocity';
 import type { WebAuditRegistry } from '../src/worker/audit-web/registry';
 import type { WebScorecard } from '../src/worker/audit-web/scorecard';
@@ -250,5 +250,33 @@ describe('the 401 discovery drew while finding the endpoint', () => {
         settled: { endpoint: SAME, challenge: wire, lane: 'modern', metadataUrl: SAME_METADATA, metadata },
       });
     }
+  });
+});
+
+describe('sign-in metadata is read over https only', () => {
+  const HTTP_ENDPOINT = 'http://example.com/mcp';
+  /** Serves metadata naming the http endpoint at its RFC 9728 location, so only the scheme can refuse it. */
+  const serving = (reads: string[]): ArtifactSource => ({
+    get: async (url) => {
+      reads.push(url);
+      return url === 'http://example.com/.well-known/oauth-protected-resource/mcp'
+        ? { status: 200, headers: {}, body: JSON.stringify({ resource: HTTP_ENDPOINT }), error: null }
+        : { status: 404, headers: {}, body: '', error: null };
+    },
+    decline: () => {},
+  });
+
+  test('a challenged path that is not https is never made the endpoint, and its metadata is never read', async () => {
+    const reads: string[] = [];
+    const challenged = [{ path: '/mcp', url: HTTP_ENDPOINT, probed: 'initialize' as const, challenge: null }];
+    expect(await signInEndpoint(challenged, serving(reads))).toBeNull();
+    expect(reads).toEqual([]);
+  });
+
+  test('an endpoint of record that is not https never settles sign-in, and its metadata is never read', async () => {
+    const reads: string[] = [];
+    const signIn = signInResolver({ endpoint: HTTP_ENDPOINT, known: null, source: serving(reads) });
+    expect(await signIn({ challenge: null, lane: 'legacy' })).toBeNull();
+    expect(reads).toEqual([]);
   });
 });

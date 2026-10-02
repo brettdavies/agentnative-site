@@ -165,7 +165,7 @@ to on another origin, in probe order. A URL declared twice keeps its first entry
 | `outcome`     | string           | `followed`, `reciprocity-refused`, `not-followed`, `blocked`, `unreachable`, or `budget-exceeded`.                                                                                                                     |
 | `admitted_by` | string, optional | On a followed `mcp-endpoint`, what its own host publishes naming it: `card`, `ai-catalog`, or `metadata`.                                                                                                              |
 | `cause`       | string, optional | On `budget-exceeded`, the limit reached: `per-audit-cap`, `slice`, or `domain-budget`.                                                                                                                                 |
-| `reason`      | string, optional | On `not-followed`, why: `templated-url`, `self-path`, `beyond-endpoint-of-record`, `follow-disabled`, or `no-service-desc`.                                                                                            |
+| `reason`      | string, optional | On `not-followed`, why: `templated-url`, `self-path`, `beyond-endpoint-of-record`, `follow-disabled`, `no-service-desc`, or `insecure-scheme`.                                                                         |
 
 An MCP endpoint on another host receives a wire probe only after that host confirms it: a SEP-2127 card at
 `<endpoint>/server-card`, an entry in the host's own `/.well-known/ai-catalog.json`, or RFC 9728 protected-resource
@@ -176,7 +176,13 @@ confirmed endpoint in declaration order is the endpoint of record unless the aud
 card document declared after it, or an endpoint confirmed while the site serves its own, reads `not-followed`. A URL the
 SSRF guard refuses, a private address or an IP literal, or a redirect hop to one, reads `blocked` and is never
 requested; its rows read `declared-host-blocked`. A URL anc cannot request at all, one that does not parse or whose
-scheme is not `http` or `https`, is never requested and reads `reciprocity-refused`.
+scheme is not `http` or `https`, is never requested and reads `reciprocity-refused`. anc sends no plaintext request: an
+http URL, declared or linked, and any redirect to http, is never requested. A declared URL or redirect hop on `http`
+that the guard admits reads `not-followed` with reason `insecure-scheme`, and no row is evaluated at it. An API row
+whose declared descriptions or hosts are all on `http` reads `absent`, naming the URL, because a surface declared over
+plaintext alone earns no more than a missing one; beside one anc can evaluate, an `http` target is left out. What a host
+publishes to confirm an endpoint is its consent to be probed, and consent read over plaintext could be forged by anyone
+on the network path, so every document anc reads to confirm an endpoint is read over `https`.
 
 An API catalog anchor is an API host the API rows evaluate when its `service-desc` names a description other than an MCP
 surface; an anchor with no such `service-desc` reads `not-followed` with reason `no-service-desc` and is never
@@ -348,11 +354,15 @@ One object per check.
 - `pass` — the surface is present and valid.
 - `noncompliant` — the surface works and an agent calling it gets the outcome it asked for, but a spec detail is
   violated. On the MCP family this is a well-formed JSON-RPC refusal carrying the wrong error code, or a correct refusal
-  missing a required payload field. Scores above absent and well below pass.
+  missing a required payload field. On `llms-txt-links` it is an `http` link, or one that redirects to `http`, which anc
+  never requests; a broken or dead link among the same links decides the row first, so listing an `http` link never
+  raises it. Scores above absent and well below pass.
 - `broken` — the surface exists but is invalid (malformed body, wrong content-type, an unexpected status where the
   surface clearly exists), so it leads an agent to a dead end or misleads it. Scores below absent. Whether a defect
   reads `noncompliant` or `broken` turns on what an agent at the audit's vantage gets.
-- `absent` — the surface is not there (404/410, no DNS records, no CORS headers).
+- `absent` — the surface is not there (404/410, no DNS records, no CORS headers), or it answers only with a redirect to
+  `http` or is declared only on `http`, which anc never requests: a surface served over plaintext alone earns no more
+  than a missing one.
 - `n_a` — excluded from the relative score and kept in the global denominator; `na_reason` says why, from a closed set:
   - `antecedent-unmet`: the check does not apply to this site.
   - `optional-absent`: an applicable MAY that is not implemented.
@@ -379,7 +389,9 @@ what sign-in blocks.
 A handler with nothing to probe (no discovered MCP endpoint) emits `n_a` with no `na_reason`. The derived `result` line
 leads with the reason's own phrase, and the last six reasons begin "Not evaluated:", for example "Not evaluated:
 mcp.example.com requires sign-in". A row whose `hosts` carry their own outcomes ends its `result` line with each host
-and its outcome, for example `; api.example.com: pass, api2.example.com: broken`.
+and its outcome, for example `; api.example.com: pass, api2.example.com: broken`. A `noncompliant` row decided by a link
+anc never requested, because it is `http` or redirects there, leads "Listed, but not over https" rather than "Works but
+does not conform".
 
 ## Remediation on the MCP surface
 

@@ -59,7 +59,7 @@
   },
   "audience": null,
   "audit_profile": null,
-  "site_type": "content",
+  "site_type": null,
   "public_listing": false,
   "vantage": {
     "network": "public",
@@ -68,45 +68,45 @@
   "follow_declarations": true,
   "declared_hosts": [],
   "summary": {
-    "pass": 14,
-    "noncompliant": 0,
-    "broken": 0,
-    "absent": 6,
-    "n_a": 47,
+    "pass": 12,
+    "noncompliant": 1,
+    "broken": 1,
+    "absent": 7,
+    "n_a": 46,
     "skip": 0,
     "error": 1
   },
   "coverage_summary": {
     "must": {
-      "total": 0,
+      "total": 1,
       "verified": 0
     },
     "should": {
-      "total": 15,
+      "total": 17,
       "verified": 9
     },
     "may": {
-      "total": 5,
-      "verified": 5
+      "total": 3,
+      "verified": 3
     }
   },
-  "score_pct": 78,
+  "score_pct": 57,
   "score": {
-    "relative": 78,
-    "global": 20
+    "relative": 57,
+    "global": 18
   },
   "categories": [
     {
       "id": "discoverability",
       "name": "Discoverability",
-      "passed": 3,
-      "counted": 6
+      "passed": 2,
+      "counted": 5
     },
     {
       "id": "content-for-agents",
       "name": "Content for agents",
-      "passed": 9,
-      "counted": 12
+      "passed": 8,
+      "counted": 11
     },
     {
       "id": "bot-crawl-policy",
@@ -118,7 +118,7 @@
       "id": "api",
       "name": "API",
       "passed": 0,
-      "counted": 0
+      "counted": 3
     },
     {
       "id": "mcp",
@@ -143,10 +143,14 @@
       "keyword": "must",
       "tier": "required",
       "principle": "P2",
-      "status": "n_a",
-      "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
-      "hosts": []
+      "status": "absent",
+      "evidence": "https://example.com/openapi.json -> 404 (status 404 not in [200])",
+      "hosts": [
+        {
+          "host": "example.com"
+        }
+      ],
+      "host": "example.com"
     },
     {
       "id": "json-schemas",
@@ -159,7 +163,7 @@
       "principle": "P2",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no JSON Schema references detected",
       "hosts": []
     },
     {
@@ -172,9 +176,14 @@
       "tier": "optional",
       "principle": "P8",
       "status": "n_a",
-      "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
-      "hosts": []
+      "na_reason": "optional-absent",
+      "evidence": "https://example.com/.well-known/api-catalog -> 404 (status 404 not in [200])",
+      "hosts": [
+        {
+          "host": "example.com"
+        }
+      ],
+      "host": "example.com"
     },
     {
       "id": "json-errors",
@@ -185,10 +194,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
-      "hosts": []
+      "status": "broken",
+      "evidence": "https://example.com/anc-web-audit-no-such-api -> 404 (HTML error body)",
+      "hosts": [
+        {
+          "host": "example.com"
+        }
+      ],
+      "host": "example.com"
     },
     {
       "id": "rate-limit-headers",
@@ -199,10 +212,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P6",
-      "status": "n_a",
-      "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
-      "hosts": []
+      "status": "absent",
+      "evidence": "https://example.com/anc-web-audit-no-such-api -> 404 (no rate-limit header)",
+      "hosts": [
+        {
+          "host": "example.com"
+        }
+      ],
+      "host": "example.com"
     },
     {
       "id": "mcp-initialize",
@@ -215,7 +232,7 @@
       "principle": "P2",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -229,7 +246,7 @@
       "principle": "P2",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -243,7 +260,7 @@
       "principle": "P2",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -257,7 +274,7 @@
       "principle": "P2",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "neither initialize nor server/discover advertises capabilities.resources",
       "hosts": []
     },
     {
@@ -271,7 +288,7 @@
       "principle": "P2",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -285,7 +302,7 @@
       "principle": "P2",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -299,7 +316,7 @@
       "principle": "P4",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -313,7 +330,7 @@
       "principle": "P4",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -327,7 +344,7 @@
       "principle": "P4",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -341,7 +358,7 @@
       "principle": "P4",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -355,7 +372,7 @@
       "principle": "P4",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -369,7 +386,7 @@
       "principle": "P4",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -383,7 +400,7 @@
       "principle": "P4",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -397,7 +414,7 @@
       "principle": "P4",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -411,7 +428,7 @@
       "principle": "P4",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "neither initialize nor server/discover advertises capabilities.resources",
       "hosts": []
     },
     {
@@ -425,7 +442,7 @@
       "principle": "P4",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -439,7 +456,7 @@
       "principle": "P4",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -453,7 +470,7 @@
       "principle": "P4",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -467,7 +484,7 @@
       "principle": "P6",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -481,7 +498,7 @@
       "principle": "P6",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -495,7 +512,7 @@
       "principle": "P8",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -509,7 +526,7 @@
       "principle": "P8",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -523,7 +540,7 @@
       "principle": "P8",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -537,7 +554,7 @@
       "principle": "P1",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -551,7 +568,7 @@
       "principle": "P1",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -565,7 +582,7 @@
       "principle": "P1",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no MCP endpoint discovered",
       "hosts": []
     },
     {
@@ -631,14 +648,14 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P2",
-      "status": "absent",
-      "evidence": "http://10.0.0.5/docs/x.md: blocked: ipv4 10.0.0.5 is in blocked range 10.0.0.0/8",
+      "status": "noncompliant",
+      "evidence": "http://example.com/docs/plain.md: not https; anc sends no plaintext request",
       "hosts": [
         {
-          "host": "other.example.net"
+          "host": "example.com"
         }
       ],
-      "host": "other.example.net"
+      "host": "example.com"
     },
     {
       "id": "llms-txt-when-to-use",
@@ -686,8 +703,9 @@
       "keyword": "may",
       "tier": "optional",
       "principle": "P2",
-      "status": "pass",
-      "evidence": "https://example.com/blog/llms.txt -> 200",
+      "status": "n_a",
+      "na_reason": "optional-absent",
+      "evidence": "https://example.com/docs/llms.txt -> 404",
       "hosts": [
         {
           "host": "example.com"
@@ -956,8 +974,9 @@
       "keyword": "may",
       "tier": "optional",
       "principle": "P7",
-      "status": "pass",
-      "evidence": "https://example.com/sitemap.xml -> 200",
+      "status": "n_a",
+      "na_reason": "optional-absent",
+      "evidence": "https://example.com/sitemap.xml -> 404 (status 404 not in [200])",
       "hosts": [
         {
           "host": "example.com"
@@ -1184,7 +1203,7 @@
       "principle": "P1",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no auth surface detected",
       "hosts": []
     },
     {
@@ -1198,7 +1217,7 @@
       "principle": "P1",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "MCP endpoint does not challenge for auth",
       "hosts": []
     },
     {
@@ -1212,7 +1231,7 @@
       "principle": "P1",
       "status": "n_a",
       "na_reason": "antecedent-unmet",
-      "evidence": "not applicable to the declared site type",
+      "evidence": "no auth surface detected",
       "hosts": []
     }
   ]

@@ -122,6 +122,45 @@ describe('guardedFetch', () => {
     expect(resp.error).toContain('blocked');
   });
 
+  test('an http request URL is refused as insecure-scheme and never sent', async () => {
+    const sent: string[] = [];
+    const fetchImpl = stubFetch((url) => {
+      sent.push(url);
+      return new Response('plaintext', { status: 200 });
+    });
+    for (const method of ['GET', 'POST', 'OPTIONS']) {
+      const resp = await guardedFetch('http://example.com/llms.txt', { method }, { fetchImpl });
+      expect({ method, status: resp.status, error: resp.error, refused: resp.refused }).toEqual({
+        method,
+        status: null,
+        error: 'not requested: not https',
+        refused: 'insecure-scheme',
+      });
+    }
+    expect(sent).toEqual([]);
+  });
+
+  test('a redirect from https to http is not taken: the redirect is the answer, refused as insecure-scheme', async () => {
+    const sent: string[] = [];
+    const fetchImpl = stubFetch((url) => {
+      sent.push(url);
+      if (url === 'https://example.com/a') return new Response(null, { status: 308, headers: { Location: '/b' } });
+      if (url === 'https://example.com/b') {
+        return new Response(null, { status: 301, headers: { Location: 'http://example.com/b' } });
+      }
+      return new Response('plaintext', { status: 200 });
+    });
+    const resp = await guardedFetch('https://example.com/a', {}, { fetchImpl });
+    expect(sent).toEqual(['https://example.com/a', 'https://example.com/b']);
+    expect(resp).toMatchObject({
+      status: 301,
+      headers: { location: 'http://example.com/b' },
+      body: '',
+      error: 'redirect refused: 301 to http://example.com/b: not https',
+      refused: 'insecure-scheme',
+    });
+  });
+
   test('with redirects refused, a redirect answer is a failure naming its target and no hop is taken', async () => {
     const fetched: string[] = [];
     const fetchImpl = stubFetch((url) => {

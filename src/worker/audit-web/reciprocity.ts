@@ -10,6 +10,9 @@
 // RFC 3986 syntax normalization, so an artifact naming one path admits no
 // other path, scheme, or port. A 405, an Allow header, or a JSON-RPC
 // envelope is what any POST-only route answers, so none of them admits.
+// Every artifact is read over https: one read over plaintext could be
+// forged by anyone on the network path, and it would admit wire probes of
+// a host that never published it.
 
 import { hostOf } from '../../shared/url-host';
 import type { ProbeResponse } from './assert';
@@ -24,7 +27,7 @@ import {
 } from './discovery-documents';
 import { RETRY_SHAPED_STATUSES, resolveUrl } from './handlers/shared';
 import type { WebAuditDiscoveryConfig } from './registry';
-import { DOCUMENT_MAX_BODY_BYTES, METADATA_MAX_BODY_BYTES, validatePublicUrl } from './ssrf';
+import { DOCUMENT_MAX_BODY_BYTES, isHttpsUrl, METADATA_MAX_BODY_BYTES, notHttps, validatePublicUrl } from './ssrf';
 
 export type AdmittedBy = 'card' | 'ai-catalog' | 'metadata';
 
@@ -212,6 +215,18 @@ export async function resolveProtectedResourceMetadata(
   return echo === 'ruled-out' || (echo === 'unanswered' && options.ofRecord === true) ? found : null;
 }
 
+/** A source that declines every URL other than https, answering it as a read that got no response. */
+export function httpsOnly(source: ArtifactSource): ArtifactSource {
+  return {
+    get: (url, opts) => {
+      if (isHttpsUrl(url)) return source.get(url, opts);
+      source.decline(url, 'not https');
+      return Promise.resolve(notHttps());
+    },
+    decline: (url, why) => source.decline(url, why),
+  };
+}
+
 /** The artifact that admitted an endpoint, and the metadata when metadata is what did. */
 export interface Admission {
   by: AdmittedBy;
@@ -228,10 +243,11 @@ export async function admittingArtifact(
   source: ArtifactSource,
   challenge?: string,
 ): Promise<Admission | null> {
-  if (await readsAsCardNaming(source, cardSuffixUrl(endpoint, cfg.card_suffix), endpoint)) {
+  const reading = httpsOnly(source);
+  if (await readsAsCardNaming(reading, cardSuffixUrl(endpoint, cfg.card_suffix), endpoint)) {
     return { by: 'card', metadata: null };
   }
-  if (await hostCatalogNames(source, endpoint, cfg.ai_catalog)) return { by: 'ai-catalog', metadata: null };
-  const metadata = await resolveProtectedResourceMetadata(endpoint, source, { challenge });
+  if (await hostCatalogNames(reading, endpoint, cfg.ai_catalog)) return { by: 'ai-catalog', metadata: null };
+  const metadata = await resolveProtectedResourceMetadata(endpoint, reading, { challenge });
   return metadata === null ? null : { by: 'metadata', metadata };
 }

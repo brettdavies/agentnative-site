@@ -19,12 +19,15 @@ export type TrailOutcome =
   | 'unreachable'
   | 'budget-exceeded';
 export type BudgetCause = 'per-audit-cap' | 'slice' | 'domain-budget';
-export type NotFollowedReason =
-  | 'templated-url'
-  | 'self-path'
-  | 'beyond-endpoint-of-record'
-  | 'follow-disabled'
-  | 'no-service-desc';
+export const NOT_FOLLOWED_REASONS = [
+  'templated-url',
+  'self-path',
+  'beyond-endpoint-of-record',
+  'follow-disabled',
+  'no-service-desc',
+  'insecure-scheme',
+] as const;
+export type NotFollowedReason = (typeof NOT_FOLLOWED_REASONS)[number];
 
 /** One declared URL and how the audit treated it. */
 export type TrailEntry = {
@@ -82,15 +85,21 @@ function inSelfZone(rawHostname: string): boolean {
 // is kept for a host the guard refuses and an IP literal, which is what
 // the rows say of it.
 const UNREQUESTABLE: Settled = { outcome: 'reciprocity-refused' };
+// What a declared host publishes naming its endpoint is its consent to be
+// probed, and consent read over plaintext can be forged by anyone on the
+// network path, so nothing a site declares over http is requested.
+const INSECURE: Settled = { outcome: 'not-followed', reason: 'insecure-scheme' };
 
 /**
- * Where the URL may not be requested at all, or null when it may. The
- * auditor's own zone admits only its canonical MCP endpoint.
+ * Where the URL may not be requested at all, or null when it may. Only
+ * https is requested, and the auditor's own zone admits only its canonical
+ * MCP endpoint.
  */
 export function refusal(url: string, kind: Declaration['kind']): Settled | null {
   const validated = validatePublicUrl(url);
   if (!validated.ok) return validated.refused === 'host' ? { outcome: 'blocked' } : UNREQUESTABLE;
   if (isIpLiteral(validated.url.hostname)) return { outcome: 'blocked' };
+  if (validated.url.protocol !== 'https:') return INSECURE;
   if (
     inSelfZone(validated.url.hostname) &&
     (kind !== 'mcp-endpoint' || normalizeEndpointUrl(url) !== CANONICAL_SELF_ENDPOINT)

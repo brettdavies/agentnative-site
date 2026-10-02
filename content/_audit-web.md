@@ -7,8 +7,9 @@ policy. The result is a web scorecard with per-check evidence and copy-paste fix
 ## What a website audit checks
 
 The audit runs entirely as network probes: HTTP requests, a JSON-RPC handshake over streamable-HTTP, a CORS preflight,
-and DNS-over-HTTPS lookups. There is no crawler and nothing is installed. Every check carries a MUST, SHOULD, or MAY
-keyword and belongs to one of six categories:
+and DNS-over-HTTPS lookups. There is no crawler and nothing is installed. anc sends no plaintext request: an http URL,
+declared or linked, and any redirect to http, is never requested. Every check carries a MUST, SHOULD, or MAY keyword and
+belongs to one of six categories:
 
 - **Discoverability**: `robots.txt`, `sitemap.xml`, `Link` headers, `<link rel>` pointers, DNS-AID records under
   `_agents`, and an agent-friendly 404: a nonsense path MUST return HTTP 404 or 410 (a soft-200 SPA shell is broken),

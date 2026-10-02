@@ -10,6 +10,7 @@ import { declaredDomainBudget, domainBudgetRefusal, registrableDomainOf } from '
 import { runWebAudit } from '../src/worker/audit-web/engine';
 import { ALWAYS_ADMIT_BUDGET, type DomainBudget } from '../src/worker/audit-web/follow-requests';
 import { endpointRedirects, mcpEndpointRedirects } from '../src/worker/audit-web/handlers/shared';
+import { type ArtifactSource, admittingArtifact } from '../src/worker/audit-web/reciprocity';
 import type { WebScorecard } from '../src/worker/audit-web/scorecard';
 import { budgetKeyPrefix, memoryKv, memoryRateLimit } from './helpers/domain-budget-fakes';
 import {
@@ -295,8 +296,8 @@ describe('follow: RFC 9728 metadata', () => {
 });
 
 describe('follow: exact URL matching', () => {
-  test('a card naming https://h/mcp admits neither a longer path, another scheme, nor another port', async () => {
-    const declared = [`https://${NET}/mcp/other`, `http://${NET}/mcp`, `https://${NET}:8443/mcp`];
+  test('a card naming https://h/mcp admits neither a longer path nor another port', async () => {
+    const declared = [`https://${NET}/mcp/other`, `https://${NET}:8443/mcp`];
     for (const endpoint of declared) {
       const seen: Seen[] = [];
       const suffix = `${endpoint.replace(/\/$/, '')}/server-card`;
@@ -1357,6 +1358,203 @@ describe('follow: hosts that are never requested', () => {
   });
 });
 
+describe('follow: only https is requested', () => {
+  const HTTP_ENDPOINT = `http://${NET}/mcp`;
+  /** A card at `<endpoint>/server-card` naming the endpoint, so only its scheme can refuse it. */
+  const confirming = (endpoint: string): Record<string, Route> => ({
+    [`GET ${endpoint}/server-card`]: () => cardDocument(sep2127Card(endpoint)),
+    [`POST ${endpoint}`]: () => initializeResult(),
+  });
+  const plaintext = (seen: readonly Seen[]): Seen[] => seen.filter((r) => r.url.startsWith('http:'));
+
+  test('an http MCP endpoint is not followed for its scheme: nothing is sent, no budget is drawn, and its rows read as no endpoint', async () => {
+    const seen: Seen[] = [];
+    const reserved: string[] = [];
+    const budget: DomainBudget = {
+      keyOf: (hostname) => hostname,
+      reserve: async (key) => {
+        reserved.push(key);
+        return { admitted: true };
+      },
+    };
+    const { scorecard } = await audit(router({ ...siteDeclaring(HTTP_ENDPOINT), ...confirming(HTTP_ENDPOINT) }, seen), {
+      domainBudget: budget,
+    });
+    expect(scorecard.declared_hosts).toEqual([
+      {
+        surface: '/.well-known/mcp.json',
+        kind: 'mcp-endpoint',
+        url: HTTP_ENDPOINT,
+        host: NET,
+        outcome: 'not-followed',
+        reason: 'insecure-scheme',
+      },
+    ]);
+    expect(requestsTo(seen, NET)).toEqual([]);
+    expect(reserved).toEqual([]);
+    expect(scorecard.mcp_endpoint).toBeNull();
+    const initialize = row(scorecard, 'mcp-initialize');
+    expect(initialize).toMatchObject({ status: 'n_a', na_reason: 'antecedent-unmet' });
+    expect(initialize.host).not.toBe(NET);
+
+    const followed = await audit(router({ ...siteDeclaring(ENDPOINT), ...confirming(ENDPOINT) }, []));
+    expect(followed.scorecard.declared_hosts?.[0]).toMatchObject({ outcome: 'followed', admitted_by: 'card' });
+    expect(followed.scorecard.mcp_endpoint).toBe(ENDPOINT);
+  });
+
+  test('an http card document is never read, so the endpoint it names is never declared', async () => {
+    const card = 'http://cards.example.org/mcp-card';
+    const seen: Seen[] = [];
+    const { scorecard } = await audit(
+      router(
+        {
+          [`GET ${TARGET}`]: () => html(),
+          'GET https://example.com/.well-known/ai-catalog.json': () => aiCatalog(cardEntry({ url: card })),
+          [`GET ${card}`]: () => cardDocument(sep2127Card(ENDPOINT)),
+          ...confirming(ENDPOINT),
+        },
+        seen,
+      ),
+    );
+    expect(scorecard.declared_hosts).toEqual([
+      {
+        surface: '/.well-known/ai-catalog.json#/entries/0',
+        kind: 'card-document',
+        url: card,
+        host: 'cards.example.org',
+        outcome: 'not-followed',
+        reason: 'insecure-scheme',
+      },
+    ]);
+    expect(plaintext(seen)).toEqual([]);
+    expect(requestsTo(seen, NET)).toEqual([]);
+  });
+
+  test('a card document whose redirect hop goes to http is not followed for its scheme, and the hop is never requested', async () => {
+    const card = 'https://cards.example.org/mcp-card';
+    const hop = 'http://cards.example.org/mcp-card';
+    const seen: Seen[] = [];
+    const { scorecard } = await audit(
+      router(
+        {
+          [`GET ${TARGET}`]: () => html(),
+          'GET https://example.com/.well-known/ai-catalog.json': () => aiCatalog(cardEntry({ url: card })),
+          [`GET ${card}`]: () => redirect(hop),
+          [`GET ${hop}`]: () => cardDocument(sep2127Card(ENDPOINT)),
+          ...confirming(ENDPOINT),
+        },
+        seen,
+      ),
+    );
+    expect(scorecard.declared_hosts).toEqual([
+      {
+        surface: '/.well-known/ai-catalog.json#/entries/0',
+        kind: 'card-document',
+        url: card,
+        host: 'cards.example.org',
+        final_url: hop,
+        outcome: 'not-followed',
+        reason: 'insecure-scheme',
+      },
+    ]);
+    expect(plaintext(seen)).toEqual([]);
+    expect(requestsTo(seen, NET)).toEqual([]);
+  });
+
+  test('a redirect hop to http is refused before it is requested, and records the hop as the final URL', async () => {
+    for (const hop of [HTTP_ENDPOINT, 'http://mcp.example.org/mcp']) {
+      const seen: Seen[] = [];
+      const { scorecard } = await audit(
+        router({ ...siteDeclaring(ENDPOINT), [`GET ${ENDPOINT}`]: () => redirect(hop), ...confirming(hop) }, seen),
+      );
+      expect({ hop, trail: scorecard.declared_hosts }).toEqual({
+        hop,
+        trail: [
+          {
+            surface: '/.well-known/mcp.json',
+            kind: 'mcp-endpoint',
+            url: ENDPOINT,
+            host: NET,
+            final_url: hop,
+            outcome: 'not-followed',
+            reason: 'insecure-scheme',
+          },
+        ],
+      });
+      expect({ hop, sent: plaintext(seen) }).toEqual({ hop, sent: [] });
+      expect({ hop, mcp: scorecard.mcp_endpoint }).toEqual({ hop, mcp: null });
+    }
+  });
+});
+
+describe('follow: reciprocity artifacts are read over https only', () => {
+  test("an entry in the endpoint host's AI catalog whose card URL is http is never read, so it confirms nothing", async () => {
+    const card = `http://${NET}/card`;
+    const seen: Seen[] = [];
+    const { scorecard } = await audit(
+      router(
+        {
+          ...siteDeclaring(ENDPOINT),
+          [`GET https://${NET}/.well-known/ai-catalog.json`]: () => aiCatalog(cardEntry({ url: card })),
+          [`GET ${card}`]: () => cardDocument(sep2127Card(ENDPOINT)),
+          [`POST ${ENDPOINT}`]: () => initializeResult(),
+        },
+        seen,
+      ),
+    );
+    expect(scorecard.declared_hosts?.[0]?.outcome).toBe('reciprocity-refused');
+    expect(seen.filter((r) => r.url.startsWith('http:'))).toEqual([]);
+    expect(wireProbesTo(seen, NET)).toEqual([]);
+  });
+
+  test('an https endpoint whose own card, catalog entry, or metadata names its http variant is not confirmed', async () => {
+    /** Each artifact on the endpoint host, naming `named`; naming the endpoint itself, each one admits it. */
+    const artifacts: Record<string, (named: string) => Record<string, Route>> = {
+      card: (named) => ({ [`GET ${ENDPOINT}/server-card`]: () => cardDocument(sep2127Card(named)) }),
+      'ai-catalog': (named) => ({
+        [`GET https://${NET}/.well-known/ai-catalog.json`]: () => aiCatalog(cardEntry({ data: sep2127Card(named) })),
+      }),
+      metadata: (named) => ({
+        [`GET https://${NET}/.well-known/oauth-protected-resource/mcp`]: () => json({ resource: named }),
+      }),
+    };
+    const run = async (routes: Record<string, Route>) => {
+      const seen: Seen[] = [];
+      const { scorecard } = await audit(
+        router({ ...siteDeclaring(ENDPOINT), ...routes, [`POST ${ENDPOINT}`]: () => initializeResult() }, seen),
+      );
+      return {
+        outcome: scorecard.declared_hosts?.[0]?.outcome,
+        wire: wireProbesTo(seen, NET).length,
+        plaintext: seen.filter((r) => r.url.startsWith('http:')),
+      };
+    };
+    for (const [artifact, naming] of Object.entries(artifacts)) {
+      expect({ artifact, ...(await run(naming(`http://${NET}/mcp`))) }).toEqual({
+        artifact,
+        outcome: 'reciprocity-refused',
+        wire: 0,
+        plaintext: [],
+      });
+      expect({ artifact, outcome: (await run(naming(ENDPOINT))).outcome }).toEqual({ artifact, outcome: 'followed' });
+    }
+  });
+
+  test('an endpoint that is not https has no artifact read for it', async () => {
+    const endpoint = `http://${NET}/mcp`;
+    const gets: string[] = [];
+    const source: ArtifactSource = {
+      get: async (url) => {
+        gets.push(url);
+        return { status: 200, headers: {}, body: JSON.stringify(sep2127Card(endpoint)), error: null };
+      },
+      decline: () => {},
+    };
+    expect(await admittingArtifact(endpoint, DISCOVERY, source)).toBeNull();
+    expect(gets).toEqual([]);
+  });
+});
+
 describe('follow: workers.dev hosts', () => {
   test('a declared workers.dev host whose fetches fail at the edge produces no broken row', async () => {
     const edge = 'https://blocked.acct.workers.dev/mcp';
@@ -1716,7 +1914,7 @@ describe('follow: the hourly budget of each declared registrable domain', () => 
     expect(puts.filter((line) => line.startsWith(`kv:put ${other}`))).toHaveLength(1);
   });
 
-  test('hosts under one registrable domain share its budget, whatever their scheme, port, or trailing dot', async () => {
+  test('hosts under one registrable domain share its budget, whatever their port or trailing dot', async () => {
     const budget = declaredDomainBudget({ SCORE_KV: memoryKv() }, { hourlyCeiling: 1 });
     expect((await declaring('https://a1.victim.example/mcp', budget)).entry).toMatchObject({
       outcome: 'reciprocity-refused',
@@ -1725,7 +1923,6 @@ describe('follow: the hourly budget of each declared registrable domain', () => 
       'https://a2.victim.example/mcp',
       'https://victim.example/mcp',
       'https://victim.example:8443/mcp',
-      'http://victim.example/mcp',
       'https://victim.example./mcp',
     ]) {
       const { entry, sent } = await declaring(endpoint, budget);

@@ -19,6 +19,7 @@
 // transport is the route's concern) and a terminal `complete` event
 // carrying the scorecard built from the collected results.
 
+import { NO_PLAINTEXT_REQUEST } from '../../shared/web-audit-result-line';
 import {
   type AntecedentContext,
   type AntecedentResolution,
@@ -100,11 +101,13 @@ export type AuditEvent =
   | { type: 'result'; result: EngineResult }
   // `follow` is what the follow slice spent: for the run record, never stored.
   | { type: 'complete'; scorecard: WebScorecard; complete: boolean; follow: FollowStats }
-  // Terminal for a target that answered nothing at the network level: no
-  // HTTP status from the root fetch or any discovery probe. Scoring such a
-  // run would publish a misleading 0% for what is actually "the auditor
-  // cannot reach this site" (a block of datacenter egress, a dead host, a
-  // tarpit), so the run ends here and nothing is cached.
+  // Terminal for a target the auditor cannot reach: nothing answered at
+  // the network level (no HTTP status from the root fetch or any discovery
+  // probe), or the root is http or redirects to http, which anc never
+  // requests. Scoring such a run would publish a misleading 0% for a site
+  // the audit measured nothing of (a block of datacenter egress, a dead
+  // host, a tarpit, a plaintext root), so the run ends here and nothing is
+  // cached.
   | { type: 'unreachable'; reason: string };
 
 type Handler = (check: WebCheck, ctx: HandlerContext) => Promise<ProbeOutcome>;
@@ -145,6 +148,19 @@ function normalizeBase(rawUrl: string): { base: string; host: string; domain: st
 
 function probeStatusToScorecard(status: ProbeOutcome['status']): ScorecardStatus {
   return status === 'na' ? 'n_a' : status;
+}
+
+/**
+ * The links row names the link whose own verdict decided it: the first link
+ * probed may have resolved while a later one missed.
+ */
+function linkEvidence(outcome: ProbeOutcome): string | null {
+  const link = outcome.evidence.find((e) => e.link_verdict === outcome.status);
+  if (link === undefined) return null;
+  if (link.error) return `${link.url}: ${link.error}`;
+  const why = (link.why as string[] | undefined)?.join('; ');
+  if (typeof link.status !== 'number') return `${link.url}: ${why ?? link.blocked}`;
+  return why === undefined ? `${link.url} -> ${link.status}` : `${link.url} -> ${link.status} (${why})`;
 }
 
 /** Compact human-readable evidence line derived from a handler's evidence. */
@@ -217,6 +233,11 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
     if (hit) return `${hit.url} -> ${hit.status} (${hit.marker})`;
   }
 
+  if (check.handler === 'llms-txt-quality') {
+    const line = linkEvidence(outcome);
+    if (line !== null) return line;
+  }
+
   // Every alias is probed, so most evidence items are unpublished paths the
   // row does not turn on. Name the one that decided the verdict, or the
   // generic line would report a 404 on a path the site never served.
@@ -234,6 +255,8 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
   const why = (evidenceItem.why as string[] | undefined)?.[
     ((evidenceItem.why as string[] | undefined)?.length ?? 1) - 1
   ];
+  if (typeof evidenceItem.blocked === 'string')
+    return `${evidenceItem.url ?? check.id}: ${why ?? evidenceItem.blocked}`;
   const isMiss = outcome.status === 'broken' || outcome.status === 'absent' || outcome.status === 'error';
   return `${evidenceItem.url ?? check.id} -> ${evidenceItem.status ?? 'error'}${isMiss && why ? ` (${why})` : ''}`;
 }
@@ -352,6 +375,11 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   // root drops every later probe to the degraded timeout so a tarpitting
   // target cannot spend the whole deadline on a handful of fetches.
   const rootResp = await guardedFetch(base, {}, { ...input.fetchOptions, timeoutMs: configuredTimeoutMs });
+  if (rootResp.refused === 'insecure-scheme') {
+    const how = rootResp.status === null ? 'is not https' : 'redirects to http';
+    yield { type: 'unreachable', reason: `${base} ${how}, and ${NO_PLAINTEXT_REQUEST}.` };
+    return;
+  }
   const root: ProbeResponse | null = rootResp.status === null ? null : rootResp;
   const perCheckTimeoutMs =
     root === null ? Math.min(configuredTimeoutMs, DEGRADED_PER_CHECK_TIMEOUT_MS) : configuredTimeoutMs;

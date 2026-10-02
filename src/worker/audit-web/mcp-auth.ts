@@ -5,13 +5,16 @@
 // keeps a gateway minting metadata for any path from confirming anything.
 // The metadata is read once per audit, for the first 401 that needs it, and
 // metadata the audit already read while finding or admitting the endpoint
-// is not read again.
+// is not read again. It is read over https only: metadata read over
+// plaintext could be forged to settle sign-in, or to make a common path the
+// endpoint, for a host that never published it.
 
 import type { ProbeResponse } from './assert';
 import { handshakeServed } from './handlers/mcp';
 import type { EvidenceItem, McpAuthRequired, ProbeOutcome } from './handlers/types';
 import {
   type ArtifactSource,
+  httpsOnly,
   type MetadataMatch,
   normalizeEndpointUrl,
   resolveProtectedResourceMetadata,
@@ -105,7 +108,7 @@ export async function signInEndpoint(
   challenged: readonly ChallengedPath[],
   source: ArtifactSource,
 ): Promise<{ path: ChallengedPath; metadata: MetadataMatch; challenge: SignInChallenge } | null> {
-  const once = readingOnce(source);
+  const once = readingOnce(httpsOnly(source));
   for (const path of challenged) {
     const metadata = await resolveProtectedResourceMetadata(path.url, once, { challenge: path.challenge ?? undefined });
     if (metadata !== null) {
@@ -161,7 +164,7 @@ async function backedSignIn(input: SignInInput, answer: SignInChallenge): Promis
   const match =
     input.known !== null && (named === null || named === input.known.url)
       ? input.known
-      : await resolveProtectedResourceMetadata(endpoint, input.source, {
+      : await resolveProtectedResourceMetadata(endpoint, httpsOnly(input.source), {
           challenge: answer.challenge ?? undefined,
           ofRecord: true,
         });

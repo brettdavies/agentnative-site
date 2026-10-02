@@ -308,6 +308,10 @@ A target behind a bot-blocking CDN produces one of two log signatures:
 - `terminal: "unreachable"`: nothing (root fetch or discovery probe) returned an HTTP status. The engine ends the run
   without caching, the page and tool report the target as unreachable. The CDN tarpits datacenter clients.
 
+A root that is http or redirects to http also ends `unreachable`, right after the root fetch, with the reason
+`<target> redirects to http, and anc sends no plaintext request.` (or `is not https`). anc never takes that hop, so the
+site has to serve its root over https before it can be scored; a stored or board score stays as it was.
+
 Probes identify themselves with the `anc-web-audit/1.0` User-Agent (`AUDIT_USER_AGENT` in
 `src/worker/audit-web/ssrf.ts`), which several CDNs treat more leniently than UA-less requests. Do not change it to
 impersonate a browser: the audit measures how a site treats agents, and evading the block would score a site the auditor

@@ -210,7 +210,8 @@ the site's server card gets GETs for the documents that could confirm it (a card
 `/.well-known/ai-catalog.json`, RFC 9728 protected-resource metadata), and it is wire-probed (JSON-RPC POSTs, a CORS
 preflight) only after one of those documents on the endpoint's own host names the endpoint. An API host anchored in the
 site's api-catalog gets document fetches (its OpenAPI description) and one GET to a nonsense path on the site's
-declaration alone. Each audit follows at most 4 off-origin hosts with at most 12 follow-phase document requests inside a
+declaration alone. anc sends no plaintext request: an http URL, declared or linked, and any redirect to http, is never
+requested. Each audit follows at most 4 off-origin hosts with at most 12 follow-phase document requests inside a
 6-second follow window, so following lengthens an audit's wall time. Across all audits and sites, following is also
 capped at about 30 audits per hour per declared registrable domain; an audit past that cap leaves that domain's hosts
 unprobed, and when the site has a saved scorecard from the last 24 hours that audit is returned without replacing it,

@@ -1081,6 +1081,51 @@ describe('runWebAudit reachability', () => {
     expect(events.find((e) => e.type === 'complete')?.type).toBe('complete');
   });
 
+  test('a root that redirects to http ends the run unreachable after the root request alone', async () => {
+    const sent: string[] = [];
+    const fetchImpl = stubFetch((url) => {
+      sent.push(url);
+      return url.startsWith('https:')
+        ? new Response(null, { status: 301, headers: { location: url.replace('https:', 'http:') } })
+        : new Response('served over plaintext', { status: 200, headers: { 'content-type': 'text/html' } });
+    });
+    const events = await collect(
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: tinyRegistry(),
+        fetchOptions: { fetchImpl },
+        perCheckTimeoutMs: 100,
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
+    );
+    expect(sent).toEqual(['https://example.com/']);
+    expect(events).toEqual([
+      { type: 'unreachable', reason: 'https://example.com/ redirects to http, and anc sends no plaintext request.' },
+    ]);
+  });
+
+  test('an http target is never requested: the run ends unreachable and says the target is not https', async () => {
+    const sent: string[] = [];
+    const fetchImpl = stubFetch((url) => {
+      sent.push(url);
+      return new Response('served over plaintext', { status: 200 });
+    });
+    const events = await collect(
+      runWebAudit({
+        url: 'http://example.com/',
+        registry: tinyRegistry(),
+        fetchOptions: { fetchImpl },
+        perCheckTimeoutMs: 100,
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
+    );
+    expect(sent).toEqual([]);
+    expect(events.at(-1)).toEqual({
+      type: 'unreachable',
+      reason: 'http://example.com/ is not https, and anc sends no plaintext request.',
+    });
+  });
+
   test('a target that answers 401 everywhere is scored, not classified unreachable', async () => {
     const fetchImpl = stubFetch(() => new Response('denied', { status: 401 }));
     const events = await collect(

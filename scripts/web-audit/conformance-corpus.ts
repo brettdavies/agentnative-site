@@ -491,18 +491,21 @@ parser; \`headers\` is a subset match on lowercase names with exact values; \`bo
 request body as JSON and compares its top-level \`method\`; \`body_contains\` is a substring match on the raw
 body.
 
-Responses carry lowercase header names with single string values and a UTF-8 text body exactly as the engine
-reads it. No response carries \`content-encoding\`: decompression is pinned by transport tests, not by the
-corpus. A transport failure is \`{"error": "Name: message"}\`, the string \`ProbeResponse.error\` carries at the
-seam; a \`TimeoutError\` is always recorded as \`TimeoutError: deadline exceeded\`. Redirects are ordinary
-exchanges (a 3xx with a \`location\` header) that the guarded fetch above the seam follows with a new request,
-except where the engine keeps a probe off hosts nothing confirmed. A request to the MCP endpoint on the audited
-origin (discovery's common-path POSTs and every probe of that endpoint) takes only hops that keep the scheme, host,
-and port: discovery records a redirect to another origin with its target and declares the target, and any other probe
-reads it as a refused redirect. A probe of an endpoint on a declared host takes no redirect at all, and neither does a
-probe of a document on that endpoint's origin (a registry path written with \`{mcp_origin}\`, which the engine replaces
-with the endpoint's scheme, host, and port). The GET an API anchor host off the audited origin receives takes only hops
-that keep the scheme, host, and port, and a redirect to another origin is its answer.
+Responses carry lowercase header names with single string values and a UTF-8 text body exactly as the engine reads it.
+No response carries \`content-encoding\`: decompression is pinned by transport tests, not by the corpus. A transport
+failure is \`{"error": "Name: message"}\`, the string \`ProbeResponse.error\` carries at the seam; a \`TimeoutError\` is
+always recorded as \`TimeoutError: deadline exceeded\`. Redirects are ordinary exchanges (a 3xx with a \`location\`
+header) that the guarded fetch above the seam follows with a new request, except where the engine keeps a probe off
+hosts nothing confirmed. The guarded fetch sends nothing over \`http\`: a request URL on \`http\` never reaches the seam
+and reads as a failure with the error \`not requested: not https\`, and a redirect to \`http\` it would otherwise follow
+is not taken, so the probe's answer is that redirect's status and headers with an empty body and the error \`redirect
+refused: <status> to <location>: not https\`. A request to the MCP endpoint on the audited origin (discovery's
+common-path POSTs and every probe of that endpoint) takes only hops that keep the scheme, host, and port: discovery
+records a redirect to another origin with its target and declares the target, and any other probe reads it as a
+refused redirect. A probe of an endpoint on a declared host takes no redirect at all, and neither does a probe of a
+document on that endpoint's origin (a registry path written with \`{mcp_origin}\`, which the engine replaces with the
+endpoint's scheme, host, and port). The GET an API anchor host off the audited origin receives takes only hops that
+keep the scheme, host, and port, and a redirect to another origin is its answer.
 
 ## scorecard.json
 
@@ -519,17 +522,17 @@ failures. Every scenario is a public-vantage audit holding no credential, so eve
 that vantage.
 
 Each row's \`hosts\` lists the distinct hosts its raw evidence items were requested from, in evidence order, as
-\`{"host": ...}\` objects. Only an item with no \`blocked\` marker counts: a request the SSRF guard refused never
-reached a host. An item with a string \`url\` counts that URL's host; one with no \`url\` and a non-empty string
-\`host\` counts that value, which is how a row a declared host kept from being evaluated names that host. The host is
-the WHATWG URL \`host\`, which keeps a non-default port (\`example.com:8443\`), so an engine whose URL library drops the
-port must add it back. An item whose \`url\` does not parse contributes nothing, and a row with no counting item has
-\`hosts: []\`. \`host\` is present, holding the same value, exactly when \`hosts\` has one entry. A row that evaluates
-several targets (the API rows when the api-catalog lists API anchors: one per declared description, one per anchor
-host) marks each target's items with its outcome, and when those items name more than one host each \`hosts\` entry
-also carries \`status\`: the worst outcome among that host's targets (\`broken\`, then \`noncompliant\`, \`absent\`,
-\`error\`, \`pass\`), or \`n_a\` with the first such target's \`na_reason\` when none on that host was evaluated. The row's
-own status is the same rule over all its targets.
+\`{"host": ...}\` objects. Only an item with no \`blocked\` marker counts: a URL the SSRF guard refused, or one never
+requested because it is not \`https\`, reached no host. An item with a string \`url\` counts that URL's host; one with no
+\`url\` and a non-empty string \`host\` counts that value, which is how a row a declared host kept from being evaluated
+names that host. The host is the WHATWG URL \`host\`, which keeps a non-default port (\`example.com:8443\`), so an engine
+whose URL library drops the port must add it back. An item whose \`url\` does not parse contributes nothing, and a row
+with no counting item has \`hosts: []\`. \`host\` is present, holding the same value, exactly when \`hosts\` has one entry.
+A row that evaluates several targets (the API rows when the api-catalog lists API anchors: one per declared
+description, one per anchor host) marks each target's items with its outcome, and when those items name more than one
+host each \`hosts\` entry also carries \`status\`: the worst outcome among that host's targets (\`broken\`, then
+\`noncompliant\`, \`absent\`, \`error\`, \`pass\`), or \`n_a\` with the first such target's \`na_reason\` when none on that host
+was evaluated. The row's own status is the same rule over all its targets.
 
 \`declared_hosts\` holds one entry per URL the target's discovery documents declare off its origin, in declaration
 order (the AI catalog's card entries, the card under the discovered endpoint, then the well-known cards; the endpoints a
@@ -539,7 +542,8 @@ followed card document names come right after that document's entry), then the a
 targets the common-path POSTs were redirected to off the origin, in probe order and with the redirecting path as
 their \`surface\`, never in the order requests complete. A URL declared twice keeps its first entry. Endpoints are tried
 one at a time in that order and the first that its own host confirms becomes the endpoint, so every later endpoint
-reads \`not-followed\`.
+reads \`not-followed\`. A declared URL or redirect hop on \`http\` that the guard admits is never requested and
+reads \`not-followed\` with reason \`insecure-scheme\`, a refused hop recorded as its \`final_url\`.
 
 ## scores.json
 

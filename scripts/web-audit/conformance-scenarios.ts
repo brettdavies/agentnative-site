@@ -156,6 +156,11 @@ const LLMS_TXT_FULL = [
 ].join('\n');
 
 const LLMS_TXT_H1_ONLY = '# Example\n';
+const HTTP_LINK = 'http://example.com/docs/plain.md';
+const LLMS_TXT_HTTP_LINK = LLMS_TXT_FULL.replace(
+  '\n\n## When to use',
+  `\n- [Plain](${HTTP_LINK}): the same docs over plaintext\n\n## When to use`,
+);
 
 const LLMS_FULL_TXT = '# Example\n\n## Guide\n\nEverything in one fetch.\n';
 const SCOPED_LLMS = '# Docs\n\n- [Guide](/docs/guide.md)\n';
@@ -423,6 +428,8 @@ const baseline = (): Exchange[] => [get('/', html(rootHtml()))];
 const DECLARED_ENDPOINT = 'https://mcp.example.net/mcp';
 
 const REDIRECTED_ENDPOINT = 'https://mcp.example.org/mcp';
+const HTTP_DECLARED_ENDPOINT = 'http://mcp.example.net/mcp';
+const HTTP_REDIRECT_HOP = 'http://mcp.example.org/mcp';
 const declaringCard = (endpoint: string): Exchange => get(CARD_PATH, json({ ...SERVER_CARD, mcp_endpoint: endpoint }));
 const selfNamingCard = (endpoint: string): Exchange => get(`${endpoint}/server-card`, cardDocument({ ...SEP_2127_CARD, remotes: [{ type: 'streamable-http', url: endpoint }] }));
 const FOLLOWED_IDS = ['mcp-initialize', 'mcp-tools-list', 'mcp-cors-preflight', 'mcp-cors-actual', 'mcp-get-fast-fail'];
@@ -631,6 +638,23 @@ export const SCENARIOS: Record<string, Scenario> = {
       get('/s4', redirect(u('/s5'))),
       get('/s5', text('Contact: mailto:security@example.com\n')),
     ],
+  ),
+  'run-document-redirects-to-http': scenario(
+    'the audited site answers /llms.txt and its API catalog with a redirect to the same path over http, where each would answer: neither hop is taken, and each document reads as missing (llms.txt absent, the optional API catalog n_a), its evidence naming the redirect to http',
+    ['llms-txt', 'api-catalog'],
+    [
+      ...baseline(),
+      get('/llms.txt', redirect('http://example.com/llms.txt')),
+      get('http://example.com/llms.txt', text(LLMS_TXT_FULL)),
+      get('/.well-known/api-catalog', redirect('http://example.com/.well-known/api-catalog')),
+      get('http://example.com/.well-known/api-catalog', linkset()),
+    ],
+  ),
+  'run-root-redirects-to-http': scenario(
+    'every https request, the root included, redirects to the http root, which would answer: the run ends unreachable after the root request alone, and nothing is requested over http',
+    ['agent-ua-reachable', 'content-without-js'],
+    [get('/', redirect('http://example.com/')), get('http://example.com/', html(rootHtml()))],
+    { allow_unmatched: false },
   ),
   'run-body-over-cap': scenario(
     'bodies past the 64 KiB probe cap are truncated: a huge tools/list no longer parses and a huge JSON error body reads as non-JSON',
@@ -1207,6 +1231,31 @@ export const SCENARIOS: Record<string, Scenario> = {
     ],
     { follow_declarations: false },
   ),
+  'follow-http-declarations': scenario(
+    'the AI catalog names an https endpoint that redirects to http, the card names an http endpoint, and the api-catalog anchors an http API host whose description is http, each host answering as one the audit would follow: nothing is requested over http, every entry reads not-followed with reason insecure-scheme (the redirected one with its hop as the final URL), and no MCP or API row is evaluated at any of them: the API rows read absent, as nothing declared over http earns more than a missing API',
+    ['mcp-initialize', 'openapi', 'json-errors'],
+    [
+      ...baseline(),
+      get(
+        '/.well-known/ai-catalog.json',
+        aiCatalog(cardEntry({ data: { ...SEP_2127_CARD, remotes: [{ type: 'streamable-http', url: REDIRECTED_ENDPOINT }] } })),
+      ),
+      get(REDIRECTED_ENDPOINT, redirect(HTTP_REDIRECT_HOP, 302)),
+      selfNamingCard(HTTP_REDIRECT_HOP),
+      declaringCard(HTTP_DECLARED_ENDPOINT),
+      selfNamingCard(HTTP_DECLARED_ENDPOINT),
+      ...legacyOnlyMcp({ endpoint: HTTP_DECLARED_ENDPOINT, cors: 'full' }),
+      get(
+        '/.well-known/api-catalog',
+        linkset({
+          anchor: 'http://api.example.net/',
+          'service-desc': [{ href: 'http://api.example.net/openapi.json', type: 'application/openapi+json' }],
+        }),
+      ),
+      get('http://api.example.net/openapi.json', json(OPENAPI)),
+      get(`http://api.example.net${API_PROBE_PATH}`, json(API_ERROR, 404)),
+    ],
+  ),
 
   // ---- endpoints that require sign-in ----------------------------------------
   'auth-own-endpoint': scenario(
@@ -1464,6 +1513,27 @@ export const SCENARIOS: Record<string, Scenario> = {
     get('/llms.txt', text(LLMS_TXT_FULL)),
     get('/docs/guide.md', md(GUIDE_MD)),
   ]),
+  'llms-quality-dead-and-http-link': scenario(
+    'an llms.txt that lists a dead link and an http link: the http link is never requested, though it would answer with a server error that would read broken, and the dead link decides the links row, which reads absent',
+    ['llms-txt-links'],
+    [
+      ...baseline(),
+      get('/llms.txt', text(LLMS_TXT_HTTP_LINK)),
+      get('/docs/guide.md', md(GUIDE_MD)),
+      get(HTTP_LINK, SERVER_ERROR),
+    ],
+  ),
+  'llms-quality-http-link': scenario(
+    'an llms.txt that lists an http link beside resolving https links: the http link is never requested, though it would answer, and the links row reads noncompliant naming it',
+    ['llms-txt-links'],
+    [
+      ...baseline(),
+      get('/llms.txt', text(LLMS_TXT_HTTP_LINK)),
+      get('/docs/guide.md', md(GUIDE_MD)),
+      get('/docs/api.md', md(GUIDE_MD)),
+      get(HTTP_LINK, md(GUIDE_MD)),
+    ],
+  ),
 
   // ---- api-hygiene -------------------------------------------------------------
   'api-hygiene-pass': scenario('a documented 4xx GET answered with a JSON error body and rate-limit headers passes both rows', ['json-errors', 'rate-limit-headers'], [
