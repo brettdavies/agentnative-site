@@ -482,21 +482,71 @@ function modernOnlyProtectedServer(endpoint: string, metadataUrl: string): Recor
   };
 }
 
+const LEGACY_SESSION_ROWS = [
+  'mcp-capabilities',
+  'mcp-tools-list',
+  'mcp-unknown-tool',
+  'mcp-accept-json',
+  'mcp-accept-unsatisfiable',
+];
+const MODERN_SESSION_ROWS = ['mcp-server-discover', 'mcp-modern-tools-list'];
+const RESOURCES_ROWS = ['mcp-resources-list', 'mcp-modern-resources-miss'];
+
+type Readings = ReturnType<typeof readings>;
+
+const authRequiredOn = (ids: readonly string[]): Readings =>
+  Object.fromEntries(ids.map((id) => [id, ['n_a', 'auth-required']]));
+
+/** The open counterpart of the modern-only server: the same legacy refusal, and every modern request served. */
+function modernOnlyOpenServer(endpoint: string): Record<string, Route> {
+  const refusing = modernOnlyProtectedServer(endpoint, SAME_METADATA);
+  return {
+    [`OPTIONS ${endpoint}`]: refusing[`OPTIONS ${endpoint}`],
+    [`POST ${endpoint}`]: (init) => {
+      const headers = new Headers(init?.headers);
+      if (headers.get('mcp-protocol-version') !== MODERN) return refusing[`POST ${endpoint}`](init);
+      if (headers.get('mcp-method') === 'server/discover') {
+        return json({
+          jsonrpc: '2.0',
+          id: 1,
+          result: {
+            supportedVersions: [MODERN],
+            capabilities: { tools: {} },
+            _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'open' } },
+          },
+        });
+      }
+      return json({ jsonrpc: '2.0', id: 1, result: { tools: [] } });
+    },
+  };
+}
+
 describe('a modern-only server behind OAuth', () => {
-  test('a legacy lane refused at HTTP 200 serves nothing without sign-in, so the session rows read auth-required and the refusal row asks on the modern lane', async () => {
-    const { scorecard } = await audit(router({ ...ROOT, ...modernOnlyProtectedServer(SAME, SAME_METADATA) }, []), {
+  test('a legacy lane refused at HTTP 200 without a 401 reads as it does on an open modern-only server, and the rows sign-in blocks read auth-required', async () => {
+    const guarded = await audit(router({ ...ROOT, ...modernOnlyProtectedServer(SAME, SAME_METADATA) }, []), {
       registry: mcpRegistry(),
     });
-    expect(scorecard.mcp_endpoint).toBe(SAME);
-    for (const id of SESSION_ROWS) {
-      expect({ id, reading: [row(scorecard, id).status, row(scorecard, id).na_reason] }).toEqual({
-        id,
-        reading: ['n_a', 'auth-required'],
-      });
-    }
+    const open = await audit(router({ ...ROOT, ...modernOnlyOpenServer(SAME) }, []), { registry: mcpRegistry() });
+    const legacyOnOpen: Readings = {
+      'mcp-capabilities': ['absent', null],
+      'mcp-tools-list': ['absent', null],
+      'mcp-unknown-tool': ['noncompliant', null],
+      'mcp-accept-json': ['pass', null],
+      'mcp-accept-unsatisfiable': ['noncompliant', null],
+    };
+    expect(guarded.scorecard.mcp_endpoint).toBe(SAME);
+    expect({
+      open: readings(open.scorecard, LEGACY_SESSION_ROWS),
+      guarded: readings(guarded.scorecard, LEGACY_SESSION_ROWS),
+      blocked: readings(guarded.scorecard, [...MODERN_SESSION_ROWS, ...RESOURCES_ROWS]),
+    }).toEqual({
+      open: legacyOnOpen,
+      guarded: legacyOnOpen,
+      blocked: authRequiredOn([...MODERN_SESSION_ROWS, ...RESOURCES_ROWS]),
+    });
     // Only the modern lane answers 401, so a pass shows where the row asked.
-    expect(row(scorecard, 'mcp-auth-enforced')).toMatchObject({ status: 'pass', evidence: 'refused with 401' });
-    expect(scorecard.results.filter((r) => r.status === 'broken').map((r) => r.id)).toEqual([]);
+    expect(row(guarded.scorecard, 'mcp-auth-enforced')).toMatchObject({ status: 'pass', evidence: 'refused with 401' });
+    expect(guarded.scorecard.results.filter((r) => r.status === 'broken').map((r) => r.id)).toEqual([]);
   });
 
   test('the challenge on server/discover alone opens the auth discovery rows, so they are evaluated rather than antecedent-unmet', async () => {
@@ -509,6 +559,64 @@ describe('a modern-only server behind OAuth', () => {
       'oauth-discovery': ['n_a', 'optional-absent'],
       'auth-md': ['n_a', 'optional-absent'],
     });
+  });
+});
+
+/**
+ * A legacy-only server behind OAuth: every legacy request draws a 401
+ * naming its metadata, while a header-routed modern request is refused with
+ * a method-not-found before any token is read.
+ */
+function legacyOnlyProtectedServer(endpoint: string, metadataUrl: string): Record<string, Route> {
+  const server = protectedServer(endpoint, metadataUrl);
+  return {
+    ...server,
+    [`POST ${endpoint}`]: (init) => {
+      if (new Headers(init?.headers).get('mcp-protocol-version') === MODERN) {
+        return json({ jsonrpc: '2.0', id: 1, error: { code: -32601, message: 'method not found' } });
+      }
+      return server[`POST ${endpoint}`](init);
+    },
+  };
+}
+
+describe('a legacy-only server behind OAuth', () => {
+  test('a modern lane refused without a 401 reads absent as it does on an open legacy-only server, and the rows sign-in blocks read auth-required', async () => {
+    const guarded = await audit(router({ ...ROOT, ...legacyOnlyProtectedServer(SAME, SAME_METADATA) }, []), {
+      registry: mcpRegistry(),
+    });
+    const open = await audit(
+      router(
+        {
+          ...ROOT,
+          [`POST ${SAME}`]: (init) =>
+            new Headers(init?.headers).get('mcp-protocol-version') === MODERN
+              ? json({ jsonrpc: '2.0', id: 1, error: { code: -32601, message: 'method not found' } })
+              : initializeResult(),
+        },
+        [],
+      ),
+      { registry: mcpRegistry() },
+    );
+    const modernAbsent: Readings = {
+      'mcp-server-discover': ['absent', null],
+      'mcp-modern-tools-list': ['absent', null],
+    };
+    expect({
+      open: readings(open.scorecard, MODERN_SESSION_ROWS),
+      guarded: readings(guarded.scorecard, MODERN_SESSION_ROWS),
+      blocked: readings(guarded.scorecard, [...LEGACY_SESSION_ROWS, ...RESOURCES_ROWS]),
+    }).toEqual({
+      open: modernAbsent,
+      guarded: modernAbsent,
+      blocked: authRequiredOn([...LEGACY_SESSION_ROWS, ...RESOURCES_ROWS]),
+    });
+    expect(readings(guarded.scorecard, ENFORCEMENT_ROWS)).toEqual({
+      'mcp-auth-challenge': ['pass', null],
+      'mcp-auth-servers': ['pass', null],
+      'mcp-auth-enforced': ['pass', null],
+    });
+    expect(guarded.scorecard.results.filter((r) => r.status === 'broken').map((r) => r.id)).toEqual([]);
   });
 });
 

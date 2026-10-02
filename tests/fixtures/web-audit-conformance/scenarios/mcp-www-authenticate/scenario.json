@@ -1,7 +1,8 @@
 {
-  "description": "an endpoint that answers legacy POSTs with a 401 whose challenge names no metadata, while root RFC 9728 metadata names it: it requires sign-in, and its modern lane refuses token-less probes with a method-not-found, a lane refusal that serves nothing, so the session rows read auth-required and it presents only the protected MCP access alternative; the rows the 401s answer read auth-required, and the challenge satisfies the mcp-auth antecedent",
+  "description": "an endpoint that answers legacy POSTs with a 401 whose challenge names no metadata, while root RFC 9728 metadata names it: it requires sign-in, so the legacy session rows, the resources rows, and every row a 401 answers read auth-required, and the challenge satisfies the mcp-auth antecedent; its modern lane refuses server/discover with a method-not-found and no 401, an answer a token would not change, so the modern session rows read absent as they do on an open server",
   "covers": [
     "mcp-initialize",
+    "mcp-server-discover",
     "mcp-auth-challenge",
     "oauth-protected-resource",
     "auth-md"

@@ -23,6 +23,8 @@ export interface AntecedentContext {
   follow?: { unmet: DeclaredHostReason | null };
   /** Set when the endpoint of record requires sign-in; absent or null when it does not. */
   mcpAuth?: McpAuthRequired | null;
+  /** The protocol era of the MCP row being gated; absent for every other row. */
+  mcpLane?: McpAuthRequired['lane'];
 }
 
 /** Whether a check applies, does not, or cannot be decided because the root never answered. */

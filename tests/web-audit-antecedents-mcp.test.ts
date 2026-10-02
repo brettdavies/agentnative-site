@@ -84,10 +84,48 @@ describe('resolveAntecedent: mcp', () => {
     ]) {
       const sources = challenged();
       sources.set('mcp-server-discover', refusal);
-      expect(resolveAntecedent('mcp-session', ctx({ mcpEndpoint: ENDPOINT, sources, mcpAuth: SIGN_IN }))).toEqual(
-        AUTH_REQUIRED,
-      );
+      for (const mcpLane of [undefined, 'legacy'] as const) {
+        expect(
+          resolveAntecedent('mcp-session', ctx({ mcpEndpoint: ENDPOINT, sources, mcpAuth: SIGN_IN, mcpLane })),
+        ).toEqual(AUTH_REQUIRED);
+      }
     }
+  });
+
+  test("a session row runs when its own lane's handshake refused the lane without asking for sign-in", () => {
+    const refusedModern = challenged();
+    refusedModern.set('mcp-server-discover', outcome('absent', [{ url: ENDPOINT, status: 200, error_code: -32601 }]));
+    const modernAsked = ctx({ mcpEndpoint: ENDPOINT, sources: refusedModern, mcpAuth: SIGN_IN });
+    expect({
+      modern: resolveAntecedent('mcp-session', { ...modernAsked, mcpLane: 'modern' }),
+      legacy: resolveAntecedent('mcp-session', { ...modernAsked, mcpLane: 'legacy' }),
+    }).toEqual({ modern: 'apply', legacy: AUTH_REQUIRED });
+
+    const refusedLegacy = new Map([
+      ['mcp-initialize', outcome('absent', [{ url: ENDPOINT, status: 200, error_code: -32022 }])],
+      ['mcp-server-discover', outcome('na', [{ url: ENDPOINT, status: 401 }])],
+    ]);
+    const legacyAsked = ctx({ mcpEndpoint: ENDPOINT, sources: refusedLegacy, mcpAuth: { ...SIGN_IN, lane: 'modern' } });
+    expect({
+      legacy: resolveAntecedent('mcp-session', { ...legacyAsked, mcpLane: 'legacy' }),
+      modern: resolveAntecedent('mcp-session', { ...legacyAsked, mcpLane: 'modern' }),
+    }).toEqual({ legacy: 'apply', modern: AUTH_REQUIRED });
+  });
+
+  test('a session row whose lane handshake went unanswered stays auth-required', () => {
+    const sources = challenged();
+    sources.set('mcp-server-discover', outcome('error', [{ url: ENDPOINT, status: null, error: 'TimeoutError' }]));
+    expect(
+      resolveAntecedent('mcp-session', ctx({ mcpEndpoint: ENDPOINT, sources, mcpAuth: SIGN_IN, mcpLane: 'modern' })),
+    ).toEqual(AUTH_REQUIRED);
+  });
+
+  test('a resources row stays auth-required while a handshake sign-in blocked could have advertised resources', () => {
+    const sources = challenged();
+    sources.set('mcp-server-discover', outcome('absent', [{ url: ENDPOINT, status: 200, error_code: -32601 }]));
+    expect(
+      resolveAntecedent('mcp-resources', ctx({ mcpEndpoint: ENDPOINT, sources, mcpAuth: SIGN_IN, mcpLane: 'modern' })),
+    ).toEqual(AUTH_REQUIRED);
   });
 
   test('mcp-auth-required holds only when the endpoint requires sign-in, never on a card declaration alone', () => {

@@ -50,18 +50,18 @@
     "pass": 16,
     "noncompliant": 1,
     "broken": 1,
-    "absent": 11,
-    "n_a": 38,
+    "absent": 13,
+    "n_a": 36,
     "skip": 0,
     "error": 1
   },
   "coverage_summary": {
     "must": {
-      "total": 1,
+      "total": 2,
       "verified": 0
     },
     "should": {
-      "total": 19,
+      "total": 20,
       "verified": 8
     },
     "may": {
@@ -69,9 +69,9 @@
       "verified": 8
     }
   },
-  "score_pct": 54,
+  "score_pct": 48,
   "score": {
-    "relative": 54,
+    "relative": 48,
     "global": 19
   },
   "categories": [
@@ -103,7 +103,7 @@
       "id": "mcp",
       "name": "MCP",
       "passed": 7,
-      "counted": 12
+      "counted": 14
     },
     {
       "id": "agent-discovery-auth",
@@ -285,9 +285,9 @@
       "keyword": "must",
       "tier": "required",
       "principle": "P2",
-      "status": "n_a",
-      "na_reason": "auth-required",
-      "evidence": "https://example.com/mcp",
+      "status": "absent",
+      "unprobed": true,
+      "evidence": "no modern lane: server/discover returned no result",
       "hosts": [
         {
           "host": "example.com"
@@ -304,9 +304,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P2",
-      "status": "n_a",
-      "na_reason": "auth-required",
-      "evidence": "https://example.com/mcp",
+      "status": "absent",
+      "evidence": "no modern lane: server/discover refused with code -32601",
       "hosts": [
         {
           "host": "example.com"

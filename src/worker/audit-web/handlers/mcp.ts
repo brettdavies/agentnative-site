@@ -188,6 +188,12 @@ export const ERA_OPS = opsWhere((spec) => spec.family === 'era');
 /** Every row that asks whether a request without a token is refused. */
 export const ENFORCEMENT_OPS = opsWhere((spec) => spec.family === 'enforcement');
 
+/** The protocol era whose wire shape an MCP row's request takes; undefined for a row this handler does not probe. */
+export function mcpRequestEra(check: Pick<WebCheck, 'handler' | 'with'>): McpOpSpec['era'] | undefined {
+  const op = check.handler === 'mcp' ? (check.with as Partial<McpWith> | undefined)?.op : undefined;
+  return op !== undefined && Object.hasOwn(MCP_OPS, op) ? specOf(op).era : undefined;
+}
+
 /** The result-page lane an op's row groups under: its era's, unless every lane answers it alike. */
 export function mcpOpLane(op: McpOp): McpOpSpec['era'] | 'shared' {
   const spec = specOf(op);

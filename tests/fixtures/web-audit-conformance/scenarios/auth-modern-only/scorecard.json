@@ -78,32 +78,32 @@
   "follow_declarations": true,
   "declared_hosts": [],
   "summary": {
-    "pass": 18,
-    "noncompliant": 1,
+    "pass": 19,
+    "noncompliant": 3,
     "broken": 1,
-    "absent": 10,
-    "n_a": 37,
+    "absent": 12,
+    "n_a": 32,
     "skip": 0,
     "error": 1
   },
   "coverage_summary": {
     "must": {
-      "total": 2,
+      "total": 3,
       "verified": 0
     },
     "should": {
-      "total": 21,
-      "verified": 11
+      "total": 25,
+      "verified": 12
     },
     "may": {
       "total": 7,
       "verified": 7
     }
   },
-  "score_pct": 57,
+  "score_pct": 51,
   "score": {
-    "relative": 57,
-    "global": 24
+    "relative": 51,
+    "global": 27
   },
   "categories": [
     {
@@ -133,8 +133,8 @@
     {
       "id": "mcp",
       "name": "MCP",
-      "passed": 9,
-      "counted": 13
+      "passed": 10,
+      "counted": 18
     },
     {
       "id": "agent-discovery-auth",
@@ -258,9 +258,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P2",
-      "status": "n_a",
-      "na_reason": "auth-required",
-      "evidence": "https://example.com/mcp",
+      "status": "absent",
+      "evidence": "no serverInfo in initialize result",
       "hosts": [
         {
           "host": "example.com"
@@ -277,9 +276,8 @@
       "keyword": "must",
       "tier": "required",
       "principle": "P2",
-      "status": "n_a",
-      "na_reason": "auth-required",
-      "evidence": "https://example.com/mcp",
+      "status": "absent",
+      "evidence": "error code -32022",
       "hosts": [
         {
           "host": "example.com"
@@ -407,9 +405,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "auth-required",
-      "evidence": "https://example.com/mcp",
+      "status": "noncompliant",
+      "evidence": "expected error code -32602, got -32022",
       "hosts": [
         {
           "host": "example.com"
@@ -520,9 +517,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "auth-required",
-      "evidence": "https://example.com/mcp",
+      "status": "pass",
+      "evidence": "https://example.com/mcp -> 200",
       "hosts": [
         {
           "host": "example.com"
@@ -539,9 +535,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "na_reason": "auth-required",
-      "evidence": "https://example.com/mcp",
+      "status": "noncompliant",
+      "evidence": "served application/json at 200 where 406 was required",
       "hosts": [
         {
           "host": "example.com"

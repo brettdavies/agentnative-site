@@ -4,10 +4,12 @@
 // evaluated names why.
 
 import { advertisesResources } from '../handlers/mcp';
-import { servedWithoutSignIn } from '../mcp-auth';
+import { laneRefused, servedWithoutSignIn } from '../mcp-auth';
 import { hostOf } from '../provenance';
 import type { AntecedentToken } from '../registry';
 import {
+  type AntecedentContext,
+  type AntecedentResolution,
   type AntecedentResolver,
   cardDeclaresAuth,
   handshakeShowsAuthChallenge,
@@ -28,16 +30,21 @@ const mcpAuth: AntecedentResolver = (ctx) => {
 // client receives, so on an endpoint that requires sign-in it is not
 // evaluated rather than read as absent or broken. A handshake answered with
 // a JSON-RPC error is a lane refusing the request, not serving it, so only
-// a result shows the endpoint serves clients without a token.
+// a result shows the endpoint serves clients without a token. A lane whose
+// own handshake was refused that way is not one sign-in blocks: the answer
+// is definitive, so its rows run and read as they do on an open server.
+function signInBlocks(ctx: AntecedentContext, lane: AntecedentContext['mcpLane']): boolean {
+  if (!ctx.mcpAuth || servedWithoutSignIn(ctx.sources)) return false;
+  return lane === undefined || !laneRefused(ctx.sources, lane);
+}
+
+function authRequired(endpoint: string): AntecedentResolution {
+  return { outcome: 'n_a', reason: 'auth-required', host: hostOf(endpoint) ?? undefined, evidence: endpoint };
+}
+
 const mcpSession: AntecedentResolver = (ctx) => {
   if (ctx.mcpEndpoint === null) return noMcpEndpoint(ctx);
-  if (!ctx.mcpAuth || servedWithoutSignIn(ctx.sources)) return 'apply';
-  return {
-    outcome: 'n_a',
-    reason: 'auth-required',
-    host: hostOf(ctx.mcpEndpoint) ?? undefined,
-    evidence: ctx.mcpEndpoint,
-  };
+  return signInBlocks(ctx, ctx.mcpLane) ? authRequired(ctx.mcpEndpoint) : 'apply';
 };
 
 // Holds only on the endpoint's own answer, a 401 its RFC 9728 metadata
@@ -55,14 +62,18 @@ const mcpAuthRequired: AntecedentResolver = (ctx) => {
 // server/discover capability advertisement both satisfy the token, so a
 // single-era server's resources-gated rows probe on the lane it offers.
 // Reading resources needs a session too, and an endpoint that requires
-// sign-in advertises nothing to a client without one.
+// sign-in advertises nothing to a client without one, so a handshake that
+// sign-in blocked leaves unread whether the row applies.
 const mcpResources: AntecedentResolver = (ctx) => {
   const session = mcpSession(ctx);
-  if (session !== 'apply') return session;
-  return advertisesResources(sourceEvidence(ctx, 'mcp-initialize')) ||
+  if (session !== 'apply' || ctx.mcpEndpoint === null) return session;
+  if (
+    advertisesResources(sourceEvidence(ctx, 'mcp-initialize')) ||
     advertisesResources(sourceEvidence(ctx, 'mcp-server-discover'))
-    ? 'apply'
-    : 'n_a';
+  ) {
+    return 'apply';
+  }
+  return signInBlocks(ctx, 'legacy') || signInBlocks(ctx, 'modern') ? authRequired(ctx.mcpEndpoint) : 'n_a';
 };
 
 export const mcpResolvers = {

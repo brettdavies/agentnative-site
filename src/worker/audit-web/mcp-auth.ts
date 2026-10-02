@@ -41,6 +41,15 @@ export function servedWithoutSignIn(sources: ReadonlyMap<string, ProbeOutcome>):
 }
 
 /**
+ * The lane's own handshake read absent: the server refused the lane as one
+ * it does not offer, without the 401 that asks for sign-in, so a token
+ * would not open it.
+ */
+export function laneRefused(sources: ReadonlyMap<string, ProbeOutcome>, lane: McpAuthRequired['lane']): boolean {
+  return WIRE_PROBES.some((probe) => probe.lane === lane && sources.get(probe.id)?.status === 'absent');
+}
+
+/**
  * Where metadata is read outside the follow slice: one GET per location,
  * redirects disabled, under the timeout `timeout` hands out. Once it hands
  * out null, nothing more is sent.

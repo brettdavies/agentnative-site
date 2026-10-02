@@ -43,6 +43,7 @@ import {
   advertisedCapabilities,
   ENFORCEMENT_OPS,
   mcpModernLaneFrom,
+  mcpRequestEra,
   mcpSessionIdFrom,
   notifyMcpInitialized,
   runMcp,
@@ -495,7 +496,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     if (!siteTypeApplies(check.site_types, actx)) {
       return naResult(check, { reason: 'antecedent-unmet', evidence: 'not applicable to the declared site type' });
     }
-    return antecedentGate(check, resolveAntecedent(check.antecedent, actx));
+    return antecedentGate(check, resolveAntecedent(check.antecedent, { ...actx, mcpLane: mcpRequestEra(check) }));
   };
 
   // Finalize + yield wave-1 results through the same gate.
