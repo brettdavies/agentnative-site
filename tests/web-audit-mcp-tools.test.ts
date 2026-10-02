@@ -1848,6 +1848,9 @@ describe('audit_website discloses third-party probing', () => {
     );
     expect(description).toContain("following lengthens an audit's wall time");
     expect(description).toContain('capped at about 30 audits per hour per declared registrable domain');
+    expect(description).toContain(
+      'when the site already has a saved scorecard that audit is returned without replacing it, with no scorecard_url, markdown_url, or json_url',
+    );
     expect(description).toContain('WEB_AUDIT_FOLLOW_ENABLED');
     expect(tool?.inputSchema.properties.follow_declarations?.type).toBe('boolean');
   });

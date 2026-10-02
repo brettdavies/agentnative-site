@@ -213,8 +213,9 @@ site's api-catalog gets document fetches (its OpenAPI description) and one GET t
 declaration alone. Each audit follows at most 4 off-origin hosts with at most 12 follow-phase document requests inside a
 6-second follow window, so following lengthens an audit's wall time. Across all audits and sites, following is also
 capped at about 30 audits per hour per declared registrable domain; an audit past that cap leaves that domain's hosts
-unprobed. The operator can switch following off for every audit (`WEB_AUDIT_FOLLOW_ENABLED`); the scorecard's
-`follow_declarations` records whether the audit followed.
+unprobed, and when the site already has a saved scorecard that audit is returned without replacing it, with no
+`scorecard_url`, `markdown_url`, or `json_url`. The operator can switch following off for every audit
+(`WEB_AUDIT_FOLLOW_ENABLED`); the scorecard's `follow_declarations` records whether the audit followed.
 
 **Freshness.** Every result that carries a scorecard carries a `freshness` object beside it, outside the scorecard
 itself: `cached` is `true` for a served cache entry or a listing-only flag patch and `false` for a result the call
