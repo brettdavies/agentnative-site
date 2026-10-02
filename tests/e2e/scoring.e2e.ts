@@ -537,6 +537,7 @@ test.describe('/scoring progress page', () => {
     await page.goto('/scoring?target=anc.dev');
     await stream.opened();
     await stream.send({ type: 'accepted', lane: 'web', target: 'anc.dev', started_at: AT });
+    await expect(page.locator('[data-scoring-status]')).toHaveText('Reading anc.dev and any hosts it declares…');
     await stream.send({ type: 'discovery', mcp_endpoint: 'https://anc.dev/mcp' });
     await expect(page.locator('[data-scoring-status]')).toContainText(
       'MCP endpoint found at https://anc.dev/mcp. Checks:',
