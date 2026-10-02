@@ -9,6 +9,7 @@ import type { NaReason } from '../../shared/web-audit-findings';
 import type { DiscoveryDocuments, DiscoveryResult } from './discovery';
 import { type FollowInput, type FollowResult, openFollow } from './follow';
 import { declarationKey, declaresHost, type TrailEntry, type TrailOutcome, trailEntry } from './follow-trail';
+import type { SignInChallenge } from './mcp-auth';
 import { hostOf } from './provenance';
 import type { MetadataMatch } from './reciprocity';
 
@@ -25,6 +26,8 @@ export interface EndpointOfRecord {
   followed: boolean;
   /** RFC 9728 metadata naming the endpoint that finding or admitting it already read. */
   metadata: MetadataMatch | null;
+  /** The 401 discovery drew from the audited site's own endpoint while finding it; null when it found it another way. */
+  challenge: SignInChallenge | null;
   trail: TrailEntry[];
   unmet: DeclaredHostReason | null;
 }
@@ -57,7 +60,10 @@ function unmetReason(trail: readonly TrailEntry[]): DeclaredHostReason | null {
 
 export function endpointOfRecord(
   base: string,
-  discovery: Pick<DiscoveryResult, 'endpoint' | 'endpointMetadata' | 'declarations' | 'redirected'>,
+  discovery: Pick<
+    DiscoveryResult,
+    'endpoint' | 'endpointMetadata' | 'endpointChallenge' | 'declarations' | 'redirected'
+  >,
   follow: Pick<FollowResult, 'endpoint' | 'endpointMetadata' | 'entries'>,
 ): EndpointOfRecord {
   const own = discovery.endpoint;
@@ -84,6 +90,7 @@ export function endpointOfRecord(
     endpoint,
     followed: own === null && follow.endpoint !== null,
     metadata: own !== null ? discovery.endpointMetadata : follow.endpointMetadata,
+    challenge: own !== null ? discovery.endpointChallenge : null,
     trail,
     unmet: endpoint === null ? unmetReason(trail) : null,
   };

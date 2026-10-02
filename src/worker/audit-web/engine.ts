@@ -5,8 +5,8 @@
 // (the WAVE1_CHECK_IDS set); wave 2 runs the dependent checks with
 // antecedents resolved from wave-1 results and the root fetch reused —
 // no duplicate `/` fetch. Between the waves it settles whether the MCP
-// endpoint requires sign-in (mcp-auth.ts), which wave 1's wire probes are
-// the first requests to show. Each check finalizes to
+// endpoint requires sign-in (mcp-auth.ts), once wave 1's wire probes have
+// answered. Each check finalizes to
 // pass / noncompliant / broken / absent / n_a / skip / error; an
 // applicable MAY that comes back absent is re-tagged n_a with na_reason
 // 'optional-absent', an unmet antecedent yields the na_reason its
@@ -437,12 +437,14 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     wave1Results.set(check.id, result);
   }
 
-  // Wave 1's wire probes are the first requests to the endpoint of record
-  // that could draw a 401, so whether it requires sign-in is settled here,
-  // and their own rows are read again the way every later MCP row is.
+  // Whether the endpoint requires sign-in is settled once wave 1's wire
+  // probes have answered, from their 401 or, when they drew none and were
+  // served nothing, from the 401 that found the endpoint; their own rows are
+  // then read again the way every later MCP row is.
   mcpAuth = await settleMcpAuth({
     endpoint: declared.endpoint,
     known: declared.metadata,
+    observed: declared.challenge,
     sources,
     source: directArtifactSource(() => (deadline - now() > 0 ? requestTimeoutMs() : null), input.fetchOptions),
   });

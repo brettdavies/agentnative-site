@@ -64,7 +64,7 @@ export interface ChallengedPath {
   path: string;
   url: string;
   /** Which discovery POST drew the 401. */
-  probed: string;
+  probed: 'initialize' | 'modern-tools-list';
   challenge: string | null;
 }
 
@@ -89,11 +89,14 @@ function readingOnce(source: ArtifactSource): ArtifactSource {
 export async function signInEndpoint(
   challenged: readonly ChallengedPath[],
   source: ArtifactSource,
-): Promise<{ path: ChallengedPath; metadata: MetadataMatch } | null> {
+): Promise<{ path: ChallengedPath; metadata: MetadataMatch; challenge: SignInChallenge } | null> {
   const once = readingOnce(source);
   for (const path of challenged) {
     const metadata = await resolveProtectedResourceMetadata(path.url, once, path.challenge ?? undefined);
-    if (metadata !== null) return { path, metadata };
+    if (metadata !== null) {
+      const lane = path.probed === 'initialize' ? 'legacy' : 'modern';
+      return { path, metadata, challenge: { challenge: path.challenge, lane } };
+    }
   }
   return null;
 }
@@ -114,18 +117,25 @@ function wireChallenge(sources: ReadonlyMap<string, ProbeOutcome>): SignInChalle
  * Whether the endpoint of record requires sign-in, once wave 1 has probed
  * it. Known metadata stands unless the 401's challenge names another
  * location, which then takes precedence the way RFC 9728 orders them.
+ *
+ * Wave 1's 401 is read first. When neither wire probe drew one, nor was
+ * served a result, the 401 that discovery drew while finding the endpoint
+ * still stands: a timeout, a rate limit, or a server error on the
+ * handshake says nothing about whether the endpoint requires sign-in.
  */
 export async function settleMcpAuth(input: {
   endpoint: string | null;
   /** Metadata naming the endpoint that finding or admitting it already read. */
   known: MetadataMatch | null;
+  /** The 401 discovery drew from the endpoint while finding it; null when it found the endpoint another way. */
+  observed: SignInChallenge | null;
   sources: ReadonlyMap<string, ProbeOutcome>;
   source: ArtifactSource;
 }): Promise<McpAuthRequired | null> {
   if (input.endpoint === null) return null;
   const endpoint = normalizeEndpointUrl(input.endpoint);
   if (endpoint === null) return null;
-  const answer = wireChallenge(input.sources);
+  const answer = wireChallenge(input.sources) ?? (servedWithoutSignIn(input.sources) ? null : input.observed);
   if (answer === null) return null;
   const named = answer.challenge === null ? null : resourceMetadataFromChallenge(answer.challenge);
   const match =

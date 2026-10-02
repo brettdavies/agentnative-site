@@ -49,7 +49,7 @@ import {
 import { probeCommonPaths } from './discovery-posts';
 import { phaseBudget, resolveUrl } from './handlers/shared';
 import type { EvidenceItem } from './handlers/types';
-import { directArtifactSource, signInEndpoint } from './mcp-auth';
+import { directArtifactSource, type SignInChallenge, signInEndpoint } from './mcp-auth';
 import type { MetadataMatch } from './reciprocity';
 import type { WebAuditDiscoveryConfig } from './registry';
 import { DOCUMENT_MAX_BODY_BYTES, type GuardedFetchOptions, guardedFetch } from './ssrf';
@@ -67,6 +67,8 @@ export interface DiscoveryResult {
   endpoint: string | null;
   /** The RFC 9728 metadata that made a common path answering 401 the endpoint; null otherwise. */
   endpointMetadata: MetadataMatch | null;
+  /** The 401 that common path answered; null when the endpoint was found another way. */
+  endpointChallenge: SignInChallenge | null;
   evidence: EvidenceItem[];
   /** In SEP-2127 order: the catalog's entries, the suffix card, then the well-known cards. */
   declarations: McpDeclaration[];
@@ -144,6 +146,7 @@ export async function readDiscoveryDocuments(
   let postEndpoint: string | null = null;
   let postRedirected: McpDeclaration[] = [];
   let postMetadata: MetadataMatch | null = null;
+  let postChallenge: SignInChallenge | null = null;
   let suffix: CardRead | null = null;
   let deadlineHit = false;
   const documents = new Map<RetainedDocumentKey, RetainedDocument>();
@@ -195,8 +198,16 @@ export async function readDiscoveryDocuments(
       endpoint === null
         ? postRedirected
         : postRedirected.map((d): McpDeclaration => ({ ...d, not_followed: 'beyond-endpoint-of-record' }));
-    const endpointMetadata = endpoint !== null && endpoint === postEndpoint ? postMetadata : null;
-    return { endpoint, endpointMetadata, evidence, declarations: declared(), redirected, documents };
+    const foundByPost = endpoint !== null && endpoint === postEndpoint;
+    return {
+      endpoint,
+      endpointMetadata: foundByPost ? postMetadata : null,
+      endpointChallenge: foundByPost ? postChallenge : null,
+      evidence,
+      declarations: declared(),
+      redirected,
+      documents,
+    };
   };
   const declared = (): McpDeclaration[] => {
     const ofRead = (read: CardRead) => [read.declaration, ...read.others];
@@ -299,6 +310,7 @@ export async function readDiscoveryDocuments(
       if (signIn !== null) {
         postEndpoint = signIn.path.url;
         postMetadata = signIn.metadata;
+        postChallenge = signIn.challenge;
         postItems.push({
           source: signIn.path.path,
           endpoint: signIn.path.url,

@@ -291,7 +291,7 @@ describe('finding a sign-in endpoint among challenged common paths', () => {
     const challenged = ['/mcp', '/sse'].map((path) => ({
       path,
       url: `https://example.com${path}`,
-      probed: 'mcp-common-path',
+      probed: 'initialize' as const,
       challenge: null,
     }));
     expect(await signInEndpoint(challenged, source)).toBeNull();
@@ -418,6 +418,125 @@ describe('a modern-only server behind OAuth', () => {
     // Only the modern lane answers 401, so a pass shows where the row asked.
     expect(row(scorecard, 'mcp-auth-enforced')).toMatchObject({ status: 'pass', evidence: 'refused with 401' });
     expect(scorecard.results.filter((r) => r.status === 'broken').map((r) => r.id)).toEqual([]);
+  });
+});
+
+/** The rows outside the session class that a correctly protected server answers with a 401. */
+const PRESENT_ROWS_DRAWING_401 = [
+  'mcp-unknown-method',
+  'mcp-batch-reject',
+  'mcp-modern-unknown-method',
+  'mcp-modern-clientcaps',
+  'mcp-modern-header-mismatch',
+];
+
+/**
+ * A protected server whose handshakes fail transiently once discovery has
+ * found it: the discovery POSTs draw the 401, and wave 1's initialize and
+ * server/discover get `transient` instead.
+ */
+function flakyHandshakes(transient: Route): Record<string, Route> {
+  const server = protectedServer(SAME, SAME_METADATA);
+  let initializes = 0;
+  return {
+    ...server,
+    [`POST ${SAME}`]: (init) => {
+      const headers = new Headers(init?.headers);
+      const body = String(init?.body ?? '');
+      if (headers.get('mcp-method') === 'server/discover') return transient(init);
+      if (body.includes('"initialize"') && ++initializes > 1) return transient(init);
+      return server[`POST ${SAME}`](init);
+    },
+  };
+}
+
+describe('a handshake that fails transiently on an endpoint discovery found through its 401', () => {
+  test('the 401 discovery drew still settles sign-in, so the rows that draw 401 read auth-required and none reads broken', async () => {
+    const failures: Array<[string, Route]> = [
+      [
+        'timeout',
+        () => {
+          throw new DOMException('deadline exceeded', 'TimeoutError');
+        },
+      ],
+      [
+        'transport error',
+        () => {
+          throw new TypeError('connection reset');
+        },
+      ],
+    ];
+    for (const [label, transient] of failures) {
+      const { scorecard } = await audit(router({ ...ROOT, ...flakyHandshakes(transient) }, []), {
+        registry: mcpRegistry(),
+      });
+      expect({ label, endpoint: scorecard.mcp_endpoint }).toEqual({ label, endpoint: SAME });
+      expect({ label, handshakes: readings(scorecard, ['mcp-initialize', 'mcp-server-discover']) }).toEqual({
+        label,
+        handshakes: { 'mcp-initialize': ['error', null], 'mcp-server-discover': ['n_a', 'auth-required'] },
+      });
+      expect({ label, readings: readings(scorecard, [...SESSION_ROWS, ...PRESENT_ROWS_DRAWING_401]) }).toEqual({
+        label,
+        readings: Object.fromEntries(
+          [...SESSION_ROWS, ...PRESENT_ROWS_DRAWING_401].map((id) => [id, ['n_a', 'auth-required']]),
+        ),
+      });
+      expect({ label, enforcement: readings(scorecard, ENFORCEMENT_ROWS) }).toEqual({
+        label,
+        enforcement: {
+          'mcp-auth-challenge': ['pass', null],
+          'mcp-auth-servers': ['pass', null],
+          'mcp-auth-enforced': ['pass', null],
+        },
+      });
+      expect({ label, broken: scorecard.results.filter((r) => r.status === 'broken').map((r) => r.id) }).toEqual({
+        label,
+        broken: [],
+      });
+    }
+  });
+
+  // The handshake rows read their own 429 or 5xx, and a server/discover
+  // answered that way leaves no modern lane, so only the legacy rows that
+  // draw a 401 are probed here.
+  test('a rate limit or a server error on the handshakes leaves the session rows and the legacy rows that draw 401 reading auth-required', async () => {
+    const ids = [...SESSION_ROWS, 'mcp-unknown-method', 'mcp-batch-reject'];
+    for (const status of [429, 503]) {
+      const { scorecard } = await audit(
+        router({ ...ROOT, ...flakyHandshakes(() => new Response('try later', { status })) }, []),
+        { registry: mcpRegistry() },
+      );
+      expect({ status, readings: readings(scorecard, ids) }).toEqual({
+        status,
+        readings: Object.fromEntries(ids.map((id) => [id, ['n_a', 'auth-required']])),
+      });
+      expect({ status, enforced: readings(scorecard, ['mcp-auth-enforced']) }).toEqual({
+        status,
+        enforced: { 'mcp-auth-enforced': ['pass', null] },
+      });
+    }
+  });
+
+  test('an endpoint that never answered 401 gets no sign-in from a failed handshake', async () => {
+    const { scorecard } = await audit(
+      router(
+        {
+          ...ROOT,
+          ...siteDeclaring(SAME),
+          [`POST ${SAME}`]: () => {
+            throw new TypeError('connection reset');
+          },
+          [`GET ${SAME_METADATA}`]: () => json({ resource: SAME, authorization_servers: ['https://auth.example.net'] }),
+        },
+        [],
+      ),
+      { registry: mcpRegistry() },
+    );
+    expect(readings(scorecard, ENFORCEMENT_ROWS)).toEqual({
+      'mcp-auth-challenge': ['n_a', 'antecedent-unmet'],
+      'mcp-auth-servers': ['n_a', 'antecedent-unmet'],
+      'mcp-auth-enforced': ['n_a', 'antecedent-unmet'],
+    });
   });
 });
 

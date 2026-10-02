@@ -314,6 +314,10 @@ describe('discoverMcpEndpoint', () => {
     });
     expect(named.endpoint).toBe('https://example.com/mcp');
     expect(named.endpointMetadata?.url).toBe(metadataUrl);
+    expect(named.endpointChallenge).toEqual({
+      challenge: `Bearer resource_metadata="${metadataUrl}"`,
+      lane: 'legacy',
+    });
     expect(named.evidence).toContainEqual({
       source: '/mcp',
       endpoint: 'https://example.com/mcp',
@@ -326,6 +330,7 @@ describe('discoverMcpEndpoint', () => {
     });
     expect(bare.endpoint).toBeNull();
     expect(bare.endpointMetadata).toBeNull();
+    expect(bare.endpointChallenge).toBeNull();
   });
 });
 
