@@ -149,21 +149,36 @@ function challengeMetadataUrl(source: ArtifactSource, endpoint: string, challeng
 }
 
 /**
- * Whether the nonsense-path metadata read rules out a gateway that echoes
- * any requested path: it must have answered, below 500, without naming
- * that path. A read that failed, timed out, ran out of budget, hit a
- * server error, or was asked to retry (408, 429) said nothing about the
- * path, so it leaves the echo unchecked and confirms nothing.
+ * What the nonsense-path metadata read says about a gateway that echoes any
+ * requested path. `ruled-out`: it answered below 500 without naming that
+ * path. `echoed`: it named it. `unanswered`: the read failed, timed out, ran
+ * out of budget, hit a server error, or was asked to retry (408, 429), which
+ * says nothing about the path.
  */
-async function echoRuledOut(source: ArtifactSource, origin: string): Promise<boolean> {
+type EchoControl = 'ruled-out' | 'echoed' | 'unanswered';
+
+async function echoControl(source: ArtifactSource, origin: string): Promise<EchoControl> {
   const response = await source.get(`${origin}${PROTECTED_RESOURCE_PATH}${ECHO_PROBE_PATH}`, {
     maxBodyBytes: METADATA_MAX_BODY_BYTES,
   });
   if (response.status === null || response.status >= 500 || RETRY_SHAPED_STATUSES.includes(response.status)) {
-    return false;
+    return 'unanswered';
   }
   const echoed = response.status === 200 ? resourceOf(parseJsonObject(response)) : null;
-  return echoed !== normalizeEndpointUrl(`${origin}${ECHO_PROBE_PATH}`);
+  return echoed === normalizeEndpointUrl(`${origin}${ECHO_PROBE_PATH}`) ? 'echoed' : 'ruled-out';
+}
+
+export interface MetadataResolveOptions {
+  /** The `WWW-Authenticate` value of a 401 the endpoint answered. */
+  challenge?: string;
+  /**
+   * The endpoint is already of record, so the metadata decides only whether
+   * it requires sign-in, never whether it exists or may be probed. An
+   * unanswered echo read then leaves the match standing, and only a read
+   * that echoed the nonsense path refuses it. Where the metadata is what
+   * finds or admits an endpoint, an unanswered read confirms nothing.
+   */
+  ofRecord?: boolean;
 }
 
 /**
@@ -171,15 +186,15 @@ async function echoRuledOut(source: ArtifactSource, origin: string): Promise<boo
  * `resource_metadata` URL when the endpoint sent one, else the
  * path-suffixed well-known location, then the root one. It matches only
  * when its `resource` normalizes to the endpoint. For an endpoint below the
- * root, metadata at a nonsense path must answer without echoing that path
- * back: a gateway that generates metadata for any requested path confirms
- * nothing.
+ * root, metadata at a nonsense path must not echo that path back: a gateway
+ * that generates metadata for any requested path confirms nothing.
  */
 export async function resolveProtectedResourceMetadata(
   endpoint: string,
   source: ArtifactSource,
-  challenge?: string,
+  options: MetadataResolveOptions = {},
 ): Promise<MetadataMatch | null> {
+  const { challenge } = options;
   const fromChallenge = challenge === undefined ? undefined : challengeMetadataUrl(source, endpoint, challenge);
   if (fromChallenge === null) return null;
   let found: MetadataMatch | null = null;
@@ -192,8 +207,9 @@ export async function resolveProtectedResourceMetadata(
   }
   if (found === null || resourceOf(found.metadata) !== endpoint) return null;
   const { origin, pathname } = new URL(endpoint);
-  if (pathname !== '/' && !(await echoRuledOut(source, origin))) return null;
-  return found;
+  if (pathname === '/') return found;
+  const echo = await echoControl(source, origin);
+  return echo === 'ruled-out' || (echo === 'unanswered' && options.ofRecord === true) ? found : null;
 }
 
 /** The artifact that admitted an endpoint, and the metadata when metadata is what did. */
@@ -216,6 +232,6 @@ export async function admittingArtifact(
     return { by: 'card', metadata: null };
   }
   if (await hostCatalogNames(source, endpoint, cfg.ai_catalog)) return { by: 'ai-catalog', metadata: null };
-  const metadata = await resolveProtectedResourceMetadata(endpoint, source, challenge);
+  const metadata = await resolveProtectedResourceMetadata(endpoint, source, { challenge });
   return metadata === null ? null : { by: 'metadata', metadata };
 }

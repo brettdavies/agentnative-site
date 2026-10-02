@@ -291,6 +291,70 @@ describe('presence with auth required', () => {
     expect(row(scorecard, 'mcp-initialize')).toMatchObject({ status: 'n_a', na_reason: 'auth-required' });
     expect(row(scorecard, 'mcp-tools-list')).toMatchObject({ status: 'n_a', na_reason: 'auth-required' });
   });
+
+  // The card already made the endpoint of record, so the metadata decides
+  // only whether it requires sign-in; an echo read that got no answer says
+  // nothing that could unsettle that.
+  test('a card-declared endpoint below the root still requires sign-in when the echo read draws a 503, a 429, or a timeout', async () => {
+    const echoReads: Array<[string, Route]> = [
+      ['503', () => new Response('upstream error', { status: 503 })],
+      ['429', () => new Response('slow down', { status: 429 })],
+      [
+        'timeout',
+        () => {
+          throw new DOMException('deadline exceeded', 'TimeoutError');
+        },
+      ],
+    ];
+    for (const [label, echo] of echoReads) {
+      const seen: Seen[] = [];
+      const { scorecard } = await audit(
+        router(
+          { ...ROOT, ...siteDeclaring(SAME), ...protectedServer(SAME, SAME_METADATA), [`GET ${ECHO_PROBE}`]: echo },
+          seen,
+        ),
+        { registry: mcpRegistry() },
+      );
+      expect({
+        label,
+        echoRead: seen.some((r) => r.url === ECHO_PROBE),
+        rows: readings(scorecard, ['mcp-initialize', ...SESSION_ROWS]),
+        signIn: readings(scorecard, ENFORCEMENT_ROWS),
+        broken: scorecard.results.filter((r) => r.status === 'broken').map((r) => r.id),
+      }).toEqual({
+        label,
+        echoRead: true,
+        rows: Object.fromEntries(['mcp-initialize', ...SESSION_ROWS].map((id) => [id, ['n_a', 'auth-required']])),
+        signIn: {
+          'mcp-auth-challenge': ['pass', null],
+          'mcp-auth-servers': ['pass', null],
+          'mcp-auth-enforced': ['pass', null],
+        },
+        broken: [],
+      });
+    }
+  });
+
+  test('an echo read that echoed the nonsense path refuses sign-in on a card-declared endpoint too', async () => {
+    const { scorecard } = await audit(
+      router(
+        {
+          ...ROOT,
+          ...siteDeclaring(SAME),
+          ...protectedServer(SAME, SAME_METADATA),
+          [`GET ${ECHO_PROBE}`]: () =>
+            json({ resource: 'https://example.com/anc-web-audit-no-such-resource', authorization_servers: [] }),
+        },
+        [],
+      ),
+      { registry: mcpRegistry() },
+    );
+    expect(readings(scorecard, ENFORCEMENT_ROWS)).toEqual({
+      'mcp-auth-challenge': ['n_a', 'antecedent-unmet'],
+      'mcp-auth-servers': ['n_a', 'antecedent-unmet'],
+      'mcp-auth-enforced': ['n_a', 'antecedent-unmet'],
+    });
+  });
 });
 
 describe('finding a sign-in endpoint among challenged common paths', () => {

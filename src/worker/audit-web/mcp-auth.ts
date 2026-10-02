@@ -97,7 +97,7 @@ export async function signInEndpoint(
 ): Promise<{ path: ChallengedPath; metadata: MetadataMatch; challenge: SignInChallenge } | null> {
   const once = readingOnce(source);
   for (const path of challenged) {
-    const metadata = await resolveProtectedResourceMetadata(path.url, once, path.challenge ?? undefined);
+    const metadata = await resolveProtectedResourceMetadata(path.url, once, { challenge: path.challenge ?? undefined });
     if (metadata !== null) {
       const lane = path.probed === 'initialize' ? 'legacy' : 'modern';
       return { path, metadata, challenge: { challenge: path.challenge, lane } };
@@ -146,7 +146,10 @@ export async function settleMcpAuth(input: {
   const match =
     input.known !== null && (named === null || named === input.known.url)
       ? input.known
-      : await resolveProtectedResourceMetadata(endpoint, input.source, answer.challenge ?? undefined);
+      : await resolveProtectedResourceMetadata(endpoint, input.source, {
+          challenge: answer.challenge ?? undefined,
+          ofRecord: true,
+        });
   if (match === null) return null;
   return {
     endpoint: input.endpoint,
