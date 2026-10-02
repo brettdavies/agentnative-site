@@ -1477,6 +1477,22 @@ describe('follow: the hourly budget of each declared registrable domain', () => 
     ).toEqual(['victim.example', 'victim.example', 'a.github.io', 'example.co.uk', 'vendor.workers.dev']);
   });
 
+  test('a host with a label the hostname rules reject is still charged to its registrable domain', () => {
+    const invalid = [
+      '-a.victim.example',
+      'a-.victim.example',
+      'a!b.victim.example',
+      `${'x'.repeat(64)}.victim.example`,
+    ];
+    expect(invalid.map(registrableDomainOf)).toEqual(invalid.map(() => 'victim.example'));
+    expect(['github.io', 'a.github.io', '192.0.2.1', '[2001:db8::1]'].map(registrableDomainOf)).toEqual([
+      'github.io',
+      'a.github.io',
+      '192.0.2.1',
+      '[2001:db8::1]',
+    ]);
+  });
+
   test('a domain at its hourly ceiling is refused on the next audit before wave 1, and nothing is sent to it', async () => {
     const log: string[] = [];
     const budget = declaredDomainBudget({ SCORE_KV: memoryKv(log) }, { hourlyCeiling: 1 });

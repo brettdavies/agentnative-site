@@ -30,7 +30,10 @@ export function registrableDomainOf(hostname: string): string {
   // WHATWG URL keeps trailing dots as written, and `example.com.` names
   // the same domain as `example.com`.
   const host = hostname.toLowerCase().replace(/\.+$/, '');
-  return getDomain(host, { allowPrivateDomains: true }) ?? host;
+  // Hostname validation off: a label tldts would reject (`-a`, `a-`, or
+  // longer than 63 characters) must still charge its parent domain, or
+  // every junk label under a third party would open a fresh budget.
+  return getDomain(host, { allowPrivateDomains: true, validateHostname: false }) ?? host;
 }
 
 /** The declared-domain budget over `env`'s bindings; `hourlyCeiling` overrides the audits-per-hour ceiling. */
