@@ -53,7 +53,7 @@ import { runProtectedResource } from './handlers/protected-resource';
 import { enumerateScopedDirs, runScopedLlms } from './handlers/scoped-llms';
 import type { EvidenceItem, HandlerContext, McpAuthRequired, McpLaneEvidence, ProbeOutcome } from './handlers/types';
 import { runWebMcp } from './handlers/webmcp';
-import { directArtifactSource, settleMcpAuth } from './mcp-auth';
+import { directArtifactSource, settleMcpAuth, signInResolver } from './mcp-auth';
 import type { WebAuditRegistry, WebCheck, WebSiteType } from './registry';
 import { buildWebScorecard, type EngineResult, type ScorecardStatus, type WebScorecard } from './scorecard';
 import { type GuardedFetchOptions, guardedFetch, isEdgeErrorStatus } from './ssrf';
@@ -389,6 +389,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   let mcpSessionId: string | null = null;
   let mcpLanes: McpLaneEvidence = { modern: 'unknown', legacyAdvertised: [], modernAdvertised: [] };
   let mcpAuth: McpAuthRequired | null = null;
+  let mcpSignIn: HandlerContext['mcpSignIn'];
   const requestTimeoutMs = (): number => Math.min(perCheckTimeoutMs, Math.max(1, deadline - now()));
 
   const handlerCtx = (): HandlerContext => ({
@@ -406,6 +407,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     mcpSessionId,
     mcpLanes,
     mcpAuth,
+    mcpSignIn,
   });
 
   const probeOne = async (
@@ -441,14 +443,15 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   // Whether the endpoint requires sign-in is settled once wave 1's wire
   // probes have answered, from their 401 or, when they drew none and were
   // served nothing, from the 401 that found the endpoint; their own rows are
-  // then read again the way every later MCP row is.
-  mcpAuth = await settleMcpAuth({
+  // then read again the way every later MCP row is. When that settles
+  // nothing, a later row's 401 is read against the same metadata.
+  const signIn = signInResolver({
     endpoint: declared.endpoint,
     known: declared.metadata,
-    observed: declared.challenge,
-    sources,
     source: directArtifactSource(() => (deadline - now() > 0 ? requestTimeoutMs() : null), input.fetchOptions),
   });
+  mcpAuth = await settleMcpAuth({ observed: declared.challenge, sources, signIn });
+  if (mcpAuth === null) mcpSignIn = async (answer) => (await signIn(answer)) !== null;
   for (const check of mcpAuth === null ? [] : wave1Checks) {
     const outcome = sources.get(check.id);
     const reread = check.handler === 'mcp' && outcome !== undefined ? signInRequiredOutcome(outcome) : null;

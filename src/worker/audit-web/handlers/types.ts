@@ -8,6 +8,7 @@ import type { RetainedDocumentKey } from '../../../shared/web-audit-documents';
 import type { NaReason } from '../../../shared/web-audit-findings';
 import type { ProbeResponse } from '../assert';
 import type { RetainedDocument } from '../discovery-documents';
+import type { SignInChallenge } from '../mcp-auth';
 import type { GuardedFetchOptions } from '../ssrf';
 
 /**
@@ -131,4 +132,10 @@ export interface HandlerContext {
   mcpLanes?: McpLaneEvidence;
   /** Set once the endpoint is known to require sign-in, so a 401 from it reads as that rather than as a defect. */
   mcpAuth?: McpAuthRequired | null;
+  /**
+   * Set when wave 1 did not settle that the endpoint requires sign-in:
+   * whether a 401 a later row drew is backed by the endpoint's RFC 9728
+   * metadata, which then reads as sign-in the same way.
+   */
+  mcpSignIn?: (answer: SignInChallenge) => Promise<boolean>;
 }

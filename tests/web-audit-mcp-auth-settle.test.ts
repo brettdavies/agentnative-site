@@ -11,7 +11,7 @@ import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import type { ProbeResponse } from '../src/worker/audit-web/assert';
 import type { ProbeOutcome } from '../src/worker/audit-web/handlers/types';
-import { settleMcpAuth } from '../src/worker/audit-web/mcp-auth';
+import { settleMcpAuth, signInResolver } from '../src/worker/audit-web/mcp-auth';
 import type { ArtifactSource } from '../src/worker/audit-web/reciprocity';
 import type { WebAuditRegistry } from '../src/worker/audit-web/registry';
 import type { WebScorecard } from '../src/worker/audit-web/scorecard';
@@ -164,14 +164,12 @@ describe('settling sign-in from the server/discover handshake alone', () => {
   test('a 401 on server/discover requires sign-in when initialize errored or was answered without a result', async () => {
     for (const [label, initialize] of initializeAnswers) {
       const settled = await settleMcpAuth({
-        endpoint: SAME,
-        known: null,
         observed: null,
         sources: new Map([
           ['mcp-initialize', initialize],
           ['mcp-server-discover', discoverChallenged],
         ]),
-        source,
+        signIn: signInResolver({ endpoint: SAME, known: null, source }),
       });
       expect({ label, settled }).toEqual({
         label,

@@ -16,6 +16,7 @@ import { directArtifactSource, signInEndpoint } from '../src/worker/audit-web/mc
 import { type ArtifactSource, resolveProtectedResourceMetadata } from '../src/worker/audit-web/reciprocity';
 import type { AntecedentToken, WebAuditRegistry } from '../src/worker/audit-web/registry';
 import type { WebRemediationCatalog } from '../src/worker/audit-web/remediation';
+import { universeMaxOf } from '../src/worker/audit-web/score';
 import type { ScorecardStatus, WebScorecard } from '../src/worker/audit-web/scorecard';
 import { buildWebSummaryMarkdown } from '../src/worker/audit-web/summary-markdown';
 import { buildWebSummaryBody } from '../src/worker/audit-web/summary-render';
@@ -780,6 +781,95 @@ const ENFORCEMENT_ROWS = ['mcp-auth-challenge', 'mcp-auth-servers', 'mcp-auth-en
 
 const readings = (scorecard: WebScorecard, ids: readonly string[]) =>
   Object.fromEntries(ids.map((id) => [id, [row(scorecard, id).status, row(scorecard, id).na_reason ?? null]]));
+
+/**
+ * A server that answers initialize without a token and refuses the modern
+ * lane with a method-not-found, while every other request it reads a token
+ * for draws a 401 naming `metadataUrl`.
+ */
+function servesInitializeOnly(endpoint: string, metadataUrl: string): Record<string, Route> {
+  const server = protectedServer(endpoint, metadataUrl);
+  return {
+    ...server,
+    [`POST ${endpoint}`]: (init) => {
+      const headers = new Headers(init?.headers);
+      if (headers.get('mcp-method') === 'server/discover') {
+        return json({ jsonrpc: '2.0', id: 1, error: { code: -32601, message: 'method not found' } });
+      }
+      if (String(init?.body ?? '').includes('"method":"initialize"')) {
+        return json({
+          jsonrpc: '2.0',
+          id: 1,
+          result: { serverInfo: { name: 'hybrid' }, protocolVersion: '2025-06-18', capabilities: { tools: {} } },
+        });
+      }
+      return server[`POST ${endpoint}`](init);
+    },
+  };
+}
+
+/** The rows the initialize-only server answers with a 401, each on its own request. */
+const ROWS_DRAWING_A_LATER_401 = [
+  'mcp-tools-list',
+  'mcp-unknown-method',
+  'mcp-batch-reject',
+  'mcp-unknown-tool',
+  'mcp-accept-json',
+  'mcp-accept-unsatisfiable',
+];
+
+describe('a server that serves a handshake without a token and asks for sign-in on later requests', () => {
+  const registry: WebAuditRegistry = { ...REGISTRY, checks: REGISTRY.checks.filter((c) => c.category === 'mcp') };
+
+  test('the rows whose 401 its metadata backs read auth-required, none reads broken, and it presents the open design', async () => {
+    const { scorecard } = await audit(router({ ...ROOT, ...servesInitializeOnly(SAME, SAME_METADATA) }, []), {
+      registry,
+    });
+    const openUniverse = universeMaxOf(
+      { checks: registry.checks.filter((c) => c.antecedent !== 'mcp-auth-required'), alternatives: [] },
+      [],
+    );
+    expect(scorecard.mcp_endpoint).toBe(SAME);
+    expect({
+      laterRows: readings(scorecard, ROWS_DRAWING_A_LATER_401),
+      handshakes: readings(scorecard, ['mcp-initialize', 'mcp-capabilities']),
+      signIn: readings(scorecard, ENFORCEMENT_ROWS),
+      broken: scorecard.results.filter((r) => r.status === 'broken').map((r) => r.id),
+      universe: universeMaxOf(registry, scorecard.results),
+    }).toEqual({
+      laterRows: authRequiredOn(ROWS_DRAWING_A_LATER_401),
+      handshakes: { 'mcp-initialize': ['pass', null], 'mcp-capabilities': ['pass', null] },
+      signIn: {
+        'mcp-auth-challenge': ['n_a', 'antecedent-unmet'],
+        'mcp-auth-servers': ['n_a', 'antecedent-unmet'],
+        'mcp-auth-enforced': ['n_a', 'antecedent-unmet'],
+      },
+      broken: [],
+      universe: openUniverse,
+    });
+  });
+
+  test('a later 401 that no metadata backs still reads as the defect it is, and either way the metadata is read once and no probe is added', async () => {
+    const backed: Seen[] = [];
+    await audit(router({ ...ROOT, ...servesInitializeOnly(SAME, SAME_METADATA) }, backed), { registry });
+    const { [`GET ${SAME_METADATA}`]: _unpublished, ...withoutMetadata } = servesInitializeOnly(SAME, SAME_METADATA);
+    const unbacked: Seen[] = [];
+    const { scorecard } = await audit(router({ ...ROOT, ...withoutMetadata }, unbacked), { registry });
+    expect(readings(scorecard, ['mcp-tools-list', 'mcp-unknown-tool'])).toEqual({
+      'mcp-tools-list': ['broken', null],
+      'mcp-unknown-tool': ['broken', null],
+    });
+    const reads = (seen: readonly Seen[], url: string) => seen.filter((r) => r.url === url).length;
+    const posts = (seen: readonly Seen[]) => seen.filter((r) => r.method === 'POST').length;
+    expect({
+      backed: { metadata: reads(backed, SAME_METADATA), echo: reads(backed, ECHO_PROBE), posts: posts(backed) },
+      unbacked: { metadata: reads(unbacked, SAME_METADATA), echo: reads(unbacked, ECHO_PROBE), posts: posts(unbacked) },
+    }).toEqual({
+      backed: { metadata: 1, echo: 1, posts: posts(unbacked) },
+      unbacked: { metadata: 1, echo: 0, posts: posts(backed) },
+    });
+  });
+});
 
 describe('auth enforcement rows', () => {
   test('a correctly protected endpoint passes all three, scored at the endpoint host', async () => {

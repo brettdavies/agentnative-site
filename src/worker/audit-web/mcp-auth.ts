@@ -1,10 +1,11 @@
 // Whether an MCP endpoint requires sign-in. Any route can answer 401, so a
-// 401 alone is refusal evidence. An endpoint requires sign-in when a wire
-// probe drew a 401 from it and RFC 9728 metadata on its own host names it
-// as the protected resource, resolved by reciprocity.ts with the echo
-// control that keeps a gateway minting metadata for any path from
-// confirming anything. Metadata the audit already read while finding or
-// admitting the endpoint is not read again.
+// 401 alone is refusal evidence. A 401 from the endpoint asks for sign-in
+// when RFC 9728 metadata on its own host names the endpoint as the
+// protected resource, resolved by reciprocity.ts with the echo control that
+// keeps a gateway minting metadata for any path from confirming anything.
+// The metadata is read once per audit, for the first 401 that needs it, and
+// metadata the audit already read while finding or admitting the endpoint
+// is not read again.
 
 import type { ProbeResponse } from './assert';
 import { handshakeServed } from './handlers/mcp';
@@ -127,30 +128,35 @@ function wireChallenge(sources: ReadonlyMap<string, ProbeOutcome>): SignInChalle
   return null;
 }
 
-/**
- * Whether the endpoint of record requires sign-in, once wave 1 has probed
- * it. Known metadata stands unless the 401's challenge names another
- * location, which then takes precedence the way RFC 9728 orders them.
- *
- * Wave 1's 401 is read first. When neither wire probe drew one, nor was
- * served a result, the 401 that discovery drew while finding the endpoint
- * still stands: a timeout, a rate limit, or a server error on the
- * handshake says nothing about whether the endpoint requires sign-in.
- */
-export async function settleMcpAuth(input: {
+/** The endpoint of record and what reading its RFC 9728 metadata draws on. */
+export interface SignInInput {
   endpoint: string | null;
   /** Metadata naming the endpoint that finding or admitting it already read. */
   known: MetadataMatch | null;
-  /** The 401 discovery drew from the endpoint while finding it; null when it found the endpoint another way. */
-  observed: SignInChallenge | null;
-  sources: ReadonlyMap<string, ProbeOutcome>;
   source: ArtifactSource;
-}): Promise<McpAuthRequired | null> {
+}
+
+/** Whether a 401 the endpoint answered is backed by RFC 9728 metadata naming it; null when it is not. */
+export type SignInResolver = (answer: SignInChallenge) => Promise<McpAuthRequired | null>;
+
+/**
+ * Reads the endpoint's metadata at most once per audit: the first 401 it is
+ * asked about decides, and every later ask gets that answer. Known metadata
+ * stands unless the 401's challenge names another location, which then
+ * takes precedence the way RFC 9728 orders them.
+ */
+export function signInResolver(input: SignInInput): SignInResolver {
+  let settled: Promise<McpAuthRequired | null> | undefined;
+  return (answer) => {
+    settled ??= backedSignIn(input, answer);
+    return settled;
+  };
+}
+
+async function backedSignIn(input: SignInInput, answer: SignInChallenge): Promise<McpAuthRequired | null> {
   if (input.endpoint === null) return null;
   const endpoint = normalizeEndpointUrl(input.endpoint);
   if (endpoint === null) return null;
-  const answer = wireChallenge(input.sources) ?? (servedWithoutSignIn(input.sources) ? null : input.observed);
-  if (answer === null) return null;
   const named = answer.challenge === null ? null : resourceMetadataFromChallenge(answer.challenge);
   const match =
     input.known !== null && (named === null || named === input.known.url)
@@ -167,4 +173,21 @@ export async function settleMcpAuth(input: {
     metadataUrl: match.url,
     metadata: match.metadata,
   };
+}
+
+/**
+ * Whether the endpoint of record requires sign-in, once wave 1 has probed
+ * it. Wave 1's 401 is read first. When neither wire probe drew one, nor was
+ * served a result, the 401 that discovery drew while finding the endpoint
+ * still stands: a timeout, a rate limit, or a server error on the
+ * handshake says nothing about whether the endpoint requires sign-in.
+ */
+export async function settleMcpAuth(input: {
+  /** The 401 discovery drew from the endpoint while finding it; null when it found the endpoint another way. */
+  observed: SignInChallenge | null;
+  sources: ReadonlyMap<string, ProbeOutcome>;
+  signIn: SignInResolver;
+}): Promise<McpAuthRequired | null> {
+  const answer = wireChallenge(input.sources) ?? (servedWithoutSignIn(input.sources) ? null : input.observed);
+  return answer === null ? null : input.signIn(answer);
 }

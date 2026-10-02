@@ -752,11 +752,18 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
 
   if (spec.family === 'enforcement') return enforcementVerdict(resp.status, rpc, ev);
 
-  // Settled ahead of every arm that reads the answer: a 401 from an
-  // endpoint known to require sign-in says nothing about the surface the
-  // row asks about, and the arms below would read it as a broken one or as
-  // an era the server does not serve.
-  if (ctx.mcpAuth && resp.status === 401) return signInRequired(ev);
+  // Settled ahead of every arm that reads the answer: a 401 that asks for
+  // sign-in says nothing about the surface the row asks about, and the arms
+  // below would read it as a broken one or as an era the server does not
+  // serve. An endpoint wave 1 did not settle as requiring sign-in, such as
+  // one that serves a handshake without a token, can still ask for it on
+  // this row, and its 401 reads the same once the endpoint's metadata backs it.
+  if (
+    resp.status === 401 &&
+    (ctx.mcpAuth || (await ctx.mcpSignIn?.({ challenge: wwwAuthenticate ?? null, lane: spec.era })))
+  ) {
+    return signInRequired(ev);
+  }
 
   // Settled ahead of the arms below because a legacy server declines this
   // method both with an envelope and without one, and the arms that would

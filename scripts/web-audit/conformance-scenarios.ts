@@ -1250,6 +1250,21 @@ export const SCENARIOS: Record<string, Scenario> = {
       get(`${PROTECTED_RESOURCE_PATH}/anc-web-audit-no-such-resource`, text('upstream error', {}, 503)),
     ],
   ),
+  'auth-later-401': scenario(
+    "the audited site's /mcp serves initialize without a token and refuses server/discover with a method-not-found, while every other request it reads a token for draws a 401 naming same-host RFC 9728 metadata that names it: no handshake asked for sign-in, so the endpoint presents the open design and the sign-in rows are n_a, and each later row whose 401 that metadata backs reads auth-required rather than broken",
+    ['mcp-capabilities', 'mcp-tools-list', 'mcp-resources-list', 'mcp-unknown-tool', 'mcp-accept-json', 'mcp-auth-enforced'],
+    [
+      ...baseline(),
+      post(MCP_PATH, rpcError(-32700, 400), { body_contains: 'not-json{{' }),
+      post(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH), ACAO), { headers: { origin: CORS_ORIGIN } }),
+      post(MCP_PATH, rpcResult(INITIALIZE_RESULT), { body_json_method: 'initialize' }),
+      post(MCP_PATH, rpcError(-32601), { headers: { 'mcp-method': 'server/discover' } }),
+      post(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH))),
+      options(MCP_PATH, res(204, ACAO, '')),
+      get(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH))),
+      get(PROTECTED_RESOURCE_PATH, json({ resource: u(MCP_PATH), authorization_servers: [AUTH_SERVER] })),
+    ],
+  ),
 
   // ---- dns-doh ---------------------------------------------------------------
   'dns-aid-pass': scenario('the first resolver answers Status 0 with a record for the index name', ['dns-aid'], [
