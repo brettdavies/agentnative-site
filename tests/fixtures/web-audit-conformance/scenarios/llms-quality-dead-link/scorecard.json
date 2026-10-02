@@ -649,7 +649,7 @@
       "tier": "recommended",
       "principle": "P2",
       "status": "absent",
-      "evidence": "https://example.com/docs/guide.md -> 200",
+      "evidence": "https://example.com/docs/api.md -> 404",
       "hosts": [
         {
           "host": "example.com"

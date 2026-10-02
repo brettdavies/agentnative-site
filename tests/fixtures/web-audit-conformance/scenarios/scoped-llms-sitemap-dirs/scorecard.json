@@ -632,7 +632,7 @@
       "tier": "recommended",
       "principle": "P2",
       "status": "absent",
-      "evidence": "http://10.0.0.5/docs/x.md -> error",
+      "evidence": "http://10.0.0.5/docs/x.md: blocked: ipv4 10.0.0.5 is in blocked range 10.0.0.0/8",
       "hosts": [
         {
           "host": "other.example.net"

@@ -8,7 +8,7 @@
 import type { WebCheck } from '../registry';
 import { guardedFetch, STATUS_ONLY_BODY_BYTES, validatePublicUrl } from '../ssrf';
 import { remainingDeadlineMs, timeoutMsFor } from './shared';
-import type { HandlerContext, ProbeOutcome, ProbeStatus } from './types';
+import type { EvidenceItem, HandlerContext, ProbeOutcome, ProbeStatus } from './types';
 
 const MARKDOWN_LINK_RE = /\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 const DEFAULT_MAX_LINKS = 8;
@@ -48,6 +48,35 @@ function hrefsFrom(body: string, base: string): string[] {
     out.push(href);
   }
   return out;
+}
+
+/** One link's evidence and its own verdict, which the row's evidence line reads to name the link that decided it. */
+async function probeLink(
+  href: string,
+  timeoutMs: number,
+  ctx: HandlerContext,
+): Promise<{ verdict: Exclude<ProbeStatus, 'na'>; item: EvidenceItem }> {
+  const validation = validatePublicUrl(href);
+  if (!validation.ok) return { verdict: 'absent', item: { url: href, blocked: validation.reason, ok: false } };
+  if (validation.url.protocol !== 'https:') {
+    return {
+      verdict: 'noncompliant',
+      item: { url: href, blocked: 'not https', ok: false, why: ['not https; not requested'] },
+    };
+  }
+  const resp = await guardedFetch(href, {}, { ...ctx.fetchOptions, timeoutMs, maxBodyBytes: STATUS_ONLY_BODY_BYTES });
+  if (resp.refused === 'insecure-scheme') {
+    return {
+      verdict: 'noncompliant',
+      item: { url: href, status: resp.status, ok: false, why: ['redirects to http; not requested'] },
+    };
+  }
+  if (resp.error !== null || resp.status === null) {
+    return { verdict: 'error', item: { url: href, status: resp.status, error: resp.error, ok: false } };
+  }
+  const ok = resp.status >= 200 && resp.status < 400;
+  const verdict = ok ? 'pass' : resp.status === 404 || resp.status === 410 ? 'absent' : 'broken';
+  return { verdict, item: { url: href, status: resp.status, ok } };
 }
 
 export async function runLlmsTxtQuality(check: WebCheck, ctx: HandlerContext): Promise<ProbeOutcome> {
@@ -94,35 +123,9 @@ export async function runLlmsTxtQuality(check: WebCheck, ctx: HandlerContext): P
       misses.push('error');
       break;
     }
-    const validation = validatePublicUrl(href);
-    if (!validation.ok) {
-      evidence.push({ url: href, blocked: validation.reason, ok: false });
-      misses.push('absent');
-      continue;
-    }
-    if (validation.url.protocol !== 'https:') {
-      evidence.push({ url: href, blocked: 'not https', ok: false, why: ['not https; not requested'] });
-      misses.push('noncompliant');
-      continue;
-    }
-    const resp = await guardedFetch(
-      href,
-      {},
-      { ...ctx.fetchOptions, timeoutMs: slice, maxBodyBytes: STATUS_ONLY_BODY_BYTES },
-    );
-    if (resp.refused === 'insecure-scheme') {
-      evidence.push({ url: href, status: resp.status, ok: false, why: ['redirects to http; not requested'] });
-      misses.push('noncompliant');
-      continue;
-    }
-    if (resp.error !== null || resp.status === null) {
-      evidence.push({ url: href, status: resp.status, error: resp.error, ok: false });
-      misses.push('error');
-      continue;
-    }
-    const ok = resp.status >= 200 && resp.status < 400;
-    evidence.push({ url: href, status: resp.status, ok });
-    if (!ok) misses.push(resp.status === 404 || resp.status === 410 ? 'absent' : 'broken');
+    const { verdict, item } = await probeLink(href, slice, ctx);
+    evidence.push({ ...item, link_verdict: verdict });
+    if (verdict !== 'pass') misses.push(verdict);
   }
 
   if (misses.length === 0) return { status: 'pass', evidence };

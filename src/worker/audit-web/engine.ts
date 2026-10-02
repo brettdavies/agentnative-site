@@ -147,6 +147,19 @@ function probeStatusToScorecard(status: ProbeOutcome['status']): ScorecardStatus
   return status === 'na' ? 'n_a' : status;
 }
 
+/**
+ * The links row names the link whose own verdict decided it: the first link
+ * probed may have resolved while a later one missed.
+ */
+function linkEvidence(outcome: ProbeOutcome): string | null {
+  const link = outcome.evidence.find((e) => e.link_verdict === outcome.status);
+  if (link === undefined) return null;
+  if (link.error) return `${link.url}: ${link.error}`;
+  const why = (link.why as string[] | undefined)?.join('; ');
+  if (typeof link.status !== 'number') return `${link.url}: ${why ?? link.blocked}`;
+  return why === undefined ? `${link.url} -> ${link.status}` : `${link.url} -> ${link.status} (${why})`;
+}
+
 /** Compact human-readable evidence line derived from a handler's evidence. */
 function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
   const first = outcome.evidence[0] ?? {};
@@ -215,6 +228,11 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
     // a bare 200 and a bad match cannot be told from a real one.
     const hit = outcome.evidence.find((e) => typeof e.marker === 'string');
     if (hit) return `${hit.url} -> ${hit.status} (${hit.marker})`;
+  }
+
+  if (check.handler === 'llms-txt-quality') {
+    const line = linkEvidence(outcome);
+    if (line !== null) return line;
   }
 
   // Every alias is probed, so most evidence items are unpublished paths the
