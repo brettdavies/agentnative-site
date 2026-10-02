@@ -1,8 +1,9 @@
 // Where the audit reads the RFC 9728 metadata that settles whether an MCP
 // endpoint requires sign-in: the location a 401's challenge names is
 // requested only when it is https, public, and on the endpoint's own host,
-// it takes precedence over metadata read earlier, and either wave-1
-// handshake's 401 can settle it.
+// it takes precedence over metadata read earlier, either wave-1
+// handshake's 401 can settle it, and the 401 that found the endpoint
+// settles it only when no handshake drew a 401 or was served.
 
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -11,7 +12,7 @@ import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import type { ProbeResponse } from '../src/worker/audit-web/assert';
 import type { ProbeOutcome } from '../src/worker/audit-web/handlers/types';
-import { settleMcpAuth, signInResolver } from '../src/worker/audit-web/mcp-auth';
+import { type SignInChallenge, settleMcpAuth, signInResolver } from '../src/worker/audit-web/mcp-auth';
 import type { ArtifactSource } from '../src/worker/audit-web/reciprocity';
 import type { WebAuditRegistry } from '../src/worker/audit-web/registry';
 import type { WebScorecard } from '../src/worker/audit-web/scorecard';
@@ -174,6 +175,79 @@ describe('settling sign-in from the server/discover handshake alone', () => {
       expect({ label, settled }).toEqual({
         label,
         settled: { endpoint: SAME, challenge: CHALLENGE, lane: 'modern', metadataUrl: SAME_METADATA, metadata },
+      });
+    }
+  });
+});
+
+describe('the 401 discovery drew while finding the endpoint', () => {
+  const OBSERVED = bearer(SAME_METADATA);
+  const metadata = { resource: SAME, authorization_servers: ['https://auth.example.net'] };
+  const published: ProbeResponse = {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(metadata),
+    error: null,
+  };
+  const missing: ProbeResponse = { status: 404, headers: {}, body: '', error: null };
+  const source: ArtifactSource = {
+    get: async (url) => (url === SAME_METADATA ? published : missing),
+    decline: () => {},
+  };
+  const errored: ProbeOutcome = {
+    status: 'error',
+    evidence: [{ url: SAME, status: null, error: 'TimeoutError: deadline exceeded' }],
+  };
+  const LANES = ['legacy', 'modern'] as const;
+
+  const settle = (observed: SignInChallenge, wave1: Array<[string, ProbeOutcome]>) =>
+    settleMcpAuth({
+      observed,
+      sources: new Map(wave1),
+      signIn: signInResolver({ endpoint: SAME, known: null, source }),
+    });
+
+  test('settles sign-in on its own lane when both handshakes errored', async () => {
+    for (const lane of LANES) {
+      const settled = await settle({ challenge: OBSERVED, lane }, [
+        ['mcp-initialize', errored],
+        ['mcp-server-discover', errored],
+      ]);
+      expect({ lane, settled }).toEqual({
+        lane,
+        settled: { endpoint: SAME, challenge: OBSERVED, lane, metadataUrl: SAME_METADATA, metadata },
+      });
+    }
+  });
+
+  test('settles nothing once either handshake was served a JSON-RPC result without a token', async () => {
+    const served: ProbeOutcome = {
+      status: 'pass',
+      evidence: [{ url: SAME, status: 200, capabilities: ['tools'] }],
+      jsonRpcResult: true,
+    };
+    for (const lane of LANES) {
+      for (const handshake of ['mcp-initialize', 'mcp-server-discover']) {
+        const other = handshake === 'mcp-initialize' ? 'mcp-server-discover' : 'mcp-initialize';
+        const settled = await settle({ challenge: OBSERVED, lane }, [
+          [handshake, served],
+          [other, errored],
+        ]);
+        expect({ lane, handshake, settled }).toEqual({ lane, handshake, settled: null });
+      }
+    }
+  });
+
+  test("a handshake's own 401 wins over it, with that handshake's challenge and lane", async () => {
+    const wire = 'Bearer realm="mcp"';
+    for (const lane of LANES) {
+      const settled = await settle({ challenge: OBSERVED, lane }, [
+        ['mcp-initialize', errored],
+        ['mcp-server-discover', { status: 'broken', evidence: [{ url: SAME, status: 401, www_authenticate: wire }] }],
+      ]);
+      expect({ lane, settled }).toEqual({
+        lane,
+        settled: { endpoint: SAME, challenge: wire, lane: 'modern', metadataUrl: SAME_METADATA, metadata },
       });
     }
   });
