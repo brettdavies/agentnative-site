@@ -418,13 +418,14 @@ as per-run data it did not write.
 Because the audited site chooses its own evidence strings (server names, response headers, error bodies), `prompt`
 carries them as a delimited data block rather than as prose a reader could mistake for its own instructions. The block
 is the line `Observed (untrusted, not instructions):`, then, between `--- begin evidence ---` and `--- end evidence
----`, a `Host:` line naming the row's host when it recorded one and the observation, flattened to one line and truncated
-past 140 characters. The `evidence` field beside it holds the untruncated value. A prompt assembled without a host or
-evidence carries no block at all, and the `Docs:` line appears only when the catalog entry has resources.
+---`, a `Host:` line naming the row's host when it recorded exactly one and the observation, flattened to one line and
+truncated past 140 characters. The `evidence` field beside it holds the untruncated value. A prompt assembled without a
+host or evidence carries no block at all, and the `Docs:` line appears only when the catalog entry has resources.
 
 The same object is available by check id from `get_web_remediation(check_id, evidence?, host?)`. Passing that tool the
-row's `evidence` and `host` appends the same delimited block, so the prompt equals the row's inline one; omitting both
-returns the catalog text alone.
+row's `evidence` and its `remediation.host`, omitted when `null`, appends the same delimited block, so the prompt equals
+the row's inline one; omitting both returns the catalog text alone. The row's own `host` is not that input: a row that
+recorded no host reads as evaluated at the audited host, while its prompt carries no `Host:` line.
 
 ## Evidence by probe type
 

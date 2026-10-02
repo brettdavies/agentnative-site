@@ -1913,17 +1913,23 @@ describe('provenance reaches every reader of a stored website result', () => {
     expect(section).toContain('- Host: `files.example.net`');
   });
 
-  test('get_web_remediation given the row host returns the inline prompt byte for byte', async () => {
+  /** What get_web_remediation answers for a row read through get_website_audit, given the inputs its docs name. */
+  async function standaloneFor(env: McpEnv, row: ReadRow | undefined) {
+    const host = row?.remediation?.host;
+    return jsonContent(
+      await callTool(env, 'get_web_remediation', {
+        check_id: row?.id,
+        evidence: row?.evidence,
+        ...(host === null || host === undefined ? {} : { host }),
+      }),
+    ) as { remediation: { prompt: string; host: string | null } };
+  }
+
+  test("get_web_remediation given the row's remediation host returns the inline prompt byte for byte", async () => {
     const { env, scorecard } = await read('stripe.dev', stripeShaped());
     const inline = scorecard.results.find((r) => r.id === 'rate-limit-headers');
     expect(inline?.remediation?.prompt).toContain('Host: api.stripe.com');
-    const standalone = jsonContent(
-      await callTool(env, 'get_web_remediation', {
-        check_id: 'rate-limit-headers',
-        evidence: inline?.evidence,
-        host: inline?.host,
-      }),
-    ) as { remediation: { prompt: string; host: string } };
+    const standalone = await standaloneFor(env, inline);
     expect(standalone.remediation.prompt).toBe(inline?.remediation?.prompt ?? '');
     expect(standalone.remediation.host).toBe('api.stripe.com');
     const carrier = /data-id="rate-limit-headers"[\s\S]*?data-copy-text="([^"]*)"/.exec(
@@ -1932,6 +1938,27 @@ describe('provenance reaches every reader of a stored website result', () => {
     expect(
       (await parseHtml(`<p data-x="${carrier?.[1]}"></p>`)).querySelector('[data-x]')?.getAttribute('data-x'),
     ).toBe(standalone.remediation.prompt);
+  });
+
+  test('a fixable row stored before provenance gets its inline prompt back from its remediation host and evidence', async () => {
+    const stored = stripeShaped();
+    const old = { ...stored, results: stored.results.map(({ hosts: _h, host: _x, ...r }) => r) };
+    const { env, scorecard } = await read('stripe.dev', old);
+    const inline = scorecard.results.find((r) => r.id === 'rate-limit-headers');
+    expect({ host: inline?.host, remediationHost: inline?.remediation?.host }).toEqual({
+      host: 'stripe.dev',
+      remediationHost: null,
+    });
+    expect(inline?.remediation?.prompt).not.toContain('Host:');
+    expect((await standaloneFor(env, inline)).remediation.prompt).toBe(inline?.remediation?.prompt ?? '');
+  });
+
+  test('a fixable row over two hosts gets its inline prompt back from its remediation host and evidence', async () => {
+    const { env, scorecard } = await read('example.com', twoAnchorShaped());
+    const inline = scorecard.results.find((r) => r.id === 'json-errors');
+    expect(inline?.hosts?.map((h) => h.host)).toEqual(['api.example.net', 'files.example.net']);
+    expect(inline?.remediation?.host).toBeNull();
+    expect((await standaloneFor(env, inline)).remediation.prompt).toBe(inline?.remediation?.prompt ?? '');
   });
 
   test('a row over two hosts carries each host with its own outcome in the MCP read', async () => {

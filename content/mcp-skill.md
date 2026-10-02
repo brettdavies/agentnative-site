@@ -197,9 +197,9 @@ upgraded, so it names the same record as the bare host.
   `json_url`, and refuses a `public_listing` that differs from the stored choice.
 - `list_website_audits`: the website half of the leaderboard, curated by default; `view: "all"` adds the user-submitted
   domains that opted in to public listing. Each entry carries `scorecard_url`.
-- `get_web_remediation`: the canonical fix for a web-audit `check_id`. Pass the failing row's `evidence` and `host` and
-  they are appended to the prompt as a delimited, length-bounded data block, the same prompt the row carries inline;
-  omit both for the catalog text alone.
+- `get_web_remediation`: the canonical fix for a web-audit `check_id`. Pass the failing row's `evidence` and its
+  `remediation.host` (omit the host when it is `null`) and they are appended to the prompt as a delimited,
+  length-bounded data block, the same prompt the row carries inline; omit both for the catalog text alone.
 
 ```jsonc
 // tools/call audit_website { "url": "anc.dev" }
