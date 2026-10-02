@@ -16,6 +16,7 @@ interface __BaseEnv_Env {
 	TURNSTILE_SITEKEY: "1x00000000000000000000AA" | "0x4AAAAAADQFMBoVm56-OPuQ";
 	MCP_CACHE_BYPASS_ALLOWED?: "true";
 	WEB_AUDIT_ENABLED?: "true";
+	WEB_AUDIT_FOLLOW_ENABLED?: "true";
 	MCP_LEGACY_ENABLED: "true";
 	WEB_AUDIT_DEBUG?: "true";
 	TELEMETRY_ENVIRONMENT: "staging" | "production";
@@ -47,6 +48,7 @@ declare namespace Cloudflare {
 		TURNSTILE_SITEKEY: "1x00000000000000000000AA";
 		MCP_CACHE_BYPASS_ALLOWED: "true";
 		WEB_AUDIT_ENABLED: "true";
+		WEB_AUDIT_FOLLOW_ENABLED: "true";
 		MCP_LEGACY_ENABLED: "true";
 		WEB_AUDIT_DEBUG: "true";
 		TELEMETRY_ENVIRONMENT: "staging";
@@ -65,7 +67,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "TURNSTILE_SITEKEY" | "MCP_CACHE_BYPASS_ALLOWED" | "WEB_AUDIT_ENABLED" | "MCP_LEGACY_ENABLED" | "WEB_AUDIT_DEBUG" | "TELEMETRY_ENVIRONMENT" | "TURNSTILE_SECRET" | "SESSION_HMAC_SECRET" | "MCP_ENABLED" | "MCP_LIVE_SCORING_ENABLED">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "TURNSTILE_SITEKEY" | "MCP_CACHE_BYPASS_ALLOWED" | "WEB_AUDIT_ENABLED" | "WEB_AUDIT_FOLLOW_ENABLED" | "MCP_LEGACY_ENABLED" | "WEB_AUDIT_DEBUG" | "TELEMETRY_ENVIRONMENT" | "TURNSTILE_SECRET" | "SESSION_HMAC_SECRET" | "MCP_ENABLED" | "MCP_LIVE_SCORING_ENABLED">> {}
 }
 
 // Begin runtime types

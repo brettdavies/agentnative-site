@@ -94,3 +94,22 @@ export function fakeJobNamespace(): FakeJobNamespace {
   };
   return namespace as unknown as FakeJobNamespace;
 }
+
+/** Record every job claim made through `jobs`, by job name, in the returned array. */
+export function countClaims(jobs: FakeJobNamespace): string[] {
+  const claims: string[] = [];
+  const get = jobs.get.bind(jobs);
+  jobs.get = ((id: { name: string }) => {
+    const stub = get(id as unknown as DurableObjectId) as unknown as {
+      claim: (startedAt: string, deadlineMs: number) => Promise<unknown>;
+    };
+    return {
+      ...stub,
+      claim: (startedAt: string, deadlineMs: number) => {
+        claims.push(id.name);
+        return stub.claim(startedAt, deadlineMs);
+      },
+    };
+  }) as unknown as FakeJobNamespace['get'];
+  return claims;
+}

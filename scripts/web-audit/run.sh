@@ -13,6 +13,7 @@
 #   scripts/web-audit/run.sh --target https://anc.dev/    # audit a public target (post-release)
 #   scripts/web-audit/run.sh --json                       # full scorecard JSON
 #   scripts/web-audit/run.sh --site-type api              # force the declared site type
+#   scripts/web-audit/run.sh --no-follow-declarations     # skip the hosts the site declares
 #
 # Exit codes (with --check): 0 pass, 1 present-but-failing, 2 setup error, 3 not evaluable.
 # Add --no-build to reuse the existing dist/ (skips the rebuild).

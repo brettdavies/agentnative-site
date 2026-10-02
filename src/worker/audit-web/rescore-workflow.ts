@@ -27,6 +27,7 @@ import { rebuildWebAggregates, type WebAggregateEnv } from './aggregate';
 import { type AuditLogEnv, instrumentAuditEvents } from './audit-log';
 import { get as cacheGet, put as cachePut, canonicalTargetOf, isStale, keyFor } from './cache';
 import { runWebAudit } from './engine';
+import { effectiveFollow, type FollowSwitchEnv } from './follow-switch';
 import { homeTag, invokeCachedPurge, webDomainTag, webTag } from './hit-min-purge';
 import { loadWebAuditRegistry } from './registry';
 import { isSeededDomain, loadWebSeed, type WebSeedEntry } from './seed';
@@ -34,7 +35,7 @@ import { isSeededDomain, loadWebSeed, type WebSeedEntry } from './seed';
 // The Workflow shares the Worker's bindings; SCORE_KV is optional so the
 // registry-change gate degrades to plain staleness batching when it is
 // absent (e.g. a minimal test env).
-export type WebRescoreEnv = WebAggregateEnv & AuditLogEnv & { SCORE_KV?: KVNamespace };
+export type WebRescoreEnv = WebAggregateEnv & AuditLogEnv & FollowSwitchEnv & { SCORE_KV?: KVNamespace };
 
 // Narrow structural view of the Workflow binding (mirrors the RateLimit
 // pattern): enough surface for the trigger helper and its tests.
@@ -140,6 +141,7 @@ export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string):
   // or reflow re-audit from resetting the stored opt-in to the default in
   // the envelope and the R2 board metadata.
   const publicListing = await isSeededDomain(env, new URL(targetUrl).host);
+  const followDeclarations = effectiveFollow(env, true);
   let scorecard: unknown = null;
   let complete = false;
   for await (const event of instrumentAuditEvents(
@@ -149,10 +151,11 @@ export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string):
       siteType: null,
       publicListing,
       specVersion: SPEC_VERSION,
+      followDeclarations,
       perAuditDeadlineMs: RESCORE_AUDIT_DEADLINE_MS,
     }),
     env,
-    { target: targetUrl, surface: 'rescore' },
+    { target: targetUrl, surface: 'rescore', followDeclarations },
   )) {
     if (event.type === 'complete') {
       scorecard = event.scorecard;

@@ -40,15 +40,17 @@ interface Args {
   check?: string;
   json: boolean;
   siteType?: 'content' | 'api';
+  followDeclarations: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { target: DEFAULT_TARGET, json: false };
+  const args: Args = { target: DEFAULT_TARGET, json: false, followDeclarations: true };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--target' || arg === '-t') args.target = argv[++i] ?? args.target;
     else if (arg === '--check' || arg === '-c') args.check = argv[++i];
     else if (arg === '--json') args.json = true;
+    else if (arg === '--no-follow-declarations') args.followDeclarations = false;
     else if (arg === '--site-type') {
       const value = argv[++i];
       if (value === 'content' || value === 'api') args.siteType = value;
@@ -104,6 +106,7 @@ async function main(): Promise<number> {
     registry,
     siteType: args.siteType ?? null,
     specVersion: SPEC_VERSION,
+    followDeclarations: args.followDeclarations,
     fetchOptions: fetchImpl ? { fetchImpl } : {},
   });
 
@@ -134,6 +137,7 @@ async function main(): Promise<number> {
   console.log(`target       = ${scorecard.target_url}`);
   console.log(`site_type    = ${scorecard.site_type ?? 'auto'}`);
   console.log(`mcp_endpoint = ${scorecard.mcp_endpoint ?? '(none)'}`);
+  console.log(`follow       = ${scorecard.follow_declarations ?? '(not recorded)'}`);
   console.log(`score_pct    = ${scorecard.score_pct}`);
   console.log('--- results ---');
   for (const result of scorecard.results) {

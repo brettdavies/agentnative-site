@@ -169,11 +169,13 @@ export interface Env {
   // path; WEB_AUDIT_LIMITER_IP is the coarse per-IP fallback (30/60s) and
   // also the per-IP burst limiter the audit_website MCP tool keys directly.
   // WEB_AUDIT_ENABLED is the secret-backed kill switch covering both the
-  // webapp route and the MCP fresh path. Optional so tests that don't
-  // exercise the web audit can stub a minimal env.
+  // webapp route and the MCP fresh path. WEB_AUDIT_FOLLOW_ENABLED switches
+  // off only the following of declared hosts; audits keep running. Optional
+  // so tests that don't exercise the web audit can stub a minimal env.
   WEB_AUDIT_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   WEB_AUDIT_LIMITER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   WEB_AUDIT_ENABLED?: string;
+  WEB_AUDIT_FOLLOW_ENABLED?: string;
   // Web-rescore bindings. WEB_RESCORE_WORKFLOW is the Workflow that fans
   // out the weekly board rescore; WEB_RESCORE_SECRET (wrangler secret)
   // auths the POST /api/web-rescore deploy hook. Optional so tests that

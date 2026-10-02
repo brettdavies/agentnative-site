@@ -565,3 +565,27 @@ describe('wrangler.jsonc — MCP kill-switch binding shapes (plan U6)', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Follow kill switch binding shape
+// ---------------------------------------------------------------------------
+
+// The follow switch is a var on staging and a secret in production, created
+// before the release that reads it. A top-level var of the same name would
+// make that `wrangler secret put` fail with Cloudflare API 10053, and every
+// deploy would reset whatever the operator flipped.
+
+describe('wrangler.jsonc — WEB_AUDIT_FOLLOW_ENABLED binding shape', () => {
+  const config = loadWranglerConfig();
+  const staging = getStagingEnv(config);
+
+  test('env.staging.vars declares WEB_AUDIT_FOLLOW_ENABLED as the string "true"', () => {
+    const vars = staging.vars as Record<string, unknown> | undefined;
+    expect(vars?.WEB_AUDIT_FOLLOW_ENABLED).toBe('true');
+  });
+
+  test('the top-level vars block does not declare WEB_AUDIT_FOLLOW_ENABLED', () => {
+    const vars = (config.vars ?? {}) as Record<string, unknown>;
+    expect(Object.hasOwn(vars, 'WEB_AUDIT_FOLLOW_ENABLED')).toBe(false);
+  });
+});

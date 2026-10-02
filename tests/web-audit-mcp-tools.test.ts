@@ -21,8 +21,10 @@ import { resetCatalogCacheForTests } from '../src/worker/mcp/catalog';
 import type { McpEnv } from '../src/worker/mcp/server';
 import { resetWebRemediationCacheForTests } from '../src/worker/mcp/tools/web-remediation';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
-import { fakeJobNamespace } from './helpers/audit-job-state';
+import { countClaims, fakeJobNamespace } from './helpers/audit-job-state';
+import { withLogCapture } from './helpers/log-capture';
 import { getJsonToolContent, type JsonRpcBody, mcpInitialize, mcpRpc, resetMcpTestState } from './helpers/mcp-rpc';
+import { stubFetch } from './helpers/stub-fetch';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
 const DATA = join(REPO_ROOT, 'src', 'data', 'web-audit');
@@ -106,7 +108,11 @@ interface WebEnvOpts {
   // Serve the zero-check registry so a fresh audit finishes without probing.
   minimalRegistry?: boolean;
   kvSeed?: Record<string, string>;
+  /** Receives the key of every SCORE_KV write. */
+  kvPuts?: string[];
   jobs?: DurableObjectNamespace<AuditJob>;
+  /** The WEB_AUDIT_FOLLOW_ENABLED value; absent leaves the binding unset. */
+  followSwitch?: string;
 }
 
 async function makeEnv(opts: WebEnvOpts = {}): Promise<McpEnv> {
@@ -161,10 +167,14 @@ async function makeEnv(opts: WebEnvOpts = {}): Promise<McpEnv> {
       async get(key: string) {
         return opts.kvSeed?.[key] ?? null;
       },
-      async put() {},
+      async put(key: string) {
+        opts.kvPuts?.push(key);
+      },
+      async delete() {},
     } as unknown as KVNamespace,
     AUDIT_JOB: opts.jobs,
     WEB_AUDIT_ENABLED: (opts.webEnabled ?? true) ? 'true' : undefined,
+    WEB_AUDIT_FOLLOW_ENABLED: opts.followSwitch,
     MCP_ENABLED: (opts.mcpEnabled ?? true) ? 'true' : undefined,
     WEB_AUDIT_LIMITER_IP: {
       async limit() {
@@ -1391,5 +1401,415 @@ describe('audit_website: a run already in flight', () => {
     const res = await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, '203.0.113.9');
     expect(res.result?.isError).toBe(true);
     expect(res.result?.content?.[0]?.text).toContain('-32099');
+  });
+});
+
+describe('audit_website: the follow kill switch', () => {
+  const IP = '203.0.113.31';
+
+  async function freshRun(followSwitch: string | undefined) {
+    const store = new Map<string, string>();
+    const env = await makeEnv({ minimalRegistry: true, followSwitch });
+    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(store);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response('not found', { status: 404 })) as unknown as typeof fetch;
+    try {
+      const { result, records } = await withLogCapture(() =>
+        callTool(env, 'audit_website', { url: 'example.com' }, IP),
+      );
+      const stored = JSON.parse(store.get(await keyFor('https://example.com/', SPEC_VERSION)) as string) as {
+        scorecard: { follow_declarations?: boolean };
+      };
+      const run = records.map((r) => r.record).find((r) => r.scope === 'web-audit.run');
+      return { body: jsonContent(result), stored: stored.scorecard, run };
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  test('an absent or off switch stores and logs follow_declarations false; "true" stores and logs true', async () => {
+    for (const followSwitch of [undefined, 'false']) {
+      const { body, stored, run } = await freshRun(followSwitch);
+      expect(body.audited).toBe(true);
+      expect({ followSwitch, stored: stored.follow_declarations, run: run?.follow_declarations }).toEqual({
+        followSwitch,
+        stored: false,
+        run: false,
+      });
+    }
+    const on = await freshRun('true');
+    expect(on.stored.follow_declarations).toBe(true);
+    expect(on.run?.follow_declarations).toBe(true);
+  });
+});
+
+describe('audit_website with follow_declarations false', () => {
+  const IP = '203.0.113.41';
+  const NOT_SAVED = 'Not saved: declared hosts were not followed for this run.';
+
+  // A bucket that records every write, seeded with `prefill`.
+  function recordingBucket(prefill: Record<string, string> = {}) {
+    const store = new Map(Object.entries(prefill));
+    const puts: string[] = [];
+    const bucket = makeBucket(store);
+    const put = bucket.put.bind(bucket);
+    bucket.put = ((key: string, value: string) => {
+      puts.push(key);
+      return put(key, value);
+    }) as unknown as R2Bucket['put'];
+    return { bucket, store, puts };
+  }
+
+  function purgeContext() {
+    const purged: string[][] = [];
+    const ctx = {
+      waitUntil() {},
+      passThroughOnException() {},
+      props: {},
+      exports: {
+        Cached: {
+          async purgeHitMinTags(tags: string[]) {
+            purged.push(tags);
+            return { success: true, errors: [] };
+          },
+        },
+      },
+    } as unknown as ExecutionContext;
+    return { ctx, purged };
+  }
+
+  async function offline<T>(fn: () => Promise<T>): Promise<T> {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response('not found', { status: 404 })) as unknown as typeof fetch;
+    try {
+      return await fn();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  async function seeded(scoredAt: string, stored = false): Promise<Record<string, string>> {
+    const record = {
+      spec_version: SPEC_VERSION,
+      target_url: 'https://anc.dev/',
+      scorecard: {
+        schema_version: '0.2',
+        target_url: 'https://anc.dev/',
+        score_pct: 64,
+        results: [],
+        public_listing: stored,
+      },
+      scored_at: scoredAt,
+    };
+    return { [await keyFor('https://anc.dev/', SPEC_VERSION)]: JSON.stringify(record) };
+  }
+
+  // anc.dev is the env's seeded domain, so a saved run would also rebuild both board aggregates.
+  async function run(args: Record<string, unknown>, opts: WebEnvOpts & { prefill?: Record<string, string> } = {}) {
+    const { prefill, ...envOpts } = opts;
+    const recorded = recordingBucket(prefill);
+    const env = await makeEnv({ minimalRegistry: true, followSwitch: 'true', ...envOpts });
+    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = recorded.bucket;
+    const purge = purgeContext();
+    const { result, records } = await offline(() =>
+      withLogCapture(() =>
+        runWithHitMinPurge(purge.ctx, async () => {
+          const body = await callTool(env, 'audit_website', { url: 'anc.dev', ...args }, IP);
+          await flushHitMinPurge();
+          return body;
+        }),
+      ),
+    );
+    const runRecord = records.map((r) => r.record).find((r) => r.scope === 'web-audit.run');
+    return {
+      result,
+      body: result.result?.isError ? null : jsonContent(result),
+      puts: recorded.puts,
+      purged: purge.purged,
+      runRecord,
+    };
+  }
+
+  test('returns a scorecard recording follow_declarations false with no result URLs, and writes, purges, and rebuilds nothing', async () => {
+    const out = await run({ follow_declarations: false });
+    expect(out.body).toMatchObject({ audited: true, scorecard_url: null, markdown_url: null, json_url: null });
+    expect((out.body?.scorecard as { follow_declarations: boolean }).follow_declarations).toBe(false);
+    expect(String(out.body?.summary_html)).toContain(NOT_SAVED);
+    expect(out.puts).toEqual([]);
+    expect(out.purged).toEqual([]);
+    expect(out.runRecord?.follow_declarations).toBe(false);
+    // Control: the same audit following its declarations writes the domain and both board aggregates.
+    const saved = await run({});
+    expect(saved.puts).toEqual(
+      expect.arrayContaining([
+        await keyFor('https://anc.dev/', SPEC_VERSION),
+        `audits/web/leaderboard/${SPEC_VERSION}.json`,
+        `audits/web/leaderboard-frontpage/${SPEC_VERSION}.json`,
+      ]),
+    );
+    expect(saved.purged.length).toBeGreaterThan(0);
+    expect(saved.runRecord?.follow_declarations).toBe(true);
+  });
+
+  test('a stored scorecard inside the serve window does not answer it, and with audits disabled it is told so', async () => {
+    const fresh = await run({ follow_declarations: false }, { prefill: await seeded(new Date().toISOString()) });
+    expect(fresh.body).toMatchObject({ audited: true, source: 'fresh-audit', scorecard_url: null });
+    for (const scoredAt of [new Date().toISOString(), new Date(Date.now() - 600_000).toISOString()]) {
+      const disabled = await run(
+        { follow_declarations: false },
+        { webEnabled: false, prefill: await seeded(scoredAt) },
+      );
+      expect(disabled.body).toMatchObject({ audited: false });
+      expect(String(disabled.body?.message)).toContain('disabled');
+      expect(disabled.body).not.toHaveProperty('scorecard');
+    }
+  });
+
+  test('with no cf-connecting-ip it is refused with -32099 and runs no audit', async () => {
+    const recorded = recordingBucket();
+    const env = await makeEnv({ minimalRegistry: true, followSwitch: 'true' });
+    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = recorded.bucket;
+    const { result, records } = await offline(() =>
+      withLogCapture(() => callTool(env, 'audit_website', { url: 'anc.dev', follow_declarations: false })),
+    );
+    expect(result.result?.isError).toBe(true);
+    expect(result.result?.content?.[0]?.text).toContain('-32099');
+    expect(result.result?.content?.[0]?.text).toContain('cf-connecting-ip');
+    expect(records.filter((r) => r.record.scope === 'web-audit.run')).toEqual([]);
+  });
+
+  test('with the hourly window exhausted it is refused and runs no audit', async () => {
+    const bucket = Math.floor(Date.now() / 3_600_000);
+    const out = await run({ follow_declarations: false }, { kvSeed: { [`audit:web:${IP}:${bucket}`]: '30' } });
+    expect(out.result.result?.isError).toBe(true);
+    expect(out.result.result?.content?.[0]?.text).toContain('30 fresh audits per hour');
+    expect(out.runRecord).toBeUndefined();
+  });
+
+  test('beside a followed run in flight it runs its own transient audit and never attaches', async () => {
+    const startedAt = new Date().toISOString();
+    const jobs = fakeJobNamespace();
+    const job = jobs.get(jobs.idFromName('web:anc.dev'));
+    const claim = await job.claim(startedAt, 90_000);
+    if (!claim.claimed) throw new Error('expected a fresh claim');
+    await job.append(claim.run, { type: 'accepted', lane: 'web', target: 'anc.dev', started_at: startedAt });
+    const followed = {
+      type: 'complete',
+      kind: 'web',
+      tier: 'live',
+      target: 'anc.dev',
+      scorecard_url: 'https://anc.dev/score/anc.dev',
+      markdown_url: 'https://anc.dev/score/anc.dev/md',
+      json_url: 'https://anc.dev/score/anc.dev/json',
+      freshness: { cached: false, scored_at: startedAt, refresh_after: null },
+      spec_version: SPEC_VERSION,
+      scorecard: { target_url: 'https://anc.dev/', score_pct: 64, results: [], follow_declarations: true },
+    } as unknown as AuditEvent;
+    setTimeout(() => void job.append(claim.run, followed), 20);
+    const out = await run(
+      { follow_declarations: false },
+      { jobs, kvSeed: { 'inflight:web:anc.dev': JSON.stringify({ started_at: startedAt, job: 'web:anc.dev' }) } },
+    );
+    expect(out.body).toMatchObject({
+      audited: true,
+      source: 'fresh-audit',
+      scorecard_url: null,
+      markdown_url: null,
+      json_url: null,
+    });
+    expect(out.body).not.toHaveProperty('attached');
+    expect((out.body?.scorecard as { follow_declarations: boolean }).follow_declarations).toBe(false);
+    expect(out.runRecord?.follow_declarations).toBe(false);
+  });
+
+  test('it claims no job and writes no in-flight flag, so no followed caller can join it', async () => {
+    const jobs = fakeJobNamespace();
+    const claims = countClaims(jobs);
+    const kvPuts: string[] = [];
+    const out = await run({ follow_declarations: false }, { jobs, kvPuts });
+    expect(out.body).toMatchObject({ audited: true, scorecard_url: null });
+    expect(claims).toEqual([]);
+    expect(jobs.jobs.size).toBe(0);
+    expect(kvPuts.filter((key) => key.startsWith('inflight:'))).toEqual([]);
+    // Control: the same call following its declarations claims the site's job and marks its flag.
+    const followedJobs = fakeJobNamespace();
+    const followedClaims = countClaims(followedJobs);
+    const followedPuts: string[] = [];
+    await run({}, { jobs: followedJobs, kvPuts: followedPuts });
+    expect(followedClaims).toEqual(['web:anc.dev']);
+    expect(followedPuts).toContain('inflight:web:anc.dev');
+  });
+
+  test('with public_listing omitted it runs against a stored opt-in, carries that listing, and writes nothing', async () => {
+    const out = await run(
+      { follow_declarations: false },
+      { prefill: await seeded(new Date(Date.now() - 600_000).toISOString(), true) },
+    );
+    expect(out.body).toMatchObject({ audited: true, source: 'fresh-audit', scorecard_url: null });
+    expect((out.body?.scorecard as { public_listing: boolean }).public_listing).toBe(true);
+    expect(out.puts).toEqual([]);
+    expect(out.purged).toEqual([]);
+  });
+
+  test('a public_listing that differs from the stored choice is rejected; the stored choice runs', async () => {
+    const prefill = await seeded(new Date(Date.now() - 600_000).toISOString(), false);
+    const refused = await run({ follow_declarations: false, public_listing: true }, { prefill });
+    expect(refused.result.result?.isError).toBe(true);
+    expect(refused.result.result?.content?.[0]?.text).toContain('public_listing');
+    expect(refused.puts).toEqual([]);
+    const same = await run({ follow_declarations: false, public_listing: false }, { prefill });
+    expect(same.body).toMatchObject({ audited: true, scorecard_url: null });
+  });
+
+  test('a non-boolean follow_declarations is rejected by input validation', async () => {
+    const env = await makeEnv();
+    const res = await callTool(env, 'audit_website', { url: 'example.com', follow_declarations: 'no' }, IP);
+    const rejected = res.error !== undefined || res.result?.isError === true;
+    expect(rejected).toBe(true);
+    expect(JSON.stringify(res)).toContain('follow_declarations');
+  });
+});
+
+describe('audit_website: a followed fresh run that fails', () => {
+  const IP = '203.0.113.61';
+
+  async function failedCall(opts: WebEnvOpts, answer: () => Response) {
+    const env = await makeEnv({ minimalRegistry: true, followSwitch: 'true', ...opts });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = stubFetch(answer);
+    try {
+      return await callTool(env, 'audit_website', { url: 'example.com' }, IP);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  test('an unreachable target says the audit failed, gives the reason, and ends by asking to check the address', async () => {
+    const res = await failedCall({}, () => new Response('', { status: 530 }));
+    expect(res.result?.isError).toBe(true);
+    const text = res.result?.content?.[0]?.text ?? '';
+    expect(text).toStartWith(
+      'the audit failed; nothing was cached. https://example.com/ did not answer any probe (every response was a Cloudflare edge error',
+    );
+    expect(text).toEndWith(' Check the address and try again.');
+  });
+
+  test('an engine that throws says the audit failed, gives the error as a sentence, and ends by asking to retry', async () => {
+    const res = await failedCall({ failRegistry: true }, () => new Response('not found', { status: 404 }));
+    expect(res.result?.isError).toBe(true);
+    expect(res.result?.content?.[0]?.text).toBe(
+      'the audit failed; nothing was cached. web-audit registry fetch failed: 500. Try again in a moment.',
+    );
+  });
+});
+
+describe('audit_website discloses third-party probing', () => {
+  test('the description names the caps, tells MCP wire probes from API anchor GETs, and offers the opt-out', async () => {
+    const env = await makeEnv();
+    const { body } = await mcpRpc(env, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
+    const tools = body.result?.tools as
+      | Array<{ name: string; description: string; inputSchema: { properties: Record<string, { type?: string }> } }>
+      | undefined;
+    const tool = tools?.find((t) => t.name === 'audit_website');
+    const description = tool?.description ?? '';
+    expect(description).toContain('also contacts third-party hosts the site declares');
+    expect(description).toContain(
+      "wire-probed (JSON-RPC POSTs, a CORS preflight) only after one of those documents on the endpoint's own host names the endpoint",
+    );
+    expect(description).toContain("one GET to a nonsense path on the site's declaration alone");
+    expect(description).toContain(
+      'at most 4 off-origin hosts with at most 12 follow-phase document requests inside a 6-second follow window',
+    );
+    expect(description).toContain("following lengthens an audit's wall time");
+    expect(description).toContain('WEB_AUDIT_FOLLOW_ENABLED');
+    expect(tool?.inputSchema.properties.follow_declarations?.type).toBe('boolean');
+  });
+});
+
+describe('a website is audited and read at its https origin', () => {
+  const IP = '203.0.113.51';
+
+  async function stored(url: string, scorePct: number, scoredAt = new Date().toISOString()) {
+    return {
+      [await keyFor(url, SPEC_VERSION)]: {
+        spec_version: SPEC_VERSION,
+        target_url: url,
+        scorecard: { target_url: url, score_pct: scorePct, results: [] },
+        scored_at: scoredAt,
+      },
+    };
+  }
+
+  // A fresh audit_website call against an offline engine; every fetched URL is recorded.
+  async function freshCall(url: string, prefill: Map<string, string> = new Map()) {
+    const jobs = fakeJobNamespace();
+    const claims = countClaims(jobs);
+    const env = await makeEnv({ minimalRegistry: true, jobs });
+    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(prefill);
+    const fetched: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = stubFetch((requested) => {
+      fetched.push(requested);
+      return new Response('not found', { status: 404 });
+    });
+    try {
+      const body = jsonContent(await callTool(env, 'audit_website', { url }, IP));
+      return { body, store: prefill, claims, fetched };
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  test('audit_website with an http:// URL audits https://<host>/, caches under the https key, and claims the job a transact run claims', async () => {
+    const { body, store, claims, fetched } = await freshCall('http://example.com/docs');
+    expect(body).toMatchObject({
+      audited: true,
+      source: 'fresh-audit',
+      target: 'example.com',
+      scorecard_url: 'https://anc.dev/score/example.com',
+    });
+    expect((body.scorecard as { target_url: string }).target_url).toBe('https://example.com/');
+    expect([...store.keys()]).toContain(await keyFor('https://example.com/', SPEC_VERSION));
+    expect([...store.keys()]).not.toContain(await keyFor('http://example.com/', SPEC_VERSION));
+    expect(fetched[0]).toBe('https://example.com/');
+    expect(fetched.filter((requested) => requested.startsWith('http://example.com'))).toEqual([]);
+    // The transact endpoint keys its job on the bare host too, so the two surfaces share one run.
+    expect(claims).toEqual(['web:example.com']);
+  });
+
+  test('a fresh record under the http key does not answer audit_website', async () => {
+    const httpKey = await keyFor('http://example.com/', SPEC_VERSION);
+    const prefill = new Map([[httpKey, JSON.stringify((await stored('http://example.com/', 12))[httpKey])]]);
+    const { body, store } = await freshCall('http://example.com/', prefill);
+    expect(body).toMatchObject({ audited: true, source: 'fresh-audit' });
+    expect(JSON.parse(store.get(httpKey) ?? '{}').scorecard.score_pct).toBe(12);
+  });
+
+  test('get_website_audit reads an http:// URL from the https record', async () => {
+    const env = await makeEnv({ cachePrefill: await stored('https://example.com/', 71) });
+    const body = jsonContent(await callTool(env, 'get_website_audit', { url: 'http://example.com/' }));
+    expect(body).toMatchObject({
+      found: true,
+      target: 'example.com',
+      scorecard_url: 'https://anc.dev/score/example.com',
+    });
+    expect((body.scorecard as { score_pct: number }).score_pct).toBe(71);
+  });
+
+  test('a record stored under an http key is never returned', async () => {
+    const env = await makeEnv({ cachePrefill: await stored('http://example.com/', 12) });
+    for (const url of ['example.com', 'http://example.com/', 'https://example.com/']) {
+      const body = jsonContent(await callTool(env, 'get_website_audit', { url }));
+      expect({ url, found: body.found }).toEqual({ url, found: false });
+    }
+  });
+
+  test('a scheme other than http or https is refused, not upgraded', async () => {
+    const env = await makeEnv();
+    for (const tool of ['get_website_audit', 'audit_website']) {
+      const res = await callTool(env, tool, { url: 'ftp://example.com/' }, IP);
+      expect(res.result?.isError).toBe(true);
+      expect(res.result?.content?.[0]?.text).toBe('scheme ftp: is not http(s)');
+    }
   });
 });

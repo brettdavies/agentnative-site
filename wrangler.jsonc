@@ -271,6 +271,10 @@
   // declaration, not a behavior change. Flip it with a committed edit through
   // a PR, or transiently with `wrangler deploy --var`; never `secret put`.
   // Procedure and hazards: docs/runbooks/mcp-operator.md § Kill switches.
+  //
+  // WEB_AUDIT_FOLLOW_ENABLED is a production secret too (env.staging.vars
+  // binds it "true"), so it never appears in this block; the guard is
+  // tests/wrangler-config.test.ts.
   "vars": {
     "TURNSTILE_SITEKEY": "0x4AAAAAADQFMBoVm56-OPuQ",
     "MCP_LEGACY_ENABLED": "true",
@@ -488,6 +492,13 @@
         "TURNSTILE_SITEKEY": "1x00000000000000000000AA",
         "MCP_CACHE_BYPASS_ALLOWED": "true",
         "WEB_AUDIT_ENABLED": "true",
+        // WEB_AUDIT_FOLLOW_ENABLED lets the web audit follow the hosts a
+        // site declares (its MCP server, its API host). Bound "true" here;
+        // production carries it as a `wrangler secret put` value (no --env
+        // flag) and no top-level var, so it flips without a deploy. Absent
+        // reads as off: audits still run and are scored without the
+        // declared hosts.
+        "WEB_AUDIT_FOLLOW_ENABLED": "true",
         "MCP_LEGACY_ENABLED": "true",
         // Verbose web-audit logging (per-check + discovery-evidence lines
         // in Workers Logs) is always on for staging. Production stays at

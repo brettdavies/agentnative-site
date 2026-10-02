@@ -49,7 +49,11 @@ describe('instrumentAuditEvents', () => {
     try {
       const input: AuditEvent[] = [{ type: 'discovery', endpoint: null, evidence: [] }, RESULT_EVENT, COMPLETE_EVENT];
       const output = await collect(
-        instrumentAuditEvents(eventsOf(input), {}, { target: 'https://example.com/', surface: 'stream' }),
+        instrumentAuditEvents(
+          eventsOf(input),
+          {},
+          { target: 'https://example.com/', surface: 'stream', followDeclarations: true },
+        ),
       );
       expect(output).toEqual(input);
       const lines = logs.records.map((r) => r.record);
@@ -58,8 +62,26 @@ describe('instrumentAuditEvents', () => {
       expect(summaries[0].terminal).toBe('complete');
       expect(summaries[0].surface).toBe('stream');
       expect(summaries[0].checks).toEqual({ pass: 1 });
+      expect(summaries[0].follow_declarations).toBe(true);
       expect(lines.some((l) => l.scope === 'web-audit.check')).toBe(false);
       expect(lines.some((l) => l.scope === 'web-audit.discovery')).toBe(false);
+    } finally {
+      logs.restore();
+    }
+  });
+
+  test('the run summary records the follow state the audit ran with', async () => {
+    const logs = captureLogs();
+    try {
+      await collect(
+        instrumentAuditEvents(
+          eventsOf([COMPLETE_EVENT]),
+          {},
+          { target: 'x', surface: 'mcp', followDeclarations: false },
+        ),
+      );
+      const summary = logs.records.map((r) => r.record).find((l) => l.scope === 'web-audit.run');
+      expect(summary?.follow_declarations).toBe(false);
     } finally {
       logs.restore();
     }
@@ -70,7 +92,11 @@ describe('instrumentAuditEvents', () => {
     try {
       const input: AuditEvent[] = [{ type: 'discovery', endpoint: null, evidence: [] }, RESULT_EVENT, COMPLETE_EVENT];
       await collect(
-        instrumentAuditEvents(eventsOf(input), { WEB_AUDIT_DEBUG: 'true' }, { target: 'x', surface: 'mcp' }),
+        instrumentAuditEvents(
+          eventsOf(input),
+          { WEB_AUDIT_DEBUG: 'true' },
+          { target: 'x', surface: 'mcp', followDeclarations: true },
+        ),
       );
       const lines = logs.records.map((r) => r.record);
       expect(lines.some((l) => l.scope === 'web-audit.discovery')).toBe(true);
@@ -87,7 +113,7 @@ describe('instrumentAuditEvents', () => {
         instrumentAuditEvents(
           eventsOf([{ type: 'unreachable', reason: 'silence' }]),
           {},
-          { target: 'x', surface: 'stream' },
+          { target: 'x', surface: 'stream', followDeclarations: true },
         ),
       );
       const lines = logs.records.map((r) => r.record);
@@ -104,9 +130,9 @@ describe('instrumentAuditEvents', () => {
         yield RESULT_EVENT;
         throw new Error('boom');
       }
-      await expect(collect(instrumentAuditEvents(explodes(), {}, { target: 'x', surface: 'mcp' }))).rejects.toThrow(
-        'boom',
-      );
+      await expect(
+        collect(instrumentAuditEvents(explodes(), {}, { target: 'x', surface: 'mcp', followDeclarations: true })),
+      ).rejects.toThrow('boom');
       const lines = logs.records.map((r) => r.record);
       const summary = lines.find((l) => l.scope === 'web-audit.run');
       expect(summary?.terminal).toBe('none');

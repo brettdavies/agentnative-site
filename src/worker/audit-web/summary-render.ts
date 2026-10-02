@@ -32,6 +32,7 @@ import {
   TIER_LABELS,
   type WebSummaryModel,
 } from './summary-model';
+import { transientReasonHtml } from './summary-transient';
 
 function tierChip(keyword: string | undefined): string {
   if (!keyword || !(keyword in TIER_LABELS)) return '';
@@ -71,14 +72,23 @@ function categoryPill(category: SummaryCategory): CategoryPill {
 /** HTML body for a website result page. */
 export function buildWebSummaryBody(input: WebSummaryInput): string {
   const { model, freshness, freshnessState } = webSummaryView(input);
-  const spine: SpineInput = input.spine ?? {
-    target: input.domain,
-    lane: 'web',
-    tier: 'cache',
-    freshnessHtml: `<span data-web-audit-freshness>${freshnessHtml(freshnessState)}</span>`,
-    linked: true,
-    control: null,
-  };
+  const spine: SpineInput = input.transient
+    ? {
+        target: input.domain,
+        lane: 'web',
+        tier: 'live',
+        freshnessHtml: `<span data-web-audit-transient>${transientReasonHtml(input.transient)}</span>`,
+        linked: false,
+        control: null,
+      }
+    : (input.spine ?? {
+        target: input.domain,
+        lane: 'web',
+        tier: 'cache',
+        freshnessHtml: `<span data-web-audit-freshness>${freshnessHtml(freshnessState)}</span>`,
+        linked: true,
+        control: null,
+      });
 
   let html = `<article class="container scorecard-page" data-web-audit-result>${renderResultSpine(spine)}${renderBigScore(
     {
@@ -123,11 +133,17 @@ ${auditContextEl(model, freshness)}
 
   html += `  </ol>
 </section>
-<section class="scorecard-cta">
+`;
+  // A result rendered in place has no page to re-audit from and runs on a
+  // page that loads no in-page tools.
+  if (!input.transient) {
+    html += `<section class="scorecard-cta">
   <p class="scorecard-cta__note">${WEB_CTA_NOTE_HTML}</p>
 </section>
 <script defer src="/js/webmcp.js"></script>
-</article>`;
+`;
+  }
+  html += '</article>';
   return html;
 }
 

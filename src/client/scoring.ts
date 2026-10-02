@@ -6,6 +6,9 @@
 //     |-- a result kept for this target (no URL of its own) ... restore it
 //     |-- a stashed click ...................................... POST with its token
 //     '-- otherwise ............................................ POST without one (probe)
+//   every request carries the follow choice of the run the tab last started,
+//   so a refresh mid-run neither drops an opt-out nor answers it with a
+//   followed result
 //   answer
 //     |-- JSON 200 envelope ....... hit: the reward or cached line, forward after the floor
 //     |-- JSON 202 in progress .... ask again every 3 s until the answer changes
@@ -14,7 +17,8 @@
 //     |-- JSON error .............. failed: the bounce panel, Run again
 //     '-- NDJSON stream ........... rows as lines land; the terminal line forwards,
 //                                   renders inline when there is no URL, or fails
-//   Start or Run again: acquire a token on the click, then POST it
+//   Start or Run again: acquire a token on the click, then POST it with the
+//   visitor's follow choice, so a run that saved nothing reruns the same way
 //
 // Only a click spends a token: a probe never carries one, and a failed or
 // waiting state holds until the next gesture. A stream reached by a probe is
@@ -26,9 +30,12 @@ import { apiScorePath, type Lane, scoreMarkdownPath } from '../shared/audit-rout
 import { ndjsonValues } from '../shared/ndjson';
 import { CLI_PHASE_LABEL, LANE_EXPECTATION, LANE_LABEL, RECLASSIFIED } from '../shared/scoring-copy';
 import {
+  buildProbeBody,
   buildScoreBody,
   clearInlineResult,
   enteredLaneOf,
+  followOf,
+  rememberFollow,
   stashInlineResult,
   take,
   takeInlineResult,
@@ -46,7 +53,13 @@ const MAX_POLLS = 20;
 /** A request that never answers would leave the page on its first-paint line. */
 const REQUEST_TIMEOUT_MS = 30_000;
 
-type Choice = { listing: boolean | null; refresh: boolean };
+type Choice = { listing: boolean | null; refresh: boolean; follow: boolean };
+
+/** Why a result renders here: a CLI name that belongs to a curated tool, or a website run that saved nothing. */
+const INLINE_SUBLINE: Readonly<Record<Lane, string>> = {
+  cli: 'This name belongs to a curated tool; this result has no URL.',
+  web: 'This result was not saved.',
+};
 
 type JsonAnswer = Partial<AuditEnvelope> & { error?: AuditError; in_progress?: boolean };
 
@@ -64,6 +77,8 @@ class ScoringRun {
   private polls = 0;
   private checks = 0;
   private startBound = false;
+  // The visitor's follow choice, repeated by Run again.
+  private follow = true;
 
   constructor(
     private readonly view: ScoringView,
@@ -75,9 +90,11 @@ class ScoringRun {
   ) {}
 
   begin(): void {
+    this.follow = followOf(this.target) ?? true;
     const kept = takeInlineResult(this.target);
     if (kept) {
-      this.inline(kept);
+      this.follow = kept.follow;
+      this.inline(kept.html);
       return;
     }
     const entered = enteredLaneOf(this.target);
@@ -88,14 +105,16 @@ class ScoringRun {
     const stashed = take(this.target);
     if (stashed) {
       if (!entered || entered === this.lane) this.view.say('Queued…');
-      void this.post(stashed.token, { listing: stashed.listing, refresh: stashed.refresh });
+      this.follow = stashed.follow;
+      void this.post(stashed.token, { listing: stashed.listing, refresh: stashed.refresh, follow: stashed.follow });
       return;
     }
     void this.post(null, null);
   }
 
   private async post(token: string | null, choice: Choice | null): Promise<void> {
-    const body = token && choice ? buildScoreBody(this.target, token, choice) : { target: this.target };
+    const body =
+      token && choice ? buildScoreBody(this.target, token, choice) : buildProbeBody(this.target, this.follow);
     // Each attempt owns the floor and the count: a second run behind Run again
     // would otherwise forward at once and carry the first run's checks on.
     this.requestedAt = Date.now();
@@ -282,11 +301,11 @@ class ScoringRun {
     this.forward(event.scorecard_url, event.tier === 'live' ? event.freshness.scored_at : null);
   }
 
-  /** A result whose name belongs to a curated tool: it has no URL, so it renders here and survives a refresh. */
+  /** A result with no URL of its own renders here and survives a refresh. */
   private inline(html: string): void {
-    stashInlineResult(this.target, html);
+    stashInlineResult(this.target, { html, follow: this.follow });
     this.view.state('done');
-    this.view.subline('This name belongs to a curated tool; this result has no URL.');
+    this.view.subline(INLINE_SUBLINE[this.lane]);
     this.view.say('Done.');
     this.view.inline(html);
     this.view.actions({ start: 'Run again', other: true });
@@ -375,7 +394,8 @@ class ScoringRun {
     this.view.state('running');
     this.view.actions({ start: null, other: false });
     this.view.say('Queued…');
-    await this.post(token, { listing: null, refresh: this.refresh });
+    rememberFollow(this.target, this.follow);
+    await this.post(token, { listing: null, refresh: this.refresh, follow: this.follow });
   }
 }
 

@@ -183,7 +183,8 @@ same input. The cost difference (registry/cache lookup vs container run) is the 
 
 Four tools score a website and its MCP server against the same eight principles as a CLI, mirroring the scorecard
 surface above. The web audit runs entirely as in-Worker network probes (HTTP, JSON-RPC over streamable-HTTP, CORS,
-DNS-over-HTTPS): no container, nothing crawled.
+DNS-over-HTTPS): no container, nothing crawled. A site is read and audited at its https origin: an `http://` URL is
+upgraded, so it names the same record as the bare host.
 
 - `get_website_audit` (cheap read): pass a `url`; returns `{ found: true, ...envelope }` with `kind: "web"` on a cache
   hit, `{ found: false, in_progress: true, started_at }` while an audit for that host is already running, or
@@ -191,6 +192,9 @@ DNS-over-HTTPS): no container, nothing crawled.
 - `audit_website` (metered fresh audit): runs a fresh audit and returns a single terminal envelope. There are no
   progress notifications: the server runs stateless per-request. A cached result younger than one minute is returned
   without re-running. Gated by `WEB_AUDIT_ENABLED` + `WEB_AUDIT_LIMITER_IP` (30 per hour per IP, no anon fallback).
+  `follow_declarations` (default `true`) follows the hosts the site declares; `false` audits only the site and returns
+  a transient result that is never cached or listed, carries `null` for `scorecard_url`, `markdown_url`, and
+  `json_url`, and refuses a `public_listing` that differs from the stored choice.
 - `list_website_audits`: the website half of the leaderboard, curated by default; `view: "all"` adds the user-submitted
   domains that opted in to public listing. Each entry carries `scorecard_url`.
 - `get_web_remediation`: the canonical fix for a web-audit `check_id`. Pass the failing row's `evidence` and it is
@@ -199,6 +203,15 @@ DNS-over-HTTPS): no container, nothing crawled.
 ```jsonc
 // tools/call audit_website { "url": "anc.dev" }
 ```
+
+**Declared hosts.** By default a website audit also contacts third-party hosts the site declares. An MCP server named
+in the site's server card gets GETs for the documents that could confirm it (a card at `<endpoint>/server-card`, its
+host's `/.well-known/ai-catalog.json`, RFC 9728 protected-resource metadata), and it is wire-probed (JSON-RPC POSTs, a
+CORS preflight) only after one of those documents on the endpoint's own host names the endpoint. An API host anchored
+in the site's api-catalog gets document fetches (its OpenAPI description) and one GET to a nonsense path on the site's
+declaration alone. Each audit follows at most 4 off-origin hosts with at most 12 follow-phase document requests inside
+a 6-second follow window, so following lengthens an audit's wall time. The operator can switch following off for every
+audit (`WEB_AUDIT_FOLLOW_ENABLED`); the scorecard's `follow_declarations` records whether the audit followed.
 
 **Freshness.** Every result that carries a scorecard carries a `freshness` object beside it, outside the scorecard
 itself: `cached` is `true` for a served cache entry or a listing-only flag patch and `false` for a result the call

@@ -15,6 +15,11 @@
 // this file pins handshake + tool/resource shape + instructions drift.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { FOLLOW_SLICE_MS } from '../src/worker/audit-web/follow';
+import { FOLLOW_DISCLOSURE } from '../src/worker/audit-web/follow-disclosure';
+import { MAX_FOLLOW_REQUESTS, MAX_FOLLOWED_HOSTS } from '../src/worker/audit-web/follow-requests';
 import type { McpEnv } from '../src/worker/mcp/server';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 import {
@@ -233,6 +238,28 @@ describe('MCP instructions string (drift gate per KTD-8)', () => {
     expect(instructions).toContain('text/event-stream');
     expect(instructions).toContain('tools/list');
     expect(instructions).toContain('resources/templates/list');
+  });
+
+  test('instructions disclose third-party probing with the follow caps, word for word as the tool does', async () => {
+    const env = makeEnv();
+    const result = await initialize(env);
+    const instructions = result.result?.instructions ?? '';
+    expect(instructions).toContain(FOLLOW_DISCLOSURE);
+    expect(instructions).toContain(
+      'at most 4 off-origin hosts with at most 12 follow-phase document requests inside a 6-second follow window',
+    );
+    expect(instructions).toContain("following lengthens an audit's wall time");
+    expect(instructions).toContain('only the following of declared hosts (WEB_AUDIT_FOLLOW_ENABLED)');
+  });
+
+  test('the published docs state the follow caps the engine enforces', async () => {
+    const flat = async (path: string) =>
+      (await readFile(join(import.meta.dir, '..', path), 'utf8')).replace(/\s+/g, ' ');
+    expect(await flat('content/mcp-skill.md')).toContain(
+      `at most ${MAX_FOLLOWED_HOSTS} off-origin hosts with at most ${MAX_FOLLOW_REQUESTS} follow-phase document ` +
+        `requests inside a ${FOLLOW_SLICE_MS / 1000}-second follow window`,
+    );
+    expect(await flat('content/_audit-web.md')).toContain(`at most ${MAX_FOLLOWED_HOSTS} per audit`);
   });
 
   test('instructions names both rate-limit bindings + both kill switches', async () => {

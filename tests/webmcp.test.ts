@@ -34,6 +34,7 @@ type Stub = {
   attrs: Record<string, string>;
   value: string;
   checked: boolean;
+  disabled: boolean;
   hidden: boolean;
   textContent: string;
   children: Stub[];
@@ -73,6 +74,7 @@ function stubEl(init: {
   attrs?: Record<string, string>;
   value?: string;
   checked?: boolean;
+  disabled?: boolean;
   hidden?: boolean;
   textContent?: string;
   children?: Stub[];
@@ -82,6 +84,7 @@ function stubEl(init: {
     attrs,
     value: init.value ?? '',
     checked: init.checked ?? false,
+    disabled: init.disabled ?? false,
     hidden: init.hidden ?? false,
     textContent: init.textContent ?? '',
     children: init.children ?? [],
@@ -595,12 +598,43 @@ describe('execute helpers (Document stub)', () => {
     const page = homeDoc();
     fillTarget(page.doc, { target: 'ripgrep' });
     const state = JSON.parse(getPageState(page.doc, '/')) as Record<string, unknown>;
-    expect(state).toEqual({ path: '/', surface: 'cli', target: 'ripgrep', listing: false });
+    expect(state).toEqual({ path: '/', surface: 'cli', target: 'ripgrep', follow_declarations: null, listing: false });
+  });
+
+  test('get_page_state reports the follow checkbox beside the listing box, and no listing choice while that box is disabled', () => {
+    const page = homeDoc({ surface: 'web', target: 'stripe.dev', listing: true });
+    const follow = stubEl({ attrs: { 'data-audit-follow': '', type: 'checkbox' }, checked: true });
+    page.form.children.push(follow);
+    const on = JSON.parse(getPageState(page.doc, '/audit')) as Record<string, unknown>;
+    expect(on).toEqual({
+      path: '/audit',
+      surface: 'web',
+      target: 'stripe.dev',
+      follow_declarations: true,
+      listing: true,
+    });
+    // Unticking follow disables the listing box, so the submit sends no listing.
+    follow.checked = false;
+    page.listing.disabled = true;
+    const off = JSON.parse(getPageState(page.doc, '/audit')) as Record<string, unknown>;
+    expect(off).toEqual({
+      path: '/audit',
+      surface: 'web',
+      target: 'stripe.dev',
+      follow_declarations: false,
+      listing: null,
+    });
   });
 
   test('a page with no entry form reports no surface rather than guessing one', () => {
     const state = JSON.parse(getPageState(stubDoc([]), '/score/anc.dev')) as Record<string, unknown>;
-    expect(state).toEqual({ path: '/score/anc.dev', surface: null, target: '', listing: null });
+    expect(state).toEqual({
+      path: '/score/anc.dev',
+      surface: null,
+      target: '',
+      follow_declarations: null,
+      listing: null,
+    });
   });
 
   test('execute returns a DOMString and never calls fetch or reaches the progress page', async () => {

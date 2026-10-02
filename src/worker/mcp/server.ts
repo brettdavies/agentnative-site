@@ -56,6 +56,7 @@ export interface McpEnv {
   WEB_AUDIT_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   WEB_AUDIT_LIMITER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   WEB_AUDIT_ENABLED?: string;
+  WEB_AUDIT_FOLLOW_ENABLED?: string;
 }
 
 type McpHandler = {

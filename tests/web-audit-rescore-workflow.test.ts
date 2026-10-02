@@ -535,6 +535,24 @@ describe('public listing on re-audit writes', () => {
   });
 });
 
+describe('the follow kill switch on rescore writes', () => {
+  test('an absent or off switch stores follow_declarations false with an empty trail; "true" stores true', async () => {
+    const stored = async (followSwitch: string | undefined) => {
+      const { env } = makeEnv([seedEntry('a.dev')], { registry: MINIMAL_REGISTRY });
+      if (followSwitch !== undefined) env.WEB_AUDIT_FOLLOW_ENABLED = followSwitch;
+      await withStubbedFetch(() => auditDomainToCache(env, 'https://a.dev/'));
+      const cached = (await cacheGet(env, await keyFor('https://a.dev/', SPEC_VERSION))) as CachedWebAudit;
+      return cached.scorecard as { follow_declarations?: boolean; declared_hosts?: unknown[] };
+    };
+    for (const followSwitch of [undefined, 'false']) {
+      const scorecard = await stored(followSwitch);
+      expect({ followSwitch, follow: scorecard.follow_declarations }).toEqual({ followSwitch, follow: false });
+      expect(scorecard.declared_hosts).toEqual([]);
+    }
+    expect((await stored('true')).follow_declarations).toBe(true);
+  });
+});
+
 describe('rebuildWebAggregates', () => {
   test('a seeded domain with no cached entry is omitted, not fatal', async () => {
     const { env } = makeEnv([seedEntry('a.dev'), seedEntry('never-scored.dev')]);

@@ -22,10 +22,16 @@ the old content, and the deploy hook re-scores it once the release lands (see
 
 ## The audit endpoint
 
-`POST /api/score` with a JSON body `{ target, site_type?, public_listing?, turnstile_token }` streams NDJSON for either
-lane; a website target is any host or URL. The terminal `complete` event is the shared result envelope: `{ kind, tier,
-target, scorecard_url, markdown_url, json_url, freshness, spec_version, scorecard }`, carrying the full web scorecard
-(schema `0.5`). `site_type` is optional (`content` | `api`); omit it to let the audit auto-detect.
+`POST /api/score` with a JSON body `{ target, site_type?, public_listing?, follow_declarations?, turnstile_token }`
+streams NDJSON for either lane; a website target is any host or URL. The terminal `complete` event is the shared result
+envelope: `{ kind, tier, target, scorecard_url, markdown_url, json_url, freshness, spec_version, scorecard }`, carrying
+the full web scorecard (schema `0.5`). `site_type` is optional (`content` | `api`); omit it to let the audit
+auto-detect.
+
+`follow_declarations` defaults to `true`. `false` audits only the site itself and is transient: it skips the cache tier
+and the in-flight flags, claims no audit job, writes nothing to R2, rebuilds no board, and its `complete` event carries
+null result URLs with `summary_html` in their place. A `public_listing` that differs from the stored choice answers
+`400 listing_requires_follow`; a non-boolean value answers `400 invalid_follow_declarations`.
 
 A cache hit answers with a single `application/json` body instead of a stream: the same envelope with no `type`.
 Content-type is the discriminator: `application/json` means served from cache, NDJSON means the engine ran. Both shapes
@@ -51,6 +57,7 @@ scripts/web-audit/run.sh                              # full report + score for 
 scripts/web-audit/run.sh --check mcp-get-fast-fail    # one check; exit 0 = pass, 1 = failing, 3 = not evaluable
 scripts/web-audit/run.sh --target https://anc.dev/    # a public target (e.g. production after a release)
 scripts/web-audit/run.sh --json                       # the full scorecard as JSON
+scripts/web-audit/run.sh --no-follow-declarations     # audit only the site, not the hosts it declares
 scripts/web-audit/run.sh --no-build                   # reuse the existing dist/ (skip the rebuild)
 ```
 
@@ -112,6 +119,12 @@ Workflow's own audit path, so it is not subject to the on-demand endpoint's per-
 checks in `registry.yaml` is a registry-shape change; the post-deploy rescore after this kind of PR reflows every
 curated seed. Stale `/score/<domain>` pages keep serving the previous row set until that reflow: missing check ids are
 omitted, not shown as ghost rows.
+
+**The follow switch and the rescore.** The rescore follows the hosts each site declares only while
+`WEB_AUDIT_FOLLOW_ENABLED` is on. While it is off, the next rescore (weekly, post-deploy, or a registry reflow) rewrites
+each seeded scorecard it re-audits as not followed: `follow_declarations: false`, with every row that needs a declared
+host `n_a` for reason `follow-disabled`. Turning the switch back on restores followed scores only through another
+rescore: the weekly run, or a manual run once the seeded scorecards are past the 2-hour eligibility window.
 
 **Secrets.** `WEB_RESCORE_SECRET` is a `wrangler secret put` value on both Workers (`--env staging` and production) and
 lives in the GitHub environment secret `ANC_WEB_RESCORE_SECRET` for the deploy hook. Rotate by setting a new value in

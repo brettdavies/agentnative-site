@@ -11,6 +11,7 @@ import type { WebRemediationCatalog } from './remediation';
 import type { FreshnessState } from './summary-freshness';
 import { freshnessState, resolveFreshness } from './summary-freshness';
 import { type SummaryRegistry, type WebScorecardShape, type WebSummaryModel, webSummaryModel } from './summary-model';
+import type { TransientReason } from './summary-transient';
 
 export interface WebSummaryInput {
   scorecard: WebScorecardShape;
@@ -36,6 +37,12 @@ export interface WebSummaryInput {
   now?: number;
   /** The page's spine; omitted renders a cached, linked, control-free spine. */
   spine?: SpineInput;
+  /**
+   * Why the result was not saved. Set, the body renders in place of a page:
+   * an unlinked spine carrying this reason where the freshness sentence goes,
+   * no Re-audit control, and no closing note pointing at one.
+   */
+  transient?: TransientReason;
   /** The three representation URLs the twin's front matter names; omitted renders none. */
   links?: ResultLinks;
 }
