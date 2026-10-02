@@ -57,6 +57,7 @@ scripts/web-audit/run.sh                              # full report + score for 
 scripts/web-audit/run.sh --check mcp-get-fast-fail    # one check; exit 0 = pass, 1 = failing, 3 = not evaluable
 scripts/web-audit/run.sh --target https://anc.dev/    # a public target (e.g. production after a release)
 scripts/web-audit/run.sh --json                       # the full scorecard as JSON
+scripts/web-audit/run.sh --no-follow-declarations     # audit only the site, not the hosts it declares
 scripts/web-audit/run.sh --no-build                   # reuse the existing dist/ (skip the rebuild)
 ```
 
