@@ -279,24 +279,41 @@ same presentation. Web results carry no badge; they live at a shareable [`/web/<
 
 ### Relative and global scores
 
-A web audit produces two scores from the same per-check outcomes:
+A web audit produces two scores from the same per-check outcomes. Each covers what an agent at the audit's vantage can
+verify: anc.dev audits from the public internet and presents no credential, and every scorecard records its
+[vantage](/web-scorecard-schema#vantage).
 
 - **Relative** (the headline, `score_pct`) is earned points over the maximum for this site's applicable checks, so a
   site perfect for its type approaches 100. `n_a`, `skip`, and `error` rows are excluded from it. The
   [web leaderboard](/web) ranks by it.
 - **Global** (the secondary "global-ready" number) is earned points over the most a single site could earn: every check
-  in the registry, except that where checks are alternatives (such as MCP access: an open endpoint earns the session
-  checks, a protected one the sign-in checks), only the alternatives the site presents count, or the larger one when it
-  presents none. An endpoint that serves some token-less requests and refuses others presents both. A check that does
-  not apply to a site still counts in the global denominator and earns nothing, whatever its `n_a` reason, and so does a
-  `skip` or `error` row: a site without MCP sees what adding MCP is worth. The web leaderboard breaks ties between equal
-  relative scores by it.
+  in the registry outside a group of alternatives, plus each alternative the site presents, or the largest when it
+  presents none. A check that does not apply to a site still counts in the global denominator and earns nothing,
+  whatever its `n_a` reason, and so does a `skip` or `error` row: a site without MCP sees what adding MCP is worth. The
+  web leaderboard breaks ties between equal relative scores by it.
+
+A check the audit could not reach, because the endpoint requires sign-in or a declared host is private or unreachable,
+reads `n_a` with that reason. It earns nothing, is excluded from relative, and stays in the global denominator, so a
+site less reachable than an otherwise equal one scores lower globally while relative still reports how it does on what
+the audit could check.
+
+Alternatives are site designs no single site can satisfy at once; a limit on what the audit could reach never forms or
+joins one. MCP access is the only group. An endpoint requires sign-in when a token-less handshake draws a 401 that
+RFC 9728 protected-resource metadata on its own host backs, and the three sign-in checks count only for a site whose
+endpoint requires sign-in or a site with no MCP endpoint. An endpoint that does not require sign-in, or that serves a
+handshake without a token anyway, presents the open design, which owns no checks; one that requires sign-in presents the
+protected design, so an endpoint that does both presents both. A protected server's global on a public audit tops out
+near 68, because the session and handshake rows its sign-in blocks stay in its denominator. A local `anc web <target>`
+run that presents a credential evaluates them.
 
 Each check carries a tier weight: 5 for MUST, 3 for SHOULD, 1 for MAY. At every tier, MAY included, a pass earns the
 full weight, a surface that works while violating a spec detail (`noncompliant`) earns 0.25 × weight, and a present but
-broken surface costs 0.75 × weight, because it misleads agents. An absent MUST or SHOULD earns nothing; an absent MAY
-reads `n_a`. Both scores floor at 0, and global never exceeds 100. These weights and outcomes are the web audit's own:
-the CLI score weights every tier equally and grades a miss as `warn` or `fail`. The
+broken surface costs 0.75 × weight, because it misleads agents. Which of the two a defect is depends on what an agent at
+the audit's vantage gets: sign-in metadata that lists one usable authorization server beside an `http` one is
+`noncompliant`, because the agent still signs in, while a list with no server the agent can use is `broken`, because it
+leaves the agent nowhere to sign in. An absent MUST or SHOULD earns nothing; an absent MAY reads `n_a`. Both scores
+floor at 0, and global never exceeds 100. These weights and outcomes are the web audit's own: the CLI score weights
+every tier equally and grades a miss as `warn` or `fail`. The
 [scoring reference](/web-scorecard-schema#the-two-score-model) carries the full credit table.
 
 Whenever the check universe grows, global scores read lower until a site re-audits under the wider universe. Seeded

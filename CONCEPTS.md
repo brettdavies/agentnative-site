@@ -190,12 +190,22 @@ absent counts as not applicable, never as a miss.
 
 ### Relative score / Global score
 
-The two scores one web-audit run produces. Relative (the headline) measures the site against only the checks that apply
-to it, so a site perfect for its type approaches the maximum; the web leaderboard ranks by it. Global measures the same
-outcomes against the most a single site could earn: every registry check, not-applicable ones included, except that
-where checks are alternatives (an open or a protected MCP endpoint) only the ones the site presents count, or the larger
-when it presents none. Exposing and nailing more surfaces scores higher, and global breaks ties between equal relative
-scores on the board.
+The two scores one web-audit run produces, each covering what an agent at the audit's vantage can verify. Relative (the
+headline) measures the site against only the checks that apply to it, so a site perfect for its type approaches the
+maximum; the web leaderboard ranks by it. Global measures the same outcomes against the most a single site could earn:
+every registry check outside a group of alternatives, not-applicable ones included, plus each alternative design the
+site presents, or the largest when it presents none. A check the audit could not reach (sign-in required, a private or
+unreachable host) earns nothing, is excluded from relative, and stays in global. Alternatives are designs, never access
+limits: the only group is MCP access, whose sign-in checks count for a site whose endpoint requires sign-in or one with
+no MCP endpoint. Exposing and nailing more surfaces scores higher, and global breaks ties between equal relative scores
+on the board.
+
+### Vantage
+
+Where a web audit ran and whether it presented a credential, recorded on every web scorecard: public (anc.dev, the
+public internet, no credential) or local (an `anc web <target>` run on the runner's own network, optionally holding a
+credential for the audited MCP endpoint). A score covers what an agent at that vantage can verify, and the public board
+lists public-vantage scorecards only.
 
 ### Fix skill
 

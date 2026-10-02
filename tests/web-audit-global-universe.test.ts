@@ -205,6 +205,20 @@ describe('the global universe counts the MCP access designs a site presents', ()
     });
   });
 
+  // The published copy states the protected ceiling as a number, so a
+  // registry change that moves it must move the copy too.
+  test('the methodology and the scorecard schema state the protected ceiling the registry produces', async () => {
+    const ceiling = scorecardOf(SHAPES.protected).score.global;
+    const docs = ['methodology.md', 'web-scorecard-schema.md'];
+    const stated = await Promise.all(
+      docs.map(async (doc) => {
+        const text = (await readFile(join(REPO_ROOT, 'content', doc), 'utf8')).replace(/\s+/g, ' ');
+        return [doc, text.includes(`on a public audit tops out near ${ceiling},`)];
+      }),
+    );
+    expect(Object.fromEntries(stated)).toEqual(Object.fromEntries(docs.map((doc) => [doc, true])));
+  });
+
   test('a stored scorecard recomputes its scores from its rows alone', () => {
     for (const [shape, rows] of Object.entries(SHAPES)) {
       const stored = JSON.parse(JSON.stringify(scorecardOf(rows))) as WebScorecard;
