@@ -1640,6 +1640,17 @@ describe('audit_website with follow_declarations false', () => {
     expect(followedPuts).toContain('inflight:web:anc.dev');
   });
 
+  test('with public_listing omitted it runs against a stored opt-in, carries that listing, and writes nothing', async () => {
+    const out = await run(
+      { follow_declarations: false },
+      { prefill: await seeded(new Date(Date.now() - 600_000).toISOString(), true) },
+    );
+    expect(out.body).toMatchObject({ audited: true, source: 'fresh-audit', scorecard_url: null });
+    expect((out.body?.scorecard as { public_listing: boolean }).public_listing).toBe(true);
+    expect(out.puts).toEqual([]);
+    expect(out.purged).toEqual([]);
+  });
+
   test('a public_listing that differs from the stored choice is rejected; the stored choice runs', async () => {
     const prefill = await seeded(new Date(Date.now() - 600_000).toISOString(), false);
     const refused = await run({ follow_declarations: false, public_listing: true }, { prefill });
