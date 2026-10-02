@@ -26,14 +26,19 @@ const PY_TOOL = join(REPO_ROOT, 'scripts', 'scoring', 'score_model.py');
 
 type TierOutcome = [keyof ScoreWeights, 'pass' | 'noncompliant' | 'broken' | 'absent' | 'n_a'];
 
+interface ParityCase {
+  name: string;
+  universe_tiers: Array<keyof ScoreWeights>;
+  rows: TierOutcome[];
+  expected: { relative: number; global: number };
+}
+
 interface ParityFixture {
   scoring_input: string[];
   weights: ScoreWeights;
   broken_factor: number;
   noncompliant_credit: number;
-  universe_tiers: Array<keyof ScoreWeights>;
-  rows: TierOutcome[];
-  expected: { relative: number; global: number };
+  cases: ParityCase[];
 }
 
 function rowsToResults(rows: TierOutcome[]): Array<Pick<EngineResult, 'keyword' | 'status'>> {
@@ -154,37 +159,48 @@ describe('scoreWebAudit', () => {
 
 describe('score_model.py parity (shared fixture)', () => {
   const fixture = JSON.parse(readFileSync(FIXTURE_PATH, 'utf8')) as ParityFixture;
+  const config = {
+    weights: fixture.weights,
+    brokenFactor: fixture.broken_factor,
+    noncompliantCredit: fixture.noncompliant_credit,
+  };
+  const expected = Object.fromEntries(fixture.cases.map((c) => [c.name, c.expected]));
+
+  test('the fixture holds a case that earns more than its universe', () => {
+    const capped = fixture.cases.filter((c) => {
+      const score = scoreWebAudit(rowsToResults(c.rows), tierUniverse(c.universe_tiers, fixture.weights), config);
+      return score.earned > tierUniverse(c.universe_tiers, fixture.weights);
+    });
+    expect(capped.map((c) => c.expected.global)).toEqual([100]);
+  });
 
   test('the engine scorer reproduces the committed expected scores', () => {
-    const universeMax = tierUniverse(fixture.universe_tiers, fixture.weights);
-    const score = scoreWebAudit(rowsToResults(fixture.rows), universeMax, {
-      weights: fixture.weights,
-      brokenFactor: fixture.broken_factor,
-      noncompliantCredit: fixture.noncompliant_credit,
-    });
-    expect({ relative: score.relative, global: score.global }).toEqual(fixture.expected);
+    const scores = Object.fromEntries(
+      fixture.cases.map((c) => {
+        const score = scoreWebAudit(rowsToResults(c.rows), tierUniverse(c.universe_tiers, fixture.weights), config);
+        return [c.name, { relative: score.relative, global: score.global }];
+      }),
+    );
+    expect(scores).toEqual(expected);
   });
 
   // Provenance and n_a reasons ride on every row, so they must never reach
   // a score; the Python model checks the same declared input list.
   test('the engine scorer reads only the declared scoring input: hosts and n_a reasons never move a score', () => {
     expect(fixture.scoring_input).toEqual(['keyword', 'status']);
-    const universeMax = tierUniverse(fixture.universe_tiers, fixture.weights);
-    const config = {
-      weights: fixture.weights,
-      brokenFactor: fixture.broken_factor,
-      noncompliantCredit: fixture.noncompliant_credit,
-    };
-    const decorated = fixture.rows.map(([keyword, status], i) => ({
-      keyword,
-      status,
-      hosts: [{ host: `h${i}.example` }, { host: 'api.example' }],
-      host: `h${i}.example`,
-      ...(status === 'n_a' ? { na_reason: NA_REASONS[i % NA_REASONS.length] } : {}),
-    }));
-    const score = scoreWebAudit(decorated, universeMax, config);
-    expect(score).toEqual(scoreWebAudit(rowsToResults(fixture.rows), universeMax, config));
-    expect({ relative: score.relative, global: score.global }).toEqual(fixture.expected);
+    for (const c of fixture.cases) {
+      const universeMax = tierUniverse(c.universe_tiers, fixture.weights);
+      const decorated = c.rows.map(([keyword, status], i) => ({
+        keyword,
+        status,
+        hosts: [{ host: `h${i}.example` }, { host: 'api.example' }],
+        host: `h${i}.example`,
+        ...(status === 'n_a' ? { na_reason: NA_REASONS[i % NA_REASONS.length] } : {}),
+      }));
+      const score = scoreWebAudit(decorated, universeMax, config);
+      expect(score).toEqual(scoreWebAudit(rowsToResults(c.rows), universeMax, config));
+      expect({ name: c.name, relative: score.relative, global: score.global }).toEqual({ name: c.name, ...c.expected });
+    }
   });
 
   // The dev tool is guarded from main (guard-main-docs extra_paths), so
@@ -194,8 +210,11 @@ describe('score_model.py parity (shared fixture)', () => {
     if (!existsSync(PY_TOOL)) return;
     const proc = Bun.spawnSync(['python3', '-B', PY_TOOL, '--fixture', FIXTURE_PATH]);
     expect(proc.exitCode).toBe(0);
-    const out = JSON.parse(proc.stdout.toString()) as { relative: number; global: number };
-    expect({ relative: out.relative, global: out.global }).toEqual(fixture.expected);
+    const out = JSON.parse(proc.stdout.toString()) as Record<string, { relative: number; global: number }>;
+    const scores = Object.fromEntries(
+      Object.entries(out).map(([name, score]) => [name, { relative: score.relative, global: score.global }]),
+    );
+    expect(scores).toEqual(expected);
   });
 });
 

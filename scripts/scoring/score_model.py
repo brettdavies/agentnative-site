@@ -156,11 +156,11 @@ def from_scorecard(path: str) -> Rows:
     return Rows(items)
 
 
-def from_fixture(path: str) -> tuple[Model, Rows]:
+def from_fixture(path: str) -> list[tuple[str, Model, Rows]]:
     """Load the committed parity fixture shared with the engine's scorer
     (tests/web-audit-two-score.test.ts). The fixture pins weights, the
-    broken factor, the noncompliant credit, an explicit universe_max, and
-    (tier, outcome) rows."""
+    broken factor, and the noncompliant credit once; each named case pins an
+    explicit universe and (tier, outcome) rows."""
     data = json.load(open(path))
     declared = tuple(data.get("scoring_input", ()))
     if declared != SCORING_INPUT:
@@ -169,15 +169,18 @@ def from_fixture(path: str) -> tuple[Model, Rows]:
             "the engine's scoring input changed, so update this model before trusting parity"
         )
     weights = {t: float(data["weights"][t]) for t in TIERS}
-    model = Model(
-        weight=weights,
-        broken_factor=float(data["broken_factor"]),
-        noncompliant_credit=float(data["noncompliant_credit"]),
-    )
-    # Pin the universe to the fixture's explicit denominator.
-    model.universe = {f"u{i}": tier for i, tier in enumerate(data["universe_tiers"])}
-    rows = Rows([(tier, outcome) for tier, outcome in data["rows"]])
-    return model, rows
+    cases: list[tuple[str, Model, Rows]] = []
+    for case in data["cases"]:
+        model = Model(
+            weight=dict(weights),
+            broken_factor=float(data["broken_factor"]),
+            noncompliant_credit=float(data["noncompliant_credit"]),
+        )
+        # Pin the universe to the case's explicit denominator.
+        model.universe = {f"u{i}": tier for i, tier in enumerate(case["universe_tiers"])}
+        rows = Rows([(tier, outcome) for tier, outcome in case["rows"]])
+        cases.append((case["name"], model, rows))
+    return cases
 
 
 SCENARIOS: dict[str, Rows] = {
@@ -198,12 +201,11 @@ def main() -> int:
     ap.add_argument("--broken", type=float, default=0.75, help="broken penalty factor (default 0.75)")
     ap.add_argument("--noncompliant", type=float, default=0.25, help="noncompliant credit factor (default 0.25)")
     ap.add_argument("--scorecard", help="score a committed web scorecard JSON instead of the scenarios")
-    ap.add_argument("--fixture", help="score the shared engine-parity fixture and print JSON")
+    ap.add_argument("--fixture", help="score each case of the shared engine-parity fixture and print JSON by case name")
     args = ap.parse_args()
 
     if args.fixture:
-        model, rows = from_fixture(args.fixture)
-        print(json.dumps(rows.score(model)))
+        print(json.dumps({name: rows.score(model) for name, model, rows in from_fixture(args.fixture)}))
         return 0
 
     wm, ws, wy = (float(x) for x in args.weights.split(","))
