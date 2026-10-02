@@ -199,19 +199,33 @@ verify; the engine computes them and consumers read the values straight from the
 Global measures how much of the whole surface a site exposes, so a check that does not apply to a site still counts in
 its global denominator and earns nothing, whatever its `n_a` reason: a missing MCP endpoint, a declared site type, a
 deliberate no-CORS posture, or any other. A site without MCP therefore sees what adding MCP is worth. `skip` and `error`
-rows stay in the global denominator the same way, and so does a check the audit could not reach: an endpoint that
-requires sign-in, or a declared host that is private or unreachable, leaves the row `n_a` with that reason.
+rows stay in the global denominator the same way, and so does a check the audit could not reach: sign-in that blocks it,
+or a declared host that is private or unreachable, leaves the row `n_a` with that reason. A check that reached the
+server and got a definitive answer scores on that answer.
 
 Only alternatives leave the global denominator. Alternatives are site designs no single site can satisfy at once; a
-limit on what the audit could reach never forms or joins one. MCP access is the only group. An endpoint requires sign-in
-when a token-less handshake draws a 401 that RFC 9728 protected-resource metadata on its own host backs, and the three
-sign-in checks (`mcp-auth-challenge`, `mcp-auth-servers`, `mcp-auth-enforced`) count only for a site whose endpoint
-requires sign-in or a site with no MCP endpoint. An endpoint that does not require sign-in, or that serves a handshake
-without a token anyway, presents the open design, which owns no checks; one that requires sign-in presents the protected
-design, so an endpoint that does both presents both. The engine reads which designs a site presents from its rows alone,
-so a stored scorecard recomputes its own denominator. A protected server's global on a public audit tops out near 68,
-because the session and handshake rows its sign-in blocks stay in its denominator; a local `anc web <target>` run that
-presents a credential evaluates them.
+limit on what the audit could reach never forms or joins one. MCP access is the only group. An endpoint presents the
+protected design when a token-less handshake (`initialize` or `server/discover`) draws a 401 that RFC 9728
+protected-resource metadata on the endpoint's own host backs, or, when neither handshake drew a 401 or a JSON-RPC
+result, when the request that found the endpoint drew one. The three sign-in checks (`mcp-auth-challenge`,
+`mcp-auth-servers`, `mcp-auth-enforced`) count only for a site that presents the protected design or a site with no MCP
+endpoint. A check that needs a session presents the open design whenever the audit evaluates it; the open design owns no
+checks, and an endpoint can present both. The engine reads which designs a site presents from its rows alone, so a
+stored scorecard recomputes its own denominator.
+
+Sign-in blocks a check on either design, and the check reads `n_a` with reason `auth-required`:
+
+- On an endpoint that presents the protected design, sign-in blocks every check that needs a session unless the endpoint
+  answered a token-less handshake with a JSON-RPC result or refused the check's own lane, as below. A resources check
+  stays blocked while a handshake that sign-in blocked could have advertised resources.
+- On either design, sign-in blocks a check whose JSON-RPC request draws a 401 the endpoint's metadata backs, apart from
+  `mcp-auth-enforced`, which passes on that 401, so an endpoint that serves a handshake without a token and asks for
+  sign-in on its other requests never reads as broken.
+- A lane whose own handshake the server refuses as unavailable (for example with `-32601` or `-32022`) rather than with
+  a 401 is not blocked: its checks read as they do on an open server, because a token would not change that answer.
+
+A protected server's global on a public audit tops out near 68, because the session and handshake rows its sign-in
+blocks stay in its denominator; a local `anc web <target>` run that presents a credential evaluates them.
 
 Per applicable check, with per-tier difficulty weights (currently 5 for MUST, 3 for SHOULD, 1 for MAY):
 
@@ -333,7 +347,7 @@ One object per check.
   - `declared-host-blocked`: the declared host, or where it redirected, is a private address or an IP literal, which anc
     never contacts.
   - `declared-host-budget-exceeded`: anc's hourly probe limit for the declared host was reached.
-  - `auth-required`: the host requires sign-in before the check can run.
+  - `auth-required`: sign-in blocked the check, because the endpoint asks for a credential the audit does not hold.
 - `skip` — the per-audit deadline passed before the check ran.
 - `error` — an operational failure (network error, timeout); never credited, never penalized in the relative score,
   and kept in the global denominator like `n_a` and `skip`.

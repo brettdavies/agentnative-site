@@ -292,19 +292,27 @@ verify: anc.dev audits from the public internet and presents no credential, and 
   whatever its `n_a` reason, and so does a `skip` or `error` row: a site without MCP sees what adding MCP is worth. The
   web leaderboard breaks ties between equal relative scores by it.
 
-A check the audit could not reach, because the endpoint requires sign-in or a declared host is private or unreachable,
-reads `n_a` with that reason. It earns nothing, is excluded from relative, and stays in the global denominator, so a
-site less reachable than an otherwise equal one scores lower globally while relative still reports how it does on what
-the audit could check.
+A check the audit could not reach, because sign-in blocked it or a declared host is private or unreachable, reads `n_a`
+with that reason. It earns nothing, is excluded from relative, and stays in the global denominator, so a site less
+reachable than an otherwise equal one scores lower globally while relative still reports how it does on what the audit
+could check. A check that reached the server and got a definitive answer scores on that answer.
 
 Alternatives are site designs no single site can satisfy at once; a limit on what the audit could reach never forms or
-joins one. MCP access is the only group. An endpoint requires sign-in when a token-less handshake draws a 401 that
-RFC 9728 protected-resource metadata on its own host backs, and the three sign-in checks count only for a site whose
-endpoint requires sign-in or a site with no MCP endpoint. An endpoint that does not require sign-in, or that serves a
-handshake without a token anyway, presents the open design, which owns no checks; one that requires sign-in presents the
-protected design, so an endpoint that does both presents both. A protected server's global on a public audit tops out
-near 68, because the session and handshake rows its sign-in blocks stay in its denominator. A local `anc web <target>`
-run that presents a credential evaluates them.
+joins one. MCP access is the only group. An endpoint presents the protected design when a token-less handshake draws a
+401 that RFC 9728 protected-resource metadata on the endpoint's own host backs, or, when neither handshake drew a 401 or
+a JSON-RPC result, when the request that found the endpoint drew one. The three sign-in checks count only for a site
+that presents the protected design or a site with no MCP endpoint. A check that needs a session presents the open design
+whenever the audit evaluates it; the open design owns no checks, and an endpoint can present both.
+
+Sign-in blocks a check on either design, and the check reads `n_a` with reason `auth-required`. On an endpoint that
+presents the protected design, sign-in blocks every check that needs a session unless the endpoint answered a token-less
+handshake with a JSON-RPC result. On either design, sign-in blocks a check whose JSON-RPC request draws a 401 the
+endpoint's metadata backs (the sign-in check that asks for that refusal passes on it instead), so an endpoint that
+serves a handshake without a token and asks for sign-in on its other requests never reads as broken. A lane the server
+refuses without asking for sign-in reads as it does on an open server, because a token would not change that answer;
+only a resources check on that lane stays blocked while a handshake that sign-in blocked could have advertised
+resources. A protected server's global on a public audit tops out near 68, because the session and handshake rows its
+sign-in blocks stay in its denominator. A local `anc web <target>` run that presents a credential evaluates them.
 
 Each check carries a tier weight: 5 for MUST, 3 for SHOULD, 1 for MAY. At every tier, MAY included, a pass earns the
 full weight, a surface that works while violating a spec detail (`noncompliant`) earns 0.25 × weight, and a present but

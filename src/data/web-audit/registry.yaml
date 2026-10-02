@@ -112,8 +112,11 @@ mcp_lanes:
 # largest variant when it presents none. An access limit (sign-in the audit
 # cannot present, a private or unreachable host) never forms or joins a
 # group: a check it blocks reads n_a with its reason and stays in the
-# universe. An endpoint that answers a handshake without a token and
-# refuses other requests with a 401 presents both MCP access designs.
+# universe. An endpoint presents the protected design when a token-less
+# handshake, or the request that found it when neither handshake drew a
+# 401 or was served a result, draws a 401 its RFC 9728 metadata backs. A
+# check gated on mcp-session presents the open design whenever it is
+# evaluated, so an endpoint can present both.
 alternatives:
   - group: mcp-access
     variants:

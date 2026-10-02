@@ -194,11 +194,13 @@ The two scores one web-audit run produces, each covering what an agent at the au
 headline) measures the site against only the checks that apply to it, so a site perfect for its type approaches the
 maximum; the web leaderboard ranks by it. Global measures the same outcomes against the most a single site could earn:
 every registry check outside a group of alternatives, not-applicable ones included, plus each alternative design the
-site presents, or the largest when it presents none. A check the audit could not reach (sign-in required, a private or
-unreachable host) earns nothing, is excluded from relative, and stays in global. Alternatives are designs, never access
-limits: the only group is MCP access, whose sign-in checks count for a site whose endpoint requires sign-in or one with
-no MCP endpoint. Exposing and nailing more surfaces scores higher, and global breaks ties between equal relative scores
-on the board.
+site presents, or the largest when it presents none. A check the audit could not reach (sign-in blocked it, or a host is
+private or unreachable) earns nothing, is excluded from relative, and stays in global; a check the audit reached scores
+on the answer it got, so a lane a server refuses without asking for sign-in reads as it does on an open server.
+Alternatives are designs, never access limits: the only group is MCP access, whose sign-in checks count for a site that
+presents the protected design (a token-less handshake, or the request that found the endpoint when neither handshake
+drew a 401 or a result, drew a 401 its RFC 9728 metadata backs) or one with no MCP endpoint. Exposing and nailing more
+surfaces scores higher, and global breaks ties between equal relative scores on the board.
 
 ### Vantage
 
