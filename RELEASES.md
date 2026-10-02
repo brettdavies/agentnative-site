@@ -103,9 +103,11 @@ git checkout -B release/<YYYY-MM-DD>-<slug> origin/main
 
 # 2. Overlay dev's entire tracked tree onto the main base. `checkout -- .` writes dev's
 #    paths but does not delete files that exist on main and are absent on dev, so remove
-#    those next (the 'D' rows are main-only files dev deleted).
+#    those next (the 'D' rows are main-only files dev deleted or moved). `--no-renames`
+#    lists a moved file as a deletion; rename detection would report it as an R row,
+#    and the stale copy left behind would ship to main.
 git checkout origin/dev -- .
-git diff --name-status origin/main origin/dev | grep '^D'
+git diff --no-renames --name-status origin/main origin/dev | grep '^D'
 trash <each main-only file listed above>
 
 # 3. Withhold any feature `dev` carries that this release must not ship. Each one
@@ -146,7 +148,9 @@ git diff --cached --name-only origin/main | grep -E "$GUARDED" \
 #       docs/TODOS.md and docs/designs/ reached an open release with a green guard-docs.
 #       Every docs/ entry and every added markdown file needs a reason to ship, or it
 #       needs registering in the workflow's extra_paths and removing from the branch.
-git diff --cached --diff-filter=A --name-only origin/main | grep -E '(^docs/|\.md$)' | grep -Ev "$GUARDED" || echo "(none unguarded)"
+#       `--no-renames` lists a doc moved from one main carries as added; rename detection
+#       would report it as R, and the A filter would drop it.
+git diff --cached --no-renames --diff-filter=A --name-only origin/main | grep -E '(^docs/|\.md$)' | grep -Ev "$GUARDED" || echo "(none unguarded)"
 
 # 6. Commit the overlay as one commit sitting directly on top of main.
 git commit
@@ -246,7 +250,9 @@ git diff origin/main..HEAD --name-only \
   && echo "LEAKED: reset and redo" || echo "(clean)"
 
 # D: what this release ADDS to main (see step 5 above for why).
-git diff origin/main..HEAD --diff-filter=A --name-only | grep -E '(^docs/|\.md$)' | grep -Ev "$GUARDED" || echo "(none unguarded)"
+# `--no-renames` lists a doc moved from one main carries as added; rename detection
+# would report it as R, and the A filter would drop it.
+git diff --no-renames origin/main..HEAD --diff-filter=A --name-only | grep -E '(^docs/|\.md$)' | grep -Ev "$GUARDED" || echo "(none unguarded)"
 
 # Patch-id cherry check (noisy in squash-merge workflow; triage per-line).
 git cherry HEAD origin/dev | grep '^+' || echo "(none)"

@@ -647,8 +647,10 @@ gate_mechanics() {
   if git rev-parse --verify origin/main >/dev/null 2>&1; then
     local added_docs
     # Guarded paths are the leak check's job above. What is left over is the
-    # actual blind spot: docs nobody has classified either way.
-    added_docs=$(git diff origin/main..HEAD --diff-filter=A --name-only 2>/dev/null \
+    # actual blind spot: docs nobody has classified either way. --no-renames,
+    # because rename detection reports a doc moved from one main carries as R,
+    # and the A filter then drops it.
+    added_docs=$(git diff --no-renames origin/main..HEAD --diff-filter=A --name-only 2>/dev/null \
       | grep -E '(^docs/|\.md$)' | grep -Ev "$guarded" || true)
     if [[ -z "$added_docs" ]]; then
       gate_pass "no unguarded docs newly added to main by this release"

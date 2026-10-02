@@ -545,7 +545,7 @@ guarded planning paths as leaked.
   anywhere, so a root-level glossary shows up) and read them:
 
   ```bash
-  git diff origin/main..HEAD --diff-filter=A --name-only | grep -E '(^docs/|\.md$)' | grep -Ev "$GUARDED" || echo "(none unguarded)"
+  git diff --no-renames origin/main..HEAD --diff-filter=A --name-only | grep -E '(^docs/|\.md$)' | grep -Ev "$GUARDED" || echo "(none unguarded)"
   ```
 
   An entry that should not ship needs both: registering in the workflow's `extra_paths`, and removing from the release
