@@ -1,9 +1,17 @@
-# Dependabot for the Bun / TypeScript toolchain (npm) and the workflow actions
-# (github-actions). Workflow actions are SHA-pinned to immutable commits, so
-# Dependabot is what surfaces a newer SHA; without the github-actions block the
-# pins never move.
+# Dependabot for the Bun / TypeScript toolchain (bun) and the workflow actions
+# (github-actions). The `bun` ecosystem regenerates bun.lock inside each update
+# PR; the `npm` ecosystem refuses a project that carries bun.lock. Workflow
+# actions are SHA-pinned to immutable commits, so Dependabot is what surfaces a
+# newer SHA; without the github-actions block the pins never move.
 #
-# `target-branch: dev` is required on every version-update block: without it
+# The bun updater writes bun.lock with the Bun its image bundles, which can
+# differ from the repo's pinned Bun, and it cannot read the lockfileVersion 2
+# that a from-scratch Bun 1.4 install writes
+# (https://github.com/dependabot/dependabot-core/issues/16026). Keep bun.lock
+# at lockfileVersion 1. When CI's frozen install rejects a Dependabot lockfile,
+# run `bun install` with the pinned Bun on the PR branch and push.
+#
+# `target-branch: dev` is required on every block: without it
 # Dependabot opens PRs against the default branch (main), which breaks the
 # dev -> main flow. Dependabot reads this config from the default branch, so it
 # must live on main to take effect.
@@ -19,16 +27,17 @@
 # with no `update-types`: exact-pinned to the version dotfiles provisions into
 # $PLAYWRIGHT_BROWSERS_PATH, so bumping is a dotfiles job, not a per-repo one.
 #
-# Security updates target the default branch and ignore every option on a
-# block that carries `target-branch`, so the trailing npm block has no
-# target-branch, `open-pull-requests-limit: 0` so it never opens version
-# updates on main, and a group with `applies-to: security-updates` that batches
-# minor and patch fixes per run. Cooldown, the majors ignore, and the Playwright
-# freeze are deliberately absent from it: a fix that resolves outside the
-# current range must still open.
+# bun-types is frozen with no `update-types`: it moves only with the Bun
+# runtime pinned in .bun-version, and a test holds the two together.
+#
+# Dependabot opens no security updates for Bun, and its alerts cover only the
+# direct dependencies in package.json: the dependency graph does not read
+# bun.lock. `bun audit` checks the whole lockfile. Fix an advisory by bumping
+# the dependency by hand and running `bun install`.
+# https://docs.github.com/en/code-security/dependabot/ecosystems-supported-by-dependabot/supported-ecosystems-and-repositories#bun
 version: 2
 updates:
-  - package-ecosystem: npm
+  - package-ecosystem: bun
     directory: "/"
     target-branch: dev
     schedule:
@@ -39,8 +48,6 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 1
-    reviewers:
-      - brettdavies
     labels:
       - dependencies
       - javascript
@@ -59,6 +66,7 @@ updates:
       - dependency-name: "@playwright/*"
       - dependency-name: "playwright"
       - dependency-name: "playwright-core"
+      - dependency-name: "bun-types"
   - package-ecosystem: github-actions
     directory: "/"
     target-branch: dev
@@ -70,8 +78,6 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 3
-    reviewers:
-      - brettdavies
     labels:
       - dependencies
       - github-actions
@@ -83,20 +89,3 @@ updates:
       - dependency-name: "*"
         update-types:
           - "version-update:semver-major"
-  - package-ecosystem: npm
-    directory: "/"
-    schedule:
-      interval: weekly
-      day: monday
-      time: "09:00"
-      timezone: America/Chicago
-    open-pull-requests-limit: 0
-    labels:
-      - dependencies
-      - security
-    groups:
-      npm-security-minor-patch:
-        applies-to: security-updates
-        update-types:
-          - minor
-          - patch
