@@ -22,6 +22,7 @@ import type { McpEnv } from '../src/worker/mcp/server';
 import { resetWebRemediationCacheForTests } from '../src/worker/mcp/tools/web-remediation';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 import { fakeJobNamespace } from './helpers/audit-job-state';
+import { withLogCapture } from './helpers/log-capture';
 import { getJsonToolContent, type JsonRpcBody, mcpInitialize, mcpRpc, resetMcpTestState } from './helpers/mcp-rpc';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
@@ -107,6 +108,8 @@ interface WebEnvOpts {
   minimalRegistry?: boolean;
   kvSeed?: Record<string, string>;
   jobs?: DurableObjectNamespace<AuditJob>;
+  /** The WEB_AUDIT_FOLLOW_ENABLED value; absent leaves the binding unset. */
+  followSwitch?: string;
 }
 
 async function makeEnv(opts: WebEnvOpts = {}): Promise<McpEnv> {
@@ -165,6 +168,7 @@ async function makeEnv(opts: WebEnvOpts = {}): Promise<McpEnv> {
     } as unknown as KVNamespace,
     AUDIT_JOB: opts.jobs,
     WEB_AUDIT_ENABLED: (opts.webEnabled ?? true) ? 'true' : undefined,
+    WEB_AUDIT_FOLLOW_ENABLED: opts.followSwitch,
     MCP_ENABLED: (opts.mcpEnabled ?? true) ? 'true' : undefined,
     WEB_AUDIT_LIMITER_IP: {
       async limit() {
@@ -1391,5 +1395,44 @@ describe('audit_website: a run already in flight', () => {
     const res = await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, '203.0.113.9');
     expect(res.result?.isError).toBe(true);
     expect(res.result?.content?.[0]?.text).toContain('-32099');
+  });
+});
+
+describe('audit_website: the follow kill switch', () => {
+  const IP = '203.0.113.31';
+
+  async function freshRun(followSwitch: string | undefined) {
+    const store = new Map<string, string>();
+    const env = await makeEnv({ minimalRegistry: true, followSwitch });
+    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(store);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response('not found', { status: 404 })) as unknown as typeof fetch;
+    try {
+      const { result, records } = await withLogCapture(() =>
+        callTool(env, 'audit_website', { url: 'example.com' }, IP),
+      );
+      const stored = JSON.parse(store.get(await keyFor('https://example.com/', SPEC_VERSION)) as string) as {
+        scorecard: { follow_declarations?: boolean };
+      };
+      const run = records.map((r) => r.record).find((r) => r.scope === 'web-audit.run');
+      return { body: jsonContent(result), stored: stored.scorecard, run };
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  test('an absent or off switch stores and logs follow_declarations false; "true" stores and logs true', async () => {
+    for (const followSwitch of [undefined, 'false']) {
+      const { body, stored, run } = await freshRun(followSwitch);
+      expect(body.audited).toBe(true);
+      expect({ followSwitch, stored: stored.follow_declarations, run: run?.follow_declarations }).toEqual({
+        followSwitch,
+        stored: false,
+        run: false,
+      });
+    }
+    const on = await freshRun('true');
+    expect(on.stored.follow_declarations).toBe(true);
+    expect(on.run?.follow_declarations).toBe(true);
   });
 });

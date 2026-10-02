@@ -31,7 +31,7 @@ export function auditDebugEnabled(env: AuditLogEnv): boolean {
 export async function* instrumentAuditEvents(
   events: AsyncGenerator<AuditEvent>,
   env: AuditLogEnv,
-  opts: { target: string; surface: 'stream' | 'mcp' | 'rescore' },
+  opts: { target: string; surface: 'stream' | 'mcp' | 'rescore'; followDeclarations: boolean },
 ): AsyncGenerator<AuditEvent> {
   const debug = auditDebugEnabled(env);
   const started = Date.now();
@@ -67,6 +67,7 @@ export async function* instrumentAuditEvents(
       {
         target: opts.target,
         surface: opts.surface,
+        follow_declarations: opts.followDeclarations,
         terminal,
         mcp_endpoint: endpoint,
         elapsed_ms: Date.now() - started,

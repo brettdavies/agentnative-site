@@ -516,6 +516,7 @@ async function handleWeb(
     target,
     siteType: parsed.siteType,
     listing,
+    followDeclarations: true,
     origin,
     probeFetch: common.deps.probeFetch,
     surface: 'stream',

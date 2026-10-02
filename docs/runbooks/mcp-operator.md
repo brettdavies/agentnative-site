@@ -12,14 +12,15 @@ envelope, cache-hint scope semantics, and the GET posture. It is the starting po
 
 ## Kill switches
 
-Three flags gate the MCP surface. Each name carries exactly one binding shape in every environment, and the flip verb
-follows the shape.
+Four flags gate the MCP surface and what the web audit reaches. Each name carries exactly one binding shape in every
+environment, and the flip verb follows the shape.
 
-| Flag                       | Binding shape                                       | Scope                     | Falsy behavior                                                                                                                                                                                          |
-| -------------------------- | --------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MCP_ENABLED`              | secret, both environments                           | the entire `/mcp` branch  | `503 Service Unavailable` with `Retry-After: 3600` and a one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error. Discoverability siblings stay live.                  |
-| `MCP_LIVE_SCORING_ENABLED` | secret, both environments                           | only the `score_cli` tool | `score_cli` returns `isError: false` with `audited: false, message: "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard"`. Read tier stays alive. |
-| `MCP_LEGACY_ENABLED`       | committed var `"true"`, top-level and `env.staging` | legacy `initialize` lane  | When `'false'`, shell logs `legacy_rejected` with `error_code: -32022` and returns JSON-RPC `-32022` (`data.supported: ["2026-07-28"]`) before SDK dispatch. Modern lane unaffected.                    |
+| Flag                       | Binding shape                                       | Scope                                     | Falsy behavior                                                                                                                                                                                                                            |
+| -------------------------- | --------------------------------------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MCP_ENABLED`              | secret, both environments                           | the entire `/mcp` branch                  | `503 Service Unavailable` with `Retry-After: 3600` and a one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error. Discoverability siblings stay live.                                                    |
+| `MCP_LIVE_SCORING_ENABLED` | secret, both environments                           | only the `score_cli` tool                 | `score_cli` returns `isError: false` with `audited: false, message: "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard"`. Read tier stays alive.                                   |
+| `MCP_LEGACY_ENABLED`       | committed var `"true"`, top-level and `env.staging` | legacy `initialize` lane                  | When `'false'`, shell logs `legacy_rejected` with `error_code: -32022` and returns JSON-RPC `-32022` (`data.supported: ["2026-07-28"]`) before SDK dispatch. Modern lane unaffected.                                                      |
+| `WEB_AUDIT_FOLLOW_ENABLED` | var `"true"` on `env.staging`, secret in production | following declared hosts, every web audit | Audits keep running on the site's own origin. The stored scorecard records `follow_declarations: false`, and rows that need a declared host read `n_a` with reason `follow-disabled`. Cached scorecards and the read tier are unaffected. |
 
 The split is a decision, not an accident. `MCP_ENABLED` and `MCP_LIVE_SCORING_ENABLED` are secrets because incident
 response needs a flip that lands without a deploy and survives the next unrelated one, and because an unset secret reads
@@ -27,6 +28,10 @@ as off: absence fails closed. `MCP_LEGACY_ENABLED` is a committed var because th
 migration rather than an incident response, and because absence there means dual-stack on.
 `tests/wrangler-config.test.ts` pins both halves: the var is `"true"` in both blocks, and neither secret name appears in
 any `vars` block.
+
+`WEB_AUDIT_FOLLOW_ENABLED` takes the `WEB_AUDIT_ENABLED` shape: a var on staging, and in production a secret created
+before the release that reads it, so an unset value reads as off. The same test pins it on staging and keeps it out of
+the top-level `vars` block.
 
 **A binding name is a var or a secret, never both.** `wrangler secret put` against a name declared in any `vars` block
 is rejected with Cloudflare API **10053** (`Binding name '<NAME>' already in use`). Never run `wrangler secret put
@@ -44,6 +49,9 @@ Decision flow:
   flip `MCP_LIVE_SCORING_ENABLED` only. The seven catalog tools and `get_scorecard` keep serving cached scorecards;
   agents that were about to call `score_cli` get a typed "disabled" response and route themselves back to
   `get_scorecard`.
+- **A declared host objects to being probed, or the follow phase misbehaves** → flip `WEB_AUDIT_FOLLOW_ENABLED` to
+  `false`. Audits keep running and scoring each site's own origin; a scorecard already stored keeps the follow state it
+  was scored with until it is re-audited.
 - **Legacy client volume has fallen under the sunset thresholds** → flip `MCP_LEGACY_ENABLED`. That is a migration, not
   an emergency; it goes through the committed-edit path below. See Legacy sunset advisory.
 
@@ -56,6 +64,9 @@ wrangler secret put MCP_ENABLED                # enter: false, to take the whole
 
 # Staging.
 wrangler secret put MCP_ENABLED --env staging
+
+# Production only: on staging the name is a var, so `secret put` there is API 10053.
+wrangler secret put WEB_AUDIT_FOLLOW_ENABLED   # enter: false, to stop following declared hosts
 ```
 
 Re-enable with the same command and the value `true`. No deploy in either direction; a warm isolate picks up the new

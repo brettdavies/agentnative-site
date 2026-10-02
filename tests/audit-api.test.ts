@@ -6,6 +6,7 @@ import { _resetIndexCache } from '../src/worker/score/core';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 import { CLI_RECORD, call, errorOf, makeEnv, ndjson, newTracker, post, WEB_RECORD } from './helpers/audit-api-env';
+import { requestsTo, router, type Seen, siteDeclaring } from './helpers/follow-fixtures';
 import { captureLogs } from './helpers/log-capture';
 
 beforeEach(() => {
@@ -673,5 +674,52 @@ describe('POST /api/score: review pins', () => {
     );
     const unavailableBody = (await unavailable.res.json()) as { error: { details?: string } };
     expect(unavailableBody.error.details).toBeUndefined();
+  });
+});
+
+describe('POST /api/score: the follow kill switch', () => {
+  type Stored = {
+    scorecard: { follow_declarations?: boolean; declared_hosts?: Array<{ outcome: string; reason?: string }> };
+  };
+
+  async function storedRecord(env: ReturnType<typeof makeEnv>, url: string): Promise<Stored> {
+    const object = await env.SCORE_CACHE.get(await webKeyFor(url, SPEC_VERSION));
+    if (!object) throw new Error(`nothing stored for ${url}`);
+    return (await object.json()) as Stored;
+  }
+
+  test('with the switch off or absent, a followed request stores follow_declarations false and an empty trail', async () => {
+    for (const followSwitch of [undefined, 'false', 'TRUE']) {
+      const env = makeEnv(followSwitch === undefined ? {} : { followSwitch });
+      const { res, ctx } = await call(post({ target: 'anc.dev', turnstile_token: 'x' }), env);
+      expect(res.status).toBe(200);
+      await Promise.all(ctx._promises);
+      const stored = await storedRecord(env, 'https://anc.dev/');
+      expect({ followSwitch, follow: stored.scorecard.follow_declarations }).toEqual({ followSwitch, follow: false });
+      expect(stored.scorecard.declared_hosts).toEqual([]);
+    }
+    const on = makeEnv({ followSwitch: 'true' });
+    const { ctx } = await call(post({ target: 'anc.dev', turnstile_token: 'x' }), on);
+    await Promise.all(ctx._promises);
+    expect((await storedRecord(on, 'https://anc.dev/')).scorecard.follow_declarations).toBe(true);
+  });
+
+  test('with the switch off, a host the site declares receives no request', async () => {
+    const endpoint = 'https://mcp.example.net/mcp';
+    const run = async (followSwitch: string) => {
+      const seen: Seen[] = [];
+      const env = makeEnv({ followSwitch, deps: { probeFetch: router(siteDeclaring(endpoint), seen) } });
+      const { res, ctx } = await call(post({ target: 'example.com', turnstile_token: 'x' }), env);
+      expect(res.status).toBe(200);
+      await Promise.all(ctx._promises);
+      const stored = await storedRecord(env, 'https://example.com/');
+      return { requests: requestsTo(seen, 'mcp.example.net').length, trail: stored.scorecard.declared_hosts ?? [] };
+    };
+    const off = await run('false');
+    expect(off.requests).toBe(0);
+    expect(off.trail.length).toBeGreaterThan(0);
+    expect(off.trail.every((entry) => entry.reason === 'follow-disabled')).toBe(true);
+    // Control: with the switch on, the same site's declared host is reached.
+    expect((await run('true')).requests).toBeGreaterThan(0);
   });
 });

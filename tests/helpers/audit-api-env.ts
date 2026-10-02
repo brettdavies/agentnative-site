@@ -82,6 +82,8 @@ export type Overrides = Partial<{
   kvSeed: Record<string, string>;
   /** The AUDIT_JOB namespace; a fresh fake of real AuditJob objects by default. */
   jobs: DurableObjectNamespace<AuditJob>;
+  /** The WEB_AUDIT_FOLLOW_ENABLED value; absent leaves the binding unset. */
+  followSwitch: string;
 }>;
 
 export function makeKv(seed: Record<string, string>, tracker?: Tracker): KVNamespace {
@@ -183,6 +185,7 @@ export function makeEnv(overrides: Overrides = {}): AuditApiEnv & { _kv: Map<str
     WEB_AUDIT_LIMITER: overrides.noLimiter ? undefined : limiter('web', overrides.limiter ?? true),
     WEB_AUDIT_LIMITER_IP: limiter('web-ip', overrides.ipLimiter ?? true),
     WEB_AUDIT_ENABLED: overrides.webKill ? 'false' : 'true',
+    ...(overrides.followSwitch !== undefined ? { WEB_AUDIT_FOLLOW_ENABLED: overrides.followSwitch } : {}),
     TURNSTILE_SECRET: overrides.turnstile === 'no-secret' ? undefined : 'test-turnstile-secret',
     SESSION_HMAC_SECRET: 'test-hmac-secret-please',
     SCORE_TELEMETRY: { writeDataPoint() {} },

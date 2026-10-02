@@ -39,6 +39,7 @@ import {
 } from '../../audit-web/cache';
 import { webEnvelope } from '../../audit-web/core';
 import { runWebAudit } from '../../audit-web/engine';
+import { effectiveFollow, type FollowSwitchEnv } from '../../audit-web/follow-switch';
 import { queueHitMinPurge, webDomainTag, webTag } from '../../audit-web/hit-min-purge';
 import { consumeWebAuditHourlyBudget } from '../../audit-web/limiter';
 import {
@@ -55,7 +56,7 @@ import { getMcpRequest } from '../request-context';
 import { requestHeader } from '../request-header';
 import { siteOrigin } from '../site-origin';
 
-export interface WebAuditToolsEnv extends AuditLogEnv, NotifyEnv, InFlightEnv {
+export interface WebAuditToolsEnv extends AuditLogEnv, NotifyEnv, InFlightEnv, FollowSwitchEnv {
   ASSETS: Fetcher;
   SCORE_CACHE: R2Bucket;
   SCORE_KV?: KVNamespace;
@@ -313,6 +314,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
 
       // Run the engine to completion (terminal-only; no streaming on MCP).
       const registry = await loadWebAuditRegistry(env);
+      const followDeclarations = effectiveFollow(env, true);
       let scorecard: unknown = null;
       let complete = false;
       try {
@@ -323,9 +325,10 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
             siteType: site_type ?? null,
             publicListing: auditListing,
             specVersion: SPEC_VERSION,
+            followDeclarations,
           }),
           env,
-          { target: canonicalTarget, surface: 'mcp' },
+          { target: canonicalTarget, surface: 'mcp', followDeclarations },
         )) {
           if (event.type === 'complete') {
             scorecard = event.scorecard;

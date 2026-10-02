@@ -32,6 +32,7 @@ import {
 } from './cache';
 import { enrichWebScorecardForDisplay } from './display';
 import { runWebAudit } from './engine';
+import { effectiveFollow, type FollowSwitchEnv } from './follow-switch';
 import { queueHitMinPurge, webDomainTag, webTag } from './hit-min-purge';
 import {
   decidePublicListingWrite,
@@ -44,7 +45,7 @@ import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remedia
 import type { EngineResult } from './scorecard';
 import { validatePublicUrl } from './ssrf';
 
-export interface WebCoreEnv extends AuditLogEnv, NotifyEnv {
+export interface WebCoreEnv extends AuditLogEnv, NotifyEnv, FollowSwitchEnv {
   ASSETS: Fetcher;
   SCORE_CACHE: R2Bucket;
   SCORE_KV?: KVNamespace;
@@ -183,6 +184,8 @@ export type RunWebAuditInput = {
   target: WebTarget;
   siteType: WebSiteType | null;
   listing: boolean;
+  /** The caller's follow choice; the operator's switch can still turn following off. */
+  followDeclarations: boolean;
   origin: string;
   probeFetch?: typeof fetch;
   surface: 'stream' | 'mcp';
@@ -211,6 +214,7 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
   const { env, target } = input;
   let scorecard: unknown = null;
   let complete = false;
+  const followDeclarations = effectiveFollow(env, input.followDeclarations);
   try {
     const registry = await loadWebAuditRegistry(env);
     for await (const event of instrumentAuditEvents(
@@ -220,10 +224,11 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
         siteType: input.siteType,
         publicListing: input.listing,
         specVersion: SPEC_VERSION,
+        followDeclarations,
         fetchOptions: input.probeFetch ? { fetchImpl: input.probeFetch } : undefined,
       }),
       env,
-      { target: target.canonical, surface: input.surface },
+      { target: target.canonical, surface: input.surface, followDeclarations },
     )) {
       if (event.type === 'discovery') {
         yield { type: 'discovery', mcp_endpoint: event.endpoint };
