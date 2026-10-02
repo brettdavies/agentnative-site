@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { discoveryLine, LANE_EXPECTATION, rowHostPhrase, webReadingLine } from '../src/shared/scoring-copy';
 import { handleScoringPage, type ScoringPageEnv } from '../src/worker/audit/scoring-page';
 import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
 import { _resetShellTemplateCache } from '../src/worker/shell-template';
@@ -70,7 +71,7 @@ describe('GET /scoring?target=', () => {
     expect(html).toContain('data-lane="web"');
     expect(html).toContain('data-target="anc.dev"');
     expect(html).toContain(`data-check-total="${total}"`);
-    expect(html).toContain('Usually a few seconds.');
+    expect(html).toContain('Usually under 30 seconds; longer when the site declares other hosts.');
     expect(html).toContain('get_website_audit');
   });
 
@@ -161,5 +162,33 @@ describe('GET /scoring: the pointer and the representations', () => {
       env(),
     );
     expect(res.status).toBe(405);
+  });
+});
+
+describe('the progress page names where a website run reads', () => {
+  test('the website lane promises a longer wait when a site declares other hosts, and reads them while it waits', () => {
+    expect(LANE_EXPECTATION.web).toBe('Usually under 30 seconds; longer when the site declares other hosts.');
+    expect(LANE_EXPECTATION.cli).toBe('Installs the tool in a sandbox; usually under a minute.');
+    expect(webReadingLine('stripe.dev')).toBe('Reading stripe.dev and any hosts it declares…');
+  });
+
+  test('an endpoint on another host is named with the target that declared it; one on the target is not', () => {
+    expect(discoveryLine('https://mcp.stripe.com/', 'stripe.dev')).toBe(
+      'MCP endpoint found at https://mcp.stripe.com/, declared by stripe.dev.',
+    );
+    expect(discoveryLine('https://anc.dev/mcp', 'anc.dev')).toBe('MCP endpoint found at https://anc.dev/mcp.');
+    expect(discoveryLine(null, 'anc.dev')).toBe('No MCP endpoint found.');
+  });
+
+  test('a streamed row names its host only when it is neither the target nor the endpoint, and it ran there', () => {
+    expect(rowHostPhrase({ host: 'api.stripe.com' }, 'stripe.dev', 'mcp.stripe.com')).toBe(
+      'evaluated at api.stripe.com',
+    );
+    expect(rowHostPhrase({ host: 'mcp.stripe.com' }, 'stripe.dev', 'mcp.stripe.com')).toBeNull();
+    expect(rowHostPhrase({ host: 'stripe.dev' }, 'stripe.dev', 'mcp.stripe.com')).toBeNull();
+    expect(rowHostPhrase({}, 'stripe.dev', null)).toBeNull();
+    expect(
+      rowHostPhrase({ host: 'mcp.example.net', na_reason: 'reciprocity-refused' }, 'stripe.dev', 'mcp.stripe.com'),
+    ).toBeNull();
   });
 });

@@ -2898,6 +2898,10 @@ main .remediation__body {
   font-size: 0.82rem;
   color: var(--fg-secondary);
 }
+.scoring__host {
+  font-size: var(--text-caption);
+  color: var(--caption-text);
+}
 .scoring__trail {
   display: inline-flex;
   align-items: center;

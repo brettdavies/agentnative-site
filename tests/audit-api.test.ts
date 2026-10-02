@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
+import type { AuditEvent } from '../src/shared/audit-events';
+import { streamedResultLine } from '../src/shared/scoring-copy';
 import { isAuditApiPath } from '../src/worker/audit/api';
 import { keyFor as webKeyFor } from '../src/worker/audit-web/cache';
 import { keyFor as cliKeyFor } from '../src/worker/score/cache';
@@ -731,6 +733,37 @@ describe('POST /api/score: the follow kill switch', () => {
     expect(off.trail.every((entry) => entry.reason === 'follow-disabled')).toBe(true);
     // Control: with the switch on, the same site's declared host is reached.
     expect((await run('true')).requests).toBeGreaterThan(0);
+  });
+});
+
+describe('POST /api/score: streamed checks name their host and reason', () => {
+  test('a check on a host that did not confirm its endpoint streams both, and the line the saved result shows', async () => {
+    const env = makeEnv({
+      followSwitch: 'true',
+      deps: { probeFetch: router(siteDeclaring('https://mcp.example.net/mcp'), []) },
+    });
+    const { res, ctx } = await call(
+      post({ target: 'example.com', turnstile_token: 'x' }, { accept: 'application/x-ndjson' }),
+      env,
+    );
+    const lines = (await ndjson(res)) as AuditEvent[];
+    await Promise.all(ctx._promises);
+    const refused = lines.filter(
+      (l): l is Extract<AuditEvent, { type: 'check' }> => l.type === 'check' && l.na_reason === 'reciprocity-refused',
+    );
+    expect(refused.length).toBeGreaterThan(0);
+    expect([...new Set(refused.map((c) => c.host))]).toEqual(['mcp.example.net']);
+    const complete = lines.at(-1) as Extract<AuditEvent, { type: 'complete' }>;
+    const saved = (complete.scorecard as { results: Array<{ id: string; result: string }> }).results;
+    for (const check of refused) {
+      expect({ id: check.id, line: streamedResultLine(check, 'example.com') }).toEqual({
+        id: check.id,
+        line: saved.find((r) => r.id === check.id)?.result ?? null,
+      });
+    }
+    expect(streamedResultLine(refused[0], 'example.com')).toStartWith(
+      'Not evaluated: mcp.example.net did not confirm this endpoint',
+    );
   });
 });
 

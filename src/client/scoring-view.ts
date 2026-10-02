@@ -103,13 +103,20 @@ export class ScoringView {
     return this.rows;
   }
 
-  private row(id: string, title: string, pill: { cls: string; text: string }, evidence?: string | null): HTMLElement {
+  private row(
+    id: string,
+    title: string,
+    pill: { cls: string; text: string },
+    evidence?: string | null,
+    hostPhrase?: string | null,
+  ): HTMLElement {
     const li = document.createElement('li');
     li.className = 'pscore__row scoring__row';
     const note = evidence ? `<p class="pscore__evidence">${escHtml(evidence)}</p>` : '';
+    const host = hostPhrase ? ` <span class="scoring__host">${escHtml(hostPhrase)}</span>` : '';
     li.innerHTML =
       `<span class="scoring__id">${escHtml(id)}</span>` +
-      `<span class="scoring__title">${escHtml(title)}${note}</span>` +
+      `<span class="scoring__title">${escHtml(title)}${host}${note}</span>` +
       `<span class="scoring__trail"><span class="stpill ${pill.cls}" data-pill>${escHtml(pill.text)}</span>` +
       '<span class="scoring__counter" aria-hidden="true" data-counter></span></span>';
     this.list().append(li);
@@ -126,9 +133,15 @@ export class ScoringView {
     this.running = this.row(phase, CLI_PHASE_LABEL[phase], { cls: 'scoring__pill--running', text: 'running' });
   }
 
-  /** A finished website check. */
-  check(id: string, title: string, status: string, evidence: string | null): void {
-    this.row(id, title, pillFor(status), evidence);
+  /** A finished website check; every row records the host its evidence came from. */
+  check(
+    id: string,
+    title: string,
+    status: string,
+    result: string | null,
+    where: { host: string; phrase: string | null },
+  ): void {
+    this.row(id, title, pillFor(status), result, where.phrase).dataset.host = where.host;
   }
 
   /** Close the running row with the pill its run ended on; its counter keeps the final time. */

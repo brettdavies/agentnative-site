@@ -9,8 +9,9 @@
 // reload, the website result that saved nothing rendering in place with Run
 // again repeating the opt-out, the entry form's opt-out reaching the POST,
 // a later followed submit superseding a kept opted-out result, a reload mid
-// opt-out run keeping the opt-out on the probe and on Start, and that the
-// page never loads the WebMCP script.
+// opt-out run keeping the opt-out on the probe and on Start, a website run's
+// waiting line, its endpoint's declarer, and each streamed row's host and
+// result line, and that the page never loads the WebMCP script.
 
 import { expect, type Page, test } from '@playwright/test';
 
@@ -144,6 +145,40 @@ async function submitWebsite(page: Page, target: string, follow: boolean): Promi
   await page.locator('[data-audit-follow]').setChecked(follow);
   await page.click('[data-audit-submit]');
   await page.waitForURL(`**/scoring?target=${target}`);
+}
+
+type StreamHooks = { __e2eSend: (line: unknown) => void };
+
+// page.route() answers with a whole body at once, so a run's waiting state
+// never shows. This stands in for the endpoint with a stream the test feeds
+// one line at a time; the page cancels it once a terminal line arrives.
+async function controlledStream(page: Page): Promise<{
+  /** Resolves once the page has asked for its run. */
+  opened: () => Promise<unknown>;
+  send: (line: unknown) => Promise<void>;
+}> {
+  await page.addInitScript(() => {
+    type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    const win = window as unknown as { fetch: Fetch };
+    const original = win.fetch.bind(window);
+    win.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (!url.includes('/api/score')) return original(input, init);
+      const encoder = new TextEncoder();
+      const hooks = window as unknown as StreamHooks;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          hooks.__e2eSend = (line) => controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
+        },
+      });
+      return new Response(body, { status: 200, headers: { 'content-type': 'application/x-ndjson' } });
+    };
+  });
+  return {
+    opened: () =>
+      page.waitForFunction(() => typeof (window as unknown as Partial<StreamHooks>).__e2eSend === 'function'),
+    send: (line) => page.evaluate((l) => (window as unknown as StreamHooks).__e2eSend(l), line),
+  };
 }
 
 test.describe('/scoring progress page', () => {
@@ -426,6 +461,87 @@ test.describe('/scoring progress page', () => {
     await expect.poll(() => posts.length).toBe(3);
     expect(posts[2]).toEqual({ target: 'stripe.dev', turnstile_token: 'fake-token', follow_declarations: false });
     await expect(page.locator('.e2e-transient')).toBeVisible();
+  });
+
+  test('a website run reads the hosts a site declares while it waits, then names each row where its evidence came from', async ({
+    page,
+  }) => {
+    await mockTurnstile(page);
+    await seedStash(page, 'stripe.dev', 'web');
+    const stream = await controlledStream(page);
+    await page.goto('/scoring?target=stripe.dev');
+    await expect(page.locator('[data-scoring-subline]')).toContainText(
+      'Usually under 30 seconds; longer when the site declares other hosts.',
+    );
+    await stream.opened();
+    const status = page.locator('[data-scoring-status]');
+    await stream.send({ type: 'accepted', lane: 'web', target: 'stripe.dev', started_at: AT });
+    await expect(status).toHaveText('Reading stripe.dev and any hosts it declares…');
+    await stream.send({ type: 'discovery', mcp_endpoint: 'https://mcp.stripe.com/' });
+    await expect(status).toContainText(
+      'MCP endpoint found at https://mcp.stripe.com/, declared by stripe.dev. Checks:',
+    );
+    const check = (id: string, fields: Record<string, unknown>) => ({
+      type: 'check',
+      id,
+      principle: 'P2',
+      keyword: 'should',
+      status: 'n_a',
+      evidence: null,
+      ...fields,
+    });
+    await stream.send(check('mcp-initialize', { na_reason: 'auth-required', host: 'mcp.stripe.com', evidence: '401' }));
+    await stream.send(
+      check('json-errors', { status: 'pass', host: 'api.stripe.com', evidence: '404 with a JSON body' }),
+    );
+    await stream.send(check('mcp-card', { na_reason: 'reciprocity-refused', host: 'mcp.example.net' }));
+    await stream.send(check('robots-txt', { status: 'pass' }));
+    const row = (id: string) => page.locator('.scoring__row', { has: page.locator(`.scoring__id:text-is("${id}")`) });
+    // Before the run completes, each row already reads the line its saved page shows.
+    await expect(row('mcp-initialize').locator('.pscore__evidence')).toHaveText(
+      'Not evaluated: mcp.stripe.com requires sign-in (401)',
+    );
+    await expect(row('mcp-card').locator('.pscore__evidence')).toHaveText(
+      'Not evaluated: mcp.example.net did not confirm this endpoint',
+    );
+    await expect(row('json-errors').locator('.pscore__evidence')).toHaveText('Verified (404 with a JSON body)');
+    await expect(row('mcp-initialize')).toHaveAttribute('data-host', 'mcp.stripe.com');
+    await expect(row('robots-txt')).toHaveAttribute('data-host', 'stripe.dev');
+    // Only a host that is neither the target nor the endpoint is named in the title.
+    await expect(row('json-errors').locator('.scoring__host')).toHaveText('evaluated at api.stripe.com');
+    // A row the audit could not run names its host in its line, not as where it was evaluated.
+    await expect(row('mcp-card').locator('.scoring__host')).toHaveCount(0);
+    await expect(row('mcp-card')).toHaveAttribute('data-host', 'mcp.example.net');
+    await expect(row('mcp-initialize').locator('.scoring__host')).toHaveCount(0);
+    await expect(row('robots-txt').locator('.scoring__host')).toHaveCount(0);
+    await stream.send(
+      envelope({
+        type: 'complete',
+        kind: 'web',
+        tier: 'live',
+        target: 'stripe.dev',
+        scorecard_url: null,
+        markdown_url: null,
+        json_url: null,
+        freshness: { cached: false, scored_at: AT, refresh_after: null },
+        summary_html: '<article class="e2e-done">done</article>',
+      }),
+    );
+    await expect(page.locator('.e2e-done')).toBeVisible();
+  });
+
+  test('a website endpoint on the target itself is named without a declarer', async ({ page }) => {
+    await mockTurnstile(page);
+    await seedStash(page, 'anc.dev', 'web');
+    const stream = await controlledStream(page);
+    await page.goto('/scoring?target=anc.dev');
+    await stream.opened();
+    await stream.send({ type: 'accepted', lane: 'web', target: 'anc.dev', started_at: AT });
+    await stream.send({ type: 'discovery', mcp_endpoint: 'https://anc.dev/mcp' });
+    await expect(page.locator('[data-scoring-status]')).toContainText(
+      'MCP endpoint found at https://anc.dev/mcp. Checks:',
+    );
+    await expect(page.locator('[data-scoring-status]')).not.toContainText('declared by');
   });
 
   test('the page never loads the WebMCP script', async ({ page }) => {
