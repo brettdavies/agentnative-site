@@ -2708,6 +2708,8 @@ text and no eval suite exists in this repo, so no eval is added.
 | Discovery overlap | completion order leaks into goldens | two-generation test (D15) | fixed evidence order | not user-facing |
 | Domain budget | shared domain drained on release day | U7, D7 | deferred, not retried; next trigger picks it up | yes, rescore log and Rollout stop |
 | Domain budget | `SCORE_KV` missing | none | fails open by precedent | silent; operator-only config fault |
+| Domain budget | the burst binding or the KV read throws | U7 | refuses the reservation; the domain's rows read budget-exceeded | yes, row reason; `follow_budget_errors` on the run record |
+| Domain budget | the KV write is rate-limited (one write per key per second) after a read with room | U7 | admits; the hourly count under-counts | `follow_budget_errors` on the run record only |
 | Document fetch | a 2 MiB catalog or card | D10 tests | 256 KiB cap, truncated, unparseable | yes, truncated evidence |
 | Protected MCP | resource rows read the wrong reason | D9 fixture | resolver returns auth-required | yes, row reason |
 | Engine regeneration | an unrelated row changes status | D12 index | PR blocked on unexplained entry | yes, in review |
