@@ -17,6 +17,7 @@ import { keyFor as cliKeyFor } from '../src/worker/score/cache';
 import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
 import { _resetShellTemplateCache } from '../src/worker/shell-template';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { parseHtml } from './helpers/html-elements';
 import { captureLogs } from './helpers/log-capture';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
@@ -423,6 +424,33 @@ describe('website records', () => {
     const rows = (expected.scorecard as { results: Array<{ id: string; category: string; result?: string }> }).results;
     expect(rows.map((r) => r.id)).toEqual(['llms-txt', 'openapi']);
     expect(rows.every((r) => typeof r.result === 'string')).toBe(true);
+  });
+
+  // The page's freshness sentence is a fixed phrase, so the registry closes
+  // the checks instead; the twin keeps it on its freshness line.
+  test('a page closes its checks with the registry it was scored under; the twin names it on its freshness line', async () => {
+    const stamped = { ...WEB_RECORD, scorecard: { ...WEB_RECORD.scorecard, registry_fingerprint: '3f2a9c1b7e40' } };
+    const env = await seededEnv({ cache: { [await webKeyFor('https://anc.dev/', SPEC_VERSION)]: stamped } });
+    const page = await (await route('/score/anc.dev', env)).text();
+    expect(page).toMatch(
+      /<\/ol>\s*<p class="pscore__registry">Scored against registry 3f2a9c1b7e40\.<\/p>\s*<\/section>/,
+    );
+    const freshness = (await parseHtml(page)).querySelector('[data-web-audit-freshness]')?.textContent ?? '';
+    expect(freshness).toStartWith('Scored 2026-09-10 20:00 UTC.');
+    expect(freshness).not.toContain('3f2a9c1b7e40');
+    const twin = await (await route('/score/anc.dev/md', env)).text();
+    const line = twin.split('\n').find((l) => l.startsWith('Scored 2026-09-10T20:00:00.000Z.'));
+    expect(line).toEndWith('Scored against registry 3f2a9c1b7e40.');
+  });
+
+  test('a scorecard that recorded no registry reads it as unknown on the page and the twin', async () => {
+    const env = await seededEnv();
+    const page = await (await route('/score/anc.dev', env)).text();
+    expect(page).toMatch(/<\/ol>\s*<p class="pscore__registry">Registry version not recorded\.<\/p>\s*<\/section>/);
+    expect(page).not.toContain('Scored against registry');
+    const twin = await (await route('/score/anc.dev/md', env)).text();
+    const line = twin.split('\n').find((l) => l.startsWith('Scored 2026-09-10T20:00:00.000Z.'));
+    expect(line).toEndWith('Registry version not recorded.');
   });
 
   test('/score/anc.dev.html and /score/anc.dev/ canonicalize to /score/anc.dev without reaching the assets binding', async () => {

@@ -2463,6 +2463,14 @@ main .remediation__body {
   color: var(--caption-text);
 }
 
+/* The registry a result was scored under, closing the checks: a caption
+ * flush with the section, where a row's note indents under its label. */
+.pscore__registry {
+  margin: var(--space-4) 0 0;
+  font-size: var(--text-caption);
+  color: var(--caption-text);
+}
+
 /* Rows the audit could not run for one reason, as one closed group that
  * still holds every row. */
 .web-check__group {

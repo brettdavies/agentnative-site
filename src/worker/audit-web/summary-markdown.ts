@@ -123,7 +123,7 @@ export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
     '',
   );
   if (model.notRunNote !== null) lines.push(richMarkdown(model.notRunNote), '');
-  lines.push(freshnessMarkdown(freshnessState), '');
+  lines.push(freshnessMarkdown(freshnessState, model.registryFingerprint), '');
   renderDeclaredHosts(model.declaredHostsView, lines);
   for (const category of model.categories) renderCategory(category, lines);
 

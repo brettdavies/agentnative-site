@@ -19,7 +19,7 @@ import type { WebAuditFreshness } from './cache';
 import { WEB_CTA_NOTE_HOSTS_HTML, WEB_CTA_NOTE_HTML } from './copy';
 import { notRunCategoryNote, notRunCount } from './provenance-copy';
 import { richHtml } from './rich-text';
-import { freshnessHtml } from './summary-freshness';
+import { freshnessHtml, registrySentence } from './summary-freshness';
 import { type WebSummaryInput, webSummaryView } from './summary-input';
 import { RELATIVE_LABEL, RELATIVE_SUBLABEL, STATUS_ORDER } from './summary-labels';
 import { renderItems, renderLane } from './summary-render-checks';
@@ -132,6 +132,7 @@ ${declaredHostsHtml(model.declaredHostsView)}<section class="pscore scorecard-au
   <h2 id="pscore-heading">Checks by category</h2>
   <ol class="pscore__list">
 ${model.categories.map((category, i) => categoryHtml(category, i + 1)).join('')}  </ol>
+  <p class="pscore__registry">${escHtml(registrySentence(model.registryFingerprint))}</p>
 </section>
 `;
   // A result rendered in place has no page to re-audit from and runs on a
