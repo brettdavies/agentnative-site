@@ -27,7 +27,7 @@ import {
 } from './discovery-documents';
 import { RETRY_SHAPED_STATUSES, resolveUrl } from './handlers/shared';
 import type { WebAuditDiscoveryConfig } from './registry';
-import { DOCUMENT_MAX_BODY_BYTES, METADATA_MAX_BODY_BYTES, validatePublicUrl } from './ssrf';
+import { DOCUMENT_MAX_BODY_BYTES, isHttpsUrl, METADATA_MAX_BODY_BYTES, notHttps, validatePublicUrl } from './ssrf';
 
 export type AdmittedBy = 'card' | 'ai-catalog' | 'metadata';
 
@@ -215,23 +215,13 @@ export async function resolveProtectedResourceMetadata(
   return echo === 'ruled-out' || (echo === 'unanswered' && options.ofRecord === true) ? found : null;
 }
 
-const NOT_READ: ProbeResponse = { status: null, headers: {}, body: '', error: 'not requested: not https' };
-
-function isHttps(url: string): boolean {
-  try {
-    return new URL(url).protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
 /** A source that declines every URL other than https, answering it as a read that got no response. */
 function httpsOnly(source: ArtifactSource): ArtifactSource {
   return {
     get: (url, opts) => {
-      if (isHttps(url)) return source.get(url, opts);
+      if (isHttpsUrl(url)) return source.get(url, opts);
       source.decline(url, 'not https');
-      return Promise.resolve(NOT_READ);
+      return Promise.resolve(notHttps());
     },
     decline: (url, why) => source.decline(url, why),
   };

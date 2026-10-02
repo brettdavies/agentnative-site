@@ -291,10 +291,30 @@ function answeredByTarget(status: unknown): boolean {
   return typeof status === 'number' && !isEdgeErrorStatus(status);
 }
 
+function unreachableReason(base: string, rootResp: ProbeResponse, onlyEdgeErrors: boolean): string {
+  if (rootResp.refused === 'insecure-scheme') return `${base} is not https, and anc sends no plaintext request.`;
+  if (onlyEdgeErrors) {
+    return (
+      `${base} did not answer any probe (every response was a Cloudflare edge error, ` +
+      `which means the host did not resolve or never replied). ` +
+      'The site may be down, its DNS may be misconfigured, or it may block requests from datacenter IP ranges ' +
+      'such as the auditor’s.'
+    );
+  }
+  return (
+    `${base} did not answer any probe (no HTTP response from the root fetch or MCP discovery). ` +
+    'The site may be down, or it may block requests from datacenter IP ranges such as the auditor’s.'
+  );
+}
+
 /** The row a check settles to from its antecedent, or null when the check must be probed. */
-export function antecedentGate(check: WebCheck, resolution: AntecedentResolution): EngineResult | null {
+export function antecedentGate(
+  check: WebCheck,
+  resolution: AntecedentResolution,
+  rootFailure = 'root fetch failed',
+): EngineResult | null {
   if (resolution === 'apply') return null;
-  if (resolution === 'error') return errorResult(check, 'antecedent unresolvable: root fetch failed');
+  if (resolution === 'error') return errorResult(check, `antecedent unresolvable: ${rootFailure}`);
   if (resolution === 'n_a') {
     return naResult(check, { reason: 'antecedent-unmet', evidence: antecedentUnmetEvidence(check.antecedent) });
   }
@@ -347,19 +367,24 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const deadline = now() + perAuditDeadlineMs;
 
   // The single canonical root fetch every root-HTML check and several
-  // antecedents read. null = failed at the network level. It runs before
-  // discovery because it doubles as the reachability probe: a network-dead
-  // root drops every later probe to the degraded timeout so a tarpitting
-  // target cannot spend the whole deadline on a handful of fetches.
+  // antecedents read. It runs before discovery because it doubles as the
+  // reachability probe: a network-dead root drops every later probe to the
+  // degraded timeout so a tarpitting target cannot spend the whole deadline
+  // on a handful of fetches. `root` is null when no document was read: the
+  // fetch failed, or the root redirected to http, which the guard does not
+  // follow. That redirect is still the target's answer, so the root counts
+  // as reachable.
   const rootResp = await guardedFetch(base, {}, { ...input.fetchOptions, timeoutMs: configuredTimeoutMs });
-  const root: ProbeResponse | null = rootResp.status === null ? null : rootResp;
+  const root: ProbeResponse | null = rootResp.error === null ? rootResp : null;
   const perCheckTimeoutMs =
-    root === null ? Math.min(configuredTimeoutMs, DEGRADED_PER_CHECK_TIMEOUT_MS) : configuredTimeoutMs;
+    rootResp.status === null ? Math.min(configuredTimeoutMs, DEGRADED_PER_CHECK_TIMEOUT_MS) : configuredTimeoutMs;
+  const rootFailure =
+    rootResp.refused !== undefined && rootResp.error !== null ? `root ${rootResp.error}` : 'root fetch failed';
 
   const discoveryConfig = input.registry.mcp_discovery;
   const phaseOptions = { timeoutMs: perCheckTimeoutMs, deadlineAt: deadline, now, fetchOptions: input.fetchOptions };
   const documents = await readDiscoveryDocuments(input.url, discoveryConfig, phaseOptions);
-  const rootFromTarget = root !== null && !isEdgeErrorStatus(root.status);
+  const rootFromTarget = answeredByTarget(rootResp.status);
   const following = input.followDeclarations !== false;
   const {
     discovery,
@@ -389,16 +414,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   if (!rootFromTarget && discovery.endpoint === null && !anyTargetResponse) {
     const onlyEdgeErrors =
       root !== null || discovery.evidence.some((e) => typeof e.status === 'number' && isEdgeErrorStatus(e.status));
-    yield {
-      type: 'unreachable',
-      reason: onlyEdgeErrors
-        ? `${base} did not answer any probe (every response was a Cloudflare edge error, ` +
-          `which means the host did not resolve or never replied). ` +
-          'The site may be down, its DNS may be misconfigured, or it may block requests from datacenter IP ranges ' +
-          'such as the auditor’s.'
-        : `${base} did not answer any probe (no HTTP response from the root fetch or MCP discovery). ` +
-          'The site may be down, or it may block requests from datacenter IP ranges such as the auditor’s.',
-    };
+    yield { type: 'unreachable', reason: unreachableReason(base, rootResp, onlyEdgeErrors) };
     return;
   }
 
@@ -526,7 +542,11 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     if (!siteTypeApplies(check.site_types, actx)) {
       return naResult(check, { reason: 'antecedent-unmet', evidence: 'not applicable to the declared site type' });
     }
-    return antecedentGate(check, resolveAntecedent(check.antecedent, { ...actx, mcpLane: mcpRequestEra(check) }));
+    return antecedentGate(
+      check,
+      resolveAntecedent(check.antecedent, { ...actx, mcpLane: mcpRequestEra(check) }),
+      rootFailure,
+    );
   };
 
   // Finalize + yield wave-1 results through the same gate.

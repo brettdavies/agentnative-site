@@ -13,6 +13,8 @@
 //     Location target through the same canonicalization + range check,
 //   - can keep the hops on the request's own origin, so a probe's method
 //     and body never reach a host its caller did not name,
+//   - sends no plaintext request: an http request URL is never sent, and
+//     a redirect to http is not taken but answered as the redirect itself,
 //   - wraps the whole chain in one AbortController deadline.
 //
 // DNS-rebinding residual: Workers cannot pre-resolve a hostname and pin
@@ -267,10 +269,25 @@ export function validatePublicUrl(raw: string): UrlValidation {
   return { ok: true, url };
 }
 
+export function isHttpsUrl(raw: string): boolean {
+  try {
+    return new URL(raw).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/** The answer for a URL that is never requested because it is not https. */
+export function notHttps(): ProbeResponse {
+  return { status: null, headers: {}, body: '', error: 'not requested: not https', refused: 'insecure-scheme' };
+}
+
 /**
  * Fetch through the SSRF guard. Never throws; failures come back as
  * `{ status: null, error }` mirroring the extracted fetch contract so
- * `assertHttp` can evaluate them uniformly.
+ * `assertHttp` can evaluate them uniformly. A redirect to http comes back
+ * as the redirect that named it, with `error` and `refused` set, so a
+ * caller can tell a target that answered from one that never did.
  */
 export async function guardedFetch(
   rawUrl: string,
@@ -300,6 +317,7 @@ export async function guardedFetch(
   try {
     let current = validatePublicUrl(rawUrl);
     if (!current.ok) return fail(current.reason.startsWith('blocked') ? current.reason : `blocked: ${current.reason}`);
+    if (current.url.protocol !== 'https:') return { ...notHttps(), elapsed_ms: Date.now() - started };
     const origin = current.url.origin;
 
     for (let hop = 0; hop <= maxRedirects; hop++) {
@@ -341,6 +359,16 @@ export async function guardedFetch(
                 : `blocked: ${validated.reason} (redirect hop ${hop + 1})`,
             );
           }
+          if (validated.url.protocol !== 'https:') {
+            return {
+              status: response.status,
+              headers: lowercased(response.headers),
+              body: '',
+              error: `redirect refused: ${response.status} to ${redirect}: not https`,
+              refused: 'insecure-scheme',
+              elapsed_ms: Date.now() - started,
+            };
+          }
           if (hop === maxRedirects) {
             return fail(`redirect limit exceeded (${maxRedirects} hops)`);
           }
@@ -349,10 +377,7 @@ export async function guardedFetch(
         }
       }
 
-      const headers: Record<string, string> = {};
-      response.headers.forEach((value, name) => {
-        headers[name.toLowerCase()] = value;
-      });
+      const headers = lowercased(response.headers);
       let read: BodyRead;
       try {
         read = await readBody(response, opts.maxBodyBytes);
@@ -386,6 +411,14 @@ export const METADATA_MAX_BODY_BYTES = 64 * 1024;
 export const OPENAPI_MAX_BODY_BYTES = 512 * 1024;
 
 type BodyRead = { body: string; truncated: boolean };
+
+function lowercased(source: Headers): Record<string, string> {
+  const headers: Record<string, string> = {};
+  source.forEach((value, name) => {
+    headers[name.toLowerCase()] = value;
+  });
+  return headers;
+}
 
 async function readBody(response: Response, maxBodyBytes: number | undefined): Promise<BodyRead> {
   if (maxBodyBytes === 0) {

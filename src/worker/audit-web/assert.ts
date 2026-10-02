@@ -7,13 +7,22 @@
 
 /** Uniform probe-response shape every handler and the SSRF guard produce. */
 export type ProbeResponse = {
-  /** HTTP status, or null when the request itself failed. */
+  /** HTTP status of the last response the target sent, or null when none arrived. */
   status: number | null;
   /** Response headers with lowercased names. */
   headers: Record<string, string>;
   body: string;
-  /** Non-null when the request failed before producing a status. */
+  /**
+   * Non-null when no usable response came back: the request failed before
+   * producing a status, or the guard refused the redirect `status` carries.
+   */
   error: string | null;
+  /**
+   * Present when the guard sent no request because its URL is not https:
+   * the request URL itself (`status` null), or the redirect hop the answer
+   * in `status` named.
+   */
+  refused?: 'insecure-scheme';
   /** Wall-clock milliseconds the request took (informational). */
   elapsed_ms?: number;
   /** Present only when the body stopped at the caller's byte cap with more still unread. */
