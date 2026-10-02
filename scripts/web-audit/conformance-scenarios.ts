@@ -1239,6 +1239,17 @@ export const SCENARIOS: Record<string, Scenario> = {
       ),
     ],
   ),
+  'auth-echo-unanswered': scenario(
+    "the audited site's card declares its /mcp, which answers every POST with a 401 naming same-host root RFC 9728 metadata that names it, and the metadata read at a nonsense path draws a 503: the card already made the endpoint of record, so an echo read that got no answer leaves sign-in settled, the rows the 401s answer read auth-required, and none reads broken",
+    ['mcp-initialize', 'mcp-tools-list', ...ENFORCEMENT_IDS],
+    [
+      ...baseline(),
+      get(CARD_PATH, json(SERVER_CARD)),
+      ...protectedMcp(MCP_PATH, u(PROTECTED_RESOURCE_PATH)),
+      get(PROTECTED_RESOURCE_PATH, json({ resource: u(MCP_PATH), authorization_servers: [AUTH_SERVER] })),
+      get(`${PROTECTED_RESOURCE_PATH}/anc-web-audit-no-such-resource`, text('upstream error', {}, 503)),
+    ],
+  ),
 
   // ---- dns-doh ---------------------------------------------------------------
   'dns-aid-pass': scenario('the first resolver answers Status 0 with a record for the index name', ['dns-aid'], [
