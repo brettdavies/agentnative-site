@@ -76,7 +76,11 @@ test('no web-audit module sends a request except through guardedFetch', async ()
     visit(source);
   }
   expect(found.filter((entry) => !(entry in ALLOWED))).toEqual([]);
-  // Each allowance is still where it says, so the scan is reading the module
-  // that holds the one sanctioned request.
-  expect(Object.keys(ALLOWED).filter((entry) => !found.includes(entry))).toEqual([]);
+  // Each allowance is still where it says, once: the scan is reading the
+  // module that holds the one sanctioned request, and a copy of an allowed
+  // line is a second request path.
+  const occurrences = (entry: string): number => found.filter((f) => f === entry).length;
+  expect(Object.keys(ALLOWED).map((entry) => [entry, occurrences(entry)])).toEqual(
+    Object.keys(ALLOWED).map((entry) => [entry, 1]),
+  );
 });
