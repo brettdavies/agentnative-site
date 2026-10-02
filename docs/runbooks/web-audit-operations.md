@@ -155,8 +155,8 @@ for them:
   audit, so it is never left off the board. A saved scorecard older than 24 hours is replaced too, so a third party that
   keeps a declared domain's hour spent cannot freeze a seed's score. Seeds that declare one domain drain its hour
   together, so a release reflow can defer several. Fire the manual trigger after the hour turns (the next full UTC hour,
-  when every hourly budget opens a new bucket). The run picks deferred seeds up by age, so one whose saved scorecard is
-  younger than the 2-hour eligibility window waits for a later run.
+  when every hourly budget opens a new bucket). A deferred seed keeps the scorecard it had, which records the registry
+  it was scored under before the reflow, so the next trigger re-audits it whatever its age.
 
 **Secrets.** `WEB_RESCORE_SECRET` is a `wrangler secret put` value on both Workers (`--env staging` and production) and
 lives in the GitHub environment secret `ANC_WEB_RESCORE_SECRET` for the deploy hook. Rotate by setting a new value in

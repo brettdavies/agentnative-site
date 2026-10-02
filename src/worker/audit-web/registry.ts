@@ -180,8 +180,13 @@ const FINGERPRINT_PREFIX_LENGTH = 12;
 const FINGERPRINT_PREFIX_RE = /^[0-9a-f]{12}$/;
 
 /** The part of a fingerprint a scorecard records: its first 12 characters. */
+export function fingerprintPrefix(fingerprint: string): string {
+  return fingerprint.slice(0, FINGERPRINT_PREFIX_LENGTH);
+}
+
+/** The prefix a scorecard scored under `registry` records. */
 export async function registryFingerprintPrefix(registry: WebAuditRegistry): Promise<string> {
-  return (await registryFingerprint(registry)).slice(0, FINGERPRINT_PREFIX_LENGTH);
+  return fingerprintPrefix(await registryFingerprint(registry));
 }
 
 /** Whether `value` is a recorded fingerprint prefix; anything else reads as an unknown registry version. */

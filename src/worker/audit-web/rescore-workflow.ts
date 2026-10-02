@@ -1,8 +1,9 @@
 // Web-rescore Workflow: staleness-batched, self-draining. Each cycle
 // selects the seeded domains whose cached audit is oldest and older than
-// the eligibility window (or never audited), takes up to RESCORE_BATCH_SIZE
-// of them oldest-first, audits each in its own step, then rebuilds both
-// board aggregates. It loops cycles until no eligible domain remains, so
+// the eligibility window (or never audited, or scored under a registry
+// other than the current one), takes up to RESCORE_BATCH_SIZE of them
+// oldest-first, audits each in its own step, then rebuilds both board
+// aggregates. It loops cycles until no eligible domain remains, so
 // the board list is dynamic: a single run drains the whole queue in bounded
 // batches regardless of board size, and anything a run cannot reach stays
 // stale and is picked up by the next run.
@@ -27,13 +28,14 @@ import { SPEC_VERSION } from '../spec-version.gen';
 import { emitLog } from '../telemetry/log';
 import { rebuildWebAggregates, type WebAggregateEnv } from './aggregate';
 import { type AuditLogEnv, instrumentAuditEvents } from './audit-log';
-import { get as cacheGet, put as cachePut, canonicalTargetOf, isStale, keyFor } from './cache';
+import { type CachedWebAudit, get as cacheGet, put as cachePut, canonicalTargetOf, isStale, keyFor } from './cache';
 import { type DomainBudgetEnv, declaredDomainBudget } from './domain-budget';
 import { domainBudgetHold } from './domain-budget-hold';
 import { runWebAudit } from './engine';
 import { effectiveFollow, type FollowSwitchEnv } from './follow-switch';
 import { homeTag, invokeCachedPurge, webDomainTag, webTag } from './hit-min-purge';
-import { loadWebAuditRegistry, registryFingerprint, withRegistryFingerprint } from './registry';
+import { readRegistryFingerprint } from './provenance';
+import { fingerprintPrefix, loadWebAuditRegistry, registryFingerprint, withRegistryFingerprint } from './registry';
 import type { WebScorecard } from './scorecard';
 import { isSeededDomain, loadWebSeed, type WebSeedEntry } from './seed';
 
@@ -183,9 +185,23 @@ async function currentRegistryFingerprint(env: WebRescoreEnv): Promise<string> {
 type BatchItem = { domain: string; target: string };
 
 /**
- * The eligible seeded domains for the next cycle: never audited or audited
- * before the eligibility window, excluding any already attempted this run,
- * sorted oldest-first and capped at `batchSize`. A never-audited or
+ * Whether a cached scorecard records a registry other than `prefix`, the
+ * current one; a scorecard that records none reads as another. A seed a
+ * reflow deferred keeps the scorecard it had, so this rather than its age
+ * makes it eligible on the next trigger. Null `prefix` (no gate ran) never
+ * counts.
+ */
+function scoredUnderOtherRegistry(cached: CachedWebAudit | null, prefix: string | null): boolean {
+  if (prefix === null || cached === null) return false;
+  const scorecard = cached.scorecard as { registry_fingerprint?: unknown } | null;
+  return readRegistryFingerprint(scorecard?.registry_fingerprint) !== prefix;
+}
+
+/**
+ * The eligible seeded domains for the next cycle: never audited, audited
+ * before the eligibility window, or scored under a registry other than
+ * `registryPrefix`, excluding any already attempted this run, sorted
+ * oldest-first and capped at `batchSize`. A never-audited or
  * unparseable-stamp entry sorts first (treated as epoch-old).
  */
 async function selectStaleBatch(
@@ -195,13 +211,16 @@ async function selectStaleBatch(
   batchSize: number,
   now: number,
   eligibleAfterMs: number,
+  registryPrefix: string | null,
 ): Promise<BatchItem[]> {
   const rows: Array<{ domain: string; target: string; scoredAtMs: number }> = [];
   for (const entry of seed) {
     if (attempted.has(entry.domain)) continue;
     const target = canonicalTargetOf(new URL(entry.url));
     const cached = await cacheGet(env, await keyFor(target, SPEC_VERSION));
-    if (!isStale(cached?.scored_at, eligibleAfterMs, now)) continue;
+    if (!isStale(cached?.scored_at, eligibleAfterMs, now) && !scoredUnderOtherRegistry(cached, registryPrefix)) {
+      continue;
+    }
     const parsed = cached?.scored_at ? Date.parse(cached.scored_at) : 0;
     rows.push({ domain: entry.domain, target, scoredAtMs: Number.isNaN(parsed) ? 0 : parsed });
   }
@@ -215,7 +234,9 @@ async function selectStaleBatch(
  * logged and skipped — the domain drops off that board rebuild and, because
  * its scored_at never advanced, is retried by the next run. A domain-budget
  * deferral is logged with its cause and skipped on the first attempt; the
- * board keeps its saved scorecard, and the next run picks it up by age.
+ * board keeps its saved scorecard, and the next run picks it up by age, or
+ * whatever its age when a reflow deferred it, because its scorecard still
+ * records the registry it was scored under before.
  */
 export async function runWebRescore(
   env: WebRescoreEnv,
@@ -236,10 +257,12 @@ export async function runWebRescore(
   // bypasses the gate; a missing SCORE_KV degrades to plain staleness batching.
   let eligibleAfterMs = deps.eligibleAfterMs ?? RESCORE_ELIGIBLE_AFTER_MS;
   let shapeToRecord: { fingerprint: string; follow: string } | null = null;
+  let registryPrefix: string | null = null;
   if (deps.eligibleAfterMs === undefined && env.SCORE_KV) {
     const kv = env.SCORE_KV;
     const compute = deps.fingerprint ?? currentRegistryFingerprint;
     const currentFp = await step.do('registry-fingerprint', async () => compute(env));
+    registryPrefix = fingerprintPrefix(currentFp);
     const currentFollow = await step.do('follow-switch', async () => String(effectiveFollow(env, true)));
     const priorFp = await step.do('registry-fingerprint:prior', async () =>
       kv.get(REGISTRY_FINGERPRINT_KEY).catch(() => null),
@@ -258,7 +281,7 @@ export async function runWebRescore(
 
   for (; cycle < RESCORE_MAX_CYCLES; cycle++) {
     const batch = await step.do(`select:${cycle}`, async () =>
-      selectStaleBatch(env, seed, attempted, batchSize, clock(), eligibleAfterMs),
+      selectStaleBatch(env, seed, attempted, batchSize, clock(), eligibleAfterMs, registryPrefix),
     );
     if (batch.length === 0) break;
     const cycleAudited: string[] = [];
