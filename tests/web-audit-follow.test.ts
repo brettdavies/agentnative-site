@@ -10,6 +10,7 @@ import { declaredDomainBudget, domainBudgetRefusal, registrableDomainOf } from '
 import { runWebAudit } from '../src/worker/audit-web/engine';
 import { ALWAYS_ADMIT_BUDGET, type DomainBudget } from '../src/worker/audit-web/follow-requests';
 import { endpointRedirects, mcpEndpointRedirects } from '../src/worker/audit-web/handlers/shared';
+import { type ArtifactSource, admittingArtifact } from '../src/worker/audit-web/reciprocity';
 import type { WebScorecard } from '../src/worker/audit-web/scorecard';
 import { budgetKeyPrefix, memoryKv, memoryRateLimit } from './helpers/domain-budget-fakes';
 import {
@@ -1452,6 +1453,41 @@ describe('follow: only https is requested', () => {
       expect({ hop, sent: plaintext(seen) }).toEqual({ hop, sent: [] });
       expect({ hop, mcp: scorecard.mcp_endpoint }).toEqual({ hop, mcp: null });
     }
+  });
+});
+
+describe('follow: reciprocity artifacts are read over https only', () => {
+  test("an entry in the endpoint host's AI catalog whose card URL is http is never read, so it confirms nothing", async () => {
+    const card = `http://${NET}/card`;
+    const seen: Seen[] = [];
+    const { scorecard } = await audit(
+      router(
+        {
+          ...siteDeclaring(ENDPOINT),
+          [`GET https://${NET}/.well-known/ai-catalog.json`]: () => aiCatalog(cardEntry({ url: card })),
+          [`GET ${card}`]: () => cardDocument(sep2127Card(ENDPOINT)),
+          [`POST ${ENDPOINT}`]: () => initializeResult(),
+        },
+        seen,
+      ),
+    );
+    expect(scorecard.declared_hosts?.[0]?.outcome).toBe('reciprocity-refused');
+    expect(seen.filter((r) => r.url.startsWith('http:'))).toEqual([]);
+    expect(wireProbesTo(seen, NET)).toEqual([]);
+  });
+
+  test('an endpoint that is not https has no artifact read for it', async () => {
+    const endpoint = `http://${NET}/mcp`;
+    const gets: string[] = [];
+    const source: ArtifactSource = {
+      get: async (url) => {
+        gets.push(url);
+        return { status: 200, headers: {}, body: JSON.stringify(sep2127Card(endpoint)), error: null };
+      },
+      decline: () => {},
+    };
+    expect(await admittingArtifact(endpoint, DISCOVERY, source)).toBeNull();
+    expect(gets).toEqual([]);
   });
 });
 
