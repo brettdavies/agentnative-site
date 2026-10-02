@@ -275,6 +275,14 @@ describe('MCP instructions string (drift gate per KTD-8)', () => {
     expect(await flat('content/_audit-web.md')).toContain(perDomain);
   });
 
+  test('the disclosure and the client skill say a declared http URL is never requested', async () => {
+    const sentence = 'Only https URLs are followed: a declared http URL, or a redirect to one, is never requested.';
+    const result = await initialize(makeEnv());
+    expect(result.result?.instructions ?? '').toContain(sentence);
+    const skill = await readFile(join(import.meta.dir, '..', 'content/mcp-skill.md'), 'utf8');
+    expect(skill.replace(/\s+/g, ' ')).toContain(sentence);
+  });
+
   test('instructions names both rate-limit bindings + both kill switches', async () => {
     const env = makeEnv();
     const result = await initialize(env);
