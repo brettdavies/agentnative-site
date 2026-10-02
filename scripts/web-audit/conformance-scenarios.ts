@@ -953,6 +953,37 @@ export const SCENARIOS: Record<string, Scenario> = {
     ...mcpEdges(),
     post(MCP_PATH, rpcError(-32099)),
   ]),
+  'mcp-http-rate-limited': scenario(
+    'an HTTP 429 or 408 answer is an operational error on every row whatever body rides it, like a -32099 refusal',
+    MCP_IDS,
+    [
+      ...baseline(),
+      ...cardSurface(),
+      ...mcpEdges(),
+      post(MCP_PATH, rpcError(-32000, 429), { body_json_method: 'initialize' }),
+      post(MCP_PATH, rpcError(-32000, 429), { headers: { 'mcp-method': 'server/discover' } }),
+      post(MCP_PATH, text('Request Timeout', {}, 408), { headers: { 'mcp-protocol-version': MODERN_PROTOCOL } }),
+      post(MCP_PATH, text('Too Many Requests', { 'retry-after': '60' }, 429)),
+    ],
+  ),
+  'mcp-discover-rate-limited': scenario(
+    'a 429 on server/discover alone leaves the modern lane unknown, so the modern rows probe on their own answers instead of reading absent',
+    [
+      'mcp-server-discover',
+      'mcp-modern-tools-list',
+      'mcp-modern-unknown-method',
+      'mcp-modern-clientcaps',
+      'mcp-modern-header-mismatch',
+      'mcp-modern-version-reject',
+      'mcp-modern-resources-miss',
+    ],
+    [
+      ...baseline(),
+      ...cardSurface(),
+      post(MCP_PATH, text('Too Many Requests', { 'retry-after': '60' }, 429), { headers: { 'mcp-method': 'server/discover' } }),
+      ...dualStackMcp(),
+    ],
+  ),
   'mcp-www-authenticate': scenario(
     'an endpoint that answers legacy POSTs with a 401 whose challenge names no metadata, while root RFC 9728 metadata names it: it requires sign-in, so the legacy session rows, the resources rows, and every row a 401 answers read auth-required, and the challenge satisfies the mcp-auth antecedent; its modern lane refuses server/discover with a method-not-found and no 401, an answer a token would not change, so the modern session rows read absent as they do on an open server',
     ['mcp-initialize', 'mcp-server-discover', 'mcp-auth-challenge', 'oauth-protected-resource', 'auth-md'],
