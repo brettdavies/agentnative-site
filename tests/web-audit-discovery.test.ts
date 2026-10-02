@@ -3,6 +3,7 @@
 import { describe, expect, test } from 'bun:test';
 import { discoverMcpEndpoint } from '../src/worker/audit-web/discovery';
 import { runWebAudit } from '../src/worker/audit-web/engine';
+import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
 import type { WebAuditRegistry } from '../src/worker/audit-web/registry';
 import { isModernProbe } from './helpers/mcp-modern';
 import { stubFetch } from './helpers/stub-fetch';
@@ -851,7 +852,12 @@ describe('runWebAudit engine', () => {
       return new Response('not found', { status: 404 });
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: tinyRegistry(), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: tinyRegistry(),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const complete = events.find((e) => e.type === 'complete');
     expect(complete?.type).toBe('complete');
@@ -874,7 +880,12 @@ describe('runWebAudit engine', () => {
       return new Response('not found', { status: 404 });
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: tinyRegistry(), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: tinyRegistry(),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const resultEvents = events.filter((e) => e.type === 'result');
     expect(resultEvents.length).toBe(4);
@@ -901,7 +912,12 @@ describe('runWebAudit engine', () => {
     // guardedFetch converts a rejected fetch into a fail response, not a throw,
     // so robots resolves as fail; the run must still complete.
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: tinyRegistry(), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: tinyRegistry(),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     expect(calls).toBeGreaterThan(0);
     const complete = events.find((e) => e.type === 'complete');
@@ -925,7 +941,12 @@ describe('runWebAudit engine', () => {
       return new Response('not found', { status: 404 });
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: tinyRegistry(), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: tinyRegistry(),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const complete = events.find((e) => e.type === 'complete');
     if (complete?.type !== 'complete') throw new Error('no complete event');
@@ -965,6 +986,7 @@ describe('runWebAudit reachability', () => {
         registry: tinyRegistry(),
         fetchOptions: { fetchImpl: tarpitFetch() },
         perCheckTimeoutMs: 100,
+        domainBudget: ALWAYS_ADMIT_BUDGET,
       }),
     );
     const terminal = events.at(-1);
@@ -998,6 +1020,7 @@ describe('runWebAudit reachability', () => {
         registry: tinyRegistry(),
         fetchOptions: { fetchImpl },
         perCheckTimeoutMs: 100,
+        domainBudget: ALWAYS_ADMIT_BUDGET,
       }),
     );
     expect(events.some((e) => e.type === 'unreachable')).toBe(false);
@@ -1013,6 +1036,7 @@ describe('runWebAudit reachability', () => {
         registry: tinyRegistry(),
         fetchOptions: { fetchImpl },
         perCheckTimeoutMs: 100,
+        domainBudget: ALWAYS_ADMIT_BUDGET,
       }),
     );
     const terminal = events.at(-1);
@@ -1032,6 +1056,7 @@ describe('runWebAudit reachability', () => {
         registry: tinyRegistry(),
         fetchOptions: { fetchImpl },
         perCheckTimeoutMs: 100,
+        domainBudget: ALWAYS_ADMIT_BUDGET,
       }),
     );
     expect(events.at(-1)?.type).toBe('unreachable');
@@ -1049,6 +1074,7 @@ describe('runWebAudit reachability', () => {
         registry: tinyRegistry(),
         fetchOptions: { fetchImpl },
         perCheckTimeoutMs: 100,
+        domainBudget: ALWAYS_ADMIT_BUDGET,
       }),
     );
     expect(events.some((e) => e.type === 'unreachable')).toBe(false);
@@ -1063,6 +1089,7 @@ describe('runWebAudit reachability', () => {
         registry: tinyRegistry(),
         fetchOptions: { fetchImpl },
         perCheckTimeoutMs: 100,
+        domainBudget: ALWAYS_ADMIT_BUDGET,
       }),
     );
     expect(events.some((e) => e.type === 'unreachable')).toBe(false);
@@ -1108,7 +1135,12 @@ describe('runWebAudit era lanes', () => {
       return new Response('not found', { status: 404 });
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: eraRegistry(), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: eraRegistry(),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const discovery = events.find((e) => e.type === 'discovery');
     if (discovery?.type !== 'discovery') throw new Error('no discovery event');
@@ -1132,7 +1164,12 @@ describe('runWebAudit era lanes', () => {
       return new Response('not found', { status: 404 });
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: eraRegistry(), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: eraRegistry(),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const complete = events.find((e) => e.type === 'complete');
     if (complete?.type !== 'complete') throw new Error('no complete event');

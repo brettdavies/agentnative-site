@@ -46,10 +46,10 @@ imperfect capability always beats withdrawing it.
 
 An MCP client can run the audit without the form. The [anc.dev MCP server](/mcp) exposes four web tools:
 
-- `audit_website(url, site_type?, public_listing?, follow_declarations?)`: run a fresh audit; every observed
-  non-passing row carries inline remediation with a copy-paste prompt. By default the audit also contacts the hosts the
-  site declares (its MCP server, its API host), at most 4 per audit; `follow_declarations: false` audits only the site
-  and returns a result that is never saved or listed.
+- `audit_website(url, site_type?, public_listing?, follow_declarations?)`: run a fresh audit; every observed non-passing
+  row carries inline remediation with a copy-paste prompt. By default the audit also contacts the hosts the site
+  declares (its MCP server, its API host), at most 4 per audit and about 30 audits per hour per declared registrable
+  domain; `follow_declarations: false` audits only the site and returns a result that is never saved or listed.
 - `get_website_audit(url)`: read a cached scorecard without re-running.
 - `list_website_audits(view?)`: the web leaderboard, curated by default.
 - `get_web_remediation(check_id, evidence?, host?)`: the canonical fix for any check, with a ready-to-paste prompt. Pass

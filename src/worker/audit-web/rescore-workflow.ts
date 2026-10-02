@@ -26,6 +26,7 @@ import { emitLog } from '../telemetry/log';
 import { rebuildWebAggregates, type WebAggregateEnv } from './aggregate';
 import { type AuditLogEnv, instrumentAuditEvents } from './audit-log';
 import { get as cacheGet, put as cachePut, canonicalTargetOf, isStale, keyFor } from './cache';
+import { type DomainBudgetEnv, declaredDomainBudget } from './domain-budget';
 import { runWebAudit } from './engine';
 import { effectiveFollow, type FollowSwitchEnv } from './follow-switch';
 import { homeTag, invokeCachedPurge, webDomainTag, webTag } from './hit-min-purge';
@@ -35,7 +36,10 @@ import { isSeededDomain, loadWebSeed, type WebSeedEntry } from './seed';
 // The Workflow shares the Worker's bindings; SCORE_KV is optional so the
 // registry-change gate degrades to plain staleness batching when it is
 // absent (e.g. a minimal test env).
-export type WebRescoreEnv = WebAggregateEnv & AuditLogEnv & FollowSwitchEnv & { SCORE_KV?: KVNamespace };
+export type WebRescoreEnv = WebAggregateEnv &
+  AuditLogEnv &
+  FollowSwitchEnv &
+  DomainBudgetEnv & { SCORE_KV?: KVNamespace };
 
 // Narrow structural view of the Workflow binding (mirrors the RateLimit
 // pattern): enough surface for the trigger helper and its tests.
@@ -152,6 +156,7 @@ export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string):
       publicListing,
       specVersion: SPEC_VERSION,
       followDeclarations,
+      domainBudget: declaredDomainBudget(env),
       perAuditDeadlineMs: RESCORE_AUDIT_DEADLINE_MS,
     }),
     env,

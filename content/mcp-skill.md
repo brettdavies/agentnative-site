@@ -205,14 +205,16 @@ upgraded, so it names the same record as the bare host.
 // tools/call audit_website { "url": "anc.dev" }
 ```
 
-**Declared hosts.** By default a website audit also contacts third-party hosts the site declares. An MCP server named
-in the site's server card gets GETs for the documents that could confirm it (a card at `<endpoint>/server-card`, its
-host's `/.well-known/ai-catalog.json`, RFC 9728 protected-resource metadata), and it is wire-probed (JSON-RPC POSTs, a
-CORS preflight) only after one of those documents on the endpoint's own host names the endpoint. An API host anchored
-in the site's api-catalog gets document fetches (its OpenAPI description) and one GET to a nonsense path on the site's
-declaration alone. Each audit follows at most 4 off-origin hosts with at most 12 follow-phase document requests inside
-a 6-second follow window, so following lengthens an audit's wall time. The operator can switch following off for every
-audit (`WEB_AUDIT_FOLLOW_ENABLED`); the scorecard's `follow_declarations` records whether the audit followed.
+**Declared hosts.** By default a website audit also contacts third-party hosts the site declares. An MCP server named in
+the site's server card gets GETs for the documents that could confirm it (a card at `<endpoint>/server-card`, its host's
+`/.well-known/ai-catalog.json`, RFC 9728 protected-resource metadata), and it is wire-probed (JSON-RPC POSTs, a CORS
+preflight) only after one of those documents on the endpoint's own host names the endpoint. An API host anchored in the
+site's api-catalog gets document fetches (its OpenAPI description) and one GET to a nonsense path on the site's
+declaration alone. Each audit follows at most 4 off-origin hosts with at most 12 follow-phase document requests inside a
+6-second follow window, so following lengthens an audit's wall time. Across all audits and sites, following is also
+capped at about 30 audits per hour per declared registrable domain; an audit past that cap leaves that domain's hosts
+unprobed. The operator can switch following off for every audit (`WEB_AUDIT_FOLLOW_ENABLED`); the scorecard's
+`follow_declarations` records whether the audit followed.
 
 **Freshness.** Every result that carries a scorecard carries a `freshness` object beside it, outside the scorecard
 itself: `cached` is `true` for a served cache entry or a listing-only flag patch and `false` for a result the call

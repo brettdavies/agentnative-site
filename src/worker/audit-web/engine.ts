@@ -32,7 +32,8 @@ import { apiTargets } from './api-targets';
 import type { ProbeResponse } from './assert';
 import { readDiscoveryDocuments } from './discovery';
 import { settleEndpointOfRecord } from './endpoint-of-record';
-import { ALWAYS_ADMIT_BUDGET, type DomainBudget } from './follow-requests';
+import type { FollowStats } from './follow';
+import type { DomainBudget } from './follow-requests';
 import { apiDescriptionBodies, runApiDescription } from './handlers/api-description';
 import { runApiHygiene } from './handlers/api-hygiene';
 import { runAuthMd } from './handlers/auth-md';
@@ -83,8 +84,13 @@ export interface RunWebAuditInput {
   fetchOptions?: Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects'>;
   /** Follow the hosts the site declares; absent means follow. */
   followDeclarations?: boolean;
-  /** The per-domain hourly budget the follow slice draws on; absent admits every domain. */
-  domainBudget?: DomainBudget;
+  /**
+   * The per-domain hourly budget the follow slice draws on. Required: an
+   * audit that skipped the budget other audits share would reach their
+   * declared domains uncapped. A runner that shares none with other audits
+   * passes ALWAYS_ADMIT_BUDGET.
+   */
+  domainBudget: DomainBudget;
   /** Injectable clock for deterministic deadline tests. */
   now?: () => number;
 }
@@ -92,7 +98,8 @@ export interface RunWebAuditInput {
 export type AuditEvent =
   | { type: 'discovery'; endpoint: string | null; evidence: EvidenceItem[] }
   | { type: 'result'; result: EngineResult }
-  | { type: 'complete'; scorecard: WebScorecard; complete: boolean }
+  // `follow` is what the follow slice spent: for the run record, never stored.
+  | { type: 'complete'; scorecard: WebScorecard; complete: boolean; follow: FollowStats }
   // Terminal for a target that answered nothing at the network level: no
   // HTTP status from the root fetch or any discovery probe. Scoring such a
   // run would publish a misleading 0% for what is actually "the auditor
@@ -354,14 +361,18 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const documents = await readDiscoveryDocuments(input.url, discoveryConfig, phaseOptions);
   const rootFromTarget = root !== null && !isEdgeErrorStatus(root.status);
   const following = input.followDeclarations !== false;
-  const { discovery, declared } = await settleEndpointOfRecord(documents, {
+  const {
+    discovery,
+    declared,
+    follow: followStats,
+  } = await settleEndpointOfRecord(documents, {
     base,
     siteAnswered: rootFromTarget || documents.statuses.some(answeredByTarget),
     // Every API row applies only to an `api` site type or an unset one.
     apiRowsApply: input.siteType === null || input.siteType === undefined || input.siteType === 'api',
     enabled: following,
     discovery: discoveryConfig,
-    budget: input.domainBudget ?? ALWAYS_ADMIT_BUDGET,
+    budget: input.domainBudget,
     ...phaseOptions,
   });
   yield { type: 'discovery', endpoint: declared.endpoint, evidence: discovery.evidence };
@@ -561,5 +572,5 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     declaredHosts: declared.trail,
     registry: input.registry,
   });
-  yield { type: 'complete', scorecard, complete: !incomplete };
+  yield { type: 'complete', scorecard, complete: !incomplete, follow: followStats };
 }

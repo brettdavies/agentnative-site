@@ -3,6 +3,7 @@
 // request the engine sent.
 
 import { type AuditEvent, type RunWebAuditInput, runWebAudit } from '../../src/worker/audit-web/engine';
+import { ALWAYS_ADMIT_BUDGET } from '../../src/worker/audit-web/follow-requests';
 import type { WebAuditRegistry, WebCheck } from '../../src/worker/audit-web/registry';
 import type { WebScorecard } from '../../src/worker/audit-web/scorecard';
 import { stubFetch } from './stub-fetch';
@@ -122,6 +123,7 @@ export async function audit(fetchImpl: typeof fetch, extra: Partial<RunWebAuditI
     url: TARGET,
     registry: followRegistry(),
     fetchOptions: { fetchImpl },
+    domainBudget: ALWAYS_ADMIT_BUDGET,
     ...extra,
   })) {
     events.push(event);

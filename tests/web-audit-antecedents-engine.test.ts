@@ -6,6 +6,7 @@
 import { describe, expect, test } from 'bun:test';
 import { WAVE1_CHECK_IDS } from '../src/worker/audit-web/antecedents';
 import { type AuditEvent, antecedentGate, runWebAudit } from '../src/worker/audit-web/engine';
+import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
 import { stubFetch } from './helpers/stub-fetch';
 
@@ -146,7 +147,12 @@ describe('runWebAudit two-wave evaluation', () => {
   test('a dependent check sees its antecedent resolved from the wave-1 result, not a second fetch', async () => {
     const { fetchImpl, seen } = siteFetch();
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const rows = resultsOf(events);
     expect(rows.find((r) => r.id === 'robots')?.status).toBe('pass');
@@ -159,7 +165,12 @@ describe('runWebAudit two-wave evaluation', () => {
   test('robots-ai-rules is n_a (antecedent-unmet) without a robots.txt and probes nothing', async () => {
     const { fetchImpl, seen } = siteFetch({ '/robots.txt': new Response('nope', { status: 404 }) });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const rows = resultsOf(events);
     const gated = rows.find((r) => r.id === 'robots-ai-rules');
@@ -171,7 +182,12 @@ describe('runWebAudit two-wave evaluation', () => {
   test('the root-HTML checks and link-headers reuse the single canonical root fetch', async () => {
     const { fetchImpl, seen } = siteFetch();
     await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     // Exactly one plain GET / : the canonical root fetch. (Discovery
     // never fetches /; content-negotiating checks carry their own headers.)
@@ -184,7 +200,12 @@ describe('runWebAudit two-wave evaluation', () => {
       '/llms-full.txt': new Response('no', { status: 404 }),
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const row = resultsOf(events).find((r) => r.id === 'llms-full-txt');
     expect(row?.status).toBe('n_a');
@@ -194,7 +215,12 @@ describe('runWebAudit two-wave evaluation', () => {
   test('llms-full-txt is n_a (antecedent-unmet) on a non-docs site', async () => {
     const { fetchImpl } = siteFetch();
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const row = resultsOf(events).find((r) => r.id === 'llms-full-txt');
     expect(row?.status).toBe('n_a');
@@ -204,7 +230,12 @@ describe('runWebAudit two-wave evaluation', () => {
   test('oauth-protected-resource is n_a with no MCP endpoint', async () => {
     const { fetchImpl } = siteFetch();
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const row = resultsOf(events).find((r) => r.id === 'oauth-protected-resource');
     expect(row?.status).toBe('n_a');
@@ -231,7 +262,13 @@ describe('runWebAudit two-wave evaluation', () => {
       }),
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry, siteType: 'content', fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry,
+        siteType: 'content',
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const row = resultsOf(events).find((r) => r.id === 'openapi');
     expect(row?.status).toBe('n_a');
@@ -277,7 +314,12 @@ describe('runWebAudit markdown-frontmatter gating', () => {
 
   async function frontmatterRow(twin: string | null) {
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: REGISTRY, fetchOptions: { fetchImpl: twinSite(twin) } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: REGISTRY,
+        fetchOptions: { fetchImpl: twinSite(twin) },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     return resultsOf(events).find((r) => r.id === 'markdown-frontmatter');
   }
@@ -348,7 +390,12 @@ describe('runWebAudit handler na_reason pass-through', () => {
 
   test("the CORS pair's posture n_a carries na_reason posture-consistent on the result rows", async () => {
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: CORS_REGISTRY, fetchOptions: { fetchImpl: noCorsSite } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: CORS_REGISTRY,
+        fetchOptions: { fetchImpl: noCorsSite },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const rows = resultsOf(events);
     for (const id of ['mcp-cors-preflight', 'mcp-cors-actual']) {
@@ -404,6 +451,7 @@ describe('runWebAudit retained documents', () => {
         registry: registryOf([apiCatalog]),
         siteType: 'api',
         fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
       }),
     );
     expect(WAVE1_CHECK_IDS.has('api-catalog')).toBe(false);

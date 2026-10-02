@@ -213,6 +213,18 @@
       "name": "WEB_AUDIT_LIMITER_IP",
       "namespace_id": "1011",
       "simple": { "limit": 30, "period": 60 }
+    },
+    // WEB_AUDIT_DOMAIN_LIMITER — keyed on sha256(registrable domain) by the
+    // web audit's follow slice (src/worker/audit-web/domain-budget.ts): about
+    // 10 audits per 60s may reach one declared domain from each Cloudflare
+    // location, because the binding's counters are local to the location the
+    // Worker runs in and eventually consistent. It is the burst floor under
+    // the KV-backed hourly window on that same domain, which concurrent
+    // audits can each read before any of them writes.
+    {
+      "name": "WEB_AUDIT_DOMAIN_LIMITER",
+      "namespace_id": "1013",
+      "simple": { "limit": 10, "period": 60 }
     }
   ],
   // SCORE_KV — operator-flippable `scoring_disabled` kill switch. Flip
@@ -439,6 +451,11 @@
           "name": "WEB_AUDIT_LIMITER_IP",
           "namespace_id": "1012",
           "simple": { "limit": 30, "period": 60 }
+        },
+        {
+          "name": "WEB_AUDIT_DOMAIN_LIMITER",
+          "namespace_id": "1014",
+          "simple": { "limit": 10, "period": 60 }
         }
       ],
       "kv_namespaces": [

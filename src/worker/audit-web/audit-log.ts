@@ -4,7 +4,12 @@
 //
 // Two verbosity tiers:
 //   - always: one `web-audit.run` summary per audit plus `web-audit.error`
-//     on an engine failure, cheap enough for production volume.
+//     on an engine failure, cheap enough for production volume. A run that
+//     completes also records what its follow slice spent: outcome counts
+//     from the declared-hosts trail, the request count, the elapsed time,
+//     the requests per declared domain under that domain's hash, the same
+//     hash its budget's KV key carries, and the reservations a budget layer
+//     error decided, so an outage reads apart from a spent hour.
 //   - WEB_AUDIT_DEBUG === 'true': additionally one `web-audit.check` line
 //     per check result and a `web-audit.discovery` line with the full probe
 //     evidence, both on the emitter's debug tier. Bound in env.staging.vars
@@ -12,7 +17,10 @@
 //     an incident needs it.
 
 import { emitLog } from '../telemetry/log';
+import { sha256Hex } from './cache';
 import type { AuditEvent } from './engine';
+import type { FollowStats } from './follow';
+import type { DeclaredHostEntry } from './provenance';
 
 export interface AuditLogEnv {
   WEB_AUDIT_DEBUG?: string;
@@ -20,6 +28,32 @@ export interface AuditLogEnv {
 
 export function auditDebugEnabled(env: AuditLogEnv): boolean {
   return env.WEB_AUDIT_DEBUG === 'true';
+}
+
+/** How many trail entries carry each value of `field`. */
+function tally(trail: readonly DeclaredHostEntry[], field: 'outcome' | 'cause'): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const entry of trail) {
+    const value = entry[field];
+    if (typeof value === 'string') counts[value] = (counts[value] ?? 0) + 1;
+  }
+  return counts;
+}
+
+/** The run record's follow fields. */
+async function followFields(trail: readonly DeclaredHostEntry[], stats: FollowStats): Promise<Record<string, unknown>> {
+  const domainRequests: Record<string, number> = {};
+  for (const [domain, requests] of Object.entries(stats.domainRequests)) {
+    domainRequests[await sha256Hex(domain)] = requests;
+  }
+  return {
+    follow_outcomes: tally(trail, 'outcome'),
+    follow_budget_causes: tally(trail, 'cause'),
+    follow_requests: stats.requests,
+    follow_elapsed_ms: stats.elapsedMs,
+    follow_domain_requests: domainRequests,
+    follow_budget_errors: stats.budgetErrors,
+  };
 }
 
 /**
@@ -38,6 +72,7 @@ export async function* instrumentAuditEvents(
   const statusCounts: Record<string, number> = {};
   let terminal = 'none';
   let endpoint: string | null = null;
+  let follow: Record<string, unknown> = {};
   try {
     for await (const event of events) {
       if (event.type === 'discovery') {
@@ -56,6 +91,7 @@ export async function* instrumentAuditEvents(
         );
       } else if (event.type === 'complete') {
         terminal = event.complete ? 'complete' : 'incomplete';
+        follow = await followFields(event.scorecard.declared_hosts ?? [], event.follow);
       } else if (event.type === 'unreachable') {
         terminal = 'unreachable';
       }
@@ -72,6 +108,7 @@ export async function* instrumentAuditEvents(
         mcp_endpoint: endpoint,
         elapsed_ms: Date.now() - started,
         checks: statusCounts,
+        ...follow,
       },
     );
   }

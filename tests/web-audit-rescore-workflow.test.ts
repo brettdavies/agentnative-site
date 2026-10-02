@@ -25,6 +25,8 @@ import {
 } from '../src/worker/audit-web/rescore-workflow';
 import { isSeededDomain, loadWebSeed, resetWebSeedCacheForTests } from '../src/worker/audit-web/seed';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { budgetKeyPrefix, memoryRateLimit } from './helpers/domain-budget-fakes';
+import { aiCatalog, cardEntry, html, requestsTo, router, type Seen, sep2127Card } from './helpers/follow-fixtures';
 
 function seedEntry(domain: string) {
   return { domain, url: `https://${domain}/`, name: domain, description: `about ${domain}` };
@@ -550,6 +552,50 @@ describe('the follow kill switch on rescore writes', () => {
       expect(scorecard.declared_hosts).toEqual([]);
     }
     expect((await stored('true')).follow_declarations).toBe(true);
+  });
+});
+
+describe('the declared-domain budget on rescore audits', () => {
+  const ENDPOINT = 'https://mcp.example.net/mcp';
+
+  async function rescoreDeclaring(env: WebRescoreEnv): Promise<{ trail: unknown[]; sent: number }> {
+    env.WEB_AUDIT_FOLLOW_ENABLED = 'true';
+    const seen: Seen[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = router(
+      {
+        'GET https://example.com/': () => html(),
+        'GET https://example.com/.well-known/ai-catalog.json': () =>
+          aiCatalog(cardEntry({ data: sep2127Card(ENDPOINT) })),
+      },
+      seen,
+    );
+    try {
+      await auditDomainToCache(env, 'https://example.com/');
+    } finally {
+      globalThis.fetch = original;
+    }
+    const cached = (await cacheGet(env, await keyFor('https://example.com/', SPEC_VERSION))) as CachedWebAudit;
+    const trail = (cached.scorecard as { declared_hosts?: unknown[] }).declared_hosts ?? [];
+    return { trail, sent: requestsTo(seen, 'mcp.example.net').length };
+  }
+
+  test("a rescore audit reserves one unit of each declared domain's hour", async () => {
+    const { env } = makeEnv([seedEntry('example.com')], { registry: MINIMAL_REGISTRY });
+    const { kv, map } = makeKv();
+    env.SCORE_KV = kv;
+    const { sent } = await rescoreDeclaring(env);
+    const prefix = await budgetKeyPrefix('example.net');
+    expect([...map.entries()].filter(([key]) => key.startsWith(prefix)).map(([, units]) => units)).toEqual(['1']);
+    expect(sent).toBeGreaterThan(0);
+  });
+
+  test('a rescore audit sends nothing to a declared domain over its burst floor', async () => {
+    const { env } = makeEnv([seedEntry('example.com')], { registry: MINIMAL_REGISTRY });
+    env.WEB_AUDIT_DOMAIN_LIMITER = memoryRateLimit(0);
+    const { trail, sent } = await rescoreDeclaring(env);
+    expect(trail[0]).toMatchObject({ outcome: 'budget-exceeded', cause: 'domain-budget' });
+    expect(sent).toBe(0);
   });
 });
 

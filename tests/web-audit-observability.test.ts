@@ -5,11 +5,25 @@
 
 import { describe, expect, test } from 'bun:test';
 import { instrumentAuditEvents } from '../src/worker/audit-web/audit-log';
-import type { AuditEvent } from '../src/worker/audit-web/engine';
+import { sha256Hex } from '../src/worker/audit-web/cache';
+import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
+import type { DomainBudget } from '../src/worker/audit-web/follow-requests';
 import type { WebScorecard } from '../src/worker/audit-web/scorecard';
 import { notifyFailure } from '../src/worker/notify';
+import {
+  aiCatalog,
+  cardEntry,
+  followRegistry,
+  html,
+  requestsTo,
+  router,
+  type Seen,
+  sep2127Card,
+  TARGET,
+} from './helpers/follow-fixtures';
 import { captureLogs } from './helpers/log-capture';
 import { fakeKv, type SentMessage } from './helpers/notify-fakes';
+import { stubFetch } from './helpers/stub-fetch';
 
 async function* eventsOf(events: AuditEvent[]): AsyncGenerator<AuditEvent> {
   for (const e of events) yield e;
@@ -41,6 +55,7 @@ const COMPLETE_EVENT: AuditEvent = {
   type: 'complete',
   scorecard: { score_pct: 50 } as WebScorecard,
   complete: true,
+  follow: { requests: 0, domainRequests: {}, elapsedMs: 0, budgetErrors: {} },
 };
 
 describe('instrumentAuditEvents', () => {
@@ -118,6 +133,65 @@ describe('instrumentAuditEvents', () => {
       );
       const lines = logs.records.map((r) => r.record);
       expect(lines.find((l) => l.scope === 'web-audit.run')?.terminal).toBe('unreachable');
+    } finally {
+      logs.restore();
+    }
+  });
+
+  test("the run summary records the follow slice's outcome counts, requests, and elapsed time, and no declared domain in the clear", async () => {
+    // One endpoint its host does not confirm, then one on a domain whose
+    // hourly budget is spent. Only requests to the declared host move the
+    // clock, so the slice's elapsed time is 100 ms per request it sent.
+    const refused = 'https://mcp.example.net/mcp';
+    const capped = 'https://mcp.capped.org/mcp';
+    let clock = 1_000_000;
+    const seen: Seen[] = [];
+    const site = router(
+      {
+        [`GET ${TARGET}`]: () => html(),
+        'GET https://example.com/.well-known/ai-catalog.json': () =>
+          aiCatalog(cardEntry({ data: sep2127Card(refused) }), cardEntry({ data: sep2127Card(capped) })),
+      },
+      seen,
+    );
+    const fetchImpl = stubFetch((url, init) => {
+      if (new URL(url).hostname !== 'example.com') clock += 100;
+      return site(url, init);
+    });
+    const budget: DomainBudget = {
+      keyOf: (hostname) => hostname.split('.').slice(-2).join('.'),
+      reserve: async (domain) => ({ admitted: domain !== 'capped.org' }),
+    };
+    const logs = captureLogs();
+    try {
+      await collect(
+        instrumentAuditEvents(
+          runWebAudit({
+            url: TARGET,
+            registry: followRegistry(),
+            fetchOptions: { fetchImpl },
+            domainBudget: budget,
+            now: () => clock,
+          }),
+          {},
+          { target: TARGET, surface: 'stream', followDeclarations: true },
+        ),
+      );
+      const sent = requestsTo(seen, 'mcp.example.net').length;
+      expect(sent).toBeGreaterThan(0);
+      expect(requestsTo(seen, 'mcp.capped.org')).toEqual([]);
+      const summary = logs.records.map((r) => r.record).find((l) => l.scope === 'web-audit.run');
+      expect(summary).toMatchObject({
+        terminal: 'complete',
+        follow_outcomes: { 'reciprocity-refused': 1, 'budget-exceeded': 1 },
+        follow_budget_causes: { 'domain-budget': 1 },
+        follow_requests: sent,
+        follow_elapsed_ms: sent * 100,
+      });
+      expect(summary?.follow_domain_requests).toEqual({ [await sha256Hex('example.net')]: sent });
+      const serialized = JSON.stringify(summary);
+      expect(serialized).not.toContain('example.net');
+      expect(serialized).not.toContain('capped.org');
     } finally {
       logs.restore();
     }

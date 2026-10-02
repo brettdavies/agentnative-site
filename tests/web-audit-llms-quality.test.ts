@@ -2,6 +2,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
+import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
 import { runLlmsTxtQuality } from '../src/worker/audit-web/handlers/llms-txt-quality';
 import type { HandlerContext } from '../src/worker/audit-web/handlers/types';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
@@ -80,7 +81,12 @@ describe('llms.txt quality trio', () => {
       return new Response('html', { status: 200, headers: { 'content-type': 'text/html' } });
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const rows = resultsOf(events);
     expect(rows.find((r) => r.id === 'llms-txt')?.status).toBe('pass');
@@ -94,7 +100,12 @@ describe('llms.txt quality trio', () => {
       return new Response('html', { status: 200, headers: { 'content-type': 'text/html' } });
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const rows = resultsOf(events);
     expect(rows.find((r) => r.id === 'llms-txt-format')?.status).toBe('pass');
@@ -121,6 +132,7 @@ describe('llms.txt quality trio', () => {
           url: 'https://example.com/',
           registry: registryOf(CHECKS),
           fetchOptions: { fetchImpl: withHeading },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
         }),
       ),
     );
@@ -130,6 +142,7 @@ describe('llms.txt quality trio', () => {
           url: 'https://example.com/',
           registry: registryOf(CHECKS),
           fetchOptions: { fetchImpl: withoutHeading },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
         }),
       ),
     );
@@ -143,7 +156,12 @@ describe('llms.txt quality trio', () => {
       return new Response('html', { status: 200, headers: { 'content-type': 'text/html' } });
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const rows = resultsOf(events);
     for (const id of ['llms-txt-format', 'llms-txt-links', 'llms-txt-when-to-use'] as const) {
@@ -199,6 +217,7 @@ describe('llms.txt quality trio', () => {
         fetchOptions: { fetchImpl },
         perAuditDeadlineMs: 25,
         perCheckTimeoutMs: 80,
+        domainBudget: ALWAYS_ADMIT_BUDGET,
       }),
     );
     const complete = events.find((e) => e.type === 'complete');

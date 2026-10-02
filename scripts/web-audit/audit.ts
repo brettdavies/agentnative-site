@@ -14,6 +14,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type AuditEvent, runWebAudit } from '../../src/worker/audit-web/engine';
+import { ALWAYS_ADMIT_BUDGET } from '../../src/worker/audit-web/follow-requests';
 import type { WebAuditRegistry } from '../../src/worker/audit-web/registry';
 import { SPEC_VERSION } from '../../src/worker/spec-version.gen';
 
@@ -107,6 +108,8 @@ async function main(): Promise<number> {
     siteType: args.siteType ?? null,
     specVersion: SPEC_VERSION,
     followDeclarations: args.followDeclarations,
+    // A local run shares no budget with other audits, so there is none to draw on.
+    domainBudget: ALWAYS_ADMIT_BUDGET,
     fetchOptions: fetchImpl ? { fetchImpl } : {},
   });
 

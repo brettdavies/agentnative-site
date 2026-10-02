@@ -33,6 +33,7 @@ import {
   WEB_AUDIT_STALE_AFTER_MS,
 } from './cache';
 import { enrichWebScorecardForDisplay } from './display';
+import { type DomainBudgetEnv, declaredDomainBudget } from './domain-budget';
 import { runWebAudit } from './engine';
 import { effectiveFollow, type FollowSwitchEnv } from './follow-switch';
 import { queueHitMinPurge, webDomainTag, webTag } from './hit-min-purge';
@@ -52,7 +53,7 @@ import type { WebScorecardShape } from './summary-model';
 import { buildWebSummaryBody } from './summary-render';
 import type { TransientReason } from './summary-transient';
 
-export interface WebCoreEnv extends AuditLogEnv, NotifyEnv, FollowSwitchEnv {
+export interface WebCoreEnv extends AuditLogEnv, NotifyEnv, FollowSwitchEnv, DomainBudgetEnv {
   ASSETS: Fetcher;
   SCORE_CACHE: R2Bucket;
   SCORE_KV?: KVNamespace;
@@ -270,6 +271,7 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
         publicListing: input.listing,
         specVersion: SPEC_VERSION,
         followDeclarations,
+        domainBudget: declaredDomainBudget(env),
         fetchOptions: input.probeFetch ? { fetchImpl: input.probeFetch } : undefined,
       }),
       env,

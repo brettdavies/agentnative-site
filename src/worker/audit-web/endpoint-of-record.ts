@@ -10,7 +10,7 @@ import type { NaReason } from '../../shared/web-audit-findings';
 import { apiDeclarations } from './api-catalog';
 import type { DiscoveryDocuments, DiscoveryResult } from './discovery';
 import type { McpDeclaration } from './discovery-documents';
-import { type FollowInput, type FollowResult, openFollow } from './follow';
+import { type FollowInput, type FollowResult, type FollowStats, openFollow } from './follow';
 import type { ApiFollowResult } from './follow-api';
 import { declarationKey, declaresHost, type TrailEntry, type TrailOutcome, trailEntry } from './follow-trail';
 import type { SignInChallenge } from './mcp-auth';
@@ -126,7 +126,7 @@ export function endpointOfRecord(
 export async function settleEndpointOfRecord(
   documents: DiscoveryDocuments,
   opts: Omit<FollowInput, 'entryEndpointDeclared'> & { siteAnswered: boolean; apiRowsApply: boolean },
-): Promise<{ discovery: DiscoveryResult; declared: EndpointOfRecord }> {
+): Promise<{ discovery: DiscoveryResult; declared: EndpointOfRecord; follow: FollowStats }> {
   const { siteAnswered, apiRowsApply, ...follow } = opts;
   const session = openFollow({ ...follow, entryEndpointDeclared: documents.cardEndpoint !== null });
   const [discovery] = await Promise.all([
@@ -135,5 +135,6 @@ export async function settleEndpointOfRecord(
   ]);
   await session.settle(discovery.redirected);
   await session.settleApi(siteAnswered && apiRowsApply ? apiDeclarations(documents.apiAnchors) : []);
-  return { discovery, declared: endpointOfRecord(follow.base, discovery, session.result()) };
+  const followed = session.result();
+  return { discovery, declared: endpointOfRecord(follow.base, discovery, followed), follow: followed.stats };
 }

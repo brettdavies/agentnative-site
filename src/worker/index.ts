@@ -170,10 +170,13 @@ export interface Env {
   // also the per-IP burst limiter the audit_website MCP tool keys directly.
   // WEB_AUDIT_ENABLED is the secret-backed kill switch covering both the
   // webapp route and the MCP fresh path. WEB_AUDIT_FOLLOW_ENABLED switches
-  // off only the following of declared hosts; audits keep running. Optional
-  // so tests that don't exercise the web audit can stub a minimal env.
+  // off only the following of declared hosts; audits keep running.
+  // WEB_AUDIT_DOMAIN_LIMITER is the per-declared-domain burst floor under
+  // the hourly KV window every audit's follow slice draws on. Optional so
+  // tests that don't exercise the web audit can stub a minimal env.
   WEB_AUDIT_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   WEB_AUDIT_LIMITER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> };
+  WEB_AUDIT_DOMAIN_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   WEB_AUDIT_ENABLED?: string;
   WEB_AUDIT_FOLLOW_ENABLED?: string;
   // Web-rescore bindings. WEB_RESCORE_WORKFLOW is the Workflow that fans

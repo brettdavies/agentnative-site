@@ -32,6 +32,7 @@ import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import { attachInlineRemediation } from '../src/worker/audit-web/display';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
+import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
 import {
   CONFORMANCE_OPS,
   ENFORCEMENT_OPS,
@@ -280,6 +281,7 @@ function auditOf(label: string, fetchImpl: typeof fetch): Promise<Audit> {
       url: BASE,
       registry,
       fetchOptions: { fetchImpl },
+      domainBudget: ALWAYS_ADMIT_BUDGET,
     }) as AsyncGenerator<AuditEvent>) {
       if (event.type === 'result') rows.push(event.result);
     }

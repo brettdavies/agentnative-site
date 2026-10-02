@@ -55,6 +55,7 @@ export interface McpEnv {
   MCP_CACHE_BYPASS_ALLOWED?: string;
   WEB_AUDIT_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   WEB_AUDIT_LIMITER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> };
+  WEB_AUDIT_DOMAIN_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   WEB_AUDIT_ENABLED?: string;
   WEB_AUDIT_FOLLOW_ENABLED?: string;
 }

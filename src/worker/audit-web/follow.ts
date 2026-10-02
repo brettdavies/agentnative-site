@@ -44,6 +44,7 @@ import {
 } from './discovery-documents';
 import { type ApiFollowResult, NO_API_FOLLOW, settleApiDeclarations } from './follow-api';
 import {
+  type BudgetLayerError,
   budgetExceeded,
   type DomainBudget,
   type Fetched,
@@ -88,6 +89,17 @@ export interface FollowInput {
   fetchOptions?: Pick<GuardedFetchOptions, 'fetchImpl'>;
 }
 
+/** What the slice spent, for the audit's run record. */
+export interface FollowStats {
+  requests: number;
+  /** Requests per domain budget key, which is the registrable domain in production. */
+  domainRequests: Readonly<Record<string, number>>;
+  /** Time the slice spent settling its batches of declarations. */
+  elapsedMs: number;
+  /** Reservations a budget layer error decided rather than the budget, per error. */
+  budgetErrors: Readonly<Partial<Record<BudgetLayerError, number>>>;
+}
+
 export interface FollowResult {
   /** The first declared endpoint reciprocity admitted, pinned to its final URL. */
   endpoint: string | null;
@@ -98,7 +110,7 @@ export interface FollowResult {
   /** The API catalog's trail entries and the descriptions the slice read. */
   api: ApiFollowResult;
   evidence: EvidenceItem[];
-  requests: number;
+  stats: FollowStats;
 }
 
 /** The follow slice, opened once per audit; its clock starts when it opens. */
@@ -134,6 +146,12 @@ export function openFollow(input: FollowInput): FollowSession {
   let endpoint: string | null = null;
   let endpointMetadata: MetadataMatch | null = null;
   let api = NO_API_FOLLOW;
+  let elapsedMs = 0;
+  const timed = async (run: () => Promise<void>): Promise<void> => {
+    const started = input.now();
+    await run();
+    elapsedMs += input.now() - started;
+  };
 
   /** A card document's trail entry, and the endpoints it names, which settle later in declaration order. */
   const cardDocumentRead = (declaration: McpDeclaration, fetched: Fetched | Settled): CardDocumentRead => {
@@ -239,7 +257,7 @@ export function openFollow(input: FollowInput): FollowSession {
   let settled = Promise.resolve();
   return {
     settle: (declarations) => {
-      settled = settled.then(() => settleBatch(declarations));
+      settled = settled.then(() => timed(() => settleBatch(declarations)));
       return settled;
     },
     settleApi: (declarations) => {
@@ -247,9 +265,11 @@ export function openFollow(input: FollowInput): FollowSession {
       const upfront = (declaration: ApiDeclaration) =>
         settledUpfront(declaration, { enabled: input.enabled, entryEndpointDeclared: false });
       const declared = unique(declarations.filter((declaration) => declaresHost(declaration, input.base)));
-      settled = settled.then(async () => {
-        api = await settleApiDeclarations(requests, declared, upfront);
-      });
+      settled = settled.then(() =>
+        timed(async () => {
+          api = await settleApiDeclarations(requests, declared, upfront);
+        }),
+      );
       return settled;
     },
     result: () => ({
@@ -258,7 +278,12 @@ export function openFollow(input: FollowInput): FollowSession {
       entries,
       api,
       evidence: requests.evidence,
-      requests: requests.count(),
+      stats: {
+        requests: requests.count(),
+        domainRequests: requests.countByDomain(),
+        elapsedMs,
+        budgetErrors: requests.budgetErrors(),
+      },
     }),
   };
 }

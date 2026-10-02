@@ -4,6 +4,7 @@
 
 import { FOLLOW_SLICE_MS } from './follow';
 import { MAX_FOLLOW_REQUESTS, MAX_FOLLOWED_HOSTS } from './follow-requests';
+import { DECLARED_DOMAIN_HOURLY_CEILING } from './limiter';
 
 export const FOLLOW_DISCLOSURE =
   'By default (follow_declarations true) a website audit also contacts third-party hosts the site declares. An MCP ' +
@@ -13,6 +14,8 @@ export const FOLLOW_DISCLOSURE =
   "the endpoint. An API host anchored in the site's api-catalog gets document fetches (its OpenAPI description) and " +
   "one GET to a nonsense path on the site's declaration alone. Each audit follows at most " +
   `${MAX_FOLLOWED_HOSTS} off-origin hosts with at most ${MAX_FOLLOW_REQUESTS} follow-phase document requests inside ` +
-  `a ${FOLLOW_SLICE_MS / 1000}-second follow window, so following lengthens an audit's wall time. ` +
+  `a ${FOLLOW_SLICE_MS / 1000}-second follow window, so following lengthens an audit's wall time. Across all ` +
+  `audits and sites, following is also capped at about ${DECLARED_DOMAIN_HOURLY_CEILING} audits per hour per ` +
+  "declared registrable domain; an audit past that cap leaves that domain's hosts unprobed. " +
   'follow_declarations false audits only the site and returns a result that is never saved, and the operator can ' +
   'switch following off for every audit (WEB_AUDIT_FOLLOW_ENABLED).';

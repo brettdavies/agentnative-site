@@ -17,6 +17,15 @@ import { type GuardedFetchOptions, guardedFetch, REDIRECT_STATUSES } from './ssr
 export const MAX_FOLLOWED_HOSTS = 4;
 export const MAX_FOLLOW_REQUESTS = 12;
 
+/** A budget layer that errored, and whether the reservation it decided was refused or admitted. */
+export type BudgetLayerError = 'burst-refused' | 'read-refused' | 'put-admitted';
+
+/** A reservation's answer, and the layer error that decided it when one did. */
+export interface Reservation {
+  admitted: boolean;
+  layerError?: BudgetLayerError;
+}
+
 /**
  * The hourly budget for each declared domain, drawn once per audit and
  * domain before the first request the slice sends there.
@@ -24,11 +33,14 @@ export const MAX_FOLLOW_REQUESTS = 12;
 export interface DomainBudget {
   /** The key a host's requests are charged to. */
   keyOf(hostname: string): string;
-  /** Reserves this audit's unit for `key`; false when that key's budget is spent. */
-  reserve(key: string): Promise<boolean>;
+  /** Reserves this audit's unit for `key`; not admitted when that key's budget is spent. */
+  reserve(key: string): Promise<Reservation>;
 }
 
-export const ALWAYS_ADMIT_BUDGET: DomainBudget = { keyOf: (hostname) => hostname, reserve: async () => true };
+export const ALWAYS_ADMIT_BUDGET: DomainBudget = {
+  keyOf: (hostname) => hostname,
+  reserve: async () => ({ admitted: true }),
+};
 
 export type ReadOptions = ArtifactReadOptions & { timeoutCapMs?: number };
 
@@ -64,6 +76,10 @@ export interface SliceRequests {
   readonly source: ArtifactSource;
   readonly evidence: EvidenceItem[];
   count(): number;
+  /** Requests sent, per domain budget key. */
+  countByDomain(): Readonly<Record<string, number>>;
+  /** Reservations a budget layer error decided, per error. */
+  budgetErrors(): Readonly<Partial<Record<BudgetLayerError, number>>>;
 }
 
 export function sliceRequests(input: {
@@ -75,6 +91,8 @@ export function sliceRequests(input: {
   const hosts: string[] = [];
   const reservations = new Map<string, Promise<boolean>>();
   const responseCache = new Map<string, Promise<ProbeResponse>>();
+  const byDomain = new Map<string, number>();
+  const layerErrors = new Map<BudgetLayerError, number>();
   let requests = 0;
 
   const admitHost = (hostname: string): boolean => {
@@ -87,7 +105,10 @@ export function sliceRequests(input: {
     const key = input.budget.keyOf(hostname);
     let reservation = reservations.get(key);
     if (reservation === undefined) {
-      reservation = input.budget.reserve(key);
+      reservation = input.budget.reserve(key).then(({ admitted, layerError }) => {
+        if (layerError !== undefined) layerErrors.set(layerError, (layerErrors.get(layerError) ?? 0) + 1);
+        return admitted;
+      });
       reservations.set(key, reservation);
     }
     return reservation;
@@ -105,6 +126,8 @@ export function sliceRequests(input: {
     if (slice === null) throw new FollowStop('slice');
     if (requests >= MAX_FOLLOW_REQUESTS) throw new FollowStop('per-audit-cap');
     requests += 1;
+    const domain = input.budget.keyOf(new URL(url).hostname);
+    byDomain.set(domain, (byDomain.get(domain) ?? 0) + 1);
     const response = await guardedFetch(url, opts.accept === undefined ? {} : { headers: { accept: opts.accept } }, {
       ...input.fetchOptions,
       timeoutMs: Math.min(slice, opts.timeoutCapMs ?? slice),
@@ -168,6 +191,8 @@ export function sliceRequests(input: {
     source: { get, decline: (url, why) => evidence.push({ url, blocked: why }) },
     evidence,
     count: () => requests,
+    countByDomain: () => Object.fromEntries(byDomain),
+    budgetErrors: () => Object.fromEntries(layerErrors),
   };
 }
 
