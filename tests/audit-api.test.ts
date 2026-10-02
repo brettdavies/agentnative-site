@@ -41,6 +41,23 @@ import {
 } from './helpers/follow-fixtures';
 import { captureLogs } from './helpers/log-capture';
 
+// A context whose purge RPC records every tag batch the run queued.
+function purgeCtx(): ReturnType<typeof makeCtx> & { purged: string[][] } {
+  const purged: string[][] = [];
+  const ctx = makeCtx();
+  return Object.assign(ctx, {
+    purged,
+    exports: {
+      Cached: {
+        async purgeHitMinTags(tags: string[]) {
+          purged.push(tags);
+          return { success: true, errors: [] };
+        },
+      },
+    },
+  });
+}
+
 beforeEach(() => {
   _resetIndexCache();
   _resetKillSwitchCache();
@@ -901,8 +918,8 @@ describe("POST /api/score: a run a declared domain's spent hourly budget limited
     return Object.assign(env, { puts });
   }
 
-  async function audit(env: ReturnType<typeof makeEnv>) {
-    const { res, ctx } = await call(post({ target: 'example.com', turnstile_token: 'x' }), env);
+  async function audit(env: ReturnType<typeof makeEnv>, body: Record<string, unknown> = {}, ctx = makeCtx()) {
+    const { res } = await call(post({ target: 'example.com', turnstile_token: 'x', ...body }), env, ctx);
     expect(res.status).toBe(200);
     await Promise.all(ctx._promises);
     return (await res.json()) as Record<string, unknown> & {
@@ -1016,6 +1033,34 @@ describe("POST /api/score: a run a declared domain's spent hourly budget limited
     });
   });
 
+  describe('a listing change the held run resolved', () => {
+    const listed = () => ({ ...prior(), scorecard: { ...prior().scorecard, public_listing: true } });
+
+    test('is written onto the saved scorecard, which keeps its rows and scored_at, and purges the board', async () => {
+      const saved = listed();
+      const env = await declaringEnv({ prior: saved, kvSeed: await spentBudget() });
+      const ctx = purgeCtx();
+      const body = await audit(env, { public_listing: false }, ctx);
+      expect(body).toMatchObject({ scorecard_url: null, scorecard: { public_listing: false } });
+      expect(JSON.parse((await storedText(env)) ?? 'null')).toEqual({
+        ...saved,
+        scorecard: { ...saved.scorecard, public_listing: false },
+      });
+      expect(ctx.purged).toEqual([['web']]);
+    });
+
+    test('that the store refuses to write leaves the envelope reporting the listing still stored', async () => {
+      const saved = listed();
+      const env = await declaringEnv({ prior: saved, kvSeed: await spentBudget() });
+      env.SCORE_CACHE.put = (async () => {
+        throw new Error('r2 unavailable');
+      }) as R2Bucket['put'];
+      const body = await audit(env, { public_listing: false });
+      expect(body).toMatchObject({ scorecard_url: null, scorecard: { public_listing: true } });
+      expect(await storedText(env)).toBe(JSON.stringify(saved));
+    });
+  });
+
   test('a run whose declared host the follow slice ran out of time for saves as any audit', async () => {
     const saved = prior();
     const probe = router(
@@ -1094,23 +1139,6 @@ describe('POST /api/score: a run that does not follow declared hosts', () => {
       return put(key, ...rest);
     }) as R2Bucket['put'];
     return Object.assign(env, { puts });
-  }
-
-  // A context whose purge RPC records every tag batch the run queued.
-  function purgeCtx(): ReturnType<typeof makeCtx> & { purged: string[][] } {
-    const purged: string[][] = [];
-    const ctx = makeCtx();
-    return Object.assign(ctx, {
-      purged,
-      exports: {
-        Cached: {
-          async purgeHitMinTags(tags: string[]) {
-            purged.push(tags);
-            return { success: true, errors: [] };
-          },
-        },
-      },
-    });
   }
 
   const fresh = () => ({

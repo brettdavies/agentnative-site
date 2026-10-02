@@ -1502,7 +1502,8 @@ describe('audit_website: the declared-domain budget', () => {
     expect(sent).toBeGreaterThan(0);
   });
 
-  test("a run a declared domain's spent hour limited returns in place and keeps the saved scorecard", async () => {
+  // A call over a saved scorecard ten minutes old, with example.net's hour and the next one spent.
+  async function spentRun(args: Record<string, unknown>, savedScorecard: Record<string, unknown> = {}) {
     const prefix = await budgetKeyPrefix('example.net');
     const hour = Math.floor(Date.now() / 3_600_000);
     const env = await makeEnv({
@@ -1510,13 +1511,13 @@ describe('audit_website: the declared-domain budget', () => {
       kvSeed: { [`${prefix}${hour}`]: '9999', [`${prefix}${hour + 1}`]: '9999' },
     });
     const key = await keyFor('https://example.com/', SPEC_VERSION);
-    const saved = JSON.stringify({
+    const saved = {
       spec_version: SPEC_VERSION,
       target_url: 'https://example.com/',
-      scorecard: { target_url: 'https://example.com/', score_pct: 64, results: [] },
+      scorecard: { target_url: 'https://example.com/', score_pct: 64, results: [], ...savedScorecard },
       scored_at: new Date(Date.now() - 600_000).toISOString(),
-    });
-    const store = new Map([[key, saved]]);
+    };
+    const store = new Map([[key, JSON.stringify(saved)]]);
     (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(store);
     const originalFetch = globalThis.fetch;
     globalThis.fetch = router(
@@ -1527,17 +1528,27 @@ describe('audit_website: the declared-domain budget', () => {
       },
       [],
     );
-    let body: Record<string, unknown>;
     try {
-      body = jsonContent(
-        (await withLogCapture(() => callTool(env, 'audit_website', { url: 'example.com' }, IP))).result,
+      const body = jsonContent(
+        (await withLogCapture(() => callTool(env, 'audit_website', { url: 'example.com', ...args }, IP))).result,
       );
+      return { body, saved, stored: JSON.parse(store.get(key) ?? 'null') as unknown };
     } finally {
       globalThis.fetch = originalFetch;
     }
+  }
+
+  test("a run a declared domain's spent hour limited returns in place and keeps the saved scorecard", async () => {
+    const { body, saved, stored } = await spentRun({});
     expect(body).toMatchObject({ audited: true, scorecard_url: null, markdown_url: null, json_url: null });
     expect(String(body.summary_html)).toContain("Not saved: example.net reached anc's hourly probe limit;");
-    expect(store.get(key)).toBe(saved);
+    expect(stored).toEqual(saved);
+  });
+
+  test('a listing change the held run resolved is written onto the saved scorecard, which keeps its rows and scored_at', async () => {
+    const { body, saved, stored } = await spentRun({ public_listing: false }, { public_listing: true });
+    expect(body).toMatchObject({ audited: true, scorecard_url: null, scorecard: { public_listing: false } });
+    expect(stored).toEqual({ ...saved, scorecard: { ...saved.scorecard, public_listing: false } });
   });
 
   test('a declared domain over its burst floor is budget-exceeded and receives nothing', async () => {
