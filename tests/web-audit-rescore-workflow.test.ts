@@ -16,17 +16,37 @@ import {
   keyFor,
 } from '../src/worker/audit-web/cache';
 import {
-  auditDomainToCache,
-  type RescoreStep,
+  FOLLOW_POLICY_VERSION,
   registryFingerprint,
+  registryFingerprintPrefix,
+  type WebAuditRegistry,
+} from '../src/worker/audit-web/registry';
+import {
+  auditDomainToCache,
+  type RescoreAuditOutcome,
+  type RescoreStep,
   runWebRescore,
   type WebRescoreEnv,
   WebRescoreWorkflow,
 } from '../src/worker/audit-web/rescore-workflow';
+import type { WebScorecard } from '../src/worker/audit-web/scorecard';
 import { isSeededDomain, loadWebSeed, resetWebSeedCacheForTests } from '../src/worker/audit-web/seed';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 import { budgetKeyPrefix, memoryRateLimit } from './helpers/domain-budget-fakes';
-import { aiCatalog, cardEntry, html, requestsTo, router, type Seen, sep2127Card } from './helpers/follow-fixtures';
+import {
+  aiCatalog,
+  cardDocument,
+  cardEntry,
+  followRegistry,
+  html,
+  type Route,
+  requestsTo,
+  router,
+  type Seen,
+  sep2127Card,
+  wireProbesTo,
+} from './helpers/follow-fixtures';
+import { captureLogs } from './helpers/log-capture';
 
 function seedEntry(domain: string) {
   return { domain, url: `https://${domain}/`, name: domain, description: `about ${domain}` };
@@ -97,6 +117,28 @@ function makeKv(initial: Record<string, string> = {}): { kv: KVNamespace; map: M
   return { kv, map };
 }
 
+/**
+ * Fake WorkflowStep that retries a throwing closure as many times as the
+ * step's config allows, as the Workflows runtime does, so a test can count
+ * the audits a refusal costs.
+ */
+function makeRetryingStep(): RescoreStep {
+  return {
+    async do<T>(_name: string, configOrFn: unknown, maybeFn?: () => Promise<T>): Promise<T> {
+      const fn = (typeof configOrFn === 'function' ? configOrFn : maybeFn) as () => Promise<T>;
+      const limit =
+        typeof configOrFn === 'function' ? 0 : ((configOrFn as { retries?: { limit?: number } }).retries?.limit ?? 0);
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await fn();
+        } catch (err) {
+          if (attempt >= limit) throw err;
+        }
+      }
+    },
+  } as RescoreStep;
+}
+
 /** Fake WorkflowStep: records step names in execution order, runs closures inline. */
 function makeStep(): { step: RescoreStep; names: string[] } {
   const names: string[] = [];
@@ -123,22 +165,39 @@ function scorecardFor(domain: string, globalScore: number, relative = globalScor
 
 /** Injected audit: caches a deterministic scorecard, throwing for listed domains. */
 function stubAudit(scores: Record<string, number>, failFor: Set<string> = new Set()) {
-  return async (env: WebRescoreEnv, targetUrl: string): Promise<void> => {
+  return async (env: WebRescoreEnv, targetUrl: string): Promise<RescoreAuditOutcome> => {
     const domain = new URL(targetUrl).host;
     if (failFor.has(domain)) throw new Error(`boom: ${domain}`);
     await cachePut(env, targetUrl, scorecardFor(domain, scores[domain] ?? 0), SPEC_VERSION);
+    return { kind: 'saved' };
   };
 }
 
 const HOUR_MS = 60 * 60_000;
 
-/** Pre-populate a domain's cache entry with a chosen audit age, bypassing put's now-stamp. */
-async function primeCache(store: Map<string, string>, domain: string, agoMs: number, globalScore = 50): Promise<void> {
+// A registry fingerprint the change gate reads as unchanged, and the prefix a scorecard scored under it records.
+const SAME_FP = `0123456789ab${'0'.repeat(52)}`;
+const SAME_PREFIX = SAME_FP.slice(0, 12);
+
+/**
+ * Pre-populate a domain's cache entry with a chosen audit age, bypassing
+ * put's now-stamp, and the registry prefix it records when one is given.
+ */
+async function primeCache(
+  store: Map<string, string>,
+  domain: string,
+  agoMs: number,
+  globalScore = 50,
+  registryPrefix?: string,
+): Promise<void> {
   const url = `https://${domain}/`;
   const payload = {
     spec_version: SPEC_VERSION,
     target_url: url,
-    scorecard: scorecardFor(domain, globalScore),
+    scorecard: {
+      ...scorecardFor(domain, globalScore),
+      ...(registryPrefix !== undefined ? { registry_fingerprint: registryPrefix } : {}),
+    },
     scored_at: new Date(Date.now() - agoMs).toISOString(),
   };
   store.set(await keyFor(url, SPEC_VERSION), JSON.stringify(payload));
@@ -372,10 +431,7 @@ describe('runWebRescore', () => {
         },
       ],
     });
-    const fpOf = async (registry: unknown) => {
-      const { env } = makeEnv([seedEntry('a.test')], { registry });
-      return registryFingerprint(env);
-    };
+    const fpOf = async (registry: object) => registryFingerprint(registry as WebAuditRegistry);
 
     test('a site-only field does not reflow the corpus', async () => {
       // `breadcrumb` names the check's own page in the site's URL trail. No
@@ -449,6 +505,13 @@ describe('runWebRescore', () => {
     });
   });
 
+  test('a new follow policy version reflows, whatever the registry', async () => {
+    const registry = MINIMAL_REGISTRY as WebAuditRegistry;
+    expect(await registryFingerprint(registry, FOLLOW_POLICY_VERSION + 1)).not.toBe(
+      await registryFingerprint(registry),
+    );
+  });
+
   test('a changed registry fingerprint reflows every domain even when all are fresh', async () => {
     const { env, store } = makeEnv([seedEntry('fresh1.dev'), seedEntry('fresh2.dev')]);
     const { kv } = makeKv({ 'web_rescore:registry_fp': 'OLD' });
@@ -464,20 +527,33 @@ describe('runWebRescore', () => {
     expect(await kv.get('web_rescore:registry_fp')).toBe('NEW'); // recorded after the reflow
   });
 
-  test('an unchanged fingerprint keeps incremental batching: fresh skipped, stale audited', async () => {
+  test('an unchanged fingerprint and follow state keep incremental batching: fresh skipped, stale audited', async () => {
     const { env, store } = makeEnv([seedEntry('fresh.dev'), seedEntry('stale.dev')]);
-    const { kv } = makeKv({ 'web_rescore:registry_fp': 'SAME' });
+    const { kv } = makeKv({ 'web_rescore:registry_fp': SAME_FP, 'web_rescore:follow_enabled': 'false' });
     env.SCORE_KV = kv;
-    await primeCache(store, 'fresh.dev', 60_000, 40); // fresh — skipped incrementally
-    await primeCache(store, 'stale.dev', 3 * HOUR_MS, 40); // > 2h — audited
+    await primeCache(store, 'fresh.dev', 60_000, 40, SAME_PREFIX); // fresh — skipped incrementally
+    await primeCache(store, 'stale.dev', 3 * HOUR_MS, 40, SAME_PREFIX); // > 2h — audited
     const { step } = makeStep();
     const result = await runWebRescore(env, step, {
       audit: stubAudit({ 'stale.dev': 80 }),
-      fingerprint: async () => 'SAME',
+      fingerprint: async () => SAME_FP,
     });
     expect(result.audited).toEqual(['stale.dev']);
     expect(result.skipped).toEqual([]);
-    expect(await kv.get('web_rescore:registry_fp')).toBe('SAME'); // unchanged, not rewritten
+    expect(await kv.get('web_rescore:registry_fp')).toBe(SAME_FP); // unchanged, not rewritten
+  });
+
+  test('a fresh seed scored under another registry, or under none recorded, is audited whatever its age', async () => {
+    const seeds = ['current.dev', 'other.dev', 'unrecorded.dev'];
+    const { env, store } = makeEnv(seeds.map(seedEntry));
+    const { kv } = makeKv({ 'web_rescore:registry_fp': SAME_FP, 'web_rescore:follow_enabled': 'false' });
+    env.SCORE_KV = kv;
+    await primeCache(store, 'current.dev', 60_000, 40, SAME_PREFIX);
+    await primeCache(store, 'other.dev', 60_000, 40, 'ffffffffffff');
+    await primeCache(store, 'unrecorded.dev', 60_000, 40);
+    const { step } = makeStep();
+    const result = await runWebRescore(env, step, { audit: stubAudit({}), fingerprint: async () => SAME_FP });
+    expect(result.audited.sort()).toEqual(['other.dev', 'unrecorded.dev']);
   });
 
   test('a first run with no recorded fingerprint reflows all and records it', async () => {
@@ -492,6 +568,48 @@ describe('runWebRescore', () => {
     });
     expect(result.audited).toEqual(['fresh.dev']);
     expect(await kv.get('web_rescore:registry_fp')).toBe('FP1');
+  });
+});
+
+describe('the follow switch in the registry-change gate', () => {
+  const FP_KEY = 'web_rescore:registry_fp';
+  const FOLLOW_KEY = 'web_rescore:follow_enabled';
+
+  test('every value but "true" records one follow state, and the fingerprint is the same with the switch on and off', async () => {
+    const recorded = async (followSwitch: string | undefined) => {
+      const { env } = makeEnv([seedEntry('a.dev')], { registry: MINIMAL_REGISTRY });
+      const { kv, map } = makeKv();
+      env.SCORE_KV = kv;
+      if (followSwitch !== undefined) env.WEB_AUDIT_FOLLOW_ENABLED = followSwitch;
+      const { step } = makeStep();
+      await withStubbedFetch(() => runWebRescore(env, step));
+      return { fingerprint: map.get(FP_KEY), follow: map.get(FOLLOW_KEY) };
+    };
+    const off = [await recorded(undefined), await recorded('false'), await recorded('TRUE')];
+    const on = await recorded('true');
+    expect(off.map((r) => r.follow)).toEqual(['false', 'false', 'false']);
+    expect(on.follow).toBe('true');
+    const fingerprint = await registryFingerprint(MINIMAL_REGISTRY as WebAuditRegistry);
+    expect([...off, on].map((r) => r.fingerprint)).toEqual([fingerprint, fingerprint, fingerprint, fingerprint]);
+  });
+
+  test('a flipped switch reflows every domain under an unchanged fingerprint; a value that reads the same does not', async () => {
+    const run = async (recordedFollow: string, followSwitch: string | undefined) => {
+      const { env, store } = makeEnv([seedEntry('fresh.dev')]);
+      const { kv } = makeKv({ [FP_KEY]: SAME_FP, [FOLLOW_KEY]: recordedFollow });
+      env.SCORE_KV = kv;
+      if (followSwitch !== undefined) env.WEB_AUDIT_FOLLOW_ENABLED = followSwitch;
+      await primeCache(store, 'fresh.dev', 60_000, 40, SAME_PREFIX);
+      const { step } = makeStep();
+      const result = await runWebRescore(env, step, {
+        audit: stubAudit({ 'fresh.dev': 70 }),
+        fingerprint: async () => SAME_FP,
+      });
+      return { audited: result.audited, follow: await kv.get(FOLLOW_KEY) };
+    };
+    expect(await run('false', 'true')).toEqual({ audited: ['fresh.dev'], follow: 'true' });
+    expect(await run('true', undefined)).toEqual({ audited: ['fresh.dev'], follow: 'false' });
+    expect(await run('false', 'TRUE')).toEqual({ audited: [], follow: 'false' });
   });
 });
 
@@ -525,6 +643,19 @@ describe('public listing on re-audit writes', () => {
       expect((cached.scorecard as { public_listing?: boolean }).public_listing).toBe(true);
       expect(putOptions.get(key)?.customMetadata?.public_listing).toBe('true');
     }
+  });
+
+  test("a curated seed's rescore records its registry prefix in the scorecard and the board metadata, still listed", async () => {
+    const { env, putOptions } = makeEnv([seedEntry('a.dev')], { registry: MINIMAL_REGISTRY });
+    const { step } = makeStep();
+    const result = await withStubbedFetch(() => runWebRescore(env, step));
+    expect(result.audited).toEqual(['a.dev']);
+    const key = await keyFor('https://a.dev/', SPEC_VERSION);
+    const cached = (await cacheGet(env, key)) as CachedWebAudit;
+    const prefix = await registryFingerprintPrefix(MINIMAL_REGISTRY as WebAuditRegistry);
+    expect(prefix).toMatch(/^[0-9a-f]{12}$/);
+    expect(cached.scorecard).toMatchObject({ registry_fingerprint: prefix, public_listing: true });
+    expect(putOptions.get(key)?.customMetadata).toMatchObject({ registry_fingerprint: prefix, public_listing: 'true' });
   });
 
   test('auditDomainToCache derives the flag from the seed: a non-seeded target stays unlisted', async () => {
@@ -596,6 +727,210 @@ describe('the declared-domain budget on rescore audits', () => {
     const { trail, sent } = await rescoreDeclaring(env);
     expect(trail[0]).toMatchObject({ outcome: 'budget-exceeded', cause: 'domain-budget' });
     expect(sent).toBe(0);
+  });
+});
+
+describe("a declared domain's spent hourly budget on the reflow", () => {
+  const SPENT = 'https://mcp.spent.example/mcp';
+  const ROOM = 'https://mcp.room.example/mcp';
+
+  type Reflow = {
+    /** The MCP endpoints the seed's ai-catalog declares, in order. */
+    endpoints?: string[];
+    routes?: Record<string, Route>;
+    /** The age of the seed's saved scorecard; none is saved when absent. */
+    savedAgoMs?: number;
+    /** Every read of the seed's saved scorecard fails. */
+    unreadable?: boolean;
+  };
+
+  // One forced reflow of the seed with spent.example's hour spent.
+  async function reflowSpent(opts: Reflow = {}) {
+    const { env, store } = makeEnv([seedEntry('example.com')], { registry: followRegistry() });
+    env.WEB_AUDIT_FOLLOW_ENABLED = 'true';
+    const hour = Math.floor(Date.now() / HOUR_MS);
+    const spent = await budgetKeyPrefix('spent.example');
+    const { kv } = makeKv({
+      'web_rescore:registry_fp': 'OLD',
+      [`${spent}${hour}`]: '9999',
+      [`${spent}${hour + 1}`]: '9999',
+    });
+    env.SCORE_KV = kv;
+    if (opts.savedAgoMs !== undefined) await primeCache(store, 'example.com', opts.savedAgoMs, 40);
+    const key = await keyFor('https://example.com/', SPEC_VERSION);
+    const saved = store.get(key);
+    if (opts.unreadable) {
+      const bucket = env.SCORE_CACHE;
+      const get = bucket.get.bind(bucket);
+      bucket.get = ((k: string, ...rest: Parameters<R2Bucket['get']> extends [string, ...infer R] ? R : never) =>
+        k === key
+          ? Promise.reject(new Error('We encountered an internal error.'))
+          : get(k, ...rest)) as R2Bucket['get'];
+    }
+    const seen: Seen[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = router(
+      {
+        'GET https://example.com/': () => html(),
+        'GET https://example.com/.well-known/ai-catalog.json': () =>
+          aiCatalog(...(opts.endpoints ?? [SPENT, ROOM]).map((url) => cardEntry({ data: sep2127Card(url) }))),
+        ...opts.routes,
+      },
+      seen,
+    );
+    const logs = captureLogs();
+    try {
+      const result = await runWebRescore(env, makeRetryingStep(), { fingerprint: async () => 'NEW' });
+      const stored = store.get(key);
+      const scorecard =
+        stored === undefined ? null : ((JSON.parse(stored) as CachedWebAudit).scorecard as WebScorecard);
+      return {
+        audited: result.audited,
+        skipped: result.skipped,
+        kept: stored === saved,
+        trail: scorecard?.declared_hosts?.map((e) => [e.url, e.outcome, e.cause]) ?? null,
+        roomProbed: wireProbesTo(seen, 'mcp.room.example').length > 0,
+      };
+    } finally {
+      logs.restore();
+      globalThis.fetch = original;
+    }
+  }
+
+  test('a seed with no saved scorecard is saved as any audit, so it is not left off the board', async () => {
+    const { audited, skipped, trail } = await reflowSpent();
+    expect({ audited, skipped }).toEqual({ audited: ['example.com'], skipped: [] });
+    expect(trail).toEqual([
+      [SPENT, 'budget-exceeded', 'domain-budget'],
+      [ROOM, 'reciprocity-refused', undefined],
+    ]);
+  });
+
+  test('a refused endpoint behind one that did not confirm decided the rows, so the seed is skipped', async () => {
+    const { audited, skipped, kept, roomProbed } = await reflowSpent({ endpoints: [ROOM, SPENT], savedAgoMs: 60_000 });
+    expect({ audited, skipped, kept, roomProbed }).toEqual({
+      audited: [],
+      skipped: ['example.com'],
+      kept: true,
+      roomProbed: false,
+    });
+  });
+
+  test('a refused endpoint in front of one admitted in its place decided the rows, so the seed is skipped', async () => {
+    const { audited, skipped, kept, roomProbed } = await reflowSpent({
+      endpoints: [SPENT, ROOM],
+      routes: { [`GET ${ROOM}/server-card`]: () => cardDocument(sep2127Card(ROOM)) },
+      savedAgoMs: 60_000,
+    });
+    expect({ audited, skipped, kept, roomProbed }).toEqual({
+      audited: [],
+      skipped: ['example.com'],
+      kept: true,
+      roomProbed: true,
+    });
+  });
+
+  test('a saved scorecard stands for a day: one 23 hours old is kept, one 25 hours old is replaced', async () => {
+    const run = async (hoursAgo: number) => {
+      const { audited, skipped, kept } = await reflowSpent({ savedAgoMs: hoursAgo * HOUR_MS });
+      return { audited, skipped, kept };
+    };
+    expect({ 23: await run(23), 25: await run(25) }).toEqual({
+      23: { audited: [], skipped: ['example.com'], kept: true },
+      25: { audited: ['example.com'], skipped: [], kept: false },
+    });
+  });
+
+  test('a young seed a reflow deferred is audited by the next trigger once its declared domain has room', async () => {
+    const { env, store } = makeEnv([seedEntry('example.com')], { registry: followRegistry() });
+    env.WEB_AUDIT_FOLLOW_ENABLED = 'true';
+    const hour = Math.floor(Date.now() / HOUR_MS);
+    const spent = await budgetKeyPrefix('spent.example');
+    const spentKeys = [`${spent}${hour}`, `${spent}${hour + 1}`];
+    const { kv, map } = makeKv({
+      'web_rescore:registry_fp': 'OLD',
+      ...Object.fromEntries(spentKeys.map((key) => [key, '9999'])),
+    });
+    env.SCORE_KV = kv;
+    await primeCache(store, 'example.com', 60_000, 40);
+    const original = globalThis.fetch;
+    globalThis.fetch = router(
+      {
+        'GET https://example.com/': () => html(),
+        'GET https://example.com/.well-known/ai-catalog.json': () =>
+          aiCatalog(cardEntry({ data: sep2127Card(SPENT) }), cardEntry({ data: sep2127Card(ROOM) })),
+      },
+      [],
+    );
+    const logs = captureLogs();
+    const runs: Array<{ audited: string[]; skipped: string[] }> = [];
+    try {
+      const { audited, skipped } = await runWebRescore(env, makeRetryingStep());
+      runs.push({ audited, skipped });
+      for (const key of spentKeys) map.delete(key);
+      const next = await runWebRescore(env, makeRetryingStep());
+      runs.push({ audited: next.audited, skipped: next.skipped });
+    } finally {
+      logs.restore();
+      globalThis.fetch = original;
+    }
+    expect(runs).toEqual([
+      { audited: [], skipped: ['example.com'] },
+      { audited: ['example.com'], skipped: [] },
+    ]);
+    const cached = (await cacheGet(env, await keyFor('https://example.com/', SPEC_VERSION))) as CachedWebAudit;
+    expect((cached.scorecard as { registry_fingerprint?: string }).registry_fingerprint).toBe(
+      await registryFingerprintPrefix(followRegistry()),
+    );
+  });
+
+  test('a seed whose saved scorecard the store cannot read is skipped, and nothing is written', async () => {
+    const { audited, skipped, kept } = await reflowSpent({ savedAgoMs: 60_000, unreadable: true });
+    expect({ audited, skipped, kept }).toEqual({ audited: [], skipped: ['example.com'], kept: true });
+  });
+
+  test('the seed is skipped on its one audit, keeps its saved scorecard, and charges its other domain once', async () => {
+    const { env, store } = makeEnv([seedEntry('example.com')], { registry: followRegistry() });
+    env.WEB_AUDIT_FOLLOW_ENABLED = 'true';
+    const hour = Math.floor(Date.now() / HOUR_MS);
+    const spent = await budgetKeyPrefix('spent.example');
+    const { kv, map } = makeKv({
+      'web_rescore:registry_fp': 'OLD',
+      [`${spent}${hour}`]: '9999',
+      [`${spent}${hour + 1}`]: '9999',
+    });
+    env.SCORE_KV = kv;
+    await primeCache(store, 'example.com', 60_000, 40);
+    const key = await keyFor('https://example.com/', SPEC_VERSION);
+    const saved = store.get(key);
+
+    const original = globalThis.fetch;
+    globalThis.fetch = router(
+      {
+        'GET https://example.com/': () => html(),
+        'GET https://example.com/.well-known/ai-catalog.json': () =>
+          aiCatalog(cardEntry({ data: sep2127Card(SPENT) }), cardEntry({ data: sep2127Card(ROOM) })),
+      },
+      [],
+    );
+    const logs = captureLogs();
+    let result: Awaited<ReturnType<typeof runWebRescore>>;
+    try {
+      result = await runWebRescore(env, makeRetryingStep(), { fingerprint: async () => 'NEW' });
+    } finally {
+      logs.restore();
+      globalThis.fetch = original;
+    }
+
+    expect({ audited: result.audited, skipped: result.skipped }).toEqual({ audited: [], skipped: ['example.com'] });
+    expect(store.get(key)).toBe(saved);
+    const records = logs.records.map((r) => r.record);
+    expect(records.filter((r) => r.scope === 'web-audit.run')).toHaveLength(1);
+    expect(records.filter((r) => r.scope === 'web-rescore')).toEqual([
+      { scope: 'web-rescore', domain: 'example.com', cause: 'domain-budget' },
+    ]);
+    const room = await budgetKeyPrefix('room.example');
+    expect([...map.entries()].filter(([k]) => k.startsWith(room)).map(([, units]) => units)).toEqual(['1']);
   });
 });
 

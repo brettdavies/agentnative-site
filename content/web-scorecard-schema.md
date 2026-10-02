@@ -65,7 +65,9 @@ not evaluated rather than as a recorded value: a missing `follow_declarations` n
 `declared_hosts` means no trail was recorded (an empty array is a recorded trail with nothing in it), and a missing
 `registry_fingerprint` means the registry version is unknown. The engine records `follow_declarations` and
 `declared_hosts` on every audit it completes, `false` with each declaration read as not followed when following was off,
-and never records `registry_fingerprint`.
+and never records `registry_fingerprint`; anc.dev adds it to every complete audit it returns or saves. The result page
+closes its checks with "Scored against registry `<prefix>`." and the markdown twin ends its freshness line with the same
+sentence, or with "Registry version not recorded." when the field is missing.
 
 ## Response freshness
 

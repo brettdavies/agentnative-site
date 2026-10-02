@@ -32,6 +32,11 @@ export const DECLARED_DOMAIN_HOURLY_CEILING = 30;
 /** KV key prefix of the declared-domain budget: `<prefix>:<sha256(domain)>:<hour bucket>`. */
 export const DECLARED_DOMAIN_BUDGET_PREFIX = 'web_audit_follow';
 
+/** When the fixed hour holding `now` ends, which is when every hourly window opens its next bucket. */
+export function hourWindowEndsAt(now: number): string {
+  return new Date((Math.floor(now / HOUR_MS) + 1) * HOUR_MS).toISOString();
+}
+
 /**
  * Reads the fixed-hour KV counter at `<prefix>:<id>:<hour bucket>`: null at
  * the ceiling, otherwise the write that takes one unit under the shared TTL.

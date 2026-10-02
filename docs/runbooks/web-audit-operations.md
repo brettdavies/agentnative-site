@@ -121,10 +121,42 @@ curated seed. Stale `/score/<domain>` pages keep serving the previous row set un
 omitted, not shown as ghost rows.
 
 **The follow switch and the rescore.** The rescore follows the hosts each site declares only while
-`WEB_AUDIT_FOLLOW_ENABLED` is on. While it is off, the next rescore (weekly, post-deploy, or a registry reflow) rewrites
-each seeded scorecard it re-audits as not followed: `follow_declarations: false`, with every row that needs a declared
-host `n_a` for reason `follow-disabled`. Turning the switch back on restores followed scores only through another
-rescore: the weekly run, or a manual run once the seeded scorecards are past the 2-hour eligibility window.
+`WEB_AUDIT_FOLLOW_ENABLED` is on. While it is off, a re-audit saves each seeded scorecard as not followed:
+`follow_declarations: false`, with every row that needs a declared host `n_a` for reason `follow-disabled`. Beside the
+fingerprint, KV records the follow state the last rescore ran with (`web_rescore:follow_enabled`, `true` or `false`; any
+value but `true` reads as `false`), and a flip in either direction forces the same full reflow a registry change does.
+A flip reflows nothing until the next rescore trigger, so after flipping the switch, fire the manual trigger above to
+re-score the board under the new state at once.
+
+**Which registry a score ran under.** The fingerprint hashes the registry without its site-only fields together with
+`FOLLOW_POLICY_VERSION` (`src/worker/audit-web/registry.ts`), so a release that changes the follow policy reflows the
+seeds even when `registry.yaml` is untouched. Every complete audit anc.dev returns or saves records the fingerprint's
+first 12 characters as `registry_fingerprint`; the board metadata in R2 carries it (or `unknown`), the result page
+closes its checks with "Scored against registry `<prefix>`.", and the markdown twin ends its freshness line with the
+same sentence. A scorecard saved before the field existed reads "Registry version not recorded." until it is re-audited.
+After a reflow, the recorded fingerprint starts with the prefix the seeded pages show:
+
+```bash
+wrangler kv key get --binding SCORE_KV --remote web_rescore:registry_fp   # add --env staging for staging
+```
+
+**When to fire the manual trigger.** Three events need the manual trigger above, because no hook fires the rescore
+for them:
+
+- **A flip of `WEB_AUDIT_FOLLOW_ENABLED`.** The flip changes the recorded follow state, and the manual run reflows every
+  seed under it.
+- **A rollback.** `wrangler rollback` fires no deploy hook. When the restored build's registry or follow policy differs
+  from the release it replaces, its fingerprint differs from the one KV recorded, and the manual run reflows every seed
+  under the restored registry.
+- **Domain-budget deferrals in a reflow.** A seed whose rows a declared domain's spent hourly budget left unevaluated is
+  not saved when it has a saved scorecard from the last 24 hours, or one R2 could not read: the rescore logs `scope:
+  web-rescore` with `cause: domain-budget`, skips that seed, and its saved scorecard stays on the board. A seed with no
+  saved scorecard (a new seed, or every seed after a vendored-spec bump, which changes the cache key) is saved as any
+  audit, so it is never left off the board. A saved scorecard older than 24 hours is replaced too, so a third party that
+  keeps a declared domain's hour spent cannot freeze a seed's score. Seeds that declare one domain drain its hour
+  together, so a release reflow can defer several. Fire the manual trigger after the hour turns (the next full UTC hour,
+  when every hourly budget opens a new bucket). A deferred seed keeps the scorecard it had, which records the registry
+  it was scored under before the reflow, so the next trigger re-audits it whatever its age.
 
 **Secrets.** `WEB_RESCORE_SECRET` is a `wrangler secret put` value on both Workers (`--env staging` and production) and
 lives in the GitHub environment secret `ANC_WEB_RESCORE_SECRET` for the deploy hook. Rotate by setting a new value in

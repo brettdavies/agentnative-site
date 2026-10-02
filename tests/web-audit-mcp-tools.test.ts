@@ -18,13 +18,18 @@ import { keyFor, WEB_AUDIT_STALE_AFTER_MS } from '../src/worker/audit-web/cache'
 import type { DomainBudgetEnv } from '../src/worker/audit-web/domain-budget';
 import { flushHitMinPurge, runWithHitMinPurge } from '../src/worker/audit-web/hit-min-purge';
 import { enforcePublicListingFlipLimit } from '../src/worker/audit-web/public-listing';
-import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
+import {
+  registryFingerprintPrefix,
+  resetWebAuditRegistryCacheForTests,
+  type WebAuditRegistry,
+} from '../src/worker/audit-web/registry';
 import { buildWebSummaryMarkdown } from '../src/worker/audit-web/summary-markdown';
 import { buildWebSummaryBody } from '../src/worker/audit-web/summary-render';
 import { resetCatalogCacheForTests } from '../src/worker/mcp/catalog';
 import type { McpEnv } from '../src/worker/mcp/server';
 import { resetWebRemediationCacheForTests } from '../src/worker/mcp/tools/web-remediation';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { webRegistryJson } from './helpers/audit-api-env';
 import { countClaims, fakeJobNamespace } from './helpers/audit-job-state';
 import {
   at,
@@ -1497,12 +1502,81 @@ describe('audit_website: the declared-domain budget', () => {
     expect(sent).toBeGreaterThan(0);
   });
 
+  // A call over a saved scorecard ten minutes old, with example.net's hour and the next one spent.
+  async function spentRun(args: Record<string, unknown>, savedScorecard: Record<string, unknown> = {}) {
+    const prefix = await budgetKeyPrefix('example.net');
+    const hour = Math.floor(Date.now() / 3_600_000);
+    const env = await makeEnv({
+      followSwitch: 'true',
+      kvSeed: { [`${prefix}${hour}`]: '9999', [`${prefix}${hour + 1}`]: '9999' },
+    });
+    const key = await keyFor('https://example.com/', SPEC_VERSION);
+    const saved = {
+      spec_version: SPEC_VERSION,
+      target_url: 'https://example.com/',
+      scorecard: { target_url: 'https://example.com/', score_pct: 64, results: [], ...savedScorecard },
+      scored_at: new Date(Date.now() - 600_000).toISOString(),
+    };
+    const store = new Map([[key, JSON.stringify(saved)]]);
+    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(store);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = router(
+      {
+        'GET https://example.com/': () => html(),
+        'GET https://example.com/.well-known/ai-catalog.json': () =>
+          aiCatalog(cardEntry({ data: sep2127Card(ENDPOINT) })),
+      },
+      [],
+    );
+    try {
+      const body = jsonContent(
+        (await withLogCapture(() => callTool(env, 'audit_website', { url: 'example.com', ...args }, IP))).result,
+      );
+      return { body, saved, stored: JSON.parse(store.get(key) ?? 'null') as unknown };
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  test("a run a declared domain's spent hour limited returns in place and keeps the saved scorecard", async () => {
+    const { body, saved, stored } = await spentRun({});
+    expect(body).toMatchObject({ audited: true, scorecard_url: null, markdown_url: null, json_url: null });
+    expect(String(body.summary_html)).toContain("Not saved: example.net reached anc's hourly probe limit;");
+    expect(stored).toEqual(saved);
+  });
+
+  test('a listing change the held run resolved is written onto the saved scorecard, which keeps its rows and scored_at', async () => {
+    const { body, saved, stored } = await spentRun({ public_listing: false }, { public_listing: true });
+    expect(body).toMatchObject({ audited: true, scorecard_url: null, scorecard: { public_listing: false } });
+    expect(stored).toEqual({ ...saved, scorecard: { ...saved.scorecard, public_listing: false } });
+  });
+
   test('a declared domain over its burst floor is budget-exceeded and receives nothing', async () => {
     const env = await makeEnv({ minimalRegistry: true, followSwitch: 'true' });
     (env as McpEnv & DomainBudgetEnv).WEB_AUDIT_DOMAIN_LIMITER = memoryRateLimit(0);
     const { trail, sent } = await freshRun(env);
     expect(trail[0]).toMatchObject({ outcome: 'budget-exceeded', cause: 'domain-budget' });
     expect(sent).toBe(0);
+  });
+});
+
+describe('audit_website: the registry a saved run ran under', () => {
+  test('a saved fresh run carries the same registry prefix the transact endpoint records', async () => {
+    const env = await makeEnv();
+    const store = new Map<string, string>();
+    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(store);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = router({ 'GET https://example.com/': () => html() }, []);
+    try {
+      await withLogCapture(() => callTool(env, 'audit_website', { url: 'example.com' }, '203.0.113.61'));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    const stored = JSON.parse(store.get(await keyFor('https://example.com/', SPEC_VERSION)) as string) as {
+      scorecard: { registry_fingerprint?: string };
+    };
+    const registry = JSON.parse(await webRegistryJson()) as WebAuditRegistry;
+    expect(stored.scorecard.registry_fingerprint).toBe(await registryFingerprintPrefix(registry));
   });
 });
 
@@ -1785,6 +1859,9 @@ describe('audit_website discloses third-party probing', () => {
     );
     expect(description).toContain("following lengthens an audit's wall time");
     expect(description).toContain('capped at about 30 audits per hour per declared registrable domain');
+    expect(description).toContain(
+      'when the site has a saved scorecard from the last 24 hours that audit is returned without replacing it, with no scorecard_url, markdown_url, or json_url',
+    );
     expect(description).toContain('WEB_AUDIT_FOLLOW_ENABLED');
     expect(tool?.inputSchema.properties.follow_declarations?.type).toBe('boolean');
   });

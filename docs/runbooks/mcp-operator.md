@@ -53,9 +53,9 @@ Decision flow:
   `false`. Audits keep running and scoring each site's own origin. A stored scorecard keeps the follow state it was
   scored with until it is re-audited, but while following is off every re-audit saves as not followed: the next board
   rescore (weekly, post-deploy, or a registry reflow) rewrites each seeded scorecard it re-audits with
-  `follow_declarations: false`, and so does a fresh audit from the form or `audit_website`. Turning following back on
-  restores followed scores only through another rescore: the weekly run, or a manual run once the seeded scorecards are
-  past the rescore's 2-hour eligibility window.
+  `follow_declarations: false`, and so does a fresh audit from the form or `audit_website`. A flip in either direction
+  makes the next rescore re-audit every seeded domain, whatever its age, so fire the manual rescore trigger after the
+  flip (see [Operating the board rescore](./web-audit-operations.md#operating-the-board-rescore)).
 - **Legacy client volume has fallen under the sunset thresholds** → flip `MCP_LEGACY_ENABLED`. That is a migration, not
   an emergency; it goes through the committed-edit path below. See Legacy sunset advisory.
 

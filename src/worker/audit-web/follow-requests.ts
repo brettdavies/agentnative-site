@@ -20,9 +20,17 @@ export const MAX_FOLLOW_REQUESTS = 12;
 /** A budget layer that errored, and whether the reservation it decided was refused or admitted. */
 export type BudgetLayerError = 'burst-refused' | 'read-refused' | 'put-admitted';
 
+/** The budget layer whose answer refused a reservation. */
+export type RefusingLayer = 'hourly-window' | 'burst-floor';
+
+/** What refused a domain's reservation: a layer's answer, or a layer that errored. */
+export type DomainRefusal = RefusingLayer | 'layer-error';
+
 /** A reservation's answer, and the layer error that decided it when one did. */
 export interface Reservation {
   admitted: boolean;
+  /** On a refusal a layer answered, that layer; absent when a layer error decided the refusal. */
+  refusedBy?: RefusingLayer;
   layerError?: BudgetLayerError;
 }
 
@@ -80,6 +88,8 @@ export interface SliceRequests {
   countByDomain(): Readonly<Record<string, number>>;
   /** Reservations a budget layer error decided, per error. */
   budgetErrors(): Readonly<Partial<Record<BudgetLayerError, number>>>;
+  /** Per domain budget key the budget refused, what refused it. */
+  budgetRefusals(): Readonly<Record<string, DomainRefusal>>;
 }
 
 export function sliceRequests(input: {
@@ -93,6 +103,7 @@ export function sliceRequests(input: {
   const responseCache = new Map<string, Promise<ProbeResponse>>();
   const byDomain = new Map<string, number>();
   const layerErrors = new Map<BudgetLayerError, number>();
+  const refusals = new Map<string, DomainRefusal>();
   let requests = 0;
 
   const admitHost = (hostname: string): boolean => {
@@ -105,8 +116,9 @@ export function sliceRequests(input: {
     const key = input.budget.keyOf(hostname);
     let reservation = reservations.get(key);
     if (reservation === undefined) {
-      reservation = input.budget.reserve(key).then(({ admitted, layerError }) => {
+      reservation = input.budget.reserve(key).then(({ admitted, refusedBy, layerError }) => {
         if (layerError !== undefined) layerErrors.set(layerError, (layerErrors.get(layerError) ?? 0) + 1);
+        if (!admitted) refusals.set(key, refusedBy ?? 'layer-error');
         return admitted;
       });
       reservations.set(key, reservation);
@@ -178,7 +190,14 @@ export function sliceRequests(input: {
     const hop = resolveUrl(declaration.url, location);
     const refused = hopRefusal(hop, declaration.kind);
     if (refused !== null) return refused;
-    await enter(hop);
+    const stop = await stopped<Settled | null>(
+      async () => {
+        await enter(hop);
+        return null;
+      },
+      (cause) => hopStopped(hop, cause),
+    );
+    if (stop !== null) return stop;
     return { url: hop, response: stopped(() => getHop(hop, opts, declaration.kind), budgetExceeded) };
   };
 
@@ -193,6 +212,7 @@ export function sliceRequests(input: {
     count: () => requests,
     countByDomain: () => Object.fromEntries(byDomain),
     budgetErrors: () => Object.fromEntries(layerErrors),
+    budgetRefusals: () => Object.fromEntries(refusals),
   };
 }
 
@@ -245,6 +265,16 @@ export async function land(landing: Landing | Settled): Promise<Fetched | Settle
 
 export function budgetExceeded(cause: BudgetCause): Settled {
   return { outcome: 'budget-exceeded', cause };
+}
+
+/**
+ * A redirect hop the slice did not admit. One the domain budget refused
+ * records the hop as its final URL, as other refused hops do, so the rows
+ * and the trail name the domain whose budget was spent rather than the one
+ * that redirected there.
+ */
+function hopStopped(hop: string, cause: BudgetCause): Settled {
+  return cause === 'domain-budget' ? { final_url: hop, ...budgetExceeded(cause) } : budgetExceeded(cause);
 }
 
 /** Runs one declaration's requests, settling a cap or budget stop through `onStop`. */

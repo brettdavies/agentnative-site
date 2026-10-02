@@ -6,6 +6,7 @@ import { hostOf } from '../../shared/url-host';
 import { FINDING_STATUSES, type FindingStatus, NA_REASONS, type NaReason } from '../../shared/web-audit-findings';
 import { worstTargetStatus } from './handlers/shared';
 import type { EvidenceItem, ProbeStatus } from './handlers/types';
+import { isRegistryFingerprintPrefix } from './registry';
 
 /** One host a row's evidence was requested from; on a row over several targets, also that host's own outcome. */
 export interface RowHost {
@@ -148,5 +149,5 @@ export function readDeclaredHosts(value: unknown): DeclaredHostEntry[] | null {
 
 /** The recorded registry fingerprint prefix, or null when the registry version is unknown. */
 export function readRegistryFingerprint(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
+  return isRegistryFingerprintPrefix(value) ? value : null;
 }

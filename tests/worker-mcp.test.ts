@@ -253,6 +253,9 @@ describe('MCP instructions string (drift gate per KTD-8)', () => {
     expect(instructions).toContain(
       "following is also capped at about 30 audits per hour per declared registrable domain; an audit past that cap leaves that domain's hosts unprobed",
     );
+    expect(instructions).toContain(
+      'when the site has a saved scorecard from the last 24 hours that audit is returned without replacing it, with no scorecard_url, markdown_url, or json_url',
+    );
     expect(instructions).toContain('only the following of declared hosts (WEB_AUDIT_FOLLOW_ENABLED)');
   });
 
@@ -266,6 +269,9 @@ describe('MCP instructions string (drift gate per KTD-8)', () => {
     expect(await flat('content/_audit-web.md')).toContain(`at most ${MAX_FOLLOWED_HOSTS} per audit`);
     const perDomain = `about ${DECLARED_DOMAIN_HOURLY_CEILING} audits per hour per declared registrable domain`;
     expect(await flat('content/mcp-skill.md')).toContain(perDomain);
+    expect(await flat('content/mcp-skill.md')).toContain(
+      'when the site has a saved scorecard from the last 24 hours that audit is returned without replacing it, with no `scorecard_url`, `markdown_url`, or `json_url`',
+    );
     expect(await flat('content/_audit-web.md')).toContain(perDomain);
   });
 

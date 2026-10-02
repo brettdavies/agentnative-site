@@ -7,8 +7,10 @@
 //   patchWebListing ........ the listing-only write, scored_at preserved
 //   runWebAuditStream ...... the engine as shared events, R2 write, purge,
 //                            aggregate rebuild, one terminal event; a run
-//                            that does not follow declared hosts writes
-//                            nothing and ends on a transient envelope
+//                            that does not follow declared hosts, or one a
+//                            declared domain's spent budget held back,
+//                            saves no scorecard and ends on a transient
+//                            envelope
 //
 // The core never reads a token, a session, or a limiter; admission is the
 // caller's. It keeps stale-serve-when-disabled (a caller decides to serve
@@ -35,7 +37,9 @@ import {
 import { enrichWebScorecardForDisplay } from './display';
 import { type DomainBudgetEnv, declaredDomainBudget } from './domain-budget';
 import { runWebAudit } from './engine';
+import type { DomainRefusal } from './follow-requests';
 import { effectiveFollow, type FollowSwitchEnv } from './follow-switch';
+import { heldRun } from './held-run';
 import { queueHitMinPurge, webDomainTag, webTag } from './hit-min-purge';
 import { rowHostFields } from './provenance';
 import {
@@ -45,9 +49,9 @@ import {
   resolveAuditListing,
   standingPublicListing,
 } from './public-listing';
-import { loadWebAuditRegistry, type WebAuditRegistry, type WebSiteType } from './registry';
+import { loadWebAuditRegistry, type WebAuditRegistry, type WebSiteType, withRegistryFingerprint } from './registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remediation';
-import type { EngineResult } from './scorecard';
+import type { EngineResult, WebScorecard } from './scorecard';
 import { validatePublicUrl } from './ssrf';
 import type { WebScorecardShape } from './summary-model';
 import { buildWebSummaryBody } from './summary-render';
@@ -251,15 +255,18 @@ function checkEvent(result: EngineResult): AuditEvent {
  * result, then one terminal event. A complete run is written to R2, the
  * board tags are queued for purge, the seeded aggregates are rebuilt, and
  * the terminal is `complete` carrying the live envelope; a complete run the
- * caller opted out of following writes, purges, and rebuilds nothing and
- * ends on the transient envelope; a deadline-bound run yields `incomplete`
- * and is never persisted; an unreachable target or a thrown engine yields
- * `error`.
+ * caller opted out of following, or one a declared domain's spent hourly
+ * budget held back from replacing a saved scorecard, saves no scorecard,
+ * rebuilds nothing, and ends on the transient envelope, though a held run
+ * still writes the listing it resolved onto the saved scorecard; a
+ * deadline-bound run yields `incomplete` and is never persisted; an
+ * unreachable target or a thrown engine yields `error`.
  */
 export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerator<AuditEvent> {
   const { env, target } = input;
-  let scorecard: unknown = null;
+  let scorecard: WebScorecard | null = null;
   let complete = false;
+  let refusals: Readonly<Record<string, DomainRefusal>> = {};
   const followDeclarations = effectiveFollow(env, input.followDeclarations);
   try {
     const registry = await loadWebAuditRegistry(env);
@@ -290,6 +297,7 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
       } else if (event.type === 'complete') {
         scorecard = event.scorecard;
         complete = event.complete;
+        refusals = event.follow.budgetRefusals;
       }
     }
     // One scoring instant per run, spent on both persistence and the
@@ -297,16 +305,18 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
     // a different clock for the same audit.
     const scoredAt = complete && scorecard ? new Date().toISOString() : null;
     if (scorecard && scoredAt) {
-      const transient: TransientReason | undefined = input.followDeclarations ? undefined : { kind: 'opt-out' };
+      const stamped = await withRegistryFingerprint(scorecard, registry);
+      const held = input.followDeclarations ? await heldRun(env, target, stamped, input.listing, refusals) : null;
+      const transient: TransientReason | undefined = input.followDeclarations ? held?.reason : { kind: 'opt-out' };
       if (!transient) {
-        const wrote = await cachePut(env, target.canonical, scorecard, SPEC_VERSION, scoredAt);
+        const wrote = await cachePut(env, target.canonical, stamped, SPEC_VERSION, scoredAt);
         if (wrote) queueHitMinPurge([webTag(), webDomainTag(target.host)]);
         await rebuildAggregatesIfSeeded(env, target.host, SPEC_VERSION);
       }
       const record: CachedWebAudit = {
         spec_version: SPEC_VERSION,
         target_url: target.canonical,
-        scorecard,
+        scorecard: held ? scorecardWithPublicListing(stamped, held.listing) : stamped,
         scored_at: scoredAt,
       };
       yield {

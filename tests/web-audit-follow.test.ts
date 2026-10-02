@@ -6,7 +6,7 @@ import { describe, expect, test } from 'bun:test';
 import { resultLine } from '../src/shared/web-audit-result-line';
 import { instrumentAuditEvents } from '../src/worker/audit-web/audit-log';
 import { sha256Hex } from '../src/worker/audit-web/cache';
-import { declaredDomainBudget, registrableDomainOf } from '../src/worker/audit-web/domain-budget';
+import { declaredDomainBudget, domainBudgetRefusal, registrableDomainOf } from '../src/worker/audit-web/domain-budget';
 import { runWebAudit } from '../src/worker/audit-web/engine';
 import { ALWAYS_ADMIT_BUDGET, type DomainBudget } from '../src/worker/audit-web/follow-requests';
 import { endpointRedirects, mcpEndpointRedirects } from '../src/worker/audit-web/handlers/shared';
@@ -766,6 +766,24 @@ describe('follow: caps and budgets', () => {
     expect(requestsTo(seen, 'mcp.capped.org')).toEqual([]);
     expect(reserved).toEqual(['example.net', 'capped.org']);
   });
+
+  test('a redirect hop the domain budget refused is the final URL, so the trail, the rows, and the hold name its domain', async () => {
+    const hop = 'https://mcp.capped.org/mcp';
+    const budget: DomainBudget = {
+      keyOf: (hostname) => hostname.split('.').slice(-2).join('.'),
+      reserve: async (key) => ({ admitted: key !== 'capped.org' }),
+    };
+    const { scorecard } = await audit(
+      router({ ...siteDeclaring(ENDPOINT), [`GET ${ENDPOINT}`]: () => redirect(hop) }, []),
+      { domainBudget: budget },
+    );
+    expect(scorecard.declared_hosts?.[0]).toMatchObject({ url: ENDPOINT, final_url: hop, outcome: 'budget-exceeded' });
+    expect(row(scorecard, 'mcp-initialize')).toMatchObject({
+      na_reason: 'declared-host-budget-exceeded',
+      host: 'mcp.capped.org',
+    });
+    expect(domainBudgetRefusal(scorecard)).toBe('capped.org');
+  });
 });
 
 describe('follow: redirects', () => {
@@ -1510,6 +1528,110 @@ describe('follow: the hourly budget of each declared registrable domain', () => 
       logs.restore();
     }
   }
+
+  test('a run holds back from a saved scorecard only when a row depends on a host the spent hour refused', () => {
+    const refusedAt = (url: string, cause = 'domain-budget', kind = 'mcp-endpoint') => ({
+      surface: 'card',
+      kind,
+      url,
+      outcome: 'budget-exceeded',
+      cause,
+    });
+    const notRun = { id: 'mcp-initialize', status: 'n_a', na_reason: 'declared-host-budget-exceeded' };
+    const scorecard = (declared: unknown[], results: unknown[], mcpEndpoint: string | null = null) =>
+      ({ declared_hosts: declared, results, mcp_endpoint: mcpEndpoint }) as Pick<
+        WebScorecard,
+        'declared_hosts' | 'results' | 'mcp_endpoint'
+      >;
+    expect({
+      row: domainBudgetRefusal(
+        scorecard(
+          [refusedAt('https://mcp.a.example.net/mcp')],
+          [{ ...notRun, hosts: [{ host: 'mcp.a.example.net' }] }],
+        ),
+      ),
+      anchor: domainBudgetRefusal(
+        scorecard(
+          [refusedAt('https://api.b.example.org/', 'domain-budget', 'api-anchor')],
+          [
+            {
+              id: 'json-errors',
+              status: 'pass',
+              hosts: [
+                { host: 'api.c.example', status: 'pass' },
+                { host: 'api.b.example.org', status: 'n_a', na_reason: 'declared-host-budget-exceeded' },
+              ],
+            },
+          ],
+        ),
+      ),
+      redirected: domainBudgetRefusal(
+        scorecard(
+          [{ ...refusedAt('https://mcp.a.example.net/mcp'), final_url: 'https://mcp.moved.example/mcp' }],
+          [{ ...notRun, hosts: [{ host: 'mcp.moved.example' }] }],
+        ),
+      ),
+      noDependentRow: domainBudgetRefusal(
+        scorecard(
+          [refusedAt('https://api.b.example.org/', 'domain-budget', 'api-anchor')],
+          [{ ...notRun, hosts: [{ host: 'mcp.other.example' }] }],
+        ),
+      ),
+      ownEndpoint: domainBudgetRefusal(
+        scorecard(
+          [
+            refusedAt('https://mcp.a.example.net/mcp'),
+            refusedAt('https://cards.d.example/card', 'domain-budget', 'card-document'),
+          ],
+          [{ id: 'mcp-initialize', status: 'pass', hosts: [{ host: 'example.com' }] }],
+          'https://example.com/mcp',
+        ),
+      ),
+      earlierEndpointRefused: domainBudgetRefusal(
+        scorecard(
+          [
+            { ...refusedAt('https://mcp.room.example/mcp'), outcome: 'reciprocity-refused', cause: undefined },
+            refusedAt('https://mcp.spent.example/mcp'),
+          ],
+          [{ ...notRun, na_reason: 'reciprocity-refused', hosts: [{ host: 'mcp.room.example' }] }],
+        ),
+      ),
+      substitute: domainBudgetRefusal(
+        scorecard(
+          [
+            refusedAt('https://mcp.spent.example/mcp'),
+            { ...refusedAt('https://mcp.room.example/mcp'), outcome: 'followed', cause: undefined },
+          ],
+          [{ id: 'mcp-initialize', status: 'pass', hosts: [{ host: 'mcp.room.example' }] }],
+          'https://mcp.room.example/mcp',
+        ),
+      ),
+      cardDocument: domainBudgetRefusal(
+        scorecard(
+          [refusedAt('https://cards.d.example/card', 'domain-budget', 'card-document')],
+          [{ id: 'mcp-initialize', status: 'n_a', na_reason: 'antecedent-unmet', hosts: [] }],
+        ),
+      ),
+      slice: domainBudgetRefusal(
+        scorecard(
+          [refusedAt('https://mcp.a.example.net/mcp', 'slice')],
+          [{ ...notRun, hosts: [{ host: 'mcp.a.example.net' }] }],
+        ),
+      ),
+      noTrail: domainBudgetRefusal(scorecard([], [{ ...notRun, hosts: [{ host: 'mcp.a.example.net' }] }])),
+    }).toEqual({
+      row: 'example.net',
+      anchor: 'example.org',
+      redirected: 'moved.example',
+      noDependentRow: null,
+      ownEndpoint: null,
+      earlierEndpointRefused: 'spent.example',
+      substitute: 'spent.example',
+      cardDocument: 'd.example',
+      slice: null,
+      noTrail: null,
+    });
+  });
 
   test('registrable domains come from the public suffix list with its private section', () => {
     expect(
