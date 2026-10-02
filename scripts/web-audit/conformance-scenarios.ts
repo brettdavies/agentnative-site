@@ -651,7 +651,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     ],
   ),
   'run-root-redirects-to-http': scenario(
-    'every https request, the root included, redirects to the http root, which would answer: nothing is requested over http, the run is scored rather than unreachable, and the rows that need the root document read error naming the refused redirect',
+    'every https request, the root included, redirects to the http root, which would answer: the run ends unreachable after the root request alone, and nothing is requested over http',
     ['agent-ua-reachable', 'content-without-js'],
     [get('/', redirect('http://example.com/')), get('http://example.com/', html(rootHtml()))],
     { unmatched: redirect('http://example.com/') },

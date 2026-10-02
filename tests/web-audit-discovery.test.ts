@@ -1081,7 +1081,7 @@ describe('runWebAudit reachability', () => {
     expect(events.find((e) => e.type === 'complete')?.type).toBe('complete');
   });
 
-  test('a site that redirects every request to http answered: it is scored, not unreachable, and nothing is sent over http', async () => {
+  test('a root that redirects to http ends the run unreachable after the root request alone', async () => {
     const sent: string[] = [];
     const fetchImpl = stubFetch((url) => {
       sent.push(url);
@@ -1089,42 +1089,18 @@ describe('runWebAudit reachability', () => {
         ? new Response(null, { status: 301, headers: { location: url.replace('https:', 'http:') } })
         : new Response('served over plaintext', { status: 200, headers: { 'content-type': 'text/html' } });
     });
-    const registry = tinyRegistry();
-    registry.checks.push({
-      id: 'agent-ua-reachable',
-      category: 'discoverability',
-      tier: 'recommended',
-      keyword: 'should',
-      principle: 'P7',
-      site_types: ['all'],
-      antecedent: 'http-root',
-      weight: 1,
-      title: 'root reachable',
-      hint: 'h',
-      handler: 'http',
-      with: { path: '/', expect: { status_below: 300 } },
-    });
     const events = await collect(
       runWebAudit({
         url: 'https://example.com/',
-        registry,
+        registry: tinyRegistry(),
         fetchOptions: { fetchImpl },
         perCheckTimeoutMs: 100,
         domainBudget: ALWAYS_ADMIT_BUDGET,
       }),
     );
-    expect(sent.filter((url) => url.startsWith('http:'))).toEqual([]);
-    expect(events.some((e) => e.type === 'unreachable')).toBe(false);
-    const complete = events.find((e) => e.type === 'complete');
-    if (complete?.type !== 'complete') throw new Error('no complete event');
-    const rows = Object.fromEntries(complete.scorecard.results.map((r) => [r.id, [r.status, r.evidence]]));
-    expect(rows['agent-ua-reachable']).toEqual([
-      'error',
-      'antecedent unresolvable: root redirect refused: 301 to http://example.com/: not https',
-    ]);
-    expect(rows['llms-txt']).toEqual([
-      'error',
-      'https://example.com/llms.txt: redirect refused: 301 to http://example.com/llms.txt: not https',
+    expect(sent).toEqual(['https://example.com/']);
+    expect(events).toEqual([
+      { type: 'unreachable', reason: 'https://example.com/ redirects to http, and anc sends no plaintext request.' },
     ]);
   });
 
