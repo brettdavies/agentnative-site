@@ -11,8 +11,10 @@
 // read it, so an anchor host is not asked to name itself first. A
 // service-desc target is read once through the same gate as a card
 // document and kept for the OpenAPI row to score. A description host that
-// gives no response at all records unreachable; any answer records
-// followed, and the row scores what came back.
+// gives no response at all records unreachable, and so does one whose
+// answer is a redirect the slice does not take (its redirect hop
+// redirecting again), since no description came back; any other answer
+// records followed, and the row scores what came back.
 
 import type { ApiDeclaration } from './api-catalog';
 import {
@@ -24,7 +26,7 @@ import {
   stopped,
 } from './follow-requests';
 import { declarationKey, type Settled, type TrailEntry, trailEntry } from './follow-trail';
-import { isEdgeErrorStatus, OPENAPI_MAX_BODY_BYTES } from './ssrf';
+import { isEdgeErrorStatus, OPENAPI_MAX_BODY_BYTES, REDIRECT_STATUSES } from './ssrf';
 
 const DESCRIPTION_TIMEOUT_MS = 3_000;
 
@@ -44,8 +46,9 @@ const ADMITTED: Settled = { outcome: 'followed' };
 function described(fetched: Fetched | Settled, declared: string): Settled {
   if (!('response' in fetched)) return fetched;
   const finalUrl = fetched.url === declared ? undefined : fetched.url;
-  const silent = fetched.response.status === null || isEdgeErrorStatus(fetched.response.status);
-  return { final_url: finalUrl, outcome: silent ? 'unreachable' : 'followed' };
+  const { status } = fetched.response;
+  const unread = status === null || isEdgeErrorStatus(status) || REDIRECT_STATUSES.has(status);
+  return { final_url: finalUrl, outcome: unread ? 'unreachable' : 'followed' };
 }
 
 /** Admits the anchor hosts in declaration order, then reads the descriptions side by side. */

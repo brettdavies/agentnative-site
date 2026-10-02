@@ -454,6 +454,32 @@ describe('API category on api-catalog anchors', () => {
     expect(row(scorecard, 'json-errors')).toMatchObject({ status: 'pass', host: API });
   });
 
+  test('an off-origin description whose redirect hop redirects again reads unreachable, not broken', async () => {
+    const seen: Seen[] = [];
+    const hop = 'https://mirror.example.org/openapi.json';
+    const { scorecard } = await auditApi(
+      site(() => linkset(anchor(`https://${API}/`, 'https://specs.example.org/openapi.json')), {
+        'GET https://specs.example.org/openapi.json': () => redirect(hop),
+        [`GET ${hop}`]: () => redirect('https://elsewhere.example.org/openapi.json'),
+      }),
+      seen,
+    );
+    expect(row(scorecard, 'openapi')).toMatchObject({
+      status: 'n_a',
+      na_reason: 'declared-host-unreachable',
+      host: 'mirror.example.org',
+    });
+    expect(scorecard.declared_hosts).toContainEqual({
+      surface: '/.well-known/api-catalog#/linkset/0/service-desc/0',
+      kind: 'api-description',
+      url: 'https://specs.example.org/openapi.json',
+      host: 'specs.example.org',
+      final_url: hop,
+      outcome: 'unreachable',
+    });
+    expect(requestsTo(seen, 'elsewhere.example.org')).toEqual([]);
+  });
+
   test('a hygiene probe of an off-origin anchor host takes no redirect to another origin', async () => {
     const seen: Seen[] = [];
     const { scorecard } = await auditApi(

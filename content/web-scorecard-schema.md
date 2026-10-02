@@ -183,8 +183,9 @@ under its caps and budgets, and then receives one GET, at a path its description
 appended to the path of the description's first server URL when that URL is on the anchor's origin and to the anchor's
 own path otherwise, which both hygiene rows read; that GET takes only redirects that keep the scheme, host, and port. An
 `api-description` is read once, up to 512 KiB, and scored by the OpenAPI row: it reads `unreachable` when its host gives
-no response at all, and `followed` on any answer. While the catalog lists API anchors, the API rows evaluate at them
-instead of the audited site, so no hygiene probe reaches the audited site unless an anchor is on it.
+no response at all or when the one redirect hop anc takes answers with another redirect, and `followed` on any other
+answer. While the catalog lists API anchors, the API rows evaluate at them instead of the audited site, so no hygiene
+probe reaches the audited site unless an anchor is on it.
 
 anc never re-sends a probe of the site's own MCP endpoint to another origin. When one of the site's MCP paths answers a
 discovery POST with a redirect to another origin, `mcp_discovery` records the probe's status and `redirect` target, and
