@@ -20,9 +20,13 @@
 # with no `update-types`: exact-pinned to the version dotfiles provisions into
 # $PLAYWRIGHT_BROWSERS_PATH, so bumping is a dotfiles job, not a per-repo one.
 #
-# Dependabot opens no security updates for Bun. Advisories still raise
-# Dependabot alerts, since the dependency graph reads bun.lock; fix one by
-# bumping the dependency by hand and running `bun install`.
+# bun-types is frozen with no `update-types`: it moves only with the Bun
+# runtime pinned in .bun-version, and a test holds the two together.
+#
+# Dependabot opens no security updates for Bun, and its alerts cover only the
+# direct dependencies in package.json: the dependency graph does not read
+# bun.lock. `bun audit` checks the whole lockfile. Fix an advisory by bumping
+# the dependency by hand and running `bun install`.
 # https://docs.github.com/en/code-security/dependabot/ecosystems-supported-by-dependabot/supported-ecosystems-and-repositories#bun
 version: 2
 updates:
@@ -55,6 +59,7 @@ updates:
       - dependency-name: "@playwright/*"
       - dependency-name: "playwright"
       - dependency-name: "playwright-core"
+      - dependency-name: "bun-types"
   - package-ecosystem: github-actions
     directory: "/"
     target-branch: dev
