@@ -34,7 +34,8 @@ import {
   WEB_AUDIT_STALE_AFTER_MS,
 } from './cache';
 import { enrichWebScorecardForDisplay } from './display';
-import { type DomainBudgetEnv, declaredDomainBudget, domainBudgetRefusal } from './domain-budget';
+import { type DomainBudgetEnv, declaredDomainBudget } from './domain-budget';
+import { domainBudgetHold } from './domain-budget-hold';
 import { runWebAudit } from './engine';
 import { effectiveFollow, type FollowSwitchEnv } from './follow-switch';
 import { queueHitMinPurge, webDomainTag, webTag } from './hit-min-purge';
@@ -254,20 +255,18 @@ function checkEvent(result: EngineResult): AuditEvent {
  * none saved gets this run saved like any audit; the one-minute reuse
  * window then bounds how long the budget-limited result is served.
  */
-async function domainBudgetHold(
+async function domainBudgetTransient(
   env: WebCoreEnv,
   target: WebTarget,
   scorecard: WebScorecard,
 ): Promise<TransientReason | undefined> {
-  const domain = domainBudgetRefusal(scorecard);
-  if (domain === null) return undefined;
-  const saved = await readStoredWebAudit(env, target);
-  if (saved === null) return undefined;
+  const hold = await domainBudgetHold(env, target.canonical, scorecard);
+  if (hold === null) return undefined;
   return {
     kind: 'domain-budget',
-    domain,
+    domain: hold.domain,
     host: target.host,
-    savedScoredAt: saved.scored_at ?? null,
+    savedScoredAt: hold.saved?.scored_at ?? null,
     retryAt: hourWindowEndsAt(Date.now()),
   };
 }
@@ -326,7 +325,7 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
     if (scorecard && scoredAt) {
       const stamped = await withRegistryFingerprint(scorecard, registry);
       const transient: TransientReason | undefined = input.followDeclarations
-        ? await domainBudgetHold(env, target, stamped)
+        ? await domainBudgetTransient(env, target, stamped)
         : { kind: 'opt-out' };
       if (!transient) {
         const wrote = await cachePut(env, target.canonical, stamped, SPEC_VERSION, scoredAt);

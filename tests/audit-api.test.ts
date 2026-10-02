@@ -942,6 +942,21 @@ describe("POST /api/score: a run a declared domain's spent hourly budget limited
     expect(env.puts).toEqual([]);
   });
 
+  test('a saved scorecard the store cannot read is kept: the run returns in place and writes nothing', async () => {
+    const env = await declaringEnv({ prior: prior(), kvSeed: await spentBudget() });
+    const key = await KEY();
+    const bucket = env.SCORE_CACHE;
+    const get = bucket.get.bind(bucket);
+    bucket.get = ((k: string, ...rest: Parameters<R2Bucket['get']> extends [string, ...infer R] ? R : never) =>
+      k === key
+        ? Promise.reject(new Error('We encountered an internal error. Please try again.'))
+        : get(k, ...rest)) as R2Bucket['get'];
+    const body = await audit(env);
+    expect(body.scorecard_url).toBeNull();
+    expect(String(body.summary_html)).toContain('<a href="/score/example.com">the saved scorecard</a> is unchanged.');
+    expect(env.puts).toEqual([]);
+  });
+
   test('a run whose declared host the follow slice ran out of time for saves as any audit', async () => {
     const saved = prior();
     const probe = router(
