@@ -21,9 +21,10 @@ import { resetCatalogCacheForTests } from '../src/worker/mcp/catalog';
 import type { McpEnv } from '../src/worker/mcp/server';
 import { resetWebRemediationCacheForTests } from '../src/worker/mcp/tools/web-remediation';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
-import { fakeJobNamespace } from './helpers/audit-job-state';
+import { countClaims, fakeJobNamespace } from './helpers/audit-job-state';
 import { withLogCapture } from './helpers/log-capture';
 import { getJsonToolContent, type JsonRpcBody, mcpInitialize, mcpRpc, resetMcpTestState } from './helpers/mcp-rpc';
+import { stubFetch } from './helpers/stub-fetch';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
 const DATA = join(REPO_ROOT, 'src', 'data', 'web-audit');
@@ -1599,5 +1600,93 @@ describe('audit_website discloses third-party probing', () => {
     expect(description).toContain("following lengthens an audit's wall time");
     expect(description).toContain('WEB_AUDIT_FOLLOW_ENABLED');
     expect(tool?.inputSchema.properties.follow_declarations?.type).toBe('boolean');
+  });
+});
+
+describe('a website is audited and read at its https origin', () => {
+  const IP = '203.0.113.51';
+
+  async function stored(url: string, scorePct: number, scoredAt = new Date().toISOString()) {
+    return {
+      [await keyFor(url, SPEC_VERSION)]: {
+        spec_version: SPEC_VERSION,
+        target_url: url,
+        scorecard: { target_url: url, score_pct: scorePct, results: [] },
+        scored_at: scoredAt,
+      },
+    };
+  }
+
+  // A fresh audit_website call against an offline engine; every fetched URL is recorded.
+  async function freshCall(url: string, prefill: Map<string, string> = new Map()) {
+    const jobs = fakeJobNamespace();
+    const claims = countClaims(jobs);
+    const env = await makeEnv({ minimalRegistry: true, jobs });
+    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(prefill);
+    const fetched: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = stubFetch((requested) => {
+      fetched.push(requested);
+      return new Response('not found', { status: 404 });
+    });
+    try {
+      const body = jsonContent(await callTool(env, 'audit_website', { url }, IP));
+      return { body, store: prefill, claims, fetched };
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  test('audit_website with an http:// URL audits https://<host>/, caches under the https key, and claims the job a transact run claims', async () => {
+    const { body, store, claims, fetched } = await freshCall('http://example.com/docs');
+    expect(body).toMatchObject({
+      audited: true,
+      source: 'fresh-audit',
+      target: 'example.com',
+      scorecard_url: 'https://anc.dev/score/example.com',
+    });
+    expect((body.scorecard as { target_url: string }).target_url).toBe('https://example.com/');
+    expect([...store.keys()]).toContain(await keyFor('https://example.com/', SPEC_VERSION));
+    expect([...store.keys()]).not.toContain(await keyFor('http://example.com/', SPEC_VERSION));
+    expect(fetched[0]).toBe('https://example.com/');
+    expect(fetched.filter((requested) => requested.startsWith('http://example.com'))).toEqual([]);
+    // The transact endpoint keys its job on the bare host too, so the two surfaces share one run.
+    expect(claims).toEqual(['web:example.com']);
+  });
+
+  test('a fresh record under the http key does not answer audit_website', async () => {
+    const httpKey = await keyFor('http://example.com/', SPEC_VERSION);
+    const prefill = new Map([[httpKey, JSON.stringify((await stored('http://example.com/', 12))[httpKey])]]);
+    const { body, store } = await freshCall('http://example.com/', prefill);
+    expect(body).toMatchObject({ audited: true, source: 'fresh-audit' });
+    expect(JSON.parse(store.get(httpKey) ?? '{}').scorecard.score_pct).toBe(12);
+  });
+
+  test('get_website_audit reads an http:// URL from the https record', async () => {
+    const env = await makeEnv({ cachePrefill: await stored('https://example.com/', 71) });
+    const body = jsonContent(await callTool(env, 'get_website_audit', { url: 'http://example.com/' }));
+    expect(body).toMatchObject({
+      found: true,
+      target: 'example.com',
+      scorecard_url: 'https://anc.dev/score/example.com',
+    });
+    expect((body.scorecard as { score_pct: number }).score_pct).toBe(71);
+  });
+
+  test('a record stored under an http key is never returned', async () => {
+    const env = await makeEnv({ cachePrefill: await stored('http://example.com/', 12) });
+    for (const url of ['example.com', 'http://example.com/', 'https://example.com/']) {
+      const body = jsonContent(await callTool(env, 'get_website_audit', { url }));
+      expect({ url, found: body.found }).toEqual({ url, found: false });
+    }
+  });
+
+  test('a scheme other than http or https is refused, not upgraded', async () => {
+    const env = await makeEnv();
+    for (const tool of ['get_website_audit', 'audit_website']) {
+      const res = await callTool(env, tool, { url: 'ftp://example.com/' }, IP);
+      expect(res.result?.isError).toBe(true);
+      expect(res.result?.content?.[0]?.text).toBe('scheme ftp: is not http(s)');
+    }
   });
 });

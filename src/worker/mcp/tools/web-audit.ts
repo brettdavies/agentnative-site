@@ -7,6 +7,10 @@
 //   list_website_audits()    the board summaries from the R2 leaderboard
 //                            aggregate (the same object /web renders).
 //
+// Both tools audit and read a site at its https origin, the target the
+// transact endpoint builds, so an http:// URL names the same record, job,
+// and result page as the bare host.
+//
 // audit_website mirrors score_cli's audit-tier gate chain: URL validation
 // + SSRF, then cache state served as data ahead of the kill switch, then
 // on a miss the kill switch (WEB_AUDIT_ENABLED + the global MCP_ENABLED),
@@ -25,19 +29,17 @@ import type { AuditLogEnv } from '../../audit-web/audit-log';
 import {
   type CachedWebAudit,
   get as cacheGet,
-  canonicalTargetOf,
   coerceUrl,
   getAggregate,
   isBoardListable,
   isStale,
   keyFor,
   listAllWebAudits,
-  normalizeTargetUrl,
   patchStoredPublicListing,
   scorecardWithPublicListing,
   WEB_AUDIT_STALE_AFTER_MS,
 } from '../../audit-web/cache';
-import { webEnvelope } from '../../audit-web/core';
+import { prepareWebTarget, type WebTarget, webEnvelope } from '../../audit-web/core';
 import { FOLLOW_DISCLOSURE } from '../../audit-web/follow-disclosure';
 import type { FollowSwitchEnv } from '../../audit-web/follow-switch';
 import { queueHitMinPurge, webTag } from '../../audit-web/hit-min-purge';
@@ -49,7 +51,6 @@ import {
   standingPublicListing,
 } from '../../audit-web/public-listing';
 import { boardExcludeDomains } from '../../audit-web/seed';
-import { validatePublicUrl } from '../../audit-web/ssrf';
 import type { NotifyEnv } from '../../notify';
 import { SPEC_VERSION } from '../../spec-version.gen';
 import { getMcpRequest } from '../request-context';
@@ -120,18 +121,19 @@ function freshResult(terminal: TerminalEvent | null) {
   return isError('the audit ended without a result; nothing was cached. Retry.');
 }
 
-/**
- * Resolve a domain's cached audit from per-domain R2 (https then http); null
- * on a miss. The whole envelope is returned, not just the scorecard, because
- * the read tool's response envelope needs the stored scoring instant.
- */
-async function resolveCachedAudit(env: WebAuditToolsEnv, domain: string): Promise<CachedWebAudit | null> {
-  for (const scheme of ['https', 'http']) {
-    const target = normalizeTargetUrl(`${scheme}://${domain}/`);
-    const cached: CachedWebAudit | null = await cacheGet(env, await keyFor(target, SPEC_VERSION));
-    if (cached) return cached;
+/** The tool input's host at its https origin, behind the SSRF gate; a scheme other than http(s) is refused. */
+function siteTarget(url: string): { ok: true; target: WebTarget } | { ok: false; reason: string } {
+  const parsed = coerceUrl(url);
+  if (!parsed) return { ok: false, reason: 'invalid url' };
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { ok: false, reason: `scheme ${parsed.protocol} is not http(s)` };
   }
-  return null;
+  return prepareWebTarget(parsed.host);
+}
+
+/** The site's stored audit at its https key; null on a miss. */
+async function readCachedAudit(env: WebAuditToolsEnv, target: WebTarget): Promise<CachedWebAudit | null> {
+  return cacheGet(env, await keyFor(target.canonical, SPEC_VERSION));
 }
 
 export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv): void {
@@ -150,18 +152,21 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         'fresh audit will be available, since kill switches, rate limits, and service failures still apply. The ' +
         'companion tool audit_website runs a fresh audit on a miss.',
       inputSchema: {
-        url: z.string().describe('The website URL or bare domain, e.g. "anc.dev" or "https://anc.dev/".'),
+        url: z
+          .string()
+          .describe(
+            'The website URL or bare domain, e.g. "anc.dev" or "https://anc.dev/". Read at its https origin; an ' +
+              'http:// URL reads the https record.',
+          ),
       },
       annotations: { readOnlyHint: true },
     },
     async ({ url }) => {
       const siteUrl = siteOrigin();
-      const parsed = coerceUrl(url);
-      if (!parsed) return isError('invalid url');
-      const validation = validatePublicUrl(canonicalTargetOf(parsed));
-      if (!validation.ok) return isError(validation.reason);
-      const domain = parsed.host;
-      const hit = await resolveCachedAudit(env, domain);
+      const site = siteTarget(url);
+      if (!site.ok) return isError(site.reason);
+      const domain = site.target.host;
+      const hit = await readCachedAudit(env, site.target);
       if (hit) {
         const envelope = await webEnvelope(env, { tier: 'cache', host: domain, record: hit, origin: siteUrl });
         return textContent({ found: true, ...envelope });
@@ -200,7 +205,11 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         'WEB_AUDIT_ENABLED or MCP_ENABLED is not "true"; a request without cf-connecting-ip returns -32099 (no anon ' +
         `fallback); a per-IP burst limiter plus a 30-fresh-audits-per-hour-per-IP window apply. ${FOLLOW_DISCLOSURE}`,
       inputSchema: {
-        url: z.string().describe('The website URL or bare domain to audit.'),
+        url: z
+          .string()
+          .describe(
+            'The website URL or bare domain to audit; audited at its https origin; an http:// URL is upgraded.',
+          ),
         site_type: z
           .enum(['content', 'api'])
           .optional()
@@ -232,12 +241,10 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       // URL validation + SSRF (the cache key needs the URL, so these precede
       // the cache read and the kill switch).
       const siteUrl = siteOrigin();
-      const parsed = coerceUrl(url);
-      if (!parsed) return isError('invalid url');
-      const canonicalTarget = canonicalTargetOf(parsed);
-      const validation = validatePublicUrl(canonicalTarget);
-      if (!validation.ok) return isError(validation.reason);
-      const domain = parsed.host;
+      const site = siteTarget(url);
+      if (!site.ok) return isError(site.reason);
+      const target = site.target;
+      const domain = target.host;
       // A run that does not follow declared hosts is never saved, so no
       // stored scorecard answers it, it joins no run, and it may not change
       // the listing.
@@ -248,7 +255,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       // A hit older than the staleness threshold falls through to the
       // fresh path (still behind every gate below) so a re-run refreshes
       // the board.
-      const cached: CachedWebAudit | null = await cacheGet(env, await keyFor(canonicalTarget, SPEC_VERSION));
+      const cached = await readCachedAudit(env, target);
       // Resolve the opt-in flag against the stored entry once. A fresh hit
       // only short-circuits when the request asks for no flag change; an
       // explicit, differing public_listing falls through the full gate stack
@@ -323,7 +330,6 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         if (!ok) return jsonRpcError32099('audit rate limit exceeded — 30 fresh audits per hour per source.');
       }
 
-      const target = { host: domain, canonical: canonicalTarget };
       if (optedOut) {
         const run = await hostWebAudit(env, {
           target,

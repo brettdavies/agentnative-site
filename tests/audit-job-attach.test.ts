@@ -8,7 +8,7 @@ import { _resetIndexCache } from '../src/worker/score/core';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
 import { ANC_VERSION } from '../src/worker/spec-version.gen';
 import { call, makeEnv, ndjson, newTracker, post, probeFetchFor } from './helpers/audit-api-env';
-import { type FakeJobNamespace, fakeJobNamespace } from './helpers/audit-job-state';
+import { countClaims, fakeJobNamespace } from './helpers/audit-job-state';
 import { captureLogs } from './helpers/log-capture';
 import { getJsonToolContent, mcpInitialize, mcpRpc, resetMcpTestState } from './helpers/mcp-rpc';
 import { stubFetch } from './helpers/stub-fetch';
@@ -421,25 +421,6 @@ describe('a run that does not follow declared hosts stays outside single-flight'
   const OPT_OUT = { target: 'anc.dev', turnstile_token: 'x', follow_declarations: false };
   const FOLLOW = { target: 'anc.dev', turnstile_token: 'x' };
   const isAccepted = (l: Line) => l.type === 'accepted';
-
-  // Every claim the endpoint makes, by job name.
-  function countClaims(jobs: FakeJobNamespace): string[] {
-    const claims: string[] = [];
-    const get = jobs.get.bind(jobs);
-    jobs.get = ((id: { name: string }) => {
-      const stub = get(id as unknown as DurableObjectId) as unknown as {
-        claim: (startedAt: string, deadlineMs: number) => Promise<unknown>;
-      };
-      return {
-        ...stub,
-        claim: (startedAt: string, deadlineMs: number) => {
-          claims.push(id.name);
-          return stub.claim(startedAt, deadlineMs);
-        },
-      };
-    }) as unknown as FakeJobNamespace['get'];
-    return claims;
-  }
 
   function gatedProbe(tracker: ReturnType<typeof newTracker>) {
     let release: () => void = () => {};

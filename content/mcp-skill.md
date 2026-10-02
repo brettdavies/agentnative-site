@@ -183,7 +183,8 @@ same input. The cost difference (registry/cache lookup vs container run) is the 
 
 Four tools score a website and its MCP server against the same eight principles as a CLI, mirroring the scorecard
 surface above. The web audit runs entirely as in-Worker network probes (HTTP, JSON-RPC over streamable-HTTP, CORS,
-DNS-over-HTTPS): no container, nothing crawled.
+DNS-over-HTTPS): no container, nothing crawled. A site is read and audited at its https origin: an `http://` URL is
+upgraded, so it names the same record as the bare host.
 
 - `get_website_audit` (cheap read): pass a `url`; returns `{ found: true, ...envelope }` with `kind: "web"` on a cache
   hit, `{ found: false, in_progress: true, started_at }` while an audit for that host is already running, or
