@@ -60,7 +60,9 @@ evidence, so no wall-clock value reaches the file. Key order is otherwise the en
 every number is an integer. A scenario that ends in
 the engine's `unreachable` event writes `{"unreachable": "<reason>"}` instead of a scorecard. The engine runs
 under a fixed clock, so no per-audit deadline fires; per-probe timeouts appear only as declared transport
-failures.
+failures. Every scenario is a public-vantage audit holding no credential, so every scorecard records
+`"vantage": {"network": "public", "credentialed": false}`, and an engine under comparison runs the scenarios at
+that vantage.
 
 Each row's `hosts` lists the distinct hosts its raw evidence items were requested from, in evidence order, as
 `{"host": ...}` objects. Only an item with no `blocked` marker counts: a request the SSRF guard refused never

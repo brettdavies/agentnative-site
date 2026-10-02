@@ -43,6 +43,10 @@
   "audit_profile": null,
   "site_type": "api",
   "public_listing": false,
+  "vantage": {
+    "network": "public",
+    "credentialed": false
+  },
   "follow_declarations": true,
   "declared_hosts": [],
   "summary": {

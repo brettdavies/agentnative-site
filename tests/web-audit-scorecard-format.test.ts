@@ -718,6 +718,7 @@ const DOCUMENTED_TOP_LEVEL = [
   'audit_profile',
   'site_type',
   'public_listing',
+  'vantage',
   'follow_declarations',
   'declared_hosts',
   'registry_fingerprint',
@@ -795,6 +796,10 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
 
   test('public_listing defaults to false when the meta omits it', () => {
     expect(produced.public_listing).toBe(false);
+  });
+
+  test('vantage records the public engine: the public internet, holding no credential', () => {
+    expect(produced.vantage).toEqual({ network: 'public', credentialed: false });
   });
 
   test('coverage_summary counts a noncompliant row as applied but not verified', () => {

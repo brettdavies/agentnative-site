@@ -11,6 +11,7 @@ import {
 } from '../src/worker/audit-web/display';
 import type { WebRemediationCatalog } from '../src/worker/audit-web/remediation';
 import { categoryRollups } from '../src/worker/audit-web/score';
+import { buildWebScorecard } from '../src/worker/audit-web/scorecard';
 
 // A registry that splits the combined API/MCP surface into two categories,
 // the exact display-only change that leaves old-shape cached scorecards
@@ -402,6 +403,45 @@ describe('provenance on stored scorecards', () => {
     expect('follow_declarations' in out).toBe(false);
     expect('declared_hosts' in out).toBe(false);
     expect('registry_fingerprint' in out).toBe(false);
+    expect('vantage' in out).toBe(false);
     for (const row of out.results) expect(row).toMatchObject({ hosts: [{ host: 'example.com' }], host: 'example.com' });
+  });
+
+  test('a stored scorecard keeps the vantage its audit recorded on every full-result read', () => {
+    const fresh = buildWebScorecard(
+      [
+        {
+          id: 'openapi',
+          title: 'OpenAPI',
+          principle: 'P2',
+          keyword: 'must',
+          tier: 'required',
+          category: 'api',
+          weight: 5,
+          status: 'pass',
+          evidence: 'openapi -> 200',
+          raw_evidence: [{ url: 'https://example.com/openapi.json', status: 200 }],
+        },
+      ],
+      {
+        targetUrl: 'https://example.com/',
+        domain: 'example.com',
+        mcpEndpoint: null,
+        discoveryEvidence: [],
+        specVersion: '0.5.0',
+        registry: {
+          category_order: ['api', 'mcp'],
+          categories: { api: 'API', mcp: 'MCP' },
+          checks: [{ id: 'openapi', keyword: 'must', antecedent: 'none' }] as never,
+        },
+      },
+    );
+    const stored = JSON.parse(JSON.stringify(fresh)) as unknown;
+    const out = enrichWebScorecardForDisplay(stored, {
+      registry: SPLIT_REGISTRY,
+      catalog: CATALOG,
+      origin: 'https://anc.dev',
+    }) as ProvenanceShape;
+    expect(out.vantage).toEqual({ network: 'public', credentialed: false });
   });
 });

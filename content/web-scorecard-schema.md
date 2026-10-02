@@ -24,6 +24,7 @@ The web scorecard is site-owned. Its `schema_version` is **0.5**, independent of
   "audit_profile": null,
   "site_type": null,
   "public_listing": false,
+  "vantage": { "network": "public", "credentialed": false },
   "follow_declarations": true,
   "declared_hosts": [ ... ],
   "registry_fingerprint": "3f2a9c1b7e40",
@@ -48,6 +49,7 @@ The web scorecard is site-owned. Its `schema_version` is **0.5**, independent of
 | `audit_profile`        | null                | engine  | Always `null` for web targets; audit profiles are a CLI concept.                                                                   |
 | `site_type`            | string \| null      | engine  | The declared site type the run scoped to: `content`, `api`, or `null` (everything ran).                                            |
 | `public_listing`       | boolean             | engine  | The submitter's opt-in to the public board listing. `false` unless explicitly set.                                                 |
+| `vantage`              | object              | engine  | Where the audit ran and whether it presented a credential. See [vantage](#vantage).                                                |
 | `follow_declarations`  | boolean, optional   | engine  | Whether the audit followed the hosts the site declares (its MCP server, its API host). Absent means no follow state was recorded.  |
 | `declared_hosts`       | array, optional     | engine  | The declared-hosts trail: one entry per host the site declares, with how the audit treated it. Absent means no trail was recorded. |
 | `registry_fingerprint` | string, optional    | stored  | The first 12 characters of the fingerprint of the check registry the score was computed under. The engine never sets it.           |
@@ -113,6 +115,24 @@ Web identity. The CLI-only header fields (`tier`, `language`, `repo`, `install`)
 | ------ | ------ | ---------------------------------------------------- |
 | `name` | string | The audited domain (host), used as the display name. |
 | `url`  | string | The normalized audited URL. Matches `target_url`.    |
+
+## `vantage`
+
+Where the audit ran and what it could present. A score covers what an agent at that vantage can verify.
+
+```json
+"vantage": { "network": "public", "credentialed": false }
+```
+
+| Field          | Type    | Meaning                                                                                                                         |
+| -------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `network`      | string  | `public` for an anc.dev audit, run from the public internet; `local` for an `anc web <target>` run on the runner's own network. |
+| `credentialed` | boolean | `true` when a local run presented a credential to the audited MCP endpoint; otherwise `false`.                                  |
+
+Every anc.dev audit writes `public` and `false`. A local `anc web <target>` run writes `local`, with `credentialed`
+`true` when it presented a credential. The public board lists public-vantage scorecards only, so a local or credentialed
+score is never ranked beside a public one. A scorecard stored before the field existed carries no `vantage`; every such
+scorecard anc.dev holds is its own public audit.
 
 ## `declared_hosts`
 

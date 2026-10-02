@@ -63,6 +63,10 @@
   "audit_profile": null,
   "site_type": "content",
   "public_listing": false,
+  "vantage": {
+    "network": "public",
+    "credentialed": false
+  },
   "follow_declarations": true,
   "declared_hosts": [],
   "summary": {
