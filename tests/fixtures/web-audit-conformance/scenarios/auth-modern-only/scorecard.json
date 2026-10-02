@@ -74,11 +74,11 @@
   "follow_declarations": true,
   "declared_hosts": [],
   "summary": {
-    "pass": 17,
+    "pass": 18,
     "noncompliant": 1,
     "broken": 1,
     "absent": 10,
-    "n_a": 38,
+    "n_a": 37,
     "skip": 0,
     "error": 1
   },
@@ -92,13 +92,13 @@
       "verified": 11
     },
     "may": {
-      "total": 6,
-      "verified": 6
+      "total": 7,
+      "verified": 7
     }
   },
-  "score_pct": 56,
+  "score_pct": 57,
   "score": {
-    "relative": 56,
+    "relative": 57,
     "global": 30
   },
   "categories": [
@@ -135,8 +135,8 @@
     {
       "id": "agent-discovery-auth",
       "name": "Agent discovery & auth",
-      "passed": 0,
-      "counted": 0
+      "passed": 1,
+      "counted": 1
     }
   ],
   "results": [
@@ -1280,9 +1280,14 @@
       "tier": "optional",
       "principle": "P1",
       "status": "n_a",
-      "na_reason": "antecedent-unmet",
-      "evidence": "no auth surface detected",
-      "hosts": []
+      "na_reason": "optional-absent",
+      "evidence": "https://example.com/.well-known/openid-configuration -> 404 (status 404 not in [200])",
+      "hosts": [
+        {
+          "host": "example.com"
+        }
+      ],
+      "host": "example.com"
     },
     {
       "id": "oauth-protected-resource",
@@ -1293,10 +1298,14 @@
       "keyword": "may",
       "tier": "optional",
       "principle": "P1",
-      "status": "n_a",
-      "na_reason": "antecedent-unmet",
-      "evidence": "MCP endpoint does not challenge for auth",
-      "hosts": []
+      "status": "pass",
+      "evidence": "https://example.com/.well-known/oauth-protected-resource -> 200",
+      "hosts": [
+        {
+          "host": "example.com"
+        }
+      ],
+      "host": "example.com"
     },
     {
       "id": "auth-md",
@@ -1308,9 +1317,14 @@
       "tier": "optional",
       "principle": "P1",
       "status": "n_a",
-      "na_reason": "antecedent-unmet",
-      "evidence": "no auth surface detected",
-      "hosts": []
+      "na_reason": "optional-absent",
+      "evidence": "https://example.com/.well-known/auth.md -> 404",
+      "hosts": [
+        {
+          "host": "example.com"
+        }
+      ],
+      "host": "example.com"
     }
   ]
 }

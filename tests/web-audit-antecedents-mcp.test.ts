@@ -28,6 +28,14 @@ describe('resolveAntecedent: mcp', () => {
     expect(resolveAntecedent('mcp-auth', ctx())).toBe('n_a');
   });
 
+  test('mcp-auth holds on a challenge to server/discover when initialize was refused without one', () => {
+    const sources = new Map([
+      ['mcp-initialize', outcome('absent', [{ url: 'https://x.dev/mcp', status: 200, error_code: -32022 }])],
+      ['mcp-server-discover', outcome('na', [{ url: 'https://x.dev/mcp', status: 401, www_authenticate: 'Bearer' }])],
+    ]);
+    expect(resolveAntecedent('mcp-auth', ctx({ mcpEndpoint: 'https://x.dev/mcp', sources }))).toBe('apply');
+  });
+
   test('mcp-resources holds only when initialize advertised capabilities.resources', () => {
     const base = { mcpEndpoint: 'https://x.dev/mcp' };
     const withResources = ctx({

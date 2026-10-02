@@ -1258,8 +1258,8 @@
     ]
   },
   "auth-modern-only": {
-    "score_pct": 56,
-    "score": {"relative":56,"global":30},
+    "score_pct": 57,
+    "score": {"relative":57,"global":30},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -1326,9 +1326,9 @@
       {"id":"a2a-agent-card","status":"n_a","na_reason":"optional-absent"},
       {"id":"ai-catalog","status":"n_a","na_reason":"optional-absent"},
       {"id":"agent-skills","status":"n_a","na_reason":"optional-absent"},
-      {"id":"oauth-discovery","status":"n_a","na_reason":"antecedent-unmet"},
-      {"id":"oauth-protected-resource","status":"n_a","na_reason":"antecedent-unmet"},
-      {"id":"auth-md","status":"n_a","na_reason":"antecedent-unmet"}
+      {"id":"oauth-discovery","status":"n_a","na_reason":"optional-absent"},
+      {"id":"oauth-protected-resource","status":"pass"},
+      {"id":"auth-md","status":"n_a","na_reason":"optional-absent"}
     ]
   },
   "auth-open-endpoint": {

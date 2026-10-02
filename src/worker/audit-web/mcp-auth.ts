@@ -8,7 +8,7 @@
 
 import type { ProbeResponse } from './assert';
 import { handshakeServed } from './handlers/mcp';
-import type { McpAuthRequired, ProbeOutcome } from './handlers/types';
+import type { EvidenceItem, McpAuthRequired, ProbeOutcome } from './handlers/types';
 import {
   type ArtifactSource,
   type MetadataMatch,
@@ -28,6 +28,11 @@ const WIRE_PROBES = [
 export interface SignInChallenge {
   challenge: string | null;
   lane: McpAuthRequired['lane'];
+}
+
+/** The wave-1 wire probes' evidence, in the order a 401's challenge is read. */
+export function wireProbeEvidence(sources: ReadonlyMap<string, ProbeOutcome>): EvidenceItem[] {
+  return WIRE_PROBES.flatMap(({ id }) => sources.get(id)?.evidence ?? []);
 }
 
 /** A wave-1 wire probe was served a JSON-RPC result: the endpoint answered a request that carried no token. */

@@ -8,6 +8,7 @@ import {
   type AntecedentResolver,
   cardDeclaresAuth,
   evidenceShowsAuthChallenge,
+  handshakeShowsAuthChallenge,
   sourceEvidence,
   sourcePassed,
 } from './context';
@@ -16,7 +17,7 @@ import {
 function authSignalObserved(ctx: AntecedentContext): boolean {
   if (ctx.root?.status === 401) return true;
   if (evidenceShowsAuthChallenge(sourceEvidence(ctx, 'openapi'))) return true;
-  if (evidenceShowsAuthChallenge(sourceEvidence(ctx, 'mcp-initialize'))) return true;
+  if (handshakeShowsAuthChallenge(ctx)) return true;
   return cardDeclaresAuth(ctx);
 }
 

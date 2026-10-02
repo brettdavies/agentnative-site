@@ -6,6 +6,8 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
+import { loadRegistry, runScenario } from '../scripts/web-audit/conformance-corpus';
+import { SCENARIOS } from '../scripts/web-audit/conformance-scenarios';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
 import { enrichWebScorecardForDisplay } from '../src/worker/audit-web/display';
 import { endpointRedirects } from '../src/worker/audit-web/handlers/shared';
@@ -418,6 +420,18 @@ describe('a modern-only server behind OAuth', () => {
     // Only the modern lane answers 401, so a pass shows where the row asked.
     expect(row(scorecard, 'mcp-auth-enforced')).toMatchObject({ status: 'pass', evidence: 'refused with 401' });
     expect(scorecard.results.filter((r) => r.status === 'broken').map((r) => r.id)).toEqual([]);
+  });
+
+  test('the challenge on server/discover alone opens the auth discovery rows, so they are evaluated rather than antecedent-unmet', async () => {
+    const scenario = SCENARIOS['auth-modern-only'];
+    if (scenario === undefined) throw new Error('the auth-modern-only corpus scenario is missing');
+    const run = await runScenario('auth-modern-only', scenario, loadRegistry());
+    const scorecard = JSON.parse(run.output) as WebScorecard;
+    expect(readings(scorecard, ['oauth-protected-resource', 'oauth-discovery', 'auth-md'])).toEqual({
+      'oauth-protected-resource': ['pass', null],
+      'oauth-discovery': ['n_a', 'optional-absent'],
+      'auth-md': ['n_a', 'optional-absent'],
+    });
   });
 });
 

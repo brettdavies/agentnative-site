@@ -10,7 +10,7 @@ import type { AntecedentToken } from '../registry';
 import {
   type AntecedentResolver,
   cardDeclaresAuth,
-  evidenceShowsAuthChallenge,
+  handshakeShowsAuthChallenge,
   noMcpEndpoint,
   sourceEvidence,
 } from './context';
@@ -21,7 +21,7 @@ const mcpPresent: AntecedentResolver = (ctx) => (ctx.mcpEndpoint !== null ? 'app
 
 const mcpAuth: AntecedentResolver = (ctx) => {
   if (ctx.mcpEndpoint === null) return noMcpEndpoint(ctx);
-  return evidenceShowsAuthChallenge(sourceEvidence(ctx, 'mcp-initialize')) || cardDeclaresAuth(ctx) ? 'apply' : 'n_a';
+  return handshakeShowsAuthChallenge(ctx) || cardDeclaresAuth(ctx) ? 'apply' : 'n_a';
 };
 
 // A row that needs a session asks the server for something only a signed-in
