@@ -275,8 +275,9 @@ describe('MCP instructions string (drift gate per KTD-8)', () => {
     expect(await flat('content/_audit-web.md')).toContain(perDomain);
   });
 
-  test('the disclosure and the client skill say a declared http URL is never requested', async () => {
-    const sentence = 'Only https URLs are followed: a declared http URL, or a redirect to one, is never requested.';
+  test('the disclosure and the client skill say anc sends no plaintext request', async () => {
+    const sentence =
+      'anc sends no plaintext request: an http URL, declared or linked, and any redirect to http, is never requested.';
     const result = await initialize(makeEnv());
     expect(result.result?.instructions ?? '').toContain(sentence);
     const skill = await readFile(join(import.meta.dir, '..', 'content/mcp-skill.md'), 'utf8');

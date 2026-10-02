@@ -12,8 +12,8 @@ export const FOLLOW_DISCLOSURE =
   "<endpoint>/server-card, its host's /.well-known/ai-catalog.json, RFC 9728 protected-resource metadata) and is " +
   "wire-probed (JSON-RPC POSTs, a CORS preflight) only after one of those documents on the endpoint's own host names " +
   "the endpoint. An API host anchored in the site's api-catalog gets document fetches (its OpenAPI description) and " +
-  "one GET to a nonsense path on the site's declaration alone. Only https URLs are followed: a declared http URL, " +
-  'or a redirect to one, is never requested. Each audit follows at most ' +
+  "one GET to a nonsense path on the site's declaration alone. anc sends no plaintext request: an http URL, " +
+  'declared or linked, and any redirect to http, is never requested. Each audit follows at most ' +
   `${MAX_FOLLOWED_HOSTS} off-origin hosts with at most ${MAX_FOLLOW_REQUESTS} follow-phase document requests inside ` +
   `a ${FOLLOW_SLICE_MS / 1000}-second follow window, so following lengthens an audit's wall time. Across all ` +
   `audits and sites, following is also capped at about ${DECLARED_DOMAIN_HOURLY_CEILING} audits per hour per ` +
