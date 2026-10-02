@@ -166,7 +166,8 @@ encodes has moved.
   not-applicable with reason auth-required, never absent or broken.
 - R15. New positive checks score auth enforcement: the 401 carries a well-formed `WWW-Authenticate` with
   `resource_metadata`; the metadata carries valid https `authorization_servers`; an unauthenticated `tools/list` is
-  rejected.
+  rejected. A failure is priced by KTD25: the challenge and enforcement checks fail noncompliant, and the
+  authorization-server check fails broken only when no listed server is usable from the audit's vantage.
 - R16. A correctly protected endpoint is never priced as broken.
 
 **API category on anchor hosts**
@@ -604,17 +605,34 @@ The funnel's shared surfaces carry this plan's fields, and the units edit them i
   `audit_website` fresh run claims the `AuditJob` and marks the in-flight flags as `handleWeb` does, keeping the
   explicit-listing no-attach rule, so MCP-initiated runs are single-flight hosts as well as consumers. Instantiates KD11
   (R36).
-- KTD24. **The global universe counts alternatives once.** `score.global` divides earned points by the most a single
-  site could earn: every registry check, except that checks forming alternatives (outcomes of one probe that an
-  endpoint usually earns only one of) count only the alternatives the site presents, or the larger alternative when it
-  presents none. MCP access is
-  the one alternative group: `open` (the `mcp-session` and `mcp-resources` checks) and `protected` (the
-  `mcp-auth-required` checks). A site presents every alternative whose antecedent held, so a hybrid endpoint that
-  answers some probes without auth and others with a 401 counts both and can never earn more than its universe. Global
-  is capped at 100 and floored at 0. Every other check, `n_a` or not, stays in the global denominator, so global still
-  measures how much of the whole surface a site exposes, and relative stays the score that excludes `n_a`. The groups
-  are declared in the registry, so declaring or changing one moves the fingerprint; `universeMaxOf`, the dev-only
-  `score_model.py`, and the CLI's Rust port of the scorer change together. Instantiates KD4 (R16).
+- KTD24. **The global universe counts design alternatives once.** `score.global` divides earned points by the most a
+  single site could earn at full access: every registry check, except that checks forming alternatives (site designs
+  that cannot both be satisfied at full access; an access limit never forms or joins a group, KTD25) count only the
+  alternatives the site presents, or the largest alternative when it presents none. MCP access is the one group:
+  `protected` (the `mcp-auth-required` checks) and `open` (no checks of its own, presented when a handshake answered
+  without sign-in). The session checks count for every site, so an open server's universe is 155, a protected or hybrid
+  server's 158, and a site without MCP 158, since the maximal site requires sign-in. On a public audit a protected
+  server's session and handshake rows read auth-required and stay in its denominator like every access-limited row, so
+  its public global tops out near 68; a local credentialed run evaluates them and can reach 100. Presentation is read
+  from stored rows alone. Global is capped at 100 and floored at 0. The groups are declared in the registry, so
+  declaring or changing one moves the fingerprint; `universeMaxOf`, the dev-only `score_model.py`, and the CLI's Rust
+  port of the scorer change together. Instantiates KD4 (R16) under KTD25.
+- KTD25. **Access-limited checks have one scoring definition across vantages.** A score covers what an agent at the
+  audit's vantage can verify: public (anc.dev: the public internet, no credentials) or local (`anc web <target>`: the
+  runner's network, optionally a credential for the audited MCP endpoint). Each scorecard records it in an additive
+  `vantage` field (`network` public or local, `credentialed`), written public/false by the public engine and riding the
+  unreleased 0.5 schema; the public board lists public-vantage scorecards only. A row the vantage could not reach
+  (sign-in without a credential, a private or unreachable host, or the audit's own follow policy) reads `n_a` with its
+  reason, earns nothing, leaves relative, and stays in the global denominator: one treatment for every access limit.
+  Alternatives are site designs, never access (KTD24). The outcome scale is read from the vantage: noncompliant when an
+  agent there gets what it asked for despite a defect, broken when the surface leads it to a dead end. So
+  `mcp-auth-challenge` and `mcp-auth-enforced` fail noncompliant, and `mcp-auth-servers` fails broken only when no
+  listed sign-in server is usable from the vantage (none, not https, or a private address while the endpoint is public)
+  and noncompliant when a usable one sits beside bad entries. A local credential goes only to the audited endpoint's
+  handshake and session probes, never to followed hosts, metadata, sign-in servers, or the enforcement probe, and is
+  never written to the scorecard. Every access-limited row is disclosed with its remedy, `anc web <target>` plus
+  `--token` for sign-in (U6). A new check takes its score from its tier, its antecedent, and the access limits it can
+  hit, and joins a group only as a design alternative. Instantiates R12, R14, R15, R16 (ledger R17).
 
 ### High-Level Technical Design
 
@@ -768,9 +786,10 @@ depends only on U10 and has no code dependency on Phases A and B beyond it.
 - The Worker's descriptor rewrite gains a field; staging and production diverge if it is missed, and the deploy smoke
   must cover the new paths.
 - The legacy-alias eval rule and its helpers stay; a wide rename touches the engine and the assert module.
-- The three R15 checks join the protected alternative of the MCP access group (KTD24) at optional tier, weight 1, so
-  only a protected server's global denominator changes and no site's relative score moves unless it actively fails
-  enforcement; the card check keeps its tier and weight under its new id, so the id replacement moves no score.
+- The three R15 checks form the protected alternative of the MCP access group (KTD24) at optional tier, weight 1: an
+  open server's universe is unchanged, a protected server and a site without MCP gain 3 points under the published
+  universe-growth rule, and no site's relative score moves unless it actively fails enforcement; the card check keeps
+  its tier and weight under its new id, so the id replacement moves no score.
 - Board metadata gains the fingerprint prefix through its single writer; the board ranks 0.4 and 0.5 objects together
   until seeds reflow and user objects refresh.
 - Every engine change reaches the CLI's Rust port through the conformance corpus; a unit that changes engine output
@@ -1126,9 +1145,12 @@ Phase C:
      typed-refusal status set unchanged, since the conformance rows' accept probe shares it.
   6. Add corpus scenarios for a protected endpoint and an open one so each new check id is some scenario's subject, and
      regenerate (KTD22).
-  7. Apply KTD24: declare the MCP access alternative group in the registry, make `universeMaxOf` count the alternatives
-     the site presents (or the larger when it presents none), and cap global at 100; open and non-MCP sites keep
-     today's universe, so their scores do not move.
+  7. Apply KTD24 and KTD25: declare the MCP access group in the registry (`protected` the sign-in checks; `open`
+     presented by a handshake answered without sign-in), make `universeMaxOf` count the alternatives the site presents
+     (or the largest when it presents none), cap global at 100, price `mcp-auth-servers` failures by what an agent at
+     the vantage can use, write `vantage` public/false on every scorecard, and state the access rules and the protected
+     public ceiling in the published scoring copy. Open MCP sites keep their universe, sites without MCP gain 3 points,
+     and protected endpoints move; the PR names every moved entry.
 - **Patterns to follow:** the existing `mcp-auth` resolver and challenge helper; the MCP op table; the typed-refusal
   vocabulary; the registry sync rule.
 - **Test scenarios:**
@@ -1405,6 +1427,12 @@ Phase C:
      leads with the bare host as its mono token and shows the full URL on a second caption line only when its path is
      not "/"; HTML (never markdown) inserts `<wbr>` after "." and "/" so lines break only at boundaries; below 40rem an
      entry stacks surface, host, then outcome; verify at 390 px in both themes.
+  1f. Every access-limited group or row (the six declared-host reasons and auth-required) is disclosed with its remedy
+     (KTD25): the group's body opens with one caption line naming why the public audit could not evaluate those rows and
+     `anc web <target>` to evaluate them from the reader's own network, adding `--token` for auth-required rows; a
+     scorecard holding any access-limited row adds one sentence to the score note saying the global score keeps those
+     rows in its maximum and pointing to the same command. The markdown twin and the MCP read carry the same sentences.
+     Verify at 390 px in both themes.
   2. Add optional `host` and `na_reason` to the shared `check` event, and have the web core's `checkEvent` copy both
      from the engine result.
   3. On the progress page, pass both through `scoring.ts` to the row view: the evidence paragraph carries the result
@@ -2291,10 +2319,11 @@ committed files to a fresh generation, which a regeneration satisfies by constru
 all 94 goldens, so an unintended status or score change in an existing scenario ships inside a diff no reviewer reads.
 Behavior to preserve: for every pre-existing scenario, `score.relative`, `score.global`, `score_pct`, and each row's
 `status` and `na_reason`. Intentional changes: U1 `schema_version` and additive fields; U2 MCP rows on scenarios with
-off-origin declarations; U3 rows on protected endpoints and protected endpoints' global denominators (KTD24); U4 API
-rows on scenarios with catalog anchors; U8 the `well-known-mcp-card` id replaced by `mcp-server-card` with the same
-status and credit. A unit that adds checks outside an alternative group shifts every global score by the published
-universe-growth rule; its PR names the shift.
+off-origin declarations; U3 rows on protected endpoints, protected endpoints' global denominators, the 3-point universe
+growth for sites without MCP (KTD24, KTD25), and the additive `vantage` field; U4 API rows on scenarios with catalog
+anchors; U8 the `well-known-mcp-card` id replaced by `mcp-server-card` with the same status and credit. A unit that adds
+checks outside an alternative group shifts every global score by the published universe-growth rule; its PR names the
+shift.
 Comparison grid:
 
 | Choice | Current | A | B |
@@ -2571,6 +2600,28 @@ State: approved
 Actual answer: B) the most one site could earn (KTD24), answered 2026-10-01. The scoring copy is corrected first in its
 own PR (relative excludes `n_a`; global excludes only alternatives; the board ranks by relative), then U3 implements
 KTD24.
+History: 2026-10-01, refined by R17: the open alternative holds no checks of its own, because the session checks are
+access-limited rather than a design alternative.
+
+### R17: one scoring definition for access-limited checks across public and local audits
+
+Finding: surfaced in U3's code review. A protected server's handshake rows stayed in its global denominator while its
+session rows left it, though one sign-in blocked both; a correctly protected server topped out near 84; and the price of
+a failed sign-in check had no rule. Each access feature (sign-in, private hosts, follow, the CLI's local run) was
+getting its own scoring decision. Reviewer: Claude (ce-code-review, U3).
+Plan baseline: KTD24 as first built (the session checks formed the open alternative); R15 named what the sign-in checks
+score, not what a failure costs.
+Runtime evidence: the U3 corpus `auth-own-endpoint` scorecard reads six mcp-present rows n_a auth-required, 20 points
+kept in a 127-point universe; `metadataOutcome` read any bad authorization server as broken; the agentnative-cli local
+web audit plan defers authenticated targets.
+Options: A) one definition built for the end state where `anc web` runs locally with an optional credential: vantage on
+every scorecard, access limits cost global and never relative, alternatives are designs at full access, the outcome
+scale is read from the vantage, credentials stay narrow, every access limit is disclosed with `anc web`, and a new check
+needs no scoring decision; B) adopt it but keep the session checks as the open alternative; C) revise first.
+State: approved
+Actual answer: A, answered 2026-10-01 (KTD25; KTD24 rewritten). A public protected server's global tops out near 68 and
+a local credentialed run can reach 100; sites without MCP gain 3 points of universe; the public scorecard points to `anc
+web <target>` for every not-run reason (U6); the CLI plan takes authenticated targets in scope.
 History: none
 
 Approval readiness: PASS. Checked R1 (D2 A), R2 (D3 A), R3 (D4 A), R4 (D5 A), R5 (D6 A), R6 (D7 A), R7 (D8 A), R8 (D9
