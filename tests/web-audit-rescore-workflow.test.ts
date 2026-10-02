@@ -29,6 +29,7 @@ import {
   type WebRescoreEnv,
   WebRescoreWorkflow,
 } from '../src/worker/audit-web/rescore-workflow';
+import type { WebScorecard } from '../src/worker/audit-web/scorecard';
 import { isSeededDomain, loadWebSeed, resetWebSeedCacheForTests } from '../src/worker/audit-web/seed';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 import { budgetKeyPrefix, memoryRateLimit } from './helpers/domain-budget-fakes';
@@ -37,10 +38,12 @@ import {
   cardEntry,
   followRegistry,
   html,
+  type Route,
   requestsTo,
   router,
   type Seen,
   sep2127Card,
+  wireProbesTo,
 } from './helpers/follow-fixtures';
 import { captureLogs } from './helpers/log-capture';
 
@@ -700,6 +703,83 @@ describe('the declared-domain budget on rescore audits', () => {
 describe("a declared domain's spent hourly budget on the reflow", () => {
   const SPENT = 'https://mcp.spent.example/mcp';
   const ROOM = 'https://mcp.room.example/mcp';
+
+  type Reflow = {
+    /** The MCP endpoints the seed's ai-catalog declares, in order. */
+    endpoints?: string[];
+    routes?: Record<string, Route>;
+    /** The age of the seed's saved scorecard; none is saved when absent. */
+    savedAgoMs?: number;
+    /** Every read of the seed's saved scorecard fails. */
+    unreadable?: boolean;
+  };
+
+  // One forced reflow of the seed with spent.example's hour spent.
+  async function reflowSpent(opts: Reflow = {}) {
+    const { env, store } = makeEnv([seedEntry('example.com')], { registry: followRegistry() });
+    env.WEB_AUDIT_FOLLOW_ENABLED = 'true';
+    const hour = Math.floor(Date.now() / HOUR_MS);
+    const spent = await budgetKeyPrefix('spent.example');
+    const { kv } = makeKv({
+      'web_rescore:registry_fp': 'OLD',
+      [`${spent}${hour}`]: '9999',
+      [`${spent}${hour + 1}`]: '9999',
+    });
+    env.SCORE_KV = kv;
+    if (opts.savedAgoMs !== undefined) await primeCache(store, 'example.com', opts.savedAgoMs, 40);
+    const key = await keyFor('https://example.com/', SPEC_VERSION);
+    const saved = store.get(key);
+    if (opts.unreadable) {
+      const bucket = env.SCORE_CACHE;
+      const get = bucket.get.bind(bucket);
+      bucket.get = ((k: string, ...rest: Parameters<R2Bucket['get']> extends [string, ...infer R] ? R : never) =>
+        k === key
+          ? Promise.reject(new Error('We encountered an internal error.'))
+          : get(k, ...rest)) as R2Bucket['get'];
+    }
+    const seen: Seen[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = router(
+      {
+        'GET https://example.com/': () => html(),
+        'GET https://example.com/.well-known/ai-catalog.json': () =>
+          aiCatalog(...(opts.endpoints ?? [SPENT, ROOM]).map((url) => cardEntry({ data: sep2127Card(url) }))),
+        ...opts.routes,
+      },
+      seen,
+    );
+    const logs = captureLogs();
+    try {
+      const result = await runWebRescore(env, makeRetryingStep(), { fingerprint: async () => 'NEW' });
+      const stored = store.get(key);
+      const scorecard =
+        stored === undefined ? null : ((JSON.parse(stored) as CachedWebAudit).scorecard as WebScorecard);
+      return {
+        audited: result.audited,
+        skipped: result.skipped,
+        kept: stored === saved,
+        trail: scorecard?.declared_hosts?.map((e) => [e.url, e.outcome, e.cause]) ?? null,
+        roomProbed: wireProbesTo(seen, 'mcp.room.example').length > 0,
+      };
+    } finally {
+      logs.restore();
+      globalThis.fetch = original;
+    }
+  }
+
+  test('a seed with no saved scorecard is saved as any audit, so it is not left off the board', async () => {
+    const { audited, skipped, trail } = await reflowSpent();
+    expect({ audited, skipped }).toEqual({ audited: ['example.com'], skipped: [] });
+    expect(trail).toEqual([
+      [SPENT, 'budget-exceeded', 'domain-budget'],
+      [ROOM, 'reciprocity-refused', undefined],
+    ]);
+  });
+
+  test('a seed whose saved scorecard the store cannot read is skipped, and nothing is written', async () => {
+    const { audited, skipped, kept } = await reflowSpent({ savedAgoMs: 60_000, unreadable: true });
+    expect({ audited, skipped, kept }).toEqual({ audited: [], skipped: ['example.com'], kept: true });
+  });
 
   test('the seed is skipped on its one audit, keeps its saved scorecard, and charges its other domain once', async () => {
     const { env, store } = makeEnv([seedEntry('example.com')], { registry: followRegistry() });

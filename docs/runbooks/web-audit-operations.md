@@ -149,11 +149,13 @@ for them:
   from the release it replaces, its fingerprint differs from the one KV recorded, and the manual run reflows every seed
   under the restored registry.
 - **Domain-budget deferrals in a reflow.** A seed whose rows a declared domain's spent hourly budget left unevaluated is
-  not saved: the rescore logs `scope: web-rescore` with `cause: domain-budget`, skips that seed, and keeps its saved
-  scorecard on the board. Seeds that declare one domain drain its hour together, so a release reflow can defer
-  several. Fire the manual trigger after the hour turns (the next full UTC hour, when every hourly budget opens a new
-  bucket). The run picks deferred seeds up by age, so one whose saved scorecard is younger than the 2-hour eligibility
-  window waits for a later run.
+  not saved when it already has a saved scorecard, or one R2 could not read: the rescore logs `scope: web-rescore` with
+  `cause: domain-budget`, skips that seed, and its saved scorecard stays on the board. A seed with no saved scorecard (a
+  new seed, or every seed after a vendored-spec bump, which changes the cache key) is saved as any audit, so it is never
+  left off the board. Seeds that declare one domain drain its hour together, so a release reflow can defer several. Fire
+  the manual trigger after the hour turns (the next full UTC hour, when every hourly budget opens a new bucket). The run
+  picks deferred seeds up by age, so one whose saved scorecard is younger than the 2-hour eligibility window waits for a
+  later run.
 
 **Secrets.** `WEB_RESCORE_SECRET` is a `wrangler secret put` value on both Workers (`--env staging` and production) and
 lives in the GitHub environment secret `ANC_WEB_RESCORE_SECRET` for the deploy hook. Rotate by setting a new value in

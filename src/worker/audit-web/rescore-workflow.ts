@@ -28,7 +28,8 @@ import { emitLog } from '../telemetry/log';
 import { rebuildWebAggregates, type WebAggregateEnv } from './aggregate';
 import { type AuditLogEnv, instrumentAuditEvents } from './audit-log';
 import { get as cacheGet, put as cachePut, canonicalTargetOf, isStale, keyFor } from './cache';
-import { type DomainBudgetEnv, declaredDomainBudget, domainBudgetRefusal } from './domain-budget';
+import { type DomainBudgetEnv, declaredDomainBudget } from './domain-budget';
+import { domainBudgetHold } from './domain-budget-hold';
 import { runWebAudit } from './engine';
 import { effectiveFollow, type FollowSwitchEnv } from './follow-switch';
 import { homeTag, invokeCachedPurge, webDomainTag, webTag } from './hit-min-purge';
@@ -130,9 +131,11 @@ const FOLLOW_STATE_KEY = 'web_rescore:follow_enabled';
 
 /**
  * Run one seeded domain's audit to completion and cache the scorecard,
- * unless a declared domain's spent hourly budget left rows unevaluated: the
- * saved scorecard then stands, and its unchanged scored_at keeps the domain
- * eligible for the next rescore.
+ * unless a declared domain's spent hourly budget left rows unevaluated and
+ * the seed has a saved scorecard, or one the store could not read: that
+ * scorecard then stands, and its unchanged scored_at keeps the domain
+ * eligible for the next rescore. A seed with none saved is saved as any
+ * audit, so it is never left off the board.
  */
 export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string): Promise<RescoreAuditOutcome> {
   const registry = await loadWebAuditRegistry(env);
@@ -167,8 +170,9 @@ export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string):
   if (!complete || !scorecard) {
     throw new Error(`audit did not complete within the deadline for ${targetUrl}`);
   }
-  if (domainBudgetRefusal(scorecard) !== null) return { kind: 'deferred', cause: 'domain-budget' };
-  await cachePut(env, targetUrl, await withRegistryFingerprint(scorecard, registry), SPEC_VERSION);
+  const stamped = await withRegistryFingerprint(scorecard, registry);
+  if ((await domainBudgetHold(env, targetUrl, stamped)) !== null) return { kind: 'deferred', cause: 'domain-budget' };
+  await cachePut(env, targetUrl, stamped, SPEC_VERSION);
   return { kind: 'saved' };
 }
 
