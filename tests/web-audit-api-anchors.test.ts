@@ -149,6 +149,55 @@ describe('API category on api-catalog anchors', () => {
     expect(jsonErrors.evidence).toContain('files.example.net');
   });
 
+  test('an anchor host not followed, listed first, neither masks nor passes the failing host beside it', async () => {
+    const seen: Seen[] = [];
+    const { scorecard } = await auditApi(
+      site(
+        () =>
+          linkset(
+            anchor(`https://${API}/`, `https://${API}/openapi.json`),
+            anchor(TARGET, 'https://example.com/openapi.yaml'),
+          ),
+        {
+          'GET https://example.com/openapi.yaml': () => new Response(OPENAPI_YAML),
+          [`GET https://example.com${FALLBACK_PATH}`]: () => htmlError(),
+        },
+      ),
+      seen,
+      false,
+    );
+    expect(row(scorecard, 'json-errors')).toMatchObject({
+      status: 'broken',
+      hosts: [
+        { host: API, status: 'n_a', na_reason: 'follow-disabled' },
+        { host: 'example.com', status: 'broken' },
+      ],
+    });
+    expect(requestsTo(seen, API)).toEqual([]);
+  });
+
+  test('the OpenAPI row needs every declared description: one passing beside one answering 404 reads absent', async () => {
+    const seen: Seen[] = [];
+    const { scorecard } = await auditApi(
+      site(
+        () =>
+          linkset(
+            anchor(`https://${API}/`, `https://${API}/openapi.json`),
+            anchor('https://files.example.net/', 'https://files.example.net/openapi.json'),
+          ),
+        { [`GET https://${API}/openapi.json`]: () => json(OPENAPI) },
+      ),
+      seen,
+    );
+    expect(row(scorecard, 'openapi')).toMatchObject({
+      status: 'absent',
+      hosts: [
+        { host: API, status: 'pass' },
+        { host: 'files.example.net', status: 'absent' },
+      ],
+    });
+  });
+
   test('a YAML OpenAPI passes presence, and the hygiene probes fall back to the nonsense path on the anchor host', async () => {
     const seen: Seen[] = [];
     const { scorecard } = await auditApi(
