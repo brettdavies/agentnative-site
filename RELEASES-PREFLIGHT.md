@@ -113,7 +113,7 @@ Dependabot raises the same fix again.
 - [ ] No lockfile package resolves newer on `main` than on `dev` (gate 3). The gate reads this repo's `bun.lock` one
       line per package name. `bun.lock` is JSONC and the gate's `jq` parser rejects its trailing commas, so a
       `parse error` on stderr means the gate saw no packages and its pass is not evidence; until the parser accepts
-      JSONC, the `.github/` parity gate plus Dependabot's security PRs are the signal.
+      JSONC, the `.github/` parity gate plus gate 1's list of `main`-only commits are the signal.
 - [ ] `dev`-newer packages are the routine updates this release ships; the gate counts them and does not list them.
 
 ### Cross-repo coordination
