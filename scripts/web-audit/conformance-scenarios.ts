@@ -4,6 +4,7 @@
 // Bodies and headers here are contract bytes: a change regenerates goldens
 // on both sides of the CLI port.
 
+import { OPENAPI_MAX_BODY_BYTES } from '../../src/worker/audit-web/ssrf';
 import type { Exchange, ExchangeResponse, Scenario } from './conformance-corpus';
 
 const BASE = 'https://example.com/';
@@ -171,6 +172,9 @@ const API_PROBE_PATH = '/v1/items/anc-web-audit-no-such';
 const API_FALLBACK_PATH = '/anc-web-audit-no-such-api';
 const OPENAPI_YAML = 'openapi: 3.1.0\ninfo:\n  title: Example files API\n  version: 1.0.0\npaths: {}\n';
 const API_ERROR = { error: { type: 'invalid_request_error', message: 'Unrecognized request URL' } };
+// Stripe-shaped: the `openapi` key follows a components object that alone
+// runs past the bytes the description read takes.
+const OPENAPI_PAST_THE_CAP = JSON.stringify({ components: { schemas: { padding: 'x'.repeat(OPENAPI_MAX_BODY_BYTES) } }, ...OPENAPI });
 const linkset = (...contexts: unknown[]): ExchangeResponse =>
   res(200, { 'content-type': 'application/linkset+json' }, JSON.stringify({ linkset: contexts }));
 
@@ -1503,6 +1507,22 @@ export const SCENARIOS: Record<string, Scenario> = {
       get(`https://api.example.net${API_PROBE_PATH}`, json(API_ERROR, 404)),
       get('https://files.example.net/openapi.yaml', res(200, { 'content-type': 'application/yaml' }, OPENAPI_YAML)),
       get(`https://files.example.net${API_FALLBACK_PATH}`, json(API_ERROR, 404)),
+    ],
+  ),
+  'api-description-over-cap': scenario(
+    'an API anchor declares a JSON description larger than the 512 KiB read cap whose `openapi` key sits after its components, past the bytes read: the OpenAPI row counts it present from the truncated read, and the hygiene probes, with no parsed description to take a path from, fall back to the nonsense path on the anchor host',
+    ['openapi'],
+    [
+      ...baseline(),
+      get(
+        '/.well-known/api-catalog',
+        linkset({
+          anchor: 'https://api.example.net/',
+          'service-desc': [{ href: 'https://api.example.net/openapi.json', type: 'application/openapi+json' }],
+        }),
+      ),
+      get('https://api.example.net/openapi.json', res(200, { 'content-type': 'application/json' }, OPENAPI_PAST_THE_CAP)),
+      get(`https://api.example.net${API_FALLBACK_PATH}`, json(API_ERROR, 404)),
     ],
   ),
 };
