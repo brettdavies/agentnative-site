@@ -193,7 +193,7 @@ the first two, `im` for the body patterns) and `results[i] = new RegExp(pattern,
 | `http-ua-negotiation` | the CLI and AI user-agent probes receive the markdown twin while the default probe receives HTML | `markdown-cli-ua`, `markdown-agent-ua`, `accept-markdown`, `markdown-accept-plain`, `agent-ua-reachable` |
 | `http-ua-negotiation-absent` | every markdown-shaped request receives HTML, so the twin family is absent | `markdown-cli-ua`, `markdown-agent-ua`, `accept-markdown`, `markdown-accept-plain` |
 | `llms-quality-broken-link` | a link that answers 5xx makes the links row broken | `llms-txt-links` |
-| `llms-quality-dead-and-http-link` | an llms.txt that lists a dead link and an http link: the http link is never requested, though it would answer, and the dead link decides the links row, which reads absent | `llms-txt-links` |
+| `llms-quality-dead-and-http-link` | an llms.txt that lists a dead link and an http link: the http link is never requested, though it would answer with a server error that would read broken, and the dead link decides the links row, which reads absent | `llms-txt-links` |
 | `llms-quality-dead-link` | a link that answers 404 makes the links row absent | `llms-txt-links` |
 | `llms-quality-h1-only` | an llms.txt with only an H1 misses format, has no links to follow, and has no when-to-use heading | `llms-txt-format`, `llms-txt-links`, `llms-txt-when-to-use` |
 | `llms-quality-http-link` | an llms.txt that lists an http link beside resolving https links: the http link is never requested, though it would answer, and the links row reads noncompliant naming it | `llms-txt-links` |

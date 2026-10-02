@@ -8,13 +8,13 @@
   "site_type": null,
   "spec_version": "0.0.0-corpus",
   "unmatched": {
-    "status": 301,
+    "status": 404,
     "headers": {
-      "location": "http://example.com/"
+      "content-type": "text/html; charset=utf-8"
     },
-    "body": ""
+    "body": "<html><body><h1>Not found</h1><p>No such page.</p></body></html>"
   },
-  "allow_unmatched": true,
+  "allow_unmatched": false,
   "exchanges": [
     {
       "request": {

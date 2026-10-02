@@ -1,5 +1,5 @@
 {
-  "description": "an llms.txt that lists a dead link and an http link: the http link is never requested, though it would answer, and the dead link decides the links row, which reads absent",
+  "description": "an llms.txt that lists a dead link and an http link: the http link is never requested, though it would answer with a server error that would read broken, and the dead link decides the links row, which reads absent",
   "covers": [
     "llms-txt-links"
   ],
@@ -60,11 +60,11 @@
         "url": "http://example.com/docs/plain.md"
       },
       "response": {
-        "status": 200,
+        "status": 500,
         "headers": {
-          "content-type": "text/markdown; charset=utf-8"
+          "content-type": "text/html; charset=utf-8"
         },
-        "body": "# Guide\n\nA substantial guide body that runs well past the forty-character floor.\n"
+        "body": "<html><body><h1>Internal error</h1></body></html>"
       }
     }
   ]

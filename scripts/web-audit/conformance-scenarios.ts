@@ -654,7 +654,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     'every https request, the root included, redirects to the http root, which would answer: the run ends unreachable after the root request alone, and nothing is requested over http',
     ['agent-ua-reachable', 'content-without-js'],
     [get('/', redirect('http://example.com/')), get('http://example.com/', html(rootHtml()))],
-    { unmatched: redirect('http://example.com/') },
+    { allow_unmatched: false },
   ),
   'run-body-over-cap': scenario(
     'bodies past the 64 KiB probe cap are truncated: a huge tools/list no longer parses and a huge JSON error body reads as non-JSON',
@@ -1514,9 +1514,14 @@ export const SCENARIOS: Record<string, Scenario> = {
     get('/docs/guide.md', md(GUIDE_MD)),
   ]),
   'llms-quality-dead-and-http-link': scenario(
-    'an llms.txt that lists a dead link and an http link: the http link is never requested, though it would answer, and the dead link decides the links row, which reads absent',
+    'an llms.txt that lists a dead link and an http link: the http link is never requested, though it would answer with a server error that would read broken, and the dead link decides the links row, which reads absent',
     ['llms-txt-links'],
-    [...baseline(), get('/llms.txt', text(LLMS_TXT_HTTP_LINK)), get('/docs/guide.md', md(GUIDE_MD)), get(HTTP_LINK, md(GUIDE_MD))],
+    [
+      ...baseline(),
+      get('/llms.txt', text(LLMS_TXT_HTTP_LINK)),
+      get('/docs/guide.md', md(GUIDE_MD)),
+      get(HTTP_LINK, SERVER_ERROR),
+    ],
   ),
   'llms-quality-http-link': scenario(
     'an llms.txt that lists an http link beside resolving https links: the http link is never requested, though it would answer, and the links row reads noncompliant naming it',
