@@ -1,12 +1,18 @@
 // The API catalog's declarations in the follow slice. An anchor host is
 // admitted to the slice (a host slot and its domain's reservation), which
-// is what lets wave 2 send it the hygiene probes; it gets no request here
-// and no reciprocity, since anc sends it only a document GET and one
-// nonsense-path GET on the audited site's declaration alone. A service-desc
-// target is read once through the same gate as a card document and kept
-// for the OpenAPI row to score. A description host that gives no response
-// at all records unreachable; any answer records followed, and the row
-// scores what came back.
+// is what lets wave 2 send it the hygiene probes; it gets no request here.
+// What reaches it later is one GET, at a path a description declared for
+// it documents, else a nonsense path (handlers/api-probe-url.ts). Since
+// the audited site names the host and, through the description, the path,
+// that GET has the reach a card-document GET already has: one bodiless
+// request through the SSRF guard that takes no redirect to another
+// origin, bounded by the host slot and the domain's hourly reservation.
+// Reciprocity gates wire probes, which act on an MCP server rather than
+// read it, so an anchor host is not asked to name itself first. A
+// service-desc target is read once through the same gate as a card
+// document and kept for the OpenAPI row to score. A description host that
+// gives no response at all records unreachable; any answer records
+// followed, and the row scores what came back.
 
 import type { ApiDeclaration } from './api-catalog';
 import {
