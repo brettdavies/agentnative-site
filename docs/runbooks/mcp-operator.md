@@ -20,7 +20,7 @@ environment, and the flip verb follows the shape.
 | `MCP_ENABLED`              | secret, both environments                           | the entire `/mcp` branch                  | `503 Service Unavailable` with `Retry-After: 3600` and a one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error. Discoverability siblings stay live.                                                    |
 | `MCP_LIVE_SCORING_ENABLED` | secret, both environments                           | only the `score_cli` tool                 | `score_cli` returns `isError: false` with `audited: false, message: "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard"`. Read tier stays alive.                                   |
 | `MCP_LEGACY_ENABLED`       | committed var `"true"`, top-level and `env.staging` | legacy `initialize` lane                  | When `'false'`, shell logs `legacy_rejected` with `error_code: -32022` and returns JSON-RPC `-32022` (`data.supported: ["2026-07-28"]`) before SDK dispatch. Modern lane unaffected.                                                      |
-| `WEB_AUDIT_FOLLOW_ENABLED` | var `"true"` on `env.staging`, secret in production | following declared hosts, every web audit | Audits keep running on the site's own origin. The stored scorecard records `follow_declarations: false`, and rows that need a declared host read `n_a` with reason `follow-disabled`. Cached scorecards and the read tier are unaffected. |
+| `WEB_AUDIT_FOLLOW_ENABLED` | var `"true"` on `env.staging`, secret in production | following declared hosts, every web audit | Audits keep running on the site's own origin. The stored scorecard records `follow_declarations: false`, and rows that need a declared host read `n_a` with reason `follow-disabled`. Re-audits save unfollowed; see the decision flow.   |
 
 The split is a decision, not an accident. `MCP_ENABLED` and `MCP_LIVE_SCORING_ENABLED` are secrets because incident
 response needs a flip that lands without a deploy and survives the next unrelated one, and because an unset secret reads
@@ -50,8 +50,12 @@ Decision flow:
   agents that were about to call `score_cli` get a typed "disabled" response and route themselves back to
   `get_scorecard`.
 - **A declared host objects to being probed, or the follow phase misbehaves** → flip `WEB_AUDIT_FOLLOW_ENABLED` to
-  `false`. Audits keep running and scoring each site's own origin; a scorecard already stored keeps the follow state it
-  was scored with until it is re-audited.
+  `false`. Audits keep running and scoring each site's own origin. A stored scorecard keeps the follow state it was
+  scored with until it is re-audited, but while following is off every re-audit saves as not followed: the next board
+  rescore (weekly, post-deploy, or a registry reflow) rewrites each seeded scorecard it re-audits with
+  `follow_declarations: false`, and so does a fresh audit from the form or `audit_website`. Turning following back on
+  restores followed scores only through another rescore: the weekly run, or a manual run once the seeded scorecards are
+  past the rescore's 2-hour eligibility window.
 - **Legacy client volume has fallen under the sunset thresholds** → flip `MCP_LEGACY_ENABLED`. That is a migration, not
   an emergency; it goes through the committed-edit path below. See Legacy sunset advisory.
 

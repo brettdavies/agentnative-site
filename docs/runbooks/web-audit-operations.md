@@ -120,6 +120,12 @@ checks in `registry.yaml` is a registry-shape change; the post-deploy rescore af
 curated seed. Stale `/score/<domain>` pages keep serving the previous row set until that reflow: missing check ids are
 omitted, not shown as ghost rows.
 
+**The follow switch and the rescore.** The rescore follows the hosts each site declares only while
+`WEB_AUDIT_FOLLOW_ENABLED` is on. While it is off, the next rescore (weekly, post-deploy, or a registry reflow) rewrites
+each seeded scorecard it re-audits as not followed: `follow_declarations: false`, with every row that needs a declared
+host `n_a` for reason `follow-disabled`. Turning the switch back on restores followed scores only through another
+rescore: the weekly run, or a manual run once the seeded scorecards are past the 2-hour eligibility window.
+
 **Secrets.** `WEB_RESCORE_SECRET` is a `wrangler secret put` value on both Workers (`--env staging` and production) and
 lives in the GitHub environment secret `ANC_WEB_RESCORE_SECRET` for the deploy hook. Rotate by setting a new value in
 both places; there is no fallback window.
