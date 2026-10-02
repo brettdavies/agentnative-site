@@ -48,7 +48,8 @@ origin (discovery's common-path POSTs and every probe of that endpoint) takes on
 and port: discovery records a redirect to another origin with its target and declares the target, and any other probe
 reads it as a refused redirect. A probe of an endpoint on a declared host takes no redirect at all, and neither does a
 probe of a document on that endpoint's origin (a registry path written with `{mcp_origin}`, which the engine replaces
-with the endpoint's scheme, host, and port).
+with the endpoint's scheme, host, and port). The GET an API anchor host off the audited origin receives takes only hops
+that keep the scheme, host, and port, and a redirect to another origin is its answer.
 
 ## scorecard.json
 
@@ -70,14 +71,22 @@ reached a host. An item with a string `url` counts that URL's host; one with no 
 `host` counts that value, which is how a row a declared host kept from being evaluated names that host. The host is
 the WHATWG URL `host`, which keeps a non-default port (`example.com:8443`), so an engine whose URL library drops the
 port must add it back. An item whose `url` does not parse contributes nothing, and a row with no counting item has
-`hosts: []`. `host` is present, holding the same value, exactly when `hosts` has one entry.
+`hosts: []`. `host` is present, holding the same value, exactly when `hosts` has one entry. A row that evaluates
+several targets (the API rows when the api-catalog lists API anchors: one per declared description, one per anchor
+host) marks each target's items with its outcome, and when those items name more than one host each `hosts` entry
+also carries `status`: the worst outcome among that host's targets (`broken`, then `noncompliant`, `absent`,
+`error`, `pass`), or `n_a` with the first such target's `na_reason` when none on that host was evaluated. The row's
+own status is the same rule over all its targets.
 
 `declared_hosts` holds one entry per URL the target's discovery documents declare off its origin, in declaration
 order (the AI catalog's card entries, the card under the discovered endpoint, then the well-known cards; the endpoints a
-followed card document names come right after that document's entry), then the targets the common-path POSTs were
-redirected to off the origin, in probe order and with the redirecting path as their `surface`, never in the order
-requests complete. A URL declared twice keeps its first entry. Endpoints are tried one at a time in that order and the
-first that its own host confirms becomes the endpoint, so every later endpoint reads `not-followed`.
+followed card document names come right after that document's entry), then the api-catalog's anchors in linkset order
+(`api-anchor`; one with no `service-desc` other than an MCP surface reads `not-followed` with reason
+`no-service-desc`), then the description each API anchor declares (`api-description`) in the same order, then the
+targets the common-path POSTs were redirected to off the origin, in probe order and with the redirecting path as
+their `surface`, never in the order requests complete. A URL declared twice keeps its first entry. Endpoints are tried
+one at a time in that order and the first that its own host confirms becomes the endpoint, so every later endpoint
+reads `not-followed`.
 
 ## scores.json
 
@@ -102,6 +111,7 @@ the first two, `im` for the body patterns) and `results[i] = new RegExp(pattern,
 | `alias-redirect-away-broken` | a legacy path that 301s away from the canonical card is broken | `mcp-card-legacy-aliases` |
 | `alias-redirect-pass` | one legacy card path 301s to the canonical card, which is enough to pass | `mcp-card-legacy-aliases`, `well-known-mcp-card`, `mcp-usage-doc` |
 | `alias-unpublished-optional-absent` | no legacy path published at all is optional-absent, never a penalty | `mcp-card-legacy-aliases` |
+| `api-anchor-hosts` | a Stripe-shaped api-catalog anchors two API hosts and an MCP endpoint with no service-desc: the OpenAPI row scores each declared description where it is hosted (JSON on one host, YAML on the other), the hygiene rows probe each anchor host once (the documented 4xx path, then the nonsense path) and list both hosts in anchor order, JSON errors pass and rate-limit headers are missing at both, the third anchor is recorded not followed and never requested, and no hygiene probe reaches the audited site | `openapi`, `api-catalog`, `json-errors`, `rate-limit-headers` |
 | `api-hygiene-fallback-path` | with no usable OpenAPI body the probe falls back to the well-known nonsense path | `json-errors`, `rate-limit-headers` |
 | `api-hygiene-html-error` | an HTML error body on the API probe is broken and carries no rate-limit header | `json-errors`, `rate-limit-headers` |
 | `api-hygiene-json-200` | a 200 JSON body where a client error was expected is absent for json-errors | `json-errors` |

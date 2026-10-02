@@ -27,6 +27,7 @@
 // the audit budget even against a target that never answers.
 
 import type { RetainedDocumentKey } from '../../shared/web-audit-documents';
+import { API_CATALOG_PATH, type CatalogAnchor, catalogAnchors } from './api-catalog';
 import type { ProbeResponse } from './assert';
 import {
   aiCatalogShape,
@@ -75,6 +76,8 @@ export interface DiscoveryResult {
   /** Where common paths redirected their POSTs off the audited origin, in probe order. */
   redirected: McpDeclaration[];
   documents: ReadonlyMap<RetainedDocumentKey, RetainedDocument>;
+  /** The API catalog's anchors, in linkset order. */
+  apiAnchors: CatalogAnchor[];
 }
 
 /** Discovery after its document reads, before any POST. */
@@ -83,6 +86,8 @@ export interface DiscoveryDocuments {
   declarations: McpDeclaration[];
   /** An endpoint a card names on the audited origin, which no POST can displace. */
   cardEndpoint: string | null;
+  /** The API catalog's anchors, in linkset order. */
+  apiAnchors: CatalogAnchor[];
   /** The HTTP status of every document read; null where the request got no answer. */
   statuses: Array<number | null>;
   /** The common-path POSTs and the suffix-card read that finish discovery. */
@@ -96,9 +101,6 @@ export interface DiscoveryDocuments {
 // one full per-check timeout per candidate path and spend the entire
 // per-audit deadline before the first real check runs.
 const DISCOVERY_BUDGET_MS = 12_000;
-
-// RFC 9727 fixes the API catalog's location.
-const API_CATALOG_PATH = '/.well-known/api-catalog';
 
 // The extension's discovery flow asks for a card by its media type.
 const CARD_REQUEST_HEADERS = { accept: MCP_SERVER_CARD_TYPE };
@@ -149,6 +151,7 @@ export async function readDiscoveryDocuments(
   let postChallenge: SignInChallenge | null = null;
   let suffix: CardRead | null = null;
   let deadlineHit = false;
+  let apiAnchors: CatalogAnchor[] = [];
   const documents = new Map<RetainedDocumentKey, RetainedDocument>();
 
   const catalogReads = (): CardRead[] => catalogSlots.flatMap((slot) => ('read' in slot ? [slot.read] : []));
@@ -207,6 +210,7 @@ export async function readDiscoveryDocuments(
       declarations: declared(),
       redirected,
       documents,
+      apiAnchors,
     };
   };
   const declared = (): McpDeclaration[] => {
@@ -226,6 +230,7 @@ export async function readDiscoveryDocuments(
   const documentsRead = (probeEndpoint: () => Promise<DiscoveryResult>): DiscoveryDocuments => ({
     declarations: declared(),
     cardEndpoint: cardWinner()?.endpoint ?? null,
+    apiAnchors,
     statuses: [
       ...wellKnown.map((read) => read.response.status),
       ...documentResponses.map((response) => response.status),
@@ -253,8 +258,10 @@ export async function readDiscoveryDocuments(
   wellKnown = wellKnownTargets.map((t, i) => readCard(t.path, t.url, cardResponses[i], false, base));
   const catalog = catalogResp.status === 200 ? parseJsonObject(catalogResp) : null;
   documentResponses.push(catalogResp, apiCatalogResp);
+  const apiCatalog = { url: apiCatalogUrl, response: apiCatalogResp };
   documents.set('ai-catalog', { url: catalogUrl, response: catalogResp });
-  documents.set('api-catalog', { url: apiCatalogUrl, response: apiCatalogResp });
+  documents.set('api-catalog', apiCatalog);
+  apiAnchors = catalogAnchors(apiCatalog);
   documentItems.push(
     documentItem(
       cfg.ai_catalog,

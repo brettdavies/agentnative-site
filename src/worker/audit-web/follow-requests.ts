@@ -7,7 +7,7 @@
 // redirects disabled, so nothing reaches a host this gate did not admit.
 
 import type { ProbeResponse } from './assert';
-import type { McpDeclaration } from './discovery-documents';
+import type { Declaration } from './discovery-documents';
 import { type BudgetCause, hopRefusal, type Settled } from './follow-trail';
 import { type PhaseBudget, resolveUrl } from './handlers/shared';
 import type { EvidenceItem } from './handlers/types';
@@ -57,9 +57,9 @@ export interface SliceRequests {
    * redirect hop the guard, the host cap, and the domain budget admit,
    * whose GET starts here. Settles the declaration when the hop is refused.
    */
-  admitHop(declaration: McpDeclaration, first: ProbeResponse, opts: ReadOptions): Promise<Landing | Settled>;
+  admitHop(declaration: Declaration, first: ProbeResponse, opts: ReadOptions): Promise<Landing | Settled>;
   /** GETs a declared URL, taking at most one admitted redirect hop. */
-  fetchDeclared(declaration: McpDeclaration, opts: ReadOptions): Promise<Fetched | Settled>;
+  fetchDeclared(declaration: Declaration, opts: ReadOptions): Promise<Fetched | Settled>;
   /** Where reciprocity reads its artifacts, through the same gate. */
   readonly source: ArtifactSource;
   readonly evidence: EvidenceItem[];
@@ -129,15 +129,22 @@ export function sliceRequests(input: {
     }
     return response;
   };
-  /** The hop's GET; a second redirect is never taken. */
-  const getHop = async (hop: string, opts: ReadOptions): Promise<ProbeResponse | Settled> => {
+  /**
+   * The hop's GET; a second redirect is never taken. An endpoint that
+   * redirects again is refused; a document's second redirect is its answer.
+   */
+  const getHop = async (
+    hop: string,
+    opts: ReadOptions,
+    kind: Declaration['kind'],
+  ): Promise<ProbeResponse | Settled> => {
     const response = await get(hop, opts);
-    return response.status !== null && REDIRECT_STATUSES.has(response.status)
+    return kind === 'mcp-endpoint' && response.status !== null && REDIRECT_STATUSES.has(response.status)
       ? { final_url: hop, outcome: 'reciprocity-refused' }
       : response;
   };
   const admitHop = async (
-    declaration: McpDeclaration,
+    declaration: Declaration,
     first: ProbeResponse,
     opts: ReadOptions,
   ): Promise<Landing | Settled> => {
@@ -149,7 +156,7 @@ export function sliceRequests(input: {
     const refused = hopRefusal(hop, declaration.kind);
     if (refused !== null) return refused;
     await enter(hop);
-    return { url: hop, response: stopped(() => getHop(hop, opts), budgetExceeded) };
+    return { url: hop, response: stopped(() => getHop(hop, opts, declaration.kind), budgetExceeded) };
   };
 
   return {
@@ -162,6 +169,46 @@ export function sliceRequests(input: {
     evidence,
     count: () => requests,
   };
+}
+
+/**
+ * Reads declared documents side by side. Each first GET is admitted in
+ * declaration order before it starts, and each redirect hop in
+ * declaration order once every first GET has answered, so host slots,
+ * domain reservations, and the request cap never go to whichever host
+ * answers first.
+ */
+export async function readDeclaredDocuments<T extends Declaration>(
+  requests: SliceRequests,
+  declarations: readonly T[],
+  upfront: (declaration: T) => Settled | null,
+  opts: ReadOptions,
+): Promise<Array<Fetched | Settled>> {
+  const firsts: Array<Promise<ProbeResponse | Settled>> = [];
+  for (const declaration of declarations) {
+    const settled =
+      upfront(declaration) ??
+      (await stopped<Settled | null>(async () => {
+        await requests.enter(declaration.url);
+        return null;
+      }, budgetExceeded));
+    firsts.push(
+      settled !== null
+        ? Promise.resolve(settled)
+        : stopped<ProbeResponse | Settled>(() => requests.get(declaration.url, opts), budgetExceeded),
+    );
+  }
+  const answered = await Promise.all(firsts);
+  const landings: Array<Landing | Settled> = [];
+  for (const [i, declaration] of declarations.entries()) {
+    const first = answered[i];
+    landings.push(
+      'status' in first
+        ? await stopped<Landing | Settled>(() => requests.admitHop(declaration, first, opts), budgetExceeded)
+        : first,
+    );
+  }
+  return Promise.all(landings.map(land));
 }
 
 /** Where a landing ends: its URL and response, or how its GET settled. */

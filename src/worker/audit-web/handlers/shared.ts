@@ -2,10 +2,12 @@
 // phases: base-relative URL resolution, `{mcp_endpoint}`/`{host}`
 // substitution, per-check timeout derivation (registry `with.timeout` is
 // in seconds), redirect handling for probes of the MCP endpoint, the
-// statuses that ask for a retry, and a phase's share of the per-audit
-// deadline.
+// statuses that ask for a retry, a phase's share of the per-audit
+// deadline, and the outcome of a row that evaluates several targets.
 
+import type { NaReason } from '../../../shared/web-audit-findings';
 import type { GuardedFetchOptions } from '../ssrf';
+import type { EvidenceItem, ProbeOutcome, ProbeStatus } from './types';
 
 /**
  * Statuses whose shape is "not now" rather than "not here": a target
@@ -145,4 +147,42 @@ export function sameOriginRecoveryLink(body: string, base: string): { ok: boolea
     }
   }
   return { ok: false, why: 'no same-origin sitemap.xml, llms.txt, or /docs link' };
+}
+
+/** One target of a row that evaluates several (the API anchors), with its own outcome. */
+export interface TargetOutcome {
+  status: ProbeStatus;
+  na_reason?: NaReason;
+  evidence: EvidenceItem[];
+}
+
+// Worst first: something there and wrong outranks a spec defect, which
+// outranks nothing there, which outranks an operational unknown; a row
+// passes only when every target it evaluated passed.
+const TARGET_STATUS_RANK: readonly ProbeStatus[] = ['broken', 'noncompliant', 'absent', 'error', 'pass'];
+
+/** The worst status among `statuses`, ignoring targets not evaluated; `na` only when none was. */
+export function worstTargetStatus(statuses: readonly ProbeStatus[]): ProbeStatus {
+  return TARGET_STATUS_RANK.find((status) => statuses.includes(status)) ?? 'na';
+}
+
+/**
+ * A row's outcome over its targets. Each evidence item carries its
+ * target's `target_status` (and `na_reason`), which is where the row's
+ * per-host outcomes are read from. A target not evaluated (its host
+ * declared but not followed) neither passes nor fails the row; when no
+ * target was evaluated the row takes the first target's reason.
+ */
+export function aggregateTargets(targets: readonly TargetOutcome[]): ProbeOutcome {
+  const evidence = targets.flatMap((target) =>
+    target.evidence.map((item) => ({
+      ...item,
+      target_status: target.status,
+      ...(target.na_reason !== undefined ? { na_reason: target.na_reason } : {}),
+    })),
+  );
+  const status = worstTargetStatus(targets.map((target) => target.status));
+  if (status !== 'na') return { status, evidence };
+  const reason = targets[0]?.na_reason;
+  return { status, evidence, ...(reason !== undefined ? { na_reason: reason } : {}) };
 }

@@ -56,7 +56,12 @@ export const WEB_AUDIT_ANTECEDENTS = new Set([
   'robots-present',
   'auth-present',
 ]);
-export const WEB_AUDIT_EVAL_RULES = new Set(['legacy-alias-redirects', 'scoped-discovery', 'retained-document']);
+export const WEB_AUDIT_EVAL_RULES = new Set([
+  'legacy-alias-redirects',
+  'scoped-discovery',
+  'retained-document',
+  'api-description',
+]);
 export const CORS_SURFACES = new Set(['preflight', 'actual']);
 const PROTECTED_RESOURCE_OPS = new Set(['challenge', 'metadata']);
 

@@ -4,6 +4,7 @@
 // them into the dispatch tables.
 
 import type { NaReason } from '../../../shared/web-audit-findings';
+import type { ApiAnchor } from '../api-catalog';
 import type { ProbeResponse } from '../assert';
 import type { DeclaredHostReason } from '../endpoint-of-record';
 import type { EvidenceItem, McpAuthRequired, ProbeOutcome } from '../handlers/types';
@@ -25,6 +26,8 @@ export interface AntecedentContext {
   mcpAuth?: McpAuthRequired | null;
   /** The protocol era of the MCP row being gated; absent for every other row. */
   mcpLane?: McpAuthRequired['lane'];
+  /** The anchors in the retained api-catalog that the API category evaluates. */
+  apiAnchors?: readonly ApiAnchor[];
 }
 
 /** Whether a check applies, does not, or cannot be decided because the root never answered. */
@@ -65,6 +68,11 @@ export function sourcePassed(ctx: AntecedentContext, checkId: string): boolean {
 
 export function sourceEvidence(ctx: AntecedentContext, checkId: string): EvidenceItem[] {
   return ctx.sources.get(checkId)?.evidence ?? [];
+}
+
+/** A wave-1 row's evidence from the audited origin, without what it read from hosts the site declares. */
+export function ownOriginEvidence(ctx: AntecedentContext, checkId: string): EvidenceItem[] {
+  return sourceEvidence(ctx, checkId).filter((item) => item.off_origin !== true);
 }
 
 export function retainedBody(ctx: AntecedentContext, checkId: string): string {

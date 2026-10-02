@@ -363,6 +363,8 @@ remediation:
     fix: |
       If your service exposes an HTTP/REST API (separate from any MCP endpoint), publish an OpenAPI
       3.1 description of it at `/openapi.json` (or `/openapi.yaml`, or `/.well-known/openapi.json`).
+      When your `/.well-known/api-catalog` lists API anchors, the description scored is the one each
+      anchor's `service-desc` links to, wherever it is hosted, not these paths: publish it at that URL.
       Non-MCP agents use it to discover endpoints, parameters, and response shapes, and to generate
       typed clients. A service whose only machine surface is MCP has no REST API to describe here.
     resources:

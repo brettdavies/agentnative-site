@@ -18,8 +18,10 @@
 //
 // Declarations arrive in batches: what discovery's documents declare, then
 // where its POSTs were redirected off the audited origin, which is known
-// only once they finish. A later batch settles after the earlier ones, on
-// the same slice clock, caps, and budgets, as if declared after them.
+// only once they finish, then the API catalog's anchors and descriptions
+// (follow-api.ts), so no API host takes the host slot an MCP endpoint
+// needs. A later batch settles after the earlier ones, on the same slice
+// clock, caps, and budgets, as if declared after them.
 //
 // Every failure of an endpoint's reciprocity, from a dead host to a card
 // naming another URL, records one outcome, so the trail cannot be read as
@@ -31,7 +33,7 @@
 // before any request and record their own outcomes.
 // The trail follows declaration order, never completion order.
 
-import type { ProbeResponse } from './assert';
+import type { ApiDeclaration } from './api-catalog';
 import {
   cardEndpoint,
   isTemplatedUrl,
@@ -40,13 +42,13 @@ import {
   otherRemotes,
   parseJsonObject,
 } from './discovery-documents';
+import { type ApiFollowResult, NO_API_FOLLOW, settleApiDeclarations } from './follow-api';
 import {
   budgetExceeded,
   type DomainBudget,
   type Fetched,
-  type Landing,
-  land,
   type ReadOptions,
+  readDeclaredDocuments,
   sliceRequests,
   stopped,
 } from './follow-requests';
@@ -93,6 +95,8 @@ export interface FollowResult {
   endpointMetadata: MetadataMatch | null;
   /** Per declaration key: its entry, then the entries of what a followed card document declared. */
   entries: ReadonlyMap<string, TrailEntry[]>;
+  /** The API catalog's trail entries and the descriptions the slice read. */
+  api: ApiFollowResult;
   evidence: EvidenceItem[];
   requests: number;
 }
@@ -104,6 +108,8 @@ export interface FollowSession {
    * URL an earlier batch settled keeps its first entry.
    */
   settle(declarations: readonly McpDeclaration[]): Promise<void>;
+  /** Settles the API catalog's declarations as one batch, after every earlier batch. */
+  settleApi(declarations: readonly ApiDeclaration[]): Promise<void>;
   result(): FollowResult;
 }
 
@@ -127,6 +133,7 @@ export function openFollow(input: FollowInput): FollowSession {
   const walked = new Set<string>();
   let endpoint: string | null = null;
   let endpointMetadata: MetadataMatch | null = null;
+  let api = NO_API_FOLLOW;
 
   /** A card document's trail entry, and the endpoints it names, which settle later in declaration order. */
   const cardDocumentRead = (declaration: McpDeclaration, fetched: Fetched | Settled): CardDocumentRead => {
@@ -149,42 +156,9 @@ export function openFollow(input: FollowInput): FollowSession {
     };
   };
 
-  /**
-   * Reads card documents side by side. Each first GET is admitted in
-   * declaration order before it starts, and each redirect hop in
-   * declaration order once every first GET has answered, so host slots,
-   * domain reservations, and the request cap never go to whichever host
-   * answers first.
-   */
   const readCardDocuments = async (declarations: readonly McpDeclaration[]): Promise<CardDocumentRead[]> => {
-    const firsts: Array<Promise<ProbeResponse | Settled>> = [];
-    for (const declaration of declarations) {
-      const settled =
-        settledUpfront(declaration, input) ??
-        (await stopped<Settled | null>(async () => {
-          await requests.enter(declaration.url);
-          return null;
-        }, budgetExceeded));
-      firsts.push(
-        settled !== null
-          ? Promise.resolve(settled)
-          : stopped<ProbeResponse | Settled>(() => requests.get(declaration.url, CARD_DOCUMENT_READ), budgetExceeded),
-      );
-    }
-    const answered = await Promise.all(firsts);
-    const landings: Array<Landing | Settled> = [];
-    for (const [i, declaration] of declarations.entries()) {
-      const first = answered[i];
-      landings.push(
-        'status' in first
-          ? await stopped<Landing | Settled>(
-              () => requests.admitHop(declaration, first, CARD_DOCUMENT_READ),
-              budgetExceeded,
-            )
-          : first,
-      );
-    }
-    const fetched = await Promise.all(landings.map(land));
+    const upfront = (declaration: McpDeclaration) => settledUpfront(declaration, input);
+    const fetched = await readDeclaredDocuments(requests, declarations, upfront, CARD_DOCUMENT_READ);
     return declarations.map((declaration, i) => cardDocumentRead(declaration, fetched[i]));
   };
 
@@ -268,6 +242,23 @@ export function openFollow(input: FollowInput): FollowSession {
       settled = settled.then(() => settleBatch(declarations));
       return settled;
     },
-    result: () => ({ endpoint, endpointMetadata, entries, evidence: requests.evidence, requests: requests.count() }),
+    settleApi: (declarations) => {
+      // The audited site's own MCP endpoint displaces only other MCP endpoints, never an API host.
+      const upfront = (declaration: ApiDeclaration) =>
+        settledUpfront(declaration, { enabled: input.enabled, entryEndpointDeclared: false });
+      const declared = unique(declarations.filter((declaration) => declaresHost(declaration, input.base)));
+      settled = settled.then(async () => {
+        api = await settleApiDeclarations(requests, declared, upfront);
+      });
+      return settled;
+    },
+    result: () => ({
+      endpoint,
+      endpointMetadata,
+      entries,
+      api,
+      evidence: requests.evidence,
+      requests: requests.count(),
+    }),
   };
 }
