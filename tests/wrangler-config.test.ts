@@ -182,6 +182,17 @@ describe('wrangler.jsonc — env.staging mirrors required non-inheritable bindin
     }
   });
 
+  test('the declared-domain burst floor is bound in both environments, each on its own namespace', () => {
+    const entryOf = (list: unknown) =>
+      (list as Array<Record<string, unknown>>).find((r) => r.name === 'WEB_AUDIT_DOMAIN_LIMITER');
+    const production = entryOf(config.ratelimits);
+    const stagingEntry = entryOf(staging.ratelimits);
+    for (const entry of [production, stagingEntry]) {
+      expect(entry?.simple).toEqual({ limit: 10, period: 60 });
+    }
+    expect(production?.namespace_id).not.toBe(stagingEntry?.namespace_id);
+  });
+
   test('env.staging.durable_objects declares the SCORE binding', () => {
     expect(staging.durable_objects).toBeDefined();
     const bindings = (

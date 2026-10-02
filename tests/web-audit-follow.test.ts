@@ -4,9 +4,12 @@
 
 import { describe, expect, test } from 'bun:test';
 import { resultLine } from '../src/shared/web-audit-result-line';
+import { declaredDomainBudget, registrableDomainOf } from '../src/worker/audit-web/domain-budget';
 import { runWebAudit } from '../src/worker/audit-web/engine';
 import type { DomainBudget } from '../src/worker/audit-web/follow-requests';
 import { endpointRedirects, mcpEndpointRedirects } from '../src/worker/audit-web/handlers/shared';
+import type { WebScorecard } from '../src/worker/audit-web/scorecard';
+import { budgetKeyPrefix, memoryKv, memoryRateLimit } from './helpers/domain-budget-fakes';
 import {
   aiCatalog,
   audit,
@@ -1454,5 +1457,200 @@ describe('follow: sequencing and determinism', () => {
     }
     expect(events).toContain('unreachable');
     expect(seen.filter((r) => new URL(r.url).host !== 'example.com' && !r.url.includes('dns'))).toEqual([]);
+  });
+});
+
+describe('follow: the hourly budget of each declared registrable domain', () => {
+  /** One audit declaring `endpoint`, with what the follow slice settled for it and what reached its host. */
+  async function declaring(endpoint: string, domainBudget: DomainBudget) {
+    const seen: Seen[] = [];
+    const { scorecard } = await audit(router(siteDeclaring(endpoint), seen), { domainBudget });
+    const host = new URL(endpoint).host;
+    return { entry: scorecard.declared_hosts?.[0], scorecard, sent: requestsTo(seen, host).length };
+  }
+
+  test('registrable domains come from the public suffix list with its private section', () => {
+    expect(
+      ['a1.victim.example', 'victim.example.', 'a.github.io', 'y.x.example.co.uk', 'mcp.vendor.workers.dev'].map(
+        registrableDomainOf,
+      ),
+    ).toEqual(['victim.example', 'victim.example', 'a.github.io', 'example.co.uk', 'vendor.workers.dev']);
+  });
+
+  test('a domain at its hourly ceiling is refused on the next audit before wave 1, and nothing is sent to it', async () => {
+    const log: string[] = [];
+    const budget = declaredDomainBudget({ SCORE_KV: memoryKv(log) }, { hourlyCeiling: 1 });
+    const first = await declaring(ENDPOINT, budget);
+    expect(first.entry).toMatchObject({ outcome: 'reciprocity-refused' });
+    expect(first.sent).toBeGreaterThan(0);
+
+    log.length = 0;
+    const seen: Seen[] = [];
+    let scorecard: WebScorecard | null = null;
+    for await (const event of runWebAudit({
+      url: TARGET,
+      registry: followRegistry(),
+      fetchOptions: { fetchImpl: router(siteDeclaring(ENDPOINT), seen) },
+      domainBudget: budget,
+    })) {
+      log.push(`event:${event.type}`);
+      if (event.type === 'complete') scorecard = event.scorecard;
+    }
+    // The one read of a spent budget comes before the discovery event, so before wave 1, and nothing is written.
+    const reads = [expect.stringMatching(new RegExp(`^kv:get ${await budgetKeyPrefix('example.net')}\\d+$`))];
+    expect(log.filter((line) => line.startsWith('kv:'))).toEqual(reads);
+    expect(log.slice(0, log.indexOf('event:discovery')).filter((line) => line.startsWith('kv:'))).toEqual(reads);
+    expect(scorecard?.declared_hosts?.[0]).toMatchObject({ outcome: 'budget-exceeded', cause: 'domain-budget' });
+    expect(scorecard === null ? null : row(scorecard, 'mcp-initialize')).toMatchObject({
+      status: 'n_a',
+      na_reason: 'declared-host-budget-exceeded',
+      host: NET,
+    });
+    expect(requestsTo(seen, NET)).toEqual([]);
+  });
+
+  test('a followed audit writes the budget once per registrable domain, however many of its hosts it reaches', async () => {
+    const log: string[] = [];
+    const seen: Seen[] = [];
+    const endpoints = ['https://a1.victim.example/mcp', 'https://a2.victim.example/mcp'];
+    const card = 'https://cards.other.example/card.json';
+    await audit(
+      router(
+        {
+          [`GET ${TARGET}`]: () => html(),
+          'GET https://example.com/.well-known/ai-catalog.json': () =>
+            aiCatalog(cardEntry({ url: card }), ...endpoints.map((url) => cardEntry({ data: sep2127Card(url) }))),
+        },
+        seen,
+      ),
+      { domainBudget: declaredDomainBudget({ SCORE_KV: memoryKv(log) }) },
+    );
+    for (const host of ['a1.victim.example', 'a2.victim.example', 'cards.other.example']) {
+      expect({ host, reached: requestsTo(seen, host).length > 0 }).toEqual({ host, reached: true });
+    }
+    const puts = log.filter((line) => line.startsWith('kv:put'));
+    const victim = await budgetKeyPrefix('victim.example');
+    const other = await budgetKeyPrefix('other.example');
+    expect(puts).toHaveLength(2);
+    expect(puts.filter((line) => line.startsWith(`kv:put ${victim}`))).toHaveLength(1);
+    expect(puts.filter((line) => line.startsWith(`kv:put ${other}`))).toHaveLength(1);
+  });
+
+  test('hosts under one registrable domain share its budget, whatever their scheme, port, or trailing dot', async () => {
+    const budget = declaredDomainBudget({ SCORE_KV: memoryKv() }, { hourlyCeiling: 1 });
+    expect((await declaring('https://a1.victim.example/mcp', budget)).entry).toMatchObject({
+      outcome: 'reciprocity-refused',
+    });
+    for (const endpoint of [
+      'https://a2.victim.example/mcp',
+      'https://victim.example/mcp',
+      'https://victim.example:8443/mcp',
+      'http://victim.example/mcp',
+      'https://victim.example./mcp',
+    ]) {
+      const { entry, sent } = await declaring(endpoint, budget);
+      expect({ endpoint, outcome: entry?.outcome, cause: entry?.cause, sent }).toEqual({
+        endpoint,
+        outcome: 'budget-exceeded',
+        cause: 'domain-budget',
+        sent: 0,
+      });
+    }
+  });
+
+  test('tenants of a private suffix hold separate budgets; subdomains of one registrable domain share one', async () => {
+    const budget = declaredDomainBudget({ SCORE_KV: memoryKv() }, { hourlyCeiling: 1 });
+    const outcomes: Array<[string, unknown]> = [];
+    for (const host of ['a.github.io', 'b.github.io', 'x.example.co.uk', 'y.x.example.co.uk']) {
+      outcomes.push([host, (await declaring(`https://${host}/mcp`, budget)).entry?.outcome]);
+    }
+    expect(outcomes).toEqual([
+      ['a.github.io', 'reciprocity-refused'],
+      ['b.github.io', 'reciprocity-refused'],
+      ['x.example.co.uk', 'reciprocity-refused'],
+      ['y.x.example.co.uk', 'budget-exceeded'],
+    ]);
+  });
+
+  test('the burst floor refuses audits beyond its 60-second ceiling when they run at once', async () => {
+    let clock = 1_000_000;
+    const budget = declaredDomainBudget({
+      SCORE_KV: memoryKv(),
+      WEB_AUDIT_DOMAIN_LIMITER: memoryRateLimit(10, () => clock),
+    });
+    const endpoint = 'https://mcp.burst.example/mcp';
+    const runs = await Promise.all(Array.from({ length: 12 }, () => declaring(endpoint, budget)));
+    const refused = runs.filter((run) => run.entry?.outcome === 'budget-exceeded');
+    expect(runs.length - refused.length).toBe(10);
+    expect(refused.map((run) => [run.entry?.cause, run.sent])).toEqual([
+      ['domain-budget', 0],
+      ['domain-budget', 0],
+    ]);
+    clock += 60_000;
+    expect((await declaring(endpoint, budget)).entry?.outcome).toBe('reciprocity-refused');
+  });
+
+  test('without KV the hourly window admits; a budget layer that throws refuses, and the audit still completes', async () => {
+    expect((await declaring(ENDPOINT, declaredDomainBudget({}))).entry?.outcome).toBe('reciprocity-refused');
+    const failing = {
+      async get(): Promise<string | null> {
+        throw new Error('kv unavailable');
+      },
+    } as unknown as KVNamespace;
+    const { entry, sent, scorecard } = await declaring(ENDPOINT, declaredDomainBudget({ SCORE_KV: failing }));
+    expect(entry).toMatchObject({ outcome: 'budget-exceeded', cause: 'domain-budget' });
+    expect(sent).toBe(0);
+    expect(row(scorecard, 'mcp-initialize')).toMatchObject({ na_reason: 'declared-host-budget-exceeded' });
+  });
+
+  test("the auditor's own zone draws on its own budget like any host; a refused self path spends none", async () => {
+    const log: string[] = [];
+    const canonical = 'https://anc.dev/mcp';
+    const budget = declaredDomainBudget({ SCORE_KV: memoryKv(log) }, { hourlyCeiling: 1 });
+    await declaring('https://anc.dev/api/web-rescore', budget);
+    expect(log).toEqual([]);
+    expect((await declaring(canonical, budget)).entry?.outcome).toBe('reciprocity-refused');
+    expect(log.filter((line) => line.startsWith('kv:put'))).toEqual([
+      expect.stringMatching(new RegExp(`^kv:put ${await budgetKeyPrefix('anc.dev')}\\d+$`)),
+    ]);
+    const { entry, sent } = await declaring(canonical, budget);
+    expect({ outcome: entry?.outcome, cause: entry?.cause, sent }).toEqual({
+      outcome: 'budget-exceeded',
+      cause: 'domain-budget',
+      sent: 0,
+    });
+  });
+
+  test('workers.dev hosts take the ordinary path, each account under its own budget', async () => {
+    const budget = declaredDomainBudget({ SCORE_KV: memoryKv() }, { hourlyCeiling: 1 });
+    const edge = 'https://blocked.acct.workers.dev/mcp';
+    const seen: Seen[] = [];
+    const { scorecard: blocked } = await audit(
+      router(siteDeclaring(edge), seen, () => new Response('error code: 1042', { status: 530 })),
+      { domainBudget: budget },
+    );
+    expect(blocked.results.some((r) => r.status === 'broken')).toBe(false);
+    expect(row(blocked, 'mcp-initialize')).toMatchObject({ status: 'n_a', na_reason: 'reciprocity-refused' });
+
+    const worker = 'https://mcp.vendor.workers.dev/mcp';
+    const { scorecard: followed } = await audit(
+      router(
+        {
+          ...siteDeclaring(worker),
+          [`GET ${worker}/server-card`]: () => cardDocument(sep2127Card(worker)),
+          [`POST ${worker}`]: () => initializeResult(),
+        },
+        [],
+      ),
+      { domainBudget: budget },
+    );
+    expect(followed.mcp_endpoint).toBe(worker);
+    expect(row(followed, 'mcp-initialize').status).toBe('pass');
+
+    const sameAccount = await declaring('https://api.vendor.workers.dev/mcp', budget);
+    expect({ outcome: sameAccount.entry?.outcome, sent: sameAccount.sent }).toEqual({
+      outcome: 'budget-exceeded',
+      sent: 0,
+    });
   });
 });

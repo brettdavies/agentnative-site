@@ -40,6 +40,7 @@ import {
   WEB_AUDIT_STALE_AFTER_MS,
 } from '../../audit-web/cache';
 import { prepareWebTarget, type WebTarget, webEnvelope } from '../../audit-web/core';
+import type { DomainBudgetEnv } from '../../audit-web/domain-budget';
 import { FOLLOW_DISCLOSURE } from '../../audit-web/follow-disclosure';
 import type { FollowSwitchEnv } from '../../audit-web/follow-switch';
 import { queueHitMinPurge, webTag } from '../../audit-web/hit-min-purge';
@@ -58,7 +59,7 @@ import { requestHeader } from '../request-header';
 import { siteOrigin } from '../site-origin';
 import { hostWebAudit } from './web-audit-host';
 
-export interface WebAuditToolsEnv extends AuditLogEnv, NotifyEnv, InFlightEnv, FollowSwitchEnv {
+export interface WebAuditToolsEnv extends AuditLogEnv, NotifyEnv, InFlightEnv, FollowSwitchEnv, DomainBudgetEnv {
   ASSETS: Fetcher;
   SCORE_CACHE: R2Bucket;
   SCORE_KV?: KVNamespace;

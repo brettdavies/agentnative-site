@@ -15,6 +15,7 @@ import type { AuditJob } from '../src/worker/audit/job';
 import { _resetResultCaches, handleResultRoute, type ResultEnv } from '../src/worker/audit/result';
 import { resolveBoardEntries, type WebBoardEnv } from '../src/worker/audit-web/board';
 import { keyFor, WEB_AUDIT_STALE_AFTER_MS } from '../src/worker/audit-web/cache';
+import type { DomainBudgetEnv } from '../src/worker/audit-web/domain-budget';
 import { flushHitMinPurge, runWithHitMinPurge } from '../src/worker/audit-web/hit-min-purge';
 import { enforcePublicListingFlipLimit } from '../src/worker/audit-web/public-listing';
 import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
@@ -34,6 +35,8 @@ import {
   stripeShaped,
   twoAnchorShaped,
 } from './helpers/declared-host-scorecards';
+import { budgetKeyPrefix, memoryKv, memoryRateLimit } from './helpers/domain-budget-fakes';
+import { aiCatalog, cardEntry, html, requestsTo, router, type Seen, sep2127Card } from './helpers/follow-fixtures';
 import { parseHtml } from './helpers/html-elements';
 import { withLogCapture } from './helpers/log-capture';
 import { getJsonToolContent, type JsonRpcBody, mcpInitialize, mcpRpc, resetMcpTestState } from './helpers/mcp-rpc';
@@ -1453,6 +1456,53 @@ describe('audit_website: the follow kill switch', () => {
     const on = await freshRun('true');
     expect(on.stored.follow_declarations).toBe(true);
     expect(on.run?.follow_declarations).toBe(true);
+  });
+});
+
+describe('audit_website: the declared-domain budget', () => {
+  const IP = '203.0.113.51';
+  const ENDPOINT = 'https://mcp.example.net/mcp';
+
+  async function freshRun(env: McpEnv) {
+    const store = new Map<string, string>();
+    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(store);
+    const seen: Seen[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = router(
+      {
+        'GET https://example.com/': () => html(),
+        'GET https://example.com/.well-known/ai-catalog.json': () =>
+          aiCatalog(cardEntry({ data: sep2127Card(ENDPOINT) })),
+      },
+      seen,
+    );
+    try {
+      await withLogCapture(() => callTool(env, 'audit_website', { url: 'example.com' }, IP));
+      const stored = JSON.parse(store.get(await keyFor('https://example.com/', SPEC_VERSION)) as string) as {
+        scorecard: { declared_hosts?: Array<Record<string, unknown>> };
+      };
+      return { trail: stored.scorecard.declared_hosts ?? [], sent: requestsTo(seen, 'mcp.example.net').length };
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  test("a fresh run reserves one unit of the declared domain's hour before reaching it", async () => {
+    const log: string[] = [];
+    const env = await makeEnv({ minimalRegistry: true, followSwitch: 'true' });
+    (env as { SCORE_KV: KVNamespace }).SCORE_KV = memoryKv(log);
+    const { sent } = await freshRun(env);
+    const prefix = await budgetKeyPrefix('example.net');
+    expect(log.filter((line) => line.startsWith(`kv:put ${prefix}`))).toHaveLength(1);
+    expect(sent).toBeGreaterThan(0);
+  });
+
+  test('a declared domain over its burst floor is budget-exceeded and receives nothing', async () => {
+    const env = await makeEnv({ minimalRegistry: true, followSwitch: 'true' });
+    (env as McpEnv & DomainBudgetEnv).WEB_AUDIT_DOMAIN_LIMITER = memoryRateLimit(0);
+    const { trail, sent } = await freshRun(env);
+    expect(trail[0]).toMatchObject({ outcome: 'budget-exceeded', cause: 'domain-budget' });
+    expect(sent).toBe(0);
   });
 });
 

@@ -19,6 +19,7 @@ import {
   post,
   WEB_RECORD,
 } from './helpers/audit-api-env';
+import { budgetKeyPrefix } from './helpers/domain-budget-fakes';
 import { html, requestsTo, router, type Seen, siteDeclaring } from './helpers/follow-fixtures';
 import { captureLogs } from './helpers/log-capture';
 
@@ -813,6 +814,43 @@ describe('POST /api/score: streamed checks name their host and reason', () => {
     expect(openapi === undefined ? null : streamedResultLine(openapi, 'example.com')).toBe(
       'Not evaluated: api.example.net did not answer (https://api.example.net/openapi.json); api.example.net: n/a, files.example.net: n/a',
     );
+  });
+});
+
+describe('POST /api/score: the declared-domain budget', () => {
+  const endpoint = 'https://mcp.example.net/mcp';
+
+  async function followed(overrides: Parameters<typeof makeEnv>[0] = {}) {
+    const seen: Seen[] = [];
+    const env = makeEnv({
+      followSwitch: 'true',
+      deps: { probeFetch: router(siteDeclaring(endpoint), seen) },
+      ...overrides,
+    });
+    const { res, ctx } = await call(post({ target: 'example.com', turnstile_token: 'x' }), env);
+    expect(res.status).toBe(200);
+    await Promise.all(ctx._promises);
+    const object = await env.SCORE_CACHE.get(await webKeyFor('https://example.com/', SPEC_VERSION));
+    const stored = (await object?.json()) as { scorecard: { declared_hosts?: Array<Record<string, unknown>> } };
+    const prefix = await budgetKeyPrefix('example.net');
+    const units = [...env._kv.entries()].filter(([key]) => key.startsWith(prefix)).map(([, value]) => value);
+    return { trail: stored.scorecard.declared_hosts ?? [], sent: requestsTo(seen, 'mcp.example.net').length, units };
+  }
+
+  test("a followed audit reserves one unit of the declared domain's hour before reaching it", async () => {
+    const { units, sent } = await followed();
+    expect(units).toEqual(['1']);
+    expect(sent).toBeGreaterThan(0);
+  });
+
+  test('a declared domain whose hour is spent is budget-exceeded and receives nothing', async () => {
+    const prefix = await budgetKeyPrefix('example.net');
+    const hour = Math.floor(Date.now() / 3_600_000);
+    // The next hour too, so a run that crosses the hour boundary still finds it spent.
+    const kvSeed = { [`${prefix}${hour}`]: '9999', [`${prefix}${hour + 1}`]: '9999' };
+    const { trail, sent } = await followed({ kvSeed });
+    expect(trail[0]).toMatchObject({ outcome: 'budget-exceeded', cause: 'domain-budget' });
+    expect(sent).toBe(0);
   });
 });
 

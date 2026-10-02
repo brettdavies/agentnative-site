@@ -20,6 +20,16 @@ const HOURLY_KV_TTL_SECONDS = 7200;
 // needs. The window is the same fixed hour the audit ceiling uses.
 const FLIP_CEILING = 5;
 
+// Audits an hour that may reach one declared registrable domain, across
+// every site and caller that declares it. Matched to the per-IP audit
+// ceiling, so one caller's full hour of audits of a site fits, while a
+// hostile site declaring a third party cannot turn many callers into more
+// than this many audits' worth of requests to it.
+const DECLARED_DOMAIN_HOURLY_CEILING = 30;
+
+/** KV key prefix of the declared-domain budget: `<prefix>:<sha256(domain)>:<hour bucket>`. */
+export const DECLARED_DOMAIN_BUDGET_PREFIX = 'web_audit_follow';
+
 /**
  * Fixed-hour KV counter behind every hourly budget: read the current
  * bucket count, refuse at the ceiling, otherwise increment under the
@@ -58,4 +68,17 @@ export async function consumeWebAuditHourlyBudget(kv: KVNamespace, ip: string): 
  */
 export async function consumeWebAuditFlipBudget(kv: KVNamespace, domainHash: string): Promise<boolean> {
   return consumeHourlyBucketBudget(kv, 'web_audit_flip', domainHash, FLIP_CEILING);
+}
+
+/**
+ * Consume one audit's unit of the hourly budget of a declared registrable
+ * domain, keyed by the domain's hash. Returns false when that domain's
+ * hour is spent.
+ */
+export async function consumeDeclaredDomainBudget(
+  kv: KVNamespace,
+  domainHash: string,
+  ceiling: number = DECLARED_DOMAIN_HOURLY_CEILING,
+): Promise<boolean> {
+  return consumeHourlyBucketBudget(kv, DECLARED_DOMAIN_BUDGET_PREFIX, domainHash, ceiling);
 }

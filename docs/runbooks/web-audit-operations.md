@@ -218,6 +218,29 @@ summary line to Workers Logs (`observability.enabled` with 100% head sampling in
 
 Query them in the dashboard under Workers & Pages -> agentnative-site -> Logs, filtering on the `scope` field.
 
+### The declared-domain budget
+
+Every audit that follows a site's declarations draws one unit per declared registrable domain before its first request
+there, whichever site declared it and whichever surface ran the audit. The registrable domain comes from the public
+suffix list with its private section, so `api.stripe.com` and `mcp.stripe.com` share `stripe.com`'s budget while
+`a.github.io` and `b.github.io` hold their own. Two layers, both keyed by the domain's SHA-256:
+
+- **Hourly ceiling:** 30 audits per domain per clock hour (UTC), a KV counter in `SCORE_KV` at
+  `web_audit_follow:<sha256(domain)>:<hour bucket>`, where the bucket is the epoch milliseconds divided by 3,600,000,
+  with a 2-hour TTL.
+- **Burst floor:** 10 audits per domain per 60 seconds, the `WEB_AUDIT_DOMAIN_LIMITER` rate-limit binding.
+
+A refused domain's hosts receive nothing for that audit: the trail records `budget-exceeded` with cause
+`domain-budget`, and the rows that needed those hosts read `declared-host-budget-exceeded`. A missing binding skips its
+layer; a layer that errors refuses.
+
+To list the domains drawing on their budget, and to find one domain's counter:
+
+```bash
+wrangler kv key list --binding SCORE_KV --remote --prefix "web_audit_follow:"   # add --env staging for staging
+printf '%s' stripe.com | sha256sum                                              # the hash in that domain's key
+```
+
 ### Debug logging
 
 `WEB_AUDIT_DEBUG: "true"` adds one `web-audit.check` line per check result (id, status, evidence) and a
