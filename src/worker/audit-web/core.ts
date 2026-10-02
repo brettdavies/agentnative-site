@@ -231,7 +231,7 @@ export type RunWebAuditInput = {
 };
 
 function checkEvent(result: EngineResult): AuditEvent {
-  const { host } = rowHostFields(result.raw_evidence);
+  const { host, hosts } = rowHostFields(result.raw_evidence);
   return {
     type: 'check',
     id: result.id,
@@ -240,6 +240,7 @@ function checkEvent(result: EngineResult): AuditEvent {
     status: result.status,
     evidence: result.evidence,
     ...(host !== undefined ? { host } : {}),
+    ...(hosts.length > 1 ? { hosts } : {}),
     ...(result.na_reason !== undefined ? { na_reason: result.na_reason } : {}),
   };
 }

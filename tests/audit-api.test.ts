@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import type { AuditEvent } from '../src/shared/audit-events';
-import { streamedResultLine } from '../src/shared/scoring-copy';
+import { streamedResultLine, streamedRowHost } from '../src/shared/scoring-copy';
 import { isAuditApiPath } from '../src/worker/audit/api';
 import { keyFor as webKeyFor } from '../src/worker/audit-web/cache';
+import { rowHostsOf } from '../src/worker/audit-web/provenance';
 import { keyFor as cliKeyFor } from '../src/worker/score/cache';
 import { _resetIndexCache } from '../src/worker/score/core';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
@@ -18,7 +19,7 @@ import {
   post,
   WEB_RECORD,
 } from './helpers/audit-api-env';
-import { requestsTo, router, type Seen, siteDeclaring } from './helpers/follow-fixtures';
+import { html, requestsTo, router, type Seen, siteDeclaring } from './helpers/follow-fixtures';
 import { captureLogs } from './helpers/log-capture';
 
 beforeEach(() => {
@@ -763,6 +764,54 @@ describe('POST /api/score: streamed checks name their host and reason', () => {
     }
     expect(streamedResultLine(refused[0], 'example.com')).toStartWith(
       'Not evaluated: mcp.example.net did not confirm this endpoint',
+    );
+  });
+
+  test('a check over two API hosts that did not answer streams both, the line the saved result shows, and its hosts', async () => {
+    const description = (host: string) => `https://${host}/openapi.json`;
+    const anchors = ['api.example.net', 'files.example.net'].map((host) => ({
+      anchor: `https://${host}/`,
+      'service-desc': [{ href: description(host), type: 'application/openapi+json' }],
+    }));
+    const down = () => {
+      throw new Error('connection refused');
+    };
+    const routes = {
+      'GET https://example.com/': () => html(),
+      'GET https://example.com/.well-known/api-catalog': () =>
+        new Response(JSON.stringify({ linkset: anchors }), { headers: { 'content-type': 'application/linkset+json' } }),
+      [`GET ${description('api.example.net')}`]: down,
+      [`GET ${description('files.example.net')}`]: down,
+    };
+    const env = makeEnv({ followSwitch: 'true', deps: { probeFetch: router(routes, []) } });
+    const { res, ctx } = await call(
+      post({ target: 'example.com', turnstile_token: 'x' }, { accept: 'application/x-ndjson' }),
+      env,
+    );
+    const lines = (await ndjson(res)) as AuditEvent[];
+    await Promise.all(ctx._promises);
+    const complete = lines.at(-1) as Extract<AuditEvent, { type: 'complete' }>;
+    type SavedRow = { id: string; result: string; hosts?: Array<{ host: string }> };
+    const saved = (complete.scorecard as { results: SavedRow[] }).results;
+    const overTwo = saved.filter((r) => (r.hosts?.length ?? 0) > 1);
+    const checks = lines.filter(
+      (l): l is Extract<AuditEvent, { type: 'check' }> => l.type === 'check' && overTwo.some((r) => r.id === l.id),
+    );
+    expect(checks.map((c) => c.id)).toContain('openapi');
+    for (const check of checks) {
+      const row = overTwo.find((r) => r.id === check.id);
+      expect({ id: check.id, line: streamedResultLine(check, 'example.com') }).toEqual({
+        id: check.id,
+        line: row?.result ?? null,
+      });
+      expect({ id: check.id, host: streamedRowHost(check, 'example.com') }).toEqual({
+        id: check.id,
+        host: rowHostsOf(row ?? {}, 'example.com').join(' '),
+      });
+    }
+    const openapi = checks.find((c) => c.id === 'openapi');
+    expect(openapi === undefined ? null : streamedResultLine(openapi, 'example.com')).toBe(
+      'Not evaluated: api.example.net did not answer (https://api.example.net/openapi.json); api.example.net: n/a, files.example.net: n/a',
     );
   });
 });

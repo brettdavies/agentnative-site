@@ -37,6 +37,7 @@ import {
   RECLASSIFIED,
   rowHostPhrase,
   streamedResultLine,
+  streamedRowHost,
   webReadingLine,
 } from '../shared/scoring-copy';
 import {
@@ -274,7 +275,7 @@ class ScoringRun {
   /** A finished check, with the result line the saved page shows for the same row. */
   private check(event: Extract<AuditEvent, { type: 'check' }>): void {
     this.view.check(event.id, event.principle, event.status, streamedResultLine(event, this.target), {
-      host: event.host ?? this.target,
+      host: streamedRowHost(event, this.target),
       phrase: rowHostPhrase(event, this.target, this.endpointHost),
     });
   }

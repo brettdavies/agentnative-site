@@ -496,6 +496,17 @@ test.describe('/scoring progress page', () => {
     );
     await stream.send(check('mcp-card', { na_reason: 'reciprocity-refused', host: 'mcp.example.net' }));
     await stream.send(check('robots-txt', { status: 'pass' }));
+    const unanswered = { status: 'n_a', na_reason: 'declared-host-unreachable' };
+    await stream.send(
+      check('openapi', {
+        ...unanswered,
+        evidence: 'https://api.stripe.com/openapi.json',
+        hosts: [
+          { host: 'api.stripe.com', ...unanswered },
+          { host: 'files.stripe.com', ...unanswered },
+        ],
+      }),
+    );
     const row = (id: string) => page.locator('.scoring__row', { has: page.locator(`.scoring__id:text-is("${id}")`) });
     // Before the run completes, each row already reads the line its saved page shows.
     await expect(row('mcp-initialize').locator('.pscore__evidence')).toHaveText(
@@ -514,6 +525,12 @@ test.describe('/scoring progress page', () => {
     await expect(row('mcp-card')).toHaveAttribute('data-host', 'mcp.example.net');
     await expect(row('mcp-initialize').locator('.scoring__host')).toHaveCount(0);
     await expect(row('robots-txt').locator('.scoring__host')).toHaveCount(0);
+    // A row over several hosts names the first and each one's outcome, and records them all, as its saved row does.
+    await expect(row('openapi').locator('.pscore__evidence')).toHaveText(
+      'Not evaluated: api.stripe.com did not answer (https://api.stripe.com/openapi.json); api.stripe.com: n/a, files.stripe.com: n/a',
+    );
+    await expect(row('openapi')).toHaveAttribute('data-host', 'api.stripe.com files.stripe.com');
+    await expect(row('openapi').locator('.scoring__host')).toHaveCount(0);
     await stream.send(
       envelope({
         type: 'complete',

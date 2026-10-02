@@ -98,13 +98,26 @@ export function scoringTitle(state: ScoringState, target: string): string {
   return `${text}${TITLE_SUFFIX}`;
 }
 
+type CheckEvent = Extract<AuditEvent, { type: 'check' }>;
+
+/** The hosts a streamed check reads as evaluated at, in evidence order. An event naming none came from the target. */
+function streamedHosts(event: CheckEvent, target: string): string[] {
+  if (event.hosts !== undefined && event.hosts.length > 0) return event.hosts.map((entry) => entry.host);
+  return [event.host ?? target];
+}
+
+/** A streamed row's hosts, space-separated, as the saved page's row carries them. */
+export function streamedRowHost(event: CheckEvent, target: string): string {
+  return streamedHosts(event, target).join(' ');
+}
+
 /**
  * A streamed check's result line: the words the saved page shows for the
- * same row, built from the same phrases. An event without a host came from
- * the target itself.
+ * same row, built from the same phrases. It names the first host, and a
+ * check over several hosts ends with each one's own outcome.
  */
-export function streamedResultLine(event: Extract<AuditEvent, { type: 'check' }>, target: string): string | null {
+export function streamedResultLine(event: CheckEvent, target: string): string | null {
   const status = FINDING_STATUSES.find((s) => s === event.status);
   if (status === undefined) return event.evidence;
-  return resultLine(status, event.evidence, event.na_reason, event.host ?? target);
+  return resultLine(status, event.evidence, event.na_reason, streamedHosts(event, target)[0], event.hosts);
 }
