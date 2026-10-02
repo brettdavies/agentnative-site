@@ -61,6 +61,16 @@ describe('catalogAnchors: the linkset anchors the API category reads', () => {
     expect(anchors.filter(isApiAnchor).map((a) => a.url)).toEqual(['https://api.example.net/']);
   });
 
+  test('only the first eight linkset contexts are read, so an anchor listed after them has no declaration', () => {
+    const linkset = Array.from({ length: 9 }, (_, i) => ({
+      anchor: `https://api${i + 1}.example.net/`,
+      'service-desc': [{ href: `https://api${i + 1}.example.net/openapi.json` }],
+    }));
+    const anchors = catalogAnchors(retainedCatalog({ linkset }));
+    expect(anchors.map((a) => a.url)).toEqual(linkset.slice(0, 8).map((context) => context.anchor));
+    expect(apiDeclarations(anchors).some((d) => d.url.startsWith('https://api9.'))).toBe(false);
+  });
+
   test("anc.dev's MCP-only catalog lists an anchor but no API anchor", () => {
     const anchors = catalogAnchors(retainedCatalog(MCP_ONLY));
     expect(anchors.map((a) => a.url)).toEqual(['https://example.com/mcp']);

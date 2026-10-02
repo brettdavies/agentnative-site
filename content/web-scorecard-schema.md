@@ -178,14 +178,15 @@ scheme is not `http` or `https`, is never requested and reads `reciprocity-refus
 
 An API catalog anchor is an API host the API rows evaluate when its `service-desc` names a description other than an MCP
 surface; an anchor with no such `service-desc` reads `not-followed` with reason `no-service-desc` and is never
-requested. An API anchor host is not confirmed the way an MCP endpoint is: it reads `followed` once the audit admits it
-under its caps and budgets, and then receives one GET, at a path its description documents or else a nonsense path,
-appended to the path of the description's first server URL when that URL is on the anchor's origin and to the anchor's
-own path otherwise, which both hygiene rows read; that GET takes only redirects that keep the scheme, host, and port. An
-`api-description` is read once, up to 512 KiB, and scored by the OpenAPI row: it reads `unreachable` when its host gives
-no response at all or when the one redirect hop anc takes answers with another redirect, and `followed` on any other
-answer. While the catalog lists API anchors, the API rows evaluate at them instead of the audited site, so no hygiene
-probe reaches the audited site unless an anchor is on it.
+requested. anc reads only the first eight contexts of the catalog's `linkset`: an anchor in a later context is never
+read, so it has no entry and no API row evaluates it. An API anchor host is not confirmed the way an MCP endpoint is: it
+reads `followed` once the audit admits it under its caps and budgets, and then receives one GET, at a path its
+description documents or else a nonsense path, appended to the path of the description's first server URL when that URL
+is on the anchor's origin and to the anchor's own path otherwise, which both hygiene rows read; that GET takes only
+redirects that keep the scheme, host, and port. An `api-description` is read once, up to 512 KiB, and scored by the
+OpenAPI row: it reads `unreachable` when its host gives no response at all or when the one redirect hop anc takes
+answers with another redirect, and `followed` on any other answer. While the catalog lists API anchors, the API rows
+evaluate at them instead of the audited site, so no hygiene probe reaches the audited site unless an anchor is on it.
 
 anc never re-sends a probe of the site's own MCP endpoint to another origin. When one of the site's MCP paths answers a
 discovery POST with a redirect to another origin, `mcp_discovery` records the probe's status and `redirect` target, and
