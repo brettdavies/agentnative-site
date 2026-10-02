@@ -4,12 +4,12 @@
 // streams and once it is saved. Typechecked under both the client and the
 // Worker configs, so it names neither environment.
 
-import { type FindingStatus, NA_REASONS, type NaReason, naReasonPhrase } from './web-audit-findings';
+import { FINDING_STATUSES, type FindingStatus, NA_REASONS, type NaReason, naReasonPhrase } from './web-audit-findings';
 
 /** One host a row's evidence was requested from, with that host's own outcome on a row over several hosts. */
 export type HostOutcome = { host: string; status?: string; na_reason?: string };
 
-const HOST_STATUS_WORDS: Readonly<Record<string, string>> = {
+const HOST_STATUS_WORDS: Readonly<Record<FindingStatus, string>> = {
   pass: 'pass',
   noncompliant: 'noncompliant',
   broken: 'broken',
@@ -28,9 +28,9 @@ function hostOutcomesText(hosts: readonly HostOutcome[] | undefined): string | n
   if (!hosts || hosts.length < 2) return null;
   const parts: string[] = [];
   for (const entry of hosts) {
-    const word = entry.status === undefined ? undefined : HOST_STATUS_WORDS[entry.status];
-    if (word === undefined) return null;
-    parts.push(`${entry.host}: ${word}`);
+    const status = FINDING_STATUSES.find((s) => s === entry.status);
+    if (status === undefined) return null;
+    parts.push(`${entry.host}: ${HOST_STATUS_WORDS[status]}`);
   }
   return parts.join(', ');
 }
