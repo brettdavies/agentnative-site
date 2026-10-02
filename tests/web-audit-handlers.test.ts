@@ -26,6 +26,7 @@ import {
   NEGOTIATION_OPS,
   runMcp,
 } from '../src/worker/audit-web/handlers/mcp';
+import { runScopedLlms } from '../src/worker/audit-web/handlers/scoped-llms';
 import type { HandlerContext, McpLaneEvidence } from '../src/worker/audit-web/handlers/types';
 import { runWebMcp } from '../src/worker/audit-web/handlers/webmcp';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
@@ -338,6 +339,114 @@ describe('runRetainedDocument', () => {
       ctx({ fetchImpl: noRequest, retainedDocuments: new Map() }),
     );
     expect(outcome.status).toBe('absent');
+  });
+});
+
+describe('a document that redirects to http reads absent', () => {
+  const WHY = 'redirects to http; anc sends no plaintext request';
+  // Every https URL redirects to its http twin, which would answer.
+  const towardHttp = (sent: string[]) =>
+    stubFetch((url) => {
+      sent.push(url);
+      return url.startsWith('https:')
+        ? new Response(null, { status: 301, headers: { location: url.replace('https:', 'http:') } })
+        : new Response('# Served over plaintext\n\n- [a](/docs/a)\n', { status: 200 });
+    });
+  const plaintext = (sent: string[]) => sent.filter((url) => url.startsWith('http:'));
+
+  test('runHttp', async () => {
+    const sent: string[] = [];
+    const outcome = await runHttp(
+      check({ id: 'llms-txt', with: { path: '/llms.txt', expect: { status: [200], body_regex: '^#' } } }),
+      ctx({ fetchImpl: towardHttp(sent) }),
+    );
+    expect(plaintext(sent)).toEqual([]);
+    expect(outcome.status).toBe('absent');
+    expect(outcome.evidence[0]).toMatchObject({
+      url: 'https://example.com/llms.txt',
+      status: 301,
+      ok: false,
+      why: [WHY],
+      error: null,
+    });
+  });
+
+  test('runRetainedDocument', async () => {
+    const outcome = await runRetainedDocument(
+      check({
+        id: 'api-catalog',
+        eval: 'retained-document',
+        with: { retained: 'api-catalog', expect: { status: [200], body_regex: 'linkset' } },
+      }),
+      ctx({
+        fetchImpl: stubFetch(() => {
+          throw new Error('a retained-document check must not send a request');
+        }),
+        retainedDocuments: new Map<RetainedDocumentKey, RetainedDocument>([
+          [
+            'api-catalog',
+            {
+              url: 'https://example.com/.well-known/api-catalog',
+              response: {
+                status: 301,
+                headers: { location: 'http://example.com/.well-known/api-catalog' },
+                body: '',
+                error: 'redirect refused: 301 to http://example.com/.well-known/api-catalog: not https',
+                refused: 'insecure-scheme',
+              },
+            },
+          ],
+        ]),
+      }),
+    );
+    expect(outcome.status).toBe('absent');
+    expect(outcome.evidence[0]).toMatchObject({ status: 301, ok: false, why: [WHY], retained: 'api-catalog' });
+  });
+
+  test('runAuthMd', async () => {
+    const sent: string[] = [];
+    const outcome = await runAuthMd(
+      check({ id: 'auth-md', handler: 'auth-md', with: { path_any: ['/.well-known/auth.md', '/auth.md'] } }),
+      ctx({ fetchImpl: towardHttp(sent) }),
+    );
+    expect(plaintext(sent)).toEqual([]);
+    expect(outcome).toEqual({
+      status: 'absent',
+      evidence: [
+        { url: 'https://example.com/.well-known/auth.md', status: 301, ok: false, why: [WHY] },
+        { url: 'https://example.com/auth.md', status: 301, ok: false, why: [WHY] },
+      ],
+    });
+  });
+
+  test('runMarkdownFrontmatter', async () => {
+    const sent: string[] = [];
+    const outcome = await runMarkdownFrontmatter(
+      check({
+        id: 'markdown-frontmatter',
+        handler: 'markdown-frontmatter',
+        with: { path: '/', headers: { Accept: 'text/markdown' } },
+      }),
+      ctx({ fetchImpl: towardHttp(sent) }),
+    );
+    expect(plaintext(sent)).toEqual([]);
+    expect(outcome).toEqual({
+      status: 'absent',
+      evidence: [{ url: 'https://example.com/', status: 301, ok: false, why: [WHY] }],
+    });
+  });
+
+  test('runScopedLlms', async () => {
+    const sent: string[] = [];
+    const outcome = await runScopedLlms(
+      check({ id: 'llms-txt-scoped', handler: 'scoped-llms', eval: 'scoped-discovery', with: { file: 'llms.txt' } }),
+      ctx({ fetchImpl: towardHttp(sent), scopedDirs: ['/docs'] }),
+    );
+    expect(plaintext(sent)).toEqual([]);
+    expect(outcome).toEqual({
+      status: 'absent',
+      evidence: [{ url: 'https://example.com/docs/llms.txt', status: 301, ok: false, why: [WHY] }],
+    });
   });
 });
 

@@ -8140,12 +8140,12 @@
     ]
   },
   "run-document-redirects-to-http": {
-    "score_pct": 51,
-    "score": {"relative":51,"global":12},
+    "score_pct": 49,
+    "score": {"relative":49,"global":12},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
-      {"id":"api-catalog","status":"error"},
+      {"id":"api-catalog","status":"n_a","na_reason":"optional-absent"},
       {"id":"json-errors","status":"broken"},
       {"id":"rate-limit-headers","status":"absent"},
       {"id":"mcp-initialize","status":"n_a","na_reason":"antecedent-unmet"},
@@ -8175,7 +8175,7 @@
       {"id":"mcp-auth-servers","status":"n_a","na_reason":"antecedent-unmet"},
       {"id":"mcp-auth-enforced","status":"n_a","na_reason":"antecedent-unmet"},
       {"id":"webmcp","status":"pass"},
-      {"id":"llms-txt","status":"error"},
+      {"id":"llms-txt","status":"absent"},
       {"id":"llms-txt-format","status":"n_a","na_reason":"antecedent-unmet"},
       {"id":"llms-txt-links","status":"n_a","na_reason":"antecedent-unmet"},
       {"id":"llms-txt-when-to-use","status":"n_a","na_reason":"antecedent-unmet"},

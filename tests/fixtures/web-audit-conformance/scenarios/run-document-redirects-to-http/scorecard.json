@@ -72,10 +72,10 @@
     "pass": 9,
     "noncompliant": 0,
     "broken": 1,
-    "absent": 6,
-    "n_a": 49,
+    "absent": 7,
+    "n_a": 50,
     "skip": 0,
-    "error": 3
+    "error": 1
   },
   "coverage_summary": {
     "must": {
@@ -83,7 +83,7 @@
       "verified": 0
     },
     "should": {
-      "total": 12,
+      "total": 13,
       "verified": 6
     },
     "may": {
@@ -91,9 +91,9 @@
       "verified": 3
     }
   },
-  "score_pct": 51,
+  "score_pct": 49,
   "score": {
-    "relative": 51,
+    "relative": 49,
     "global": 12
   },
   "categories": [
@@ -107,7 +107,7 @@
       "id": "content-for-agents",
       "name": "Content for agents",
       "passed": 5,
-      "counted": 6
+      "counted": 7
     },
     {
       "id": "bot-crawl-policy",
@@ -176,8 +176,9 @@
       "keyword": "may",
       "tier": "optional",
       "principle": "P8",
-      "status": "error",
-      "evidence": "https://example.com/.well-known/api-catalog: redirect refused: 301 to http://example.com/.well-known/api-catalog: not https",
+      "status": "n_a",
+      "na_reason": "optional-absent",
+      "evidence": "https://example.com/.well-known/api-catalog -> 301 (redirects to http; anc sends no plaintext request)",
       "hosts": [
         {
           "host": "example.com"
@@ -612,8 +613,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P2",
-      "status": "error",
-      "evidence": "https://example.com/llms.txt: redirect refused: 301 to http://example.com/llms.txt: not https",
+      "status": "absent",
+      "evidence": "https://example.com/llms.txt -> 301 (redirects to http; anc sends no plaintext request)",
       "hosts": [
         {
           "host": "example.com"

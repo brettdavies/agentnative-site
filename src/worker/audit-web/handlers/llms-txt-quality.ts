@@ -8,7 +8,7 @@
 import { NO_PLAINTEXT_REQUEST } from '../../../shared/web-audit-result-line';
 import type { WebCheck } from '../registry';
 import { guardedFetch, STATUS_ONLY_BODY_BYTES, validatePublicUrl } from '../ssrf';
-import { remainingDeadlineMs, timeoutMsFor } from './shared';
+import { redirectsToHttp, redirectsToHttpItem, remainingDeadlineMs, timeoutMsFor } from './shared';
 import type { EvidenceItem, HandlerContext, ProbeOutcome, ProbeStatus } from './types';
 
 const MARKDOWN_LINK_RE = /\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
@@ -70,12 +70,7 @@ async function probeLink(
     };
   }
   const resp = await guardedFetch(href, {}, { ...ctx.fetchOptions, timeoutMs, maxBodyBytes: STATUS_ONLY_BODY_BYTES });
-  if (resp.refused === 'insecure-scheme') {
-    return {
-      verdict: 'noncompliant',
-      item: { url: href, status: resp.status, ok: false, why: [`redirects to http; ${NO_PLAINTEXT_REQUEST}`] },
-    };
-  }
+  if (redirectsToHttp(resp)) return { verdict: 'noncompliant', item: redirectsToHttpItem(href, resp.status) };
   if (resp.error !== null || resp.status === null) {
     return { verdict: 'error', item: { url: href, status: resp.status, error: resp.error, ok: false } };
   }

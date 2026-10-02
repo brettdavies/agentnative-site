@@ -9,6 +9,8 @@ import type { WebCheck } from '../registry';
 import { guardedFetch } from '../ssrf';
 import {
   endpointRedirects,
+  redirectsToHttp,
+  redirectsToHttpItem,
   resolveUrl,
   retryShapedWhy,
   sameOriginRecoveryLink,
@@ -37,13 +39,16 @@ export type HttpWith = {
  * existing document, so a failed assertion means the affordance is
  * absent, not broken. A timeout is operational (error) unless the check
  * opted into an explicit hang-detection budget via `with.timeout` (e.g.
- * mcp-get-fast-fail, whose failure mode IS the held-open hang).
+ * mcp-get-fast-fail, whose failure mode IS the held-open hang). A redirect
+ * to http is absent: anc never takes that hop, and a surface served only
+ * over plaintext must earn no more than a missing one.
  */
 export function classifyMiss(
-  resp: { status: number | null; error: string | null },
+  resp: Pick<ProbeResponse, 'status' | 'error' | 'refused'>,
   expect: ExpectBlock,
   hasExplicitTimeout: boolean,
 ): Exclude<ProbeStatus, 'pass' | 'na'> {
+  if (redirectsToHttp(resp)) return 'absent';
   if (resp.error !== null) {
     return resp.error.startsWith('TimeoutError') && hasExplicitTimeout ? 'broken' : 'error';
   }
@@ -59,6 +64,9 @@ export function assessResponse(
   w: HttpWith,
   base: string,
 ): { ok: boolean; item: EvidenceItem & { why: string[] } } {
+  if (redirectsToHttp(resp)) {
+    return { ok: false, item: { ...redirectsToHttpItem(url, resp.status), elapsed_ms: resp.elapsed_ms, error: null } };
+  }
   const expect = w.expect ?? {};
   const asserted = assertHttp(expect, resp);
   const recovery =

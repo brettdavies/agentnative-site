@@ -640,7 +640,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     ],
   ),
   'run-document-redirects-to-http': scenario(
-    'the audited site answers /llms.txt and its API catalog with a redirect to the same path over http, where each would answer: neither hop is taken, the llms.txt row reads error naming the refused redirect, and the API catalog is not read',
+    'the audited site answers /llms.txt and its API catalog with a redirect to the same path over http, where each would answer: neither hop is taken, and each document reads as missing (llms.txt absent, the optional API catalog n_a), its evidence naming the redirect to http',
     ['llms-txt', 'api-catalog'],
     [
       ...baseline(),
