@@ -357,6 +357,8 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const { discovery, declared } = await settleEndpointOfRecord(documents, {
     base,
     siteAnswered: rootFromTarget || documents.statuses.some(answeredByTarget),
+    // Every API row applies only to an `api` site type or an unset one.
+    apiRowsApply: input.siteType === null || input.siteType === undefined || input.siteType === 'api',
     enabled: following,
     discovery: discoveryConfig,
     budget: input.domainBudget ?? ALWAYS_ADMIT_BUDGET,

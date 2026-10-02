@@ -121,19 +121,19 @@ export function endpointOfRecord(
  * slice, then the API catalog's declarations, then the endpoint of record.
  * The hosts the documents declare are followed only when the site
  * answered the root or a document read; a redirected POST is an answer of
- * its own.
+ * its own. The API catalog's are followed only when an API row applies.
  */
 export async function settleEndpointOfRecord(
   documents: DiscoveryDocuments,
-  opts: Omit<FollowInput, 'entryEndpointDeclared'> & { siteAnswered: boolean },
+  opts: Omit<FollowInput, 'entryEndpointDeclared'> & { siteAnswered: boolean; apiRowsApply: boolean },
 ): Promise<{ discovery: DiscoveryResult; declared: EndpointOfRecord }> {
-  const { siteAnswered, ...follow } = opts;
+  const { siteAnswered, apiRowsApply, ...follow } = opts;
   const session = openFollow({ ...follow, entryEndpointDeclared: documents.cardEndpoint !== null });
   const [discovery] = await Promise.all([
     documents.probeEndpoint(),
     session.settle(siteAnswered ? documents.declarations : []),
   ]);
   await session.settle(discovery.redirected);
-  await session.settleApi(siteAnswered ? apiDeclarations(documents.apiAnchors) : []);
+  await session.settleApi(siteAnswered && apiRowsApply ? apiDeclarations(documents.apiAnchors) : []);
   return { discovery, declared: endpointOfRecord(follow.base, discovery, session.result()) };
 }

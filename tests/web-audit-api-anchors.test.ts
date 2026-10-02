@@ -336,6 +336,29 @@ describe('API category on api-catalog anchors', () => {
     expect(requestsTo(seen, 'example.com').filter((r) => r.url.includes('auth.md'))).toEqual([]);
   });
 
+  test('a declared content site follows no API anchor and reads no description, since no API row applies to it', async () => {
+    const seen: Seen[] = [];
+    const { scorecard } = await audit(
+      router(
+        site(() => linkset(anchor(`https://${API}/`, 'https://specs.example.org/openapi.json')), {
+          'GET https://specs.example.org/openapi.json': () => json(OPENAPI),
+        }),
+        seen,
+      ),
+      { registry: apiRegistry(), siteType: 'content' },
+    );
+    expect(seen.filter((r) => new URL(r.url).host !== 'example.com')).toEqual([]);
+    expect(scorecard.declared_hosts?.filter((entry) => entry.outcome === 'followed')).toEqual([]);
+    for (const id of API_IDS) expect(row(scorecard, id).status).toBe('n_a');
+  });
+
+  test('every API row applies to the api site type alone, which is what the follow slice gates the catalog on', () => {
+    const api = loadRegistry().checks.filter((check) => check.category === 'api');
+    expect(api.length).toBeGreaterThan(0);
+    for (const check of api)
+      expect({ id: check.id, site_types: check.site_types }).toEqual({ id: check.id, site_types: ['api'] });
+  });
+
   test('with following off, rows that need an off-origin anchor or description read follow-disabled and nothing off the audited origin is requested', async () => {
     const seen: Seen[] = [];
     const { scorecard } = await auditApi(
