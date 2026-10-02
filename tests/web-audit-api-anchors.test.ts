@@ -611,4 +611,61 @@ describe('API category on api-catalog anchors', () => {
     expect(row(scorecard, 'openapi')).toMatchObject({ status: 'n_a', na_reason: 'declared-host-blocked' });
     expect(row(scorecard, 'json-errors')).toMatchObject({ status: 'n_a', na_reason: 'declared-host-blocked' });
   });
+
+  test('an http anchor and an http description are never requested, and neither is an http redirect hop of an https description', async () => {
+    const seen: Seen[] = [];
+    const hop = 'http://files.example.net/openapi.json';
+    const { scorecard } = await auditApi(
+      site(
+        () =>
+          linkset(
+            anchor(`http://${API}/`, `http://${API}/openapi.json`),
+            anchor('https://files.example.net/', 'https://files.example.net/openapi.json'),
+          ),
+        {
+          [`GET http://${API}/openapi.json`]: () => json(OPENAPI),
+          [`GET http://${API}/v1/items/anc-web-audit-no-such`]: () => json({ error: 'not_found' }, 404),
+          'GET https://files.example.net/openapi.json': () => redirect(hop),
+          [`GET ${hop}`]: () => json(OPENAPI),
+        },
+      ),
+      seen,
+    );
+    expect(seen.filter((r) => r.url.startsWith('http:'))).toEqual([]);
+    expect(scorecard.declared_hosts).toEqual([
+      {
+        surface: '/.well-known/api-catalog#/linkset/0',
+        kind: 'api-anchor',
+        url: `http://${API}/`,
+        host: API,
+        outcome: 'not-followed',
+        reason: 'insecure-scheme',
+      },
+      {
+        surface: '/.well-known/api-catalog#/linkset/1',
+        kind: 'api-anchor',
+        url: 'https://files.example.net/',
+        host: 'files.example.net',
+        outcome: 'followed',
+      },
+      {
+        surface: '/.well-known/api-catalog#/linkset/0/service-desc/0',
+        kind: 'api-description',
+        url: `http://${API}/openapi.json`,
+        host: API,
+        outcome: 'not-followed',
+        reason: 'insecure-scheme',
+      },
+      {
+        surface: '/.well-known/api-catalog#/linkset/1/service-desc/0',
+        kind: 'api-description',
+        url: 'https://files.example.net/openapi.json',
+        host: 'files.example.net',
+        final_url: hop,
+        outcome: 'not-followed',
+        reason: 'insecure-scheme',
+      },
+    ]);
+    expect(row(scorecard, 'openapi').hosts?.map((h) => h.host)).not.toContain(API);
+  });
 });
