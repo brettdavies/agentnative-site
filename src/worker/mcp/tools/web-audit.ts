@@ -108,6 +108,12 @@ function attachedResult(terminal: TerminalEvent | null, signal: AbortSignal | un
   return isError('the audit already in flight for this site did not answer; nothing was cached. Retry.');
 }
 
+/** `text` closed as a sentence, so the call to action after it reads as its own. */
+function asSentence(text: string): string {
+  const trimmed = text.trim();
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
 /** The answer to a call whose own run produced `terminal`. */
 function freshResult(terminal: TerminalEvent | null) {
   if (terminal?.type === 'complete') {
@@ -117,7 +123,9 @@ function freshResult(terminal: TerminalEvent | null) {
   if (terminal?.type === 'incomplete') {
     return isError('the audit did not finish within the deadline; nothing was cached. Retry.');
   }
-  if (terminal) return isError(`${terminal.error.message} Nothing was cached. ${terminal.error.cta}`);
+  if (terminal) {
+    return isError(`the audit failed; nothing was cached. ${asSentence(terminal.error.message)} ${terminal.error.cta}`);
+  }
   return isError('the audit ended without a result; nothing was cached. Retry.');
 }
 

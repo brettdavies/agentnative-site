@@ -1638,6 +1638,39 @@ describe('audit_website with follow_declarations false', () => {
   });
 });
 
+describe('audit_website: a followed fresh run that fails', () => {
+  const IP = '203.0.113.61';
+
+  async function failedCall(opts: WebEnvOpts, answer: () => Response) {
+    const env = await makeEnv({ minimalRegistry: true, followSwitch: 'true', ...opts });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = stubFetch(answer);
+    try {
+      return await callTool(env, 'audit_website', { url: 'example.com' }, IP);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  test('an unreachable target says the audit failed, gives the reason, and ends by asking to check the address', async () => {
+    const res = await failedCall({}, () => new Response('', { status: 530 }));
+    expect(res.result?.isError).toBe(true);
+    const text = res.result?.content?.[0]?.text ?? '';
+    expect(text).toStartWith(
+      'the audit failed; nothing was cached. https://example.com/ did not answer any probe (every response was a Cloudflare edge error',
+    );
+    expect(text).toEndWith(' Check the address and try again.');
+  });
+
+  test('an engine that throws says the audit failed, gives the error as a sentence, and ends by asking to retry', async () => {
+    const res = await failedCall({ failRegistry: true }, () => new Response('not found', { status: 404 }));
+    expect(res.result?.isError).toBe(true);
+    expect(res.result?.content?.[0]?.text).toBe(
+      'the audit failed; nothing was cached. web-audit registry fetch failed: 500. Try again in a moment.',
+    );
+  });
+});
+
 describe('audit_website discloses third-party probing', () => {
   test('the description names the caps, tells MCP wire probes from API anchor GETs, and offers the opt-out', async () => {
     const env = await makeEnv();
