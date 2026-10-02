@@ -1368,11 +1368,10 @@ describe('loadScoredTools — schema 0.4 metadata', () => {
   });
 
   test('rejects scorecards outside the supported schema set (no synthesis fallback)', async () => {
-    // Schemas 0.5 and 0.6 are supported during the migration window. The site
-    // reads `scorecard.badge.*` and `scorecard.{tool,anc,run,target}` directly
-    // from each scorecard; a scorecard without these blocks would fail render.
-    // The load-time invariant fails the build immediately rather than silently
-    // render wrong data via a synthesized fallback.
+    // The site reads `scorecard.badge.*` and `scorecard.{tool,anc,run,target}`
+    // directly from each scorecard; a scorecard without these blocks would fail
+    // render. The load-time invariant fails the build immediately rather than
+    // silently render wrong data via a synthesized fallback.
     const dir = join(tmpdir(), `scorecards-invariant-${Date.now()}`);
     await mkdir(dir, { recursive: true });
     const stale = {
@@ -1433,7 +1432,7 @@ describe('loadScoredTools — schema 0.4 metadata', () => {
     }
   });
 
-  test('loads schema 0.5, 0.6, and 0.7 scorecards side by side', async () => {
+  test('loads schema 0.5 through 0.8 scorecards side by side', async () => {
     const dir = join(tmpdir(), `scorecards-mixed-${Date.now()}`);
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, 'alpha-v1.0.0.json'), JSON.stringify(makeV04Scorecard()));
@@ -1447,6 +1446,15 @@ describe('loadScoredTools — schema 0.4 metadata', () => {
         makeV06Scorecard({
           schema_version: '0.7',
           tool: { name: 'gamma', binary: 'gamma', version: 'gamma 2.0.0' },
+        }),
+      ),
+    );
+    await writeFile(
+      join(dir, 'delta-v3.0.0.json'),
+      JSON.stringify(
+        makeV06Scorecard({
+          schema_version: '0.8',
+          tool: { name: 'delta', binary: 'delta', version: 'delta 3.0.0' },
         }),
       ),
     );
@@ -1479,20 +1487,29 @@ describe('loadScoredTools — schema 0.4 metadata', () => {
           creator: 'me',
           description: 'z',
         },
+        {
+          name: 'delta',
+          repo: 'g/h',
+          binary: 'delta',
+          language: 'Rust',
+          tier: 'workhorse',
+          creator: 'me',
+          description: 'w',
+        },
       ];
       const result = await loadScoredTools(dir, registry);
       const tools = result.tools as LoadedTool[];
       const versions = tools.map((t) => t.scorecard.schema_version).sort();
-      expect(versions).toEqual(['0.5', '0.6', '0.7']);
+      expect(versions).toEqual(['0.5', '0.6', '0.7', '0.8']);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  test('rejects a schema version above the supported set (e.g. 0.8)', async () => {
+  test('rejects a schema version above the supported set (e.g. 0.10)', async () => {
     const dir = join(tmpdir(), `scorecards-future-${Date.now()}`);
     await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, 'fixture-v1.2.3.json'), JSON.stringify(makeV06Scorecard({ schema_version: '0.8' })));
+    await writeFile(join(dir, 'fixture-v1.2.3.json'), JSON.stringify(makeV06Scorecard({ schema_version: '0.10' })));
     try {
       const registry = [
         {
@@ -1506,7 +1523,7 @@ describe('loadScoredTools — schema 0.4 metadata', () => {
         },
       ];
       await expect(loadScoredTools(dir, registry)).rejects.toThrow(
-        /schema_version "0\.8" not supported.*Site supports schema 0\.5, 0\.6, 0\.7/,
+        /schema_version "0\.10" not supported.*Site supports schema 0\.5, 0\.6, 0\.7, 0\.8, 0\.9\./,
       );
     } finally {
       await rm(dir, { recursive: true, force: true });
