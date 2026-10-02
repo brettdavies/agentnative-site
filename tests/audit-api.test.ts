@@ -815,6 +815,38 @@ describe('POST /api/score: a run that does not follow declared hosts', () => {
     }
   });
 
+  test('with no turnstile_token it gets the tokenless answer and spends nothing: no siteverify, no limiter, no engine', async () => {
+    const tracker = newTracker();
+    const { res } = await call(post({ target: 'anc.dev', follow_declarations: false }), makeEnv({ tracker }));
+    expect(res.status).toBe(403);
+    expect(await errorOf(res)).toMatchObject({ code: 'turnstile_failed', cta: 'Start the audit from the page.' });
+    expect(tracker).toMatchObject({ siteverifyCalls: 0, limiterCalls: [], probeCalls: [] });
+  });
+
+  test('a request admission refuses gets that refusal and runs no engine', async () => {
+    const bucket = Math.floor(Date.now() / 3_600_000);
+    const refusals: Array<{ overrides: Parameters<typeof makeEnv>[0]; status: number; code: string }> = [
+      { overrides: { limiter: false }, status: 429, code: 'rate_limited' },
+      { overrides: { ipLimiter: false }, status: 429, code: 'rate_limited' },
+      { overrides: { kvSeed: { [`audit:web:203.0.113.9:${bucket}`]: '30' } }, status: 429, code: 'rate_limited' },
+      { overrides: { turnstile: 'reject' }, status: 403, code: 'turnstile_failed' },
+      { overrides: { turnstile: 'transport' }, status: 503, code: 'turnstile_unavailable' },
+    ];
+    for (const refusal of refusals) {
+      const tracker = newTracker();
+      const { res } = await call(
+        post({ target: 'anc.dev', turnstile_token: 'x', follow_declarations: false }),
+        makeEnv({ tracker, ...refusal.overrides }),
+      );
+      const body = (await res.json()) as { error?: { code: string } };
+      expect({ status: res.status, code: body.error?.code, probes: tracker.probeCalls }).toEqual({
+        status: refusal.status,
+        code: refusal.code,
+        probes: [],
+      });
+    }
+  });
+
   test('it streams its rows and ends on a complete line with no URLs, marking no in-flight flag', async () => {
     const env = watchedEnv();
     const ctx = purgeCtx();

@@ -1565,6 +1565,27 @@ describe('audit_website with follow_declarations false', () => {
     }
   });
 
+  test('with no cf-connecting-ip it is refused with -32099 and runs no audit', async () => {
+    const recorded = recordingBucket();
+    const env = await makeEnv({ minimalRegistry: true, followSwitch: 'true' });
+    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = recorded.bucket;
+    const { result, records } = await offline(() =>
+      withLogCapture(() => callTool(env, 'audit_website', { url: 'anc.dev', follow_declarations: false })),
+    );
+    expect(result.result?.isError).toBe(true);
+    expect(result.result?.content?.[0]?.text).toContain('-32099');
+    expect(result.result?.content?.[0]?.text).toContain('cf-connecting-ip');
+    expect(records.filter((r) => r.record.scope === 'web-audit.run')).toEqual([]);
+  });
+
+  test('with the hourly window exhausted it is refused and runs no audit', async () => {
+    const bucket = Math.floor(Date.now() / 3_600_000);
+    const out = await run({ follow_declarations: false }, { kvSeed: { [`audit:web:${IP}:${bucket}`]: '30' } });
+    expect(out.result.result?.isError).toBe(true);
+    expect(out.result.result?.content?.[0]?.text).toContain('30 fresh audits per hour');
+    expect(out.runRecord).toBeUndefined();
+  });
+
   test('beside a followed run in flight it runs its own transient audit and never attaches', async () => {
     const startedAt = new Date().toISOString();
     const jobs = fakeJobNamespace();
