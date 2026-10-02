@@ -423,6 +423,8 @@ const baseline = (): Exchange[] => [get('/', html(rootHtml()))];
 const DECLARED_ENDPOINT = 'https://mcp.example.net/mcp';
 
 const REDIRECTED_ENDPOINT = 'https://mcp.example.org/mcp';
+const HTTP_DECLARED_ENDPOINT = 'http://mcp.example.net/mcp';
+const HTTP_REDIRECT_HOP = 'http://mcp.example.org/mcp';
 const declaringCard = (endpoint: string): Exchange => get(CARD_PATH, json({ ...SERVER_CARD, mcp_endpoint: endpoint }));
 const selfNamingCard = (endpoint: string): Exchange => get(`${endpoint}/server-card`, cardDocument({ ...SEP_2127_CARD, remotes: [{ type: 'streamable-http', url: endpoint }] }));
 const FOLLOWED_IDS = ['mcp-initialize', 'mcp-tools-list', 'mcp-cors-preflight', 'mcp-cors-actual', 'mcp-get-fast-fail'];
@@ -1206,6 +1208,31 @@ export const SCENARIOS: Record<string, Scenario> = {
       ...legacyOnlyMcp({ endpoint: DECLARED_ENDPOINT, cors: 'full' }),
     ],
     { follow_declarations: false },
+  ),
+  'follow-http-declarations': scenario(
+    'the AI catalog names an https endpoint that redirects to http, the card names an http endpoint, and the api-catalog anchors an http API host whose description is http, each host answering as one the audit would follow: nothing is requested over http, every entry reads not-followed with reason insecure-scheme (the redirected one with its hop as the final URL), and no MCP or API row is evaluated at any of them',
+    ['mcp-initialize', 'openapi', 'json-errors'],
+    [
+      ...baseline(),
+      get(
+        '/.well-known/ai-catalog.json',
+        aiCatalog(cardEntry({ data: { ...SEP_2127_CARD, remotes: [{ type: 'streamable-http', url: REDIRECTED_ENDPOINT }] } })),
+      ),
+      get(REDIRECTED_ENDPOINT, redirect(HTTP_REDIRECT_HOP, 302)),
+      selfNamingCard(HTTP_REDIRECT_HOP),
+      declaringCard(HTTP_DECLARED_ENDPOINT),
+      selfNamingCard(HTTP_DECLARED_ENDPOINT),
+      ...legacyOnlyMcp({ endpoint: HTTP_DECLARED_ENDPOINT, cors: 'full' }),
+      get(
+        '/.well-known/api-catalog',
+        linkset({
+          anchor: 'http://api.example.net/',
+          'service-desc': [{ href: 'http://api.example.net/openapi.json', type: 'application/openapi+json' }],
+        }),
+      ),
+      get('http://api.example.net/openapi.json', json(OPENAPI)),
+      get(`http://api.example.net${API_PROBE_PATH}`, json(API_ERROR, 404)),
+    ],
   ),
 
   // ---- endpoints that require sign-in ----------------------------------------

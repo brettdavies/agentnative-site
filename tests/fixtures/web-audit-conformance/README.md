@@ -86,7 +86,8 @@ followed card document names come right after that document's entry), then the a
 targets the common-path POSTs were redirected to off the origin, in probe order and with the redirecting path as
 their `surface`, never in the order requests complete. A URL declared twice keeps its first entry. Endpoints are tried
 one at a time in that order and the first that its own host confirms becomes the endpoint, so every later endpoint
-reads `not-followed`.
+reads `not-followed`. A declared URL or redirect hop on `http` that the guard admits is never requested and
+reads `not-followed` with reason `insecure-scheme`, a refused hop recorded as its `final_url`.
 
 ## scores.json
 
@@ -157,6 +158,7 @@ the first two, `im` for the body patterns) and `results[i] = new RegExp(pattern,
 | `follow-card-admit` | the card names an endpoint on another host, whose own card at `<endpoint>/server-card` names it: the MCP rows are scored there | `mcp-initialize`, `mcp-tools-list`, `mcp-cors-preflight`, `mcp-cors-actual`, `mcp-get-fast-fail` |
 | `follow-disabled` | the same declared endpoint as follow-card-admit with following off: nothing off the audited origin is requested and the MCP rows read follow-disabled | `mcp-initialize`, `mcp-tools-list`, `mcp-cors-preflight`, `mcp-cors-actual`, `mcp-get-fast-fail` |
 | `follow-host-cap` | four declared hosts each redirect into a private range and are blocked; the fifth exceeds the per-audit host cap and is never requested | `mcp-initialize` |
+| `follow-http-declarations` | the AI catalog names an https endpoint that redirects to http, the card names an http endpoint, and the api-catalog anchors an http API host whose description is http, each host answering as one the audit would follow: nothing is requested over http, every entry reads not-followed with reason insecure-scheme (the redirected one with its hop as the final URL), and no MCP or API row is evaluated at any of them | `mcp-initialize`, `openapi`, `json-errors` |
 | `follow-own-redirect-admit` | the audited site's /mcp answers the discovery POSTs with a 307 to another host whose card at `<endpoint>/server-card` names it: no POST follows the redirect, the target is confirmed like a declared endpoint, and the MCP rows are scored there | `mcp-initialize`, `mcp-tools-list`, `mcp-cors-preflight`, `mcp-cors-actual`, `mcp-get-fast-fail` |
 | `follow-own-redirect-refused` | the audited site's /mcp answers the discovery POSTs with a 307 to another host that publishes nothing naming that URL: no POST or OPTIONS reaches the host, and the MCP rows name the host that did not confirm it | `mcp-initialize`, `mcp-tools-list`, `mcp-cors-preflight`, `mcp-cors-actual`, `mcp-get-fast-fail` |
 | `follow-reciprocity-refused` | the declared endpoint answers GET with 405 and Allow: POST but publishes no card, catalog entry, or metadata naming it: no wire probe, and the MCP rows name the host that did not confirm it | `mcp-initialize`, `mcp-tools-list`, `mcp-cors-preflight`, `mcp-cors-actual`, `mcp-get-fast-fail` |

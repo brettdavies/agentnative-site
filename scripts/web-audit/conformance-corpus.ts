@@ -539,7 +539,8 @@ followed card document names come right after that document's entry), then the a
 targets the common-path POSTs were redirected to off the origin, in probe order and with the redirecting path as
 their \`surface\`, never in the order requests complete. A URL declared twice keeps its first entry. Endpoints are tried
 one at a time in that order and the first that its own host confirms becomes the endpoint, so every later endpoint
-reads \`not-followed\`.
+reads \`not-followed\`. A declared URL or redirect hop on \`http\` that the guard admits is never requested and
+reads \`not-followed\` with reason \`insecure-scheme\`, a refused hop recorded as its \`final_url\`.
 
 ## scores.json
 
