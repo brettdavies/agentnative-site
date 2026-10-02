@@ -163,7 +163,10 @@ encodes has moved.
   refusal evidence. A host whose nonsense path also answers 401 with metadata echoing that path's URL grants no
   presence.
 - R14. MCP checks that work without a session still run against a protected endpoint; checks that need a session resolve
-  not-applicable with reason auth-required, never absent or broken.
+  not-applicable with reason auth-required when sign-in blocks them, never absent or broken. A row the audit reached and
+  got a definitive answer from is scored on that answer, so a lane the server refuses without asking for sign-in reads
+  as it does on an open server, and any row whose own 401 is backed by the endpoint's RFC 9728 metadata reads
+  auth-required on either design (KTD25).
 - R15. New positive checks score auth enforcement: the 401 carries a well-formed `WWW-Authenticate` with
   `resource_metadata`; the metadata carries valid https `authorization_servers`; an unauthenticated `tools/list` is
   rejected. A failure is priced by KTD25: the challenge and enforcement checks fail noncompliant, and the
