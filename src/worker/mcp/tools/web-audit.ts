@@ -38,6 +38,7 @@ import {
   WEB_AUDIT_STALE_AFTER_MS,
 } from '../../audit-web/cache';
 import { webEnvelope } from '../../audit-web/core';
+import { FOLLOW_DISCLOSURE } from '../../audit-web/follow-disclosure';
 import type { FollowSwitchEnv } from '../../audit-web/follow-switch';
 import { queueHitMinPurge, webTag } from '../../audit-web/hit-min-purge';
 import { consumeWebAuditHourlyBudget } from '../../audit-web/limiter';
@@ -197,7 +198,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         '1-minute cache-reuse window — eligibility only, not a promise a fresh audit will be available, since kill ' +
         'switches, rate limits, and service failures still apply. A fresh audit is gated like score_cli: disabled when ' +
         'WEB_AUDIT_ENABLED or MCP_ENABLED is not "true"; a request without cf-connecting-ip returns -32099 (no anon ' +
-        'fallback); a per-IP burst limiter plus a 30-fresh-audits-per-hour-per-IP window apply.',
+        `fallback); a per-IP burst limiter plus a 30-fresh-audits-per-hour-per-IP window apply. ${FOLLOW_DISCLOSURE}`,
       inputSchema: {
         url: z.string().describe('The website URL or bare domain to audit.'),
         site_type: z

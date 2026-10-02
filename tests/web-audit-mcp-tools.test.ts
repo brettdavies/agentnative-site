@@ -1578,3 +1578,26 @@ describe('audit_website with follow_declarations false', () => {
     expect(JSON.stringify(res)).toContain('follow_declarations');
   });
 });
+
+describe('audit_website discloses third-party probing', () => {
+  test('the description names the caps, tells MCP wire probes from API anchor GETs, and offers the opt-out', async () => {
+    const env = await makeEnv();
+    const { body } = await mcpRpc(env, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
+    const tools = body.result?.tools as
+      | Array<{ name: string; description: string; inputSchema: { properties: Record<string, { type?: string }> } }>
+      | undefined;
+    const tool = tools?.find((t) => t.name === 'audit_website');
+    const description = tool?.description ?? '';
+    expect(description).toContain('also contacts third-party hosts the site declares');
+    expect(description).toContain(
+      "wire-probed (JSON-RPC POSTs, a CORS preflight) only after one of those documents on the endpoint's own host names the endpoint",
+    );
+    expect(description).toContain("one GET to a nonsense path on the site's declaration alone");
+    expect(description).toContain(
+      'at most 4 off-origin hosts with at most 12 follow-phase document requests inside a 6-second follow window',
+    );
+    expect(description).toContain("following lengthens an audit's wall time");
+    expect(description).toContain('WEB_AUDIT_FOLLOW_ENABLED');
+    expect(tool?.inputSchema.properties.follow_declarations?.type).toBe('boolean');
+  });
+});

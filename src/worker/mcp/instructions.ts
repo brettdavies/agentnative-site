@@ -18,6 +18,7 @@
 // talking to staging.
 
 import { SCORE_PREFIX } from '../../shared/audit-routes';
+import { FOLLOW_DISCLOSURE } from '../audit-web/follow-disclosure';
 import { siteOrigin } from './site-origin';
 
 export const SPEC_REVISION = '2026-07-28';
@@ -71,10 +72,11 @@ function buildInstructionsText(siteUrl: string): string {
       `burst limiter (WEB_AUDIT_LIMITER_IP) plus ${WEB_AUDIT_HOURLY_REQUESTS} fresh audits per 60 minutes per IP, ` +
       'no anon fallback. All keyed on ' +
       'cf-connecting-ip; the read tier falls back to a shared anon bucket, the audit tiers reject on missing IP ' +
-      'rather than consuming a shared bucket. Three of the four kill switches let the operator disable the whole ' +
-      'surface (MCP_ENABLED), only the cost-bearing CLI audit tool (MCP_LIVE_SCORING_ENABLED), or the website audit ' +
-      '(WEB_AUDIT_ENABLED) without a deploy; the fourth (MCP_LEGACY_ENABLED) surfaces as the -32022 legacy reject ' +
-      'above.',
+      'rather than consuming a shared bucket. Four of the five kill switches let the operator disable the whole ' +
+      'surface (MCP_ENABLED), only the cost-bearing CLI audit tool (MCP_LIVE_SCORING_ENABLED), the website audit ' +
+      '(WEB_AUDIT_ENABLED), or only the following of declared hosts (WEB_AUDIT_FOLLOW_ENABLED) without a deploy; ' +
+      'the fifth (MCP_LEGACY_ENABLED) surfaces as the -32022 legacy reject above.',
+    FOLLOW_DISCLOSURE,
     `Spec revision is pinned to ${SPEC_REVISION}; the /.well-known/mcp/server-card.json server card advertises the same value, and the ` +
       'two are bumped in lockstep when the SDK is upgraded.',
     `Connect now at ${siteUrl}/mcp (no authentication). Full recipes remain at ${docsUrl}.`,

@@ -67,7 +67,7 @@ import { admittingArtifact, type MetadataMatch, normalizeEndpointUrl } from './r
 import type { WebAuditDiscoveryConfig } from './registry';
 import { DOCUMENT_MAX_BODY_BYTES, type GuardedFetchOptions, isEdgeErrorStatus, STATUS_ONLY_BODY_BYTES } from './ssrf';
 
-const FOLLOW_SLICE_MS = 6_000;
+export const FOLLOW_SLICE_MS = 6_000;
 // A streamable-HTTP endpoint may hold a GET open as an event stream; the
 // GET only looks for a redirect and a challenge, so a hang must not spend
 // the slice reciprocity needs.

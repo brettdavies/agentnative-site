@@ -14,8 +14,8 @@ import type { EvidenceItem } from './handlers/types';
 import type { ArtifactReadOptions, ArtifactSource } from './reciprocity';
 import { type GuardedFetchOptions, guardedFetch, REDIRECT_STATUSES } from './ssrf';
 
-const MAX_FOLLOWED_HOSTS = 4;
-const MAX_FOLLOW_REQUESTS = 12;
+export const MAX_FOLLOWED_HOSTS = 4;
+export const MAX_FOLLOW_REQUESTS = 12;
 
 /**
  * The hourly budget for each declared domain, drawn once per audit and
