@@ -7,6 +7,7 @@
 import { describe, expect, test } from 'bun:test';
 import { loadRegistry } from '../scripts/web-audit/conformance-corpus';
 import type { WebAuditRegistry } from '../src/worker/audit-web/registry';
+import { OPENAPI_MAX_BODY_BYTES } from '../src/worker/audit-web/ssrf';
 import {
   audit,
   cardDocument,
@@ -81,6 +82,50 @@ async function auditApi(
   registry = apiRegistry(),
 ) {
   return audit(router(routes, seen), { registry, followDeclarations });
+}
+
+type Placement = { anchor: string; url: string; offOrigin: boolean };
+
+const DESCRIPTION_PLACEMENTS: Array<[string, Placement]> = [
+  [
+    'read by the follow slice off the audited origin',
+    { anchor: `https://${API}/`, url: `https://${API}/openapi.json`, offOrigin: true },
+  ],
+  [
+    'read on the audited origin',
+    { anchor: 'https://example.com/', url: 'https://example.com/openapi.json', offOrigin: false },
+  ],
+];
+
+// Stripe's spec3.json puts its `openapi` key after the components object,
+// which alone runs past the bytes the cap reads.
+const PADDING = 'x'.repeat(OPENAPI_MAX_BODY_BYTES);
+const JSON_PAST_THE_CAP = JSON.stringify({ components: { schemas: { padding: PADDING } }, ...OPENAPI });
+const YAML_PAST_THE_CAP = `components:\n  schemas:\n    padding: ${PADDING}\nopenapi: 3.1.0\npaths: {}\n`;
+const HTML_PAST_THE_CAP = `<!doctype html>\n<html><body><p>${PADDING}</p><a href="/openapi.json">OpenAPI</a></body></html>\n`;
+
+const PRESENT_PAST_THE_CAP: Array<[string, string, string]> = [
+  ['JSON', 'application/json', JSON_PAST_THE_CAP],
+  ['YAML', 'application/yaml', YAML_PAST_THE_CAP],
+  ['a JSON object served as plain text', 'text/plain', JSON_PAST_THE_CAP],
+];
+
+const NOT_A_DESCRIPTION_PAST_THE_CAP: Array<[string, string, string]> = [
+  ['an HTML page', 'text/html', HTML_PAST_THE_CAP],
+  ['an HTML page labelled JSON', 'application/json', HTML_PAST_THE_CAP],
+  ['plain text that opens no JSON object', 'text/plain', `${PADDING}\nopenapi\n`],
+];
+
+async function auditDescription(placement: Placement, contentType: string, body: string) {
+  const seen: Seen[] = [];
+  const { events, scorecard } = await auditApi(
+    site(() => linkset(anchor(placement.anchor, placement.url)), {
+      [`GET ${placement.url}`]: () => new Response(body, { headers: { 'content-type': contentType } }),
+    }),
+    seen,
+  );
+  const result = events.flatMap((e) => (e.type === 'result' && e.result.id === 'openapi' ? [e.result] : []))[0];
+  return { openapi: row(scorecard, 'openapi'), evidence: result?.raw_evidence ?? [], seen };
 }
 
 describe('API category on api-catalog anchors', () => {
@@ -226,6 +271,48 @@ describe('API category on api-catalog anchors', () => {
     const result = events.flatMap((e) => (e.type === 'result' && e.result.id === 'openapi' ? [e.result] : []))[0];
     expect(result?.raw_evidence[0]).toMatchObject({ url: `https://${API}/openapi.json`, truncated: true });
     expect(hygieneProbes(seen)).toEqual([`https://${API}${FALLBACK_PATH}`]);
+  });
+
+  describe.each(DESCRIPTION_PLACEMENTS)('an OpenAPI description %s', (_where, placement) => {
+    test.each(
+      PRESENT_PAST_THE_CAP,
+    )('cut at the cap as %s, its marker past the cap, counts as present with its evidence marked truncated', async (_shape, contentType, body) => {
+      const { openapi, evidence, seen } = await auditDescription(placement, contentType, body);
+      expect(openapi.status).toBe('pass');
+      expect(evidence[0]).toMatchObject({
+        url: placement.url,
+        status: 200,
+        ok: true,
+        truncated: true,
+        why: ['status 200 in [200]', 'description larger than 512 KiB; read in part, presence counted'],
+      });
+      expect(evidence[0]?.off_origin === true).toBe(placement.offOrigin);
+      expect(hygieneProbes(seen)).toEqual([`${new URL(placement.anchor).origin}${FALLBACK_PATH}`]);
+    });
+
+    test.each(
+      NOT_A_DESCRIPTION_PAST_THE_CAP,
+    )('cut at the cap as %s keeps its miss', async (_shape, contentType, body) => {
+      const { openapi, evidence } = await auditDescription(placement, contentType, body);
+      expect(openapi.status).toBe('broken');
+      expect(evidence[0]).toMatchObject({
+        url: placement.url,
+        ok: false,
+        truncated: true,
+        why: ['status 200 in [200]', 'body no match /openapi|swagger/'],
+      });
+    });
+
+    test('read whole without the marker keeps its miss', async () => {
+      const { openapi, evidence } = await auditDescription(
+        placement,
+        'application/json',
+        JSON.stringify({ components: { schemas: {} }, paths: {} }),
+      );
+      expect(openapi.status).toBe('broken');
+      expect(evidence[0]).toMatchObject({ ok: false, why: ['status 200 in [200]', 'body no match /openapi|swagger/'] });
+      expect(evidence[0]?.truncated).toBeUndefined();
+    });
   });
 
   test('with no catalog and no on-origin OpenAPI, the API checks stay n/a', async () => {
