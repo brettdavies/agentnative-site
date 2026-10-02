@@ -22,6 +22,8 @@
 #   llms-txt-quality      format / links / when-to-use ops on retained llms.txt
 #   api-hygiene           JSON error bodies / rate-limit headers from a safe GET
 #   protected-resource    sign-in challenge and RFC 9728 metadata an MCP endpoint served (no request)
+#   server-card           required fields of the retained server card, against the
+#                         vendored SEP-2127 schema (no request)
 #
 # Fields:
 #   id          stable slug, also the remediation-doc key
@@ -45,6 +47,10 @@
 #   handler     one of the handlers above
 #   with        handler parameters
 #   hint        one-line remediation summary
+#
+# A server-card check's with.required and with.remote_required are not
+# authored here: the build reads them from the `required` arrays of the
+# vendored extension schema (src/data/web-audit/server-card.schema.json).
 
 version: 1
 
@@ -103,6 +109,15 @@ mcp_lanes:
   browser:
     label: In-page tools · WebMCP
     note: browser tools exposed by the site's HTML, not by the MCP server
+
+# Retired check ids, outside `checks`. A stored row can still carry one, so
+# the result page renders it under its successor's lane with a note naming
+# the successor, and its fix page stays live. Display and build only: no
+# audit reads this map, so the registry fingerprint ignores it.
+retired:
+  well-known-mcp-card:
+    successor: mcp-server-card
+    reason: the card check scores the server card discovery keeps, SEP-2127 or SEP-1649, instead of requesting one SEP-1649 path
 
 # Alternatives: site designs that cannot both be satisfied at full access,
 # whatever the audit's vantage and whatever credential it holds. A
@@ -504,21 +519,24 @@ checks:
       surface: actual
     hint: Echo Access-Control-Allow-Origin on the actual POST, not only the preflight.
 
-  - id: well-known-mcp-card
+  # Scores the card of record discovery kept, of either generation: a
+  # SEP-2127 card passes when its required fields validate, and a SEP-1649
+  # card passes with the superseded advisory.
+  - id: mcp-server-card
     category: mcp
     lane: shared
     tier: recommended
     principle: P8
     site_types: [mcp]
     antecedent: mcp-present
+    eval: retained-document
     weight: 3
-    title: A .well-known MCP server card is published (SEP-1649)
+    title: An MCP server card is published
     breadcrumb: MCP server card
-    handler: http
+    handler: server-card
     with:
-      path: /.well-known/mcp/server-card.json
-      expect: { status: [200], content_type: "json", body_regex: "mcp_endpoint|serverInfo|transport|\"name\"" }
-    hint: Publish /.well-known/mcp/server-card.json (SEP-1649).
+      retained: server-card
+    hint: Publish a SEP-2127 server card at <endpoint>/server-card and list it in /.well-known/ai-catalog.json.
 
   - id: mcp-card-legacy-aliases
     category: mcp

@@ -1,8 +1,9 @@
 {
-  "description": "an AI catalog entry names a SEP-2127 card on the audited origin; its streamable-http remote is the endpoint, so no common path is POSTed",
+  "description": "an AI catalog entry names a SEP-2127 card on the audited origin; its streamable-http remote is the endpoint, so no common path is POSTed, and the card passes the card check",
   "covers": [
     "ai-catalog",
-    "mcp-initialize"
+    "mcp-initialize",
+    "mcp-server-card"
   ],
   "target": "https://example.com/",
   "site_type": null,

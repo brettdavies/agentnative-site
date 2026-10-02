@@ -83,6 +83,7 @@ describe('web-audit registry shape', () => {
         'llms-txt-quality',
         'api-hygiene',
         'protected-resource',
+        'server-card',
       ]).toContain(check.handler);
       expect(Array.isArray(check.site_types) && check.site_types.length > 0).toBe(true);
       for (const st of check.site_types) expect(['content', 'api', 'mcp', 'all']).toContain(st);
@@ -131,14 +132,16 @@ describe('web-audit registry shape', () => {
   });
 
   // Publishing the card and retiring its legacy aliases are separate rows:
-  // the card requirement carries no eval rule, and alias hygiene is its own
-  // MAY row, so a correct card is never downgraded by a legacy path.
+  // the card requirement scores the card discovery kept, and alias hygiene
+  // is its own MAY row, so a correct card is never downgraded by a legacy path.
   test('the card requirement and its legacy-alias row are separate checks', async () => {
     const registry = await loadNormalized();
-    const card = registry.checks.find((c) => c.id === 'well-known-mcp-card');
-    expect(card?.eval).toBeUndefined();
+    const card = registry.checks.find((c) => c.id === 'mcp-server-card');
+    expect(card?.eval).toBe('retained-document');
+    expect(card?.handler).toBe('server-card');
     expect(card?.antecedent).toBe('mcp-present');
     expect(card?.keyword).toBe('should');
+    expect(card?.weight).toBe(3);
 
     const aliases = registry.checks.find((c) => c.id === 'mcp-card-legacy-aliases');
     expect(aliases?.eval).toBe('legacy-alias-redirects');
@@ -416,6 +419,17 @@ describe('web-audit registry shape', () => {
     expect(() =>
       normalizeWebAuditRegistry({ ...laneBase, mcp_lanes: { shared: { label: 'x' } }, checks: [mcpCheck] }),
     ).toThrow(/mcp_lanes/);
+  });
+
+  test('a retired id names a live successor and is not itself live', () => {
+    const retiring = (retired: unknown) => normalizeWebAuditRegistry({ ...abortBase, retired, checks: [abortCheck] });
+    expect(retiring({ 'old-x': { successor: 'x', reason: 'renamed' } }).retired).toEqual({
+      'old-x': { successor: 'x', reason: 'renamed' },
+    });
+    expect(() => retiring({ x: { successor: 'x', reason: 'r' } })).toThrow(/retired id "x" is still a registry check/);
+    expect(() => retiring({ 'old-x': { successor: 'gone', reason: 'r' } })).toThrow(/successor "gone"/);
+    expect(() => retiring({ 'old-x': { successor: 'x' } })).toThrow(/needs a reason/);
+    expect(() => retiring({ 'old-x': { successor: 'x', reason: 'r', lane: 'shared' } })).toThrow(/unknown field/);
   });
 
   test('duplicate check ids abort normalization', () => {

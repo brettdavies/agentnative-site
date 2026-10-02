@@ -260,15 +260,31 @@ remediation:
       declares CORS but the `POST` omits the header.
     resources:
       - { label: MDN CORS, url: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS" }
+  mcp-server-card:
+    title: An MCP server card is published
+    goal: Publish a SEP-2127 server card for your MCP server and list it in your AI catalog
+    fix: |
+      Serve a SEP-2127 server card at `<endpoint>/server-card` (`/mcp/server-card` for an endpoint at
+      `/mcp`) as `application/mcp-server-card+json`. It carries `$schema`
+      (`https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json`), `name` in reverse-DNS
+      form (`com.example/server`), `version`, `description`, and `remotes`, one entry per endpoint with
+      `type` (`streamable-http`) and `url`. List it in `/.well-known/ai-catalog.json` as an entry of type
+      `application/mcp-server-card+json` with the card's `url`. A card at `/.well-known/mcp/server-card.json`
+      is the legacy SEP-1649 shape: it still passes, and SEP-2127 is the shape to publish.
+    resources:
+      - { label: SEP-2127, url: "https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2127" }
+      - { label: Server card discovery, url: "https://github.com/modelcontextprotocol/experimental-ext-server-card/blob/main/docs/discovery.md" }
+      - { label: AI catalog, url: "https://github.com/Agent-Card/ai-catalog/blob/main/specification/ai-catalog.md" }
   well-known-mcp-card:
     title: A .well-known MCP server card is published
-    goal: Publish an MCP server card at the canonical SEP-1649 path
+    goal: Publish a SEP-2127 server card for your MCP server and list it in your AI catalog
     fix: |
-      Publish an MCP server card at `/.well-known/mcp/server-card.json` (SEP-1649) naming the
-      endpoint, transport, and capabilities: include `mcp_endpoint` (or `url`, or
-      `transport.endpoint`), `serverInfo`, and the transport type.
+      This check is retired in favor of `mcp-server-card`, which scores the server card. Serve a SEP-2127 card at
+      `<endpoint>/server-card` carrying `$schema`, `name`, `version`, `description`, and `remotes` (each
+      with `type` and `url`), and list it in `/.well-known/ai-catalog.json`. The SEP-1649 path,
+      `/.well-known/mcp/server-card.json`, is the legacy location.
     resources:
-      - { label: SEP-1649, url: "https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2127" }
+      - { label: SEP-2127, url: "https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2127" }
   mcp-card-legacy-aliases:
     title: Legacy MCP card paths redirect to the canonical card
     goal: Point every legacy MCP card path at the canonical card instead of serving its own copy

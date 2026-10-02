@@ -25,6 +25,7 @@ async function load() {
   const remediation = normalizeWebRemediation(
     yaml.load(await readFile(join(DATA, 'remediation.yaml'), 'utf8')) as object,
     checkIds,
+    Object.keys(registry.retired ?? {}),
   ) as Record<string, RemediationEntry>;
   return { checkIds, remediation };
 }
@@ -62,6 +63,23 @@ describe('web remediation catalog coverage', () => {
   test('an unknown check id aborts normalization (orphan guard)', async () => {
     const doc = { remediation: { 'not-a-check': { title: 't', goal: 'g', fix: 'f' } } };
     expect(() => normalizeWebRemediation(doc, ['llms-txt'])).toThrow(/orphan|no remediation/);
+  });
+
+  // A retired id's fix page stays live for the stored rows that link it, so
+  // its entry is kept, while an id the registry never knew is still an orphan.
+  test('a retired check id keeps its entry, and an id neither live nor retired is an orphan', async () => {
+    const entry = { title: 't', goal: 'g', fix: 'f' };
+    const doc = { remediation: { 'llms-txt': entry, 'old-llms': entry } };
+    expect(Object.keys(normalizeWebRemediation(doc, ['llms-txt'], ['old-llms']))).toEqual(['llms-txt', 'old-llms']);
+    const unknown = { remediation: { ...doc.remediation, 'no-such-check': entry } };
+    expect(() => normalizeWebRemediation(unknown, ['llms-txt'], ['old-llms'])).toThrow(
+      'orphan remediation "no-such-check"',
+    );
+    expect(() => normalizeWebRemediation({ remediation: { 'llms-txt': entry } }, ['llms-txt'], ['old-llms'])).toThrow(
+      'retired check "old-llms" has no remediation entry',
+    );
+    const { remediation } = await load();
+    expect(remediation['well-known-mcp-card']?.goal).toContain('SEP-2127');
   });
 
   test('a missing remediation entry aborts normalization', async () => {

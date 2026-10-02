@@ -2406,7 +2406,8 @@ main .remediation__body {
   /* Evidence quotes URLs the target serves, which can outrun a phone row. */
   overflow-wrap: anywhere;
 }
-.web-check__resources a {
+.web-check__resources a,
+.web-check__note a {
   color: var(--accent);
 }
 .web-check pre {

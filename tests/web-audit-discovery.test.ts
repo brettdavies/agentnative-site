@@ -1,6 +1,10 @@
 // MCP endpoint discovery + engine orchestration tests (plan U5).
 
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import * as yaml from 'js-yaml';
+import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import { discoverMcpEndpoint } from '../src/worker/audit-web/discovery';
 import { runWebAudit } from '../src/worker/audit-web/engine';
 import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
@@ -1223,5 +1227,89 @@ describe('runWebAudit era lanes', () => {
     expect(legacy?.status).toBe('n_a');
     expect(modern?.status).toBe('n_a');
     expect(complete.scorecard.coverage_summary.must.total).toBe(0);
+  });
+});
+
+// The card check scores the card of record discovery kept, with no request
+// of its own, against the required fields the build read from the vendored
+// schema; the registry here is the real one, so those lists are the built ones.
+describe('mcp-server-card scores the card discovery kept', () => {
+  const REGISTRY_PATH = join(new URL('..', import.meta.url).pathname, 'src', 'data', 'web-audit', 'registry.yaml');
+  const full = normalizeWebAuditRegistry(
+    yaml.load(readFileSync(REGISTRY_PATH, 'utf8')) as object,
+  ) as unknown as WebAuditRegistry;
+  const registry: WebAuditRegistry = {
+    ...full,
+    alternatives: [],
+    checks: full.checks.filter((check) => check.id === 'mcp-server-card'),
+  };
+  const SEP_2127_CARD = {
+    $schema: 'https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json',
+    name: 'com.example/example',
+    version: '1.0.0',
+    description: 'Example MCP server',
+    remotes: [{ type: 'streamable-http', url: 'https://example.com/mcp' }],
+  };
+  const json = (value: unknown) =>
+    new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } });
+  const inlineCatalog = (card: unknown) => json({ specVersion: '1.0', entries: [{ type: MCP_CARD_TYPE, data: card }] });
+
+  async function cardRow(fetchImpl: typeof fetch) {
+    const events = await collect(
+      runWebAudit({
+        url: 'https://example.com/',
+        registry,
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
+    );
+    const complete = events.find((e) => e.type === 'complete');
+    if (complete?.type !== 'complete') throw new Error('no complete event');
+    const row = complete.scorecard.results.find((r) => r.id === 'mcp-server-card');
+    if (row === undefined) throw new Error('no mcp-server-card row');
+    return row;
+  }
+
+  test('a retained SEP-2127 card with every required field passes, with no advisory', async () => {
+    const row = await cardRow(
+      stubFetch((url) => (url === CATALOG_URL ? inlineCatalog(SEP_2127_CARD) : new Response('', { status: 404 }))),
+    );
+    expect(row.status).toBe('pass');
+    expect(row.advisory).toBeUndefined();
+    expect(row.evidence).toBe(`${CATALOG_URL}#/entries/0/data -> 200`);
+  });
+
+  test('a SEP-2127 card missing name reads broken, naming the missing field', async () => {
+    const { name: _name, ...nameless } = SEP_2127_CARD;
+    const row = await cardRow(
+      stubFetch((url) => (url === CATALOG_URL ? inlineCatalog(nameless) : new Response('', { status: 404 }))),
+    );
+    expect(row.status).toBe('broken');
+    expect(row.evidence).toContain('missing required field name');
+  });
+
+  test('a SEP-1649-shaped card passes with the superseded advisory', async () => {
+    const row = await cardRow(
+      stubFetch((url) =>
+        url.endsWith('/.well-known/mcp/server-card.json')
+          ? json({ name: 'example', mcp_endpoint: 'https://example.com/mcp' })
+          : new Response('', { status: 404 }),
+      ),
+    );
+    expect({ status: row.status, advisory: row.advisory }).toEqual({ status: 'pass', advisory: 'superseded' });
+  });
+
+  test('no card reads absent at the recommended tier', async () => {
+    const row = await cardRow(
+      stubFetch((url, init) =>
+        url.endsWith('/mcp') && init?.method === 'POST' ? initializeResponse() : new Response('', { status: 404 }),
+      ),
+    );
+    expect({ status: row.status, keyword: row.keyword, tier: row.tier, advisory: row.advisory }).toEqual({
+      status: 'absent',
+      keyword: 'should',
+      tier: 'recommended',
+      advisory: undefined,
+    });
   });
 });

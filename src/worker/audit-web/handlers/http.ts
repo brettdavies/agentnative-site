@@ -144,8 +144,8 @@ export async function runHttp(check: WebCheck, ctx: HandlerContext): Promise<Pro
 /**
  * retained-document eval rule: score a document discovery already read
  * against the check's `expect`, exactly as the same response fetched live
- * would score, with no request of its own. Discovery keeps a server card
- * only when it found one, so a document it did not keep is absent.
+ * would score, with no request of its own. Discovery keeps a document only
+ * when it read one, so a document it did not keep is absent.
  */
 export async function runRetainedDocument(check: WebCheck, ctx: HandlerContext): Promise<ProbeOutcome> {
   const w = check.with as HttpWith & { retained: RetainedDocumentKey };

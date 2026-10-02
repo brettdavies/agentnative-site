@@ -43,7 +43,7 @@ UNIVERSE: dict[str, str] = {
     "mcp-initialize": "must", "mcp-tools-list": "must", "openapi": "must",
     # SHOULD
     "mcp-capabilities": "should", "mcp-unknown-method": "should", "mcp-get-fast-fail": "should",
-    "mcp-cors-preflight": "should", "mcp-cors-actual": "should", "well-known-mcp-card": "should",
+    "mcp-cors-preflight": "should", "mcp-cors-actual": "should", "mcp-server-card": "should",
     "llms-txt": "should", "accept-markdown": "should", "root-meta-description": "should",
     "noscript-fallback": "should", "robots": "should", "link-headers": "should",
     "root-link-rel": "should", "robots-ai-rules": "should", "content-signals": "should",

@@ -19,7 +19,8 @@ export type WebCheckHandler =
   | 'content-without-js'
   | 'llms-txt-quality'
   | 'api-hygiene'
-  | 'protected-resource';
+  | 'protected-resource'
+  | 'server-card';
 
 /** Declared audit site type (the entry-point argument). */
 export type WebSiteType = 'content' | 'api';
@@ -78,6 +79,13 @@ export interface WebAlternativeGroup {
   variants: Record<string, WebAlternativeVariant>;
 }
 
+/** A retired check id, outside the registry's checks, which a stored row can still hold. */
+export interface RetiredCheck {
+  /** The live check that replaced it, whose lane, category, and fix page the stored row takes. */
+  successor: string;
+  reason: string;
+}
+
 /** One protocol lane the MCP category's rows group under, keyed by lane id. */
 export interface McpLaneSpec {
   label: string;
@@ -103,6 +111,8 @@ export interface WebAuditRegistry {
   mcp_lanes?: Record<string, McpLaneSpec>;
   /** Absent reads as no alternatives: every check counts in the global universe. */
   alternatives?: WebAlternativeGroup[];
+  /** Retired check ids by id; absent reads as none. */
+  retired?: Record<string, RetiredCheck>;
   checks: WebCheck[];
 }
 
@@ -147,14 +157,16 @@ export const FOLLOW_POLICY_VERSION = 1;
  * site's URL trail; its only reader is the build that emits those pages.
  * `lane` and the `mcp_lanes` map group MCP rows on the result page, read from
  * the live registry at render time, so a stored scorecard picks up a lane
- * change on its next render without a re-audit.
+ * change on its next render without a re-audit. `retired` names the
+ * successor a stored row with a retired id renders under, read the same way
+ * and by the build that emits the retired id's fix page.
  *
  * Membership here is a claim that the field is build-only or read from the
  * live registry at render time, never copied into a stored scorecard.
  * Anything absent from this set counts as scoring shape, so a new field
  * reflows until someone establishes otherwise.
  */
-const SITE_ONLY_REGISTRY_FIELDS: ReadonlySet<string> = new Set(['breadcrumb', 'lane', 'mcp_lanes']);
+const SITE_ONLY_REGISTRY_FIELDS: ReadonlySet<string> = new Set(['breadcrumb', 'lane', 'mcp_lanes', 'retired']);
 
 /**
  * SHA-256 hex of the normalized registry minus its site-only fields, beside

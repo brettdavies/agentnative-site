@@ -69,13 +69,13 @@ function sectionMd(md: string, heading: string): string {
   return md.slice(start, next === -1 ? undefined : next);
 }
 
-/** A stored scorecard from before provenance: no hosts on rows, no follow state, no trail. */
+/** A stored scorecard from before provenance: no hosts or advisories on rows, no follow state, no trail. */
 function preProvenance(): Scorecard {
   const sc = stripeShaped();
   const { follow_declarations: _f, declared_hosts: _d, ...rest } = sc;
   return {
     ...rest,
-    results: sc.results.map(({ hosts: _h, host: _x, ...r }) =>
+    results: sc.results.map(({ hosts: _h, host: _x, advisory: _a, ...r }) =>
       r.na_reason === 'auth-required' ? { ...r, na_reason: undefined, status: 'n_a' } : r,
     ),
   } as Scorecard;

@@ -50,9 +50,9 @@
   "follow_declarations": true,
   "declared_hosts": [],
   "summary": {
-    "pass": 21,
+    "pass": 20,
     "noncompliant": 0,
-    "broken": 1,
+    "broken": 2,
     "absent": 14,
     "n_a": 31,
     "skip": 0,
@@ -65,17 +65,17 @@
     },
     "should": {
       "total": 29,
-      "verified": 16
+      "verified": 15
     },
     "may": {
       "total": 3,
       "verified": 3
     }
   },
-  "score_pct": 64,
+  "score_pct": 58,
   "score": {
-    "relative": 64,
-    "global": 38
+    "relative": 58,
+    "global": 35
   },
   "categories": [
     {
@@ -105,7 +105,7 @@
     {
       "id": "mcp",
       "name": "MCP",
-      "passed": 13,
+      "passed": 12,
       "counted": 20
     },
     {
@@ -572,16 +572,16 @@
       "host": "example.com"
     },
     {
-      "id": "well-known-mcp-card",
-      "label": "A .well-known MCP server card is published (SEP-1649)",
+      "id": "mcp-server-card",
+      "label": "An MCP server card is published",
       "category": "mcp",
       "group": "P8",
       "layer": "web",
       "keyword": "should",
       "tier": "recommended",
       "principle": "P8",
-      "status": "pass",
-      "evidence": "https://example.com/.well-known/mcp/server-card.json -> 200",
+      "status": "broken",
+      "evidence": "https://example.com/.well-known/mcp/server-card.json -> 200 (missing required fields $schema, description, version)",
       "hosts": [
         {
           "host": "example.com"

@@ -202,6 +202,12 @@ const SEP_2127_CARD = {
   description: 'Example MCP server',
   remotes: [{ type: 'streamable-http', url: 'https://example.com/mcp' }],
 };
+const SEP_2127_CARD_WITHOUT_NAME = {
+  $schema: SEP_2127_CARD.$schema,
+  version: SEP_2127_CARD.version,
+  description: SEP_2127_CARD.description,
+  remotes: SEP_2127_CARD.remotes,
+};
 const cardDocument = (card: unknown): ExchangeResponse => res(200, { 'content-type': MCP_CARD_TYPE }, JSON.stringify(card));
 const aiCatalog = (...entries: unknown[]): ExchangeResponse => json({ specVersion: '1.0', entries });
 const cardEntry = (fields: Record<string, unknown>) => ({
@@ -510,7 +516,7 @@ const ALL_IDS = [
   ...MCP_IDS,
   'mcp-cors-preflight',
   'mcp-cors-actual',
-  'well-known-mcp-card',
+  'mcp-server-card',
   'mcp-card-legacy-aliases',
   'mcp-usage-doc',
   'webmcp',
@@ -591,7 +597,7 @@ export const SCENARIOS: Record<string, Scenario> = {
   ),
   'run-antecedent-unmet': scenario(
     'a bare HTML site: no llms.txt, no API surface, no MCP endpoint, so every gated check is `n_a`',
-    ['llms-txt-format', 'llms-txt-links', 'llms-txt-when-to-use', 'llms-txt-scoped', 'llms-full-txt-scoped', 'json-schemas', 'api-catalog', 'json-errors', 'rate-limit-headers', 'mcp-cors-preflight', 'mcp-cors-actual', 'well-known-mcp-card', 'mcp-card-legacy-aliases', 'mcp-usage-doc', 'oauth-protected-resource', 'robots-ai-rules', 'content-signals', 'auth-md', ...MCP_IDS],
+    ['llms-txt-format', 'llms-txt-links', 'llms-txt-when-to-use', 'llms-txt-scoped', 'llms-full-txt-scoped', 'json-schemas', 'api-catalog', 'json-errors', 'rate-limit-headers', 'mcp-cors-preflight', 'mcp-cors-actual', 'mcp-server-card', 'mcp-card-legacy-aliases', 'mcp-usage-doc', 'oauth-protected-resource', 'robots-ai-rules', 'content-signals', 'auth-md', ...MCP_IDS],
     [get('/', html(rootHtml({ linkRel: false, webmcp: false })))],
   ),
   'run-root-not-html': scenario(
@@ -787,7 +793,7 @@ export const SCENARIOS: Record<string, Scenario> = {
   ),
 
   // ---- legacy-alias-redirects eval -------------------------------------------
-  'alias-redirect-pass': scenario('one legacy card path 301s to the canonical card, which is enough to pass', ['mcp-card-legacy-aliases', 'well-known-mcp-card', 'mcp-usage-doc'], [
+  'alias-redirect-pass': scenario('one legacy card path 301s to the canonical card, which is enough to pass', ['mcp-card-legacy-aliases', 'mcp-server-card', 'mcp-usage-doc'], [
     ...baseline(),
     get(CARD_PATH, json(SERVER_CARD)),
     get('/.well-known/mcp.json', redirect(u(CARD_PATH))),
@@ -1084,14 +1090,14 @@ export const SCENARIOS: Record<string, Scenario> = {
     ...noModernLane(),
     ...legacyMcp({ initializeResult: { serverInfo: { name: 'example' }, protocolVersion: LEGACY_PROTOCOL, capabilities: {} } }),
   ]),
-  'mcp-card-off-origin': scenario('a card declaring an off-origin endpoint is recorded and never probed; discovery falls through to initialize', ['well-known-mcp-card', 'mcp-initialize'], [
+  'mcp-card-off-origin': scenario('a card declaring an off-origin endpoint is recorded and never probed; discovery falls through to initialize', ['mcp-server-card', 'mcp-initialize'], [
     ...baseline(),
     get(CARD_PATH, json({ ...SERVER_CARD, mcp_endpoint: 'https://mcp.example.net/mcp' })),
     ...mcpEdges(),
     ...noModernLane(),
     ...legacyMcp(),
   ]),
-  'mcp-card-no-endpoint-field': scenario('a card without an endpoint field passes the card check while discovery falls through to initialize', ['well-known-mcp-card', 'mcp-initialize'], [
+  'mcp-card-no-endpoint-field': scenario('a card with neither a SEP-2127 remotes array nor a SEP-1649 endpoint field is held to SEP-2127 and reads broken, while discovery falls through to initialize', ['mcp-server-card', 'mcp-initialize'], [
     ...baseline(),
     get(CARD_PATH, json({ name: 'example', serverInfo: { name: 'example' } })),
     ...mcpEdges(),
@@ -1101,8 +1107,8 @@ export const SCENARIOS: Record<string, Scenario> = {
 
   // ---- discovery order: SEP-2127 catalog, card suffix, SEP-1649 --------------
   'discovery-catalog-card': scenario(
-    'an AI catalog entry names a SEP-2127 card on the audited origin; its streamable-http remote is the endpoint, so no common path is POSTed',
-    ['ai-catalog', 'mcp-initialize'],
+    'an AI catalog entry names a SEP-2127 card on the audited origin; its streamable-http remote is the endpoint, so no common path is POSTed, and the card passes the card check',
+    ['ai-catalog', 'mcp-initialize', 'mcp-server-card'],
     [
       ...baseline(),
       get('/.well-known/ai-catalog.json', aiCatalog(cardEntry({ url: u(CARD_SUFFIX_PATH) }))),
@@ -1135,9 +1141,19 @@ export const SCENARIOS: Record<string, Scenario> = {
     ['mcp-initialize'],
     [...baseline(), get(CARD_SUFFIX_PATH, cardDocument(SEP_2127_CARD)), ...legacyOnlyMcp()],
   ),
+  'mcp-server-card-missing-field': scenario(
+    'an AI catalog names a SEP-2127 card that omits the required name: its remote is still the endpoint, and the card check reads broken naming the missing field',
+    ['mcp-server-card'],
+    [
+      ...baseline(),
+      get('/.well-known/ai-catalog.json', aiCatalog(cardEntry({ url: u(CARD_SUFFIX_PATH) }))),
+      get(CARD_SUFFIX_PATH, cardDocument(SEP_2127_CARD_WITHOUT_NAME)),
+      ...legacyOnlyMcp(),
+    ],
+  ),
   'discovery-legacy-card': scenario(
     'a SEP-1649 card at the well-known path names the endpoint in transport.url; no common path is POSTed and the card suffix answers 404',
-    ['well-known-mcp-card', 'mcp-initialize'],
+    ['mcp-server-card', 'mcp-initialize'],
     [
       ...baseline(),
       get(CARD_PATH, json({ name: 'example', transport: { type: 'streamable-http', url: 'https://example.com/mcp' } })),
