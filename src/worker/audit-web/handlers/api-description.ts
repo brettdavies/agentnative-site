@@ -18,7 +18,7 @@ import { sameOrigin } from '../discovery-documents';
 import type { WebCheck } from '../registry';
 import { guardedFetch, OPENAPI_MAX_BODY_BYTES } from '../ssrf';
 import { assessResponse, classifyMiss, type HttpWith, runHttp } from './http';
-import { aggregateTargets, type TargetOutcome, timeoutMsFor } from './shared';
+import { aggregateTargets, plaintextItem, type TargetOutcome, timeoutMsFor } from './shared';
 import type { EvidenceItem, HandlerContext, ProbeOutcome } from './types';
 
 const READ_IN_PART_WHY = `description larger than ${OPENAPI_MAX_BODY_BYTES / 1024} KiB; read in part, presence counted`;
@@ -61,6 +61,10 @@ async function describe(
       na_reason: reason,
       evidence: [{ host, description: target.url, why: [url], off_origin: true }],
     };
+  }
+  if ('plaintext' in target) {
+    const item = { url: target.url, description: target.url, off_origin: true, ...plaintextItem(target.plaintext) };
+    return { status: 'absent', evidence: [item] };
   }
   const read =
     'fetched' in target

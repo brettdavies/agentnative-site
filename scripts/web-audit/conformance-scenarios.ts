@@ -1232,7 +1232,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     { follow_declarations: false },
   ),
   'follow-http-declarations': scenario(
-    'the AI catalog names an https endpoint that redirects to http, the card names an http endpoint, and the api-catalog anchors an http API host whose description is http, each host answering as one the audit would follow: nothing is requested over http, every entry reads not-followed with reason insecure-scheme (the redirected one with its hop as the final URL), and no MCP or API row is evaluated at any of them',
+    'the AI catalog names an https endpoint that redirects to http, the card names an http endpoint, and the api-catalog anchors an http API host whose description is http, each host answering as one the audit would follow: nothing is requested over http, every entry reads not-followed with reason insecure-scheme (the redirected one with its hop as the final URL), and no MCP or API row is evaluated at any of them: the API rows read absent, as nothing declared over http earns more than a missing API',
     ['mcp-initialize', 'openapi', 'json-errors'],
     [
       ...baseline(),

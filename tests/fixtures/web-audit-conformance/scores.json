@@ -3774,14 +3774,14 @@
     ]
   },
   "follow-http-declarations": {
-    "score_pct": 75,
-    "score": {"relative":75,"global":15},
+    "score_pct": 60,
+    "score": {"relative":60,"global":15},
     "results": [
-      {"id":"openapi","status":"n_a"},
+      {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
       {"id":"api-catalog","status":"pass"},
-      {"id":"json-errors","status":"n_a"},
-      {"id":"rate-limit-headers","status":"n_a"},
+      {"id":"json-errors","status":"absent"},
+      {"id":"rate-limit-headers","status":"absent"},
       {"id":"mcp-initialize","status":"n_a","na_reason":"antecedent-unmet"},
       {"id":"mcp-capabilities","status":"n_a","na_reason":"antecedent-unmet"},
       {"id":"mcp-tools-list","status":"n_a","na_reason":"antecedent-unmet"},

@@ -6,6 +6,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { loadRegistry } from '../scripts/web-audit/conformance-corpus';
+import { NO_PLAINTEXT_REQUEST } from '../src/shared/web-audit-result-line';
 import type { WebAuditRegistry } from '../src/worker/audit-web/registry';
 import { OPENAPI_MAX_BODY_BYTES } from '../src/worker/audit-web/ssrf';
 import {
@@ -118,6 +119,10 @@ const NOT_A_DESCRIPTION_PAST_THE_CAP: Array<[string, string, string]> = [
   ['a GraphQL introspection result', 'application/json', `{"__schema": {"types": "${PADDING}"}, "openapi": 1}`],
 ];
 
+function rawEvidence(events: Awaited<ReturnType<typeof auditApi>>['events'], id: string) {
+  return events.flatMap((e) => (e.type === 'result' && e.result.id === id ? e.result.raw_evidence : []));
+}
+
 async function auditDescription(placement: Placement, contentType: string, body: string) {
   const seen: Seen[] = [];
   const { events, scorecard } = await auditApi(
@@ -126,8 +131,7 @@ async function auditDescription(placement: Placement, contentType: string, body:
     }),
     seen,
   );
-  const result = events.flatMap((e) => (e.type === 'result' && e.result.id === 'openapi' ? [e.result] : []))[0];
-  return { openapi: row(scorecard, 'openapi'), evidence: result?.raw_evidence ?? [], seen };
+  return { openapi: row(scorecard, 'openapi'), evidence: rawEvidence(events, 'openapi'), seen };
 }
 
 describe('API category on api-catalog anchors', () => {
@@ -615,7 +619,7 @@ describe('API category on api-catalog anchors', () => {
   test('an http anchor and an http description are never requested, and neither is an http redirect hop of an https description', async () => {
     const seen: Seen[] = [];
     const hop = 'http://files.example.net/openapi.json';
-    const { scorecard } = await auditApi(
+    const { scorecard, events } = await auditApi(
       site(
         () =>
           linkset(
@@ -667,5 +671,50 @@ describe('API category on api-catalog anchors', () => {
       },
     ]);
     expect(row(scorecard, 'openapi').hosts?.map((h) => h.host)).not.toContain(API);
+    expect(row(scorecard, 'openapi').status).toBe('absent');
+    expect(rawEvidence(events, 'openapi').map((item) => [item.url, item.why])).toEqual([
+      [`http://${API}/openapi.json`, [`not https; ${NO_PLAINTEXT_REQUEST}`]],
+      ['https://files.example.net/openapi.json', [`redirects to http; ${NO_PLAINTEXT_REQUEST}`]],
+    ]);
+  });
+
+  test('a catalog that declares its API only over http reads absent on every API row, as one that declares none does', async () => {
+    const seen: Seen[] = [];
+    const { scorecard } = await auditApi(
+      site(() => linkset(anchor(`http://${API}/`, `http://${API}/openapi.json`))),
+      seen,
+    );
+    expect(seen.filter((r) => r.url.startsWith('http:'))).toEqual([]);
+    expect(['openapi', 'json-errors', 'rate-limit-headers'].map((id) => [id, row(scorecard, id).status])).toEqual([
+      ['openapi', 'absent'],
+      ['json-errors', 'absent'],
+      ['rate-limit-headers', 'absent'],
+    ]);
+    expect(row(scorecard, 'openapi').evidence).toBe(`http://${API}/openapi.json: not https; ${NO_PLAINTEXT_REQUEST}`);
+    expect(row(scorecard, 'json-errors').evidence).toBe(`http://${API}/: not https; ${NO_PLAINTEXT_REQUEST}`);
+    expect(row(scorecard, 'openapi').hosts ?? []).toEqual([]);
+  });
+
+  test('an https API declared beside an http one is scored on the https one alone', async () => {
+    const seen: Seen[] = [];
+    const plain = 'plain.example.org';
+    const { scorecard } = await auditApi(
+      site(
+        () =>
+          linkset(
+            anchor(`http://${plain}/`, `http://${plain}/openapi.json`),
+            anchor(`https://${API}/`, `https://${API}/openapi.json`),
+          ),
+        {
+          [`GET https://${API}/openapi.json`]: () => json(OPENAPI),
+          [`GET ${DOCUMENTED_PROBE}`]: () => json({ error: 'not_found' }, 404),
+        },
+      ),
+      seen,
+    );
+    expect(seen.filter((r) => r.url.startsWith('http:'))).toEqual([]);
+    expect(row(scorecard, 'openapi')).toMatchObject({ status: 'pass', host: API });
+    expect(row(scorecard, 'json-errors')).toMatchObject({ status: 'pass', host: API });
+    expect(row(scorecard, 'openapi').evidence).not.toContain(plain);
   });
 });

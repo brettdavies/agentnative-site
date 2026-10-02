@@ -22,6 +22,14 @@ export function redirectsToHttp(resp: Pick<ProbeResponse, 'status' | 'refused'>)
   return resp.refused === 'insecure-scheme' && resp.status !== null;
 }
 
+/** Why a declared URL was not requested over plaintext: as written, or by its redirect. */
+export type PlaintextReason = 'not https' | 'redirects to http';
+
+/** The evidence item for a declared URL anc did not request over plaintext. */
+export function plaintextItem(reason: PlaintextReason): EvidenceItem & { why: string[] } {
+  return { blocked: reason, ok: false, why: [`${reason}; ${NO_PLAINTEXT_REQUEST}`] };
+}
+
 /** The evidence item for a URL that answered only with a redirect to http. */
 export function redirectsToHttpItem(url: string, status: number | null): EvidenceItem & { why: string[] } {
   return { url, status, ok: false, why: [REDIRECTS_TO_HTTP_WHY] };

@@ -178,7 +178,9 @@ SSRF guard refuses, a private address or an IP literal, or a redirect hop to one
 requested; its rows read `declared-host-blocked`. A URL anc cannot request at all, one that does not parse or whose
 scheme is not `http` or `https`, is never requested and reads `reciprocity-refused`. anc sends no plaintext request: an
 http URL, declared or linked, and any redirect to http, is never requested. A declared URL or redirect hop on `http`
-that the guard admits reads `not-followed` with reason `insecure-scheme`, and no row is evaluated at it. What a host
+that the guard admits reads `not-followed` with reason `insecure-scheme`, and no row is evaluated at it. An API row
+whose declared descriptions or hosts are all on `http` reads `absent`, naming the URL, because a surface declared over
+plaintext alone earns no more than a missing one; beside one anc can evaluate, an `http` target is left out. What a host
 publishes to confirm an endpoint is its consent to be probed, and consent read over plaintext could be forged by anyone
 on the network path, so every document anc reads to confirm an endpoint is read over `https`.
 
@@ -359,7 +361,8 @@ One object per check.
   surface clearly exists), so it leads an agent to a dead end or misleads it. Scores below absent. Whether a defect
   reads `noncompliant` or `broken` turns on what an agent at the audit's vantage gets.
 - `absent` — the surface is not there (404/410, no DNS records, no CORS headers), or it answers only with a redirect to
-  `http`, which anc never follows: a surface served over plaintext alone earns no more than a missing one.
+  `http` or is declared only on `http`, which anc never requests: a surface served over plaintext alone earns no more
+  than a missing one.
 - `n_a` — excluded from the relative score and kept in the global denominator; `na_reason` says why, from a closed set:
   - `antecedent-unmet`: the check does not apply to this site.
   - `optional-absent`: an applicable MAY that is not implemented.

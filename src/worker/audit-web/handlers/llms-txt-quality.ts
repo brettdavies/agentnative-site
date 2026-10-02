@@ -5,10 +5,9 @@
 // markdown link per item and never for plaintext, so such a link is present
 // but not usable over https.
 
-import { NO_PLAINTEXT_REQUEST } from '../../../shared/web-audit-result-line';
 import type { WebCheck } from '../registry';
 import { guardedFetch, STATUS_ONLY_BODY_BYTES, validatePublicUrl } from '../ssrf';
-import { redirectsToHttp, redirectsToHttpItem, remainingDeadlineMs, timeoutMsFor } from './shared';
+import { plaintextItem, redirectsToHttp, redirectsToHttpItem, remainingDeadlineMs, timeoutMsFor } from './shared';
 import type { EvidenceItem, HandlerContext, ProbeOutcome, ProbeStatus } from './types';
 
 const MARKDOWN_LINK_RE = /\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
@@ -66,7 +65,7 @@ async function probeLink(
   if (validation.url.protocol !== 'https:') {
     return {
       verdict: 'noncompliant',
-      item: { url: href, blocked: 'not https', ok: false, why: [`not https; ${NO_PLAINTEXT_REQUEST}`] },
+      item: { url: href, ...plaintextItem('not https') },
     };
   }
   const resp = await guardedFetch(href, {}, { ...ctx.fetchOptions, timeoutMs, maxBodyBytes: STATUS_ONLY_BODY_BYTES });

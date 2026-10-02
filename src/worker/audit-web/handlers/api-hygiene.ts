@@ -18,7 +18,7 @@ import {
   validatePublicUrl,
 } from '../ssrf';
 import { deriveApiProbeUrl, deriveHostProbeUrl, type ProbeUrl } from './api-probe-url';
-import { aggregateTargets, type TargetOutcome, timeoutMsFor } from './shared';
+import { aggregateTargets, plaintextItem, type TargetOutcome, timeoutMsFor } from './shared';
 import type { HandlerContext, ProbeOutcome } from './types';
 
 const CLIENT_ERROR = (status: number) => status >= 400 && status < 500;
@@ -146,6 +146,9 @@ async function probeHost(
   if (target.unmet !== undefined) {
     const { reason, host, url } = target.unmet;
     return { status: 'na', na_reason: reason, evidence: [{ host, why: [url] }] };
+  }
+  if (target.plaintext !== undefined) {
+    return { status: 'absent', evidence: [{ url: target.anchors[0]?.url, ...plaintextItem(target.plaintext) }] };
   }
   const derived = deriveHostProbeUrl(target, ctx.apiDescriptionBodies ?? new Map());
   return probeOnce(op, derived, anchorHostGet(target, timeoutMs, ctx));

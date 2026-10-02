@@ -117,18 +117,18 @@
     "pass": 11,
     "noncompliant": 0,
     "broken": 0,
-    "absent": 5,
-    "n_a": 51,
+    "absent": 8,
+    "n_a": 48,
     "skip": 0,
     "error": 1
   },
   "coverage_summary": {
     "must": {
-      "total": 0,
+      "total": 1,
       "verified": 0
     },
     "should": {
-      "total": 11,
+      "total": 13,
       "verified": 6
     },
     "may": {
@@ -136,9 +136,9 @@
       "verified": 5
     }
   },
-  "score_pct": 75,
+  "score_pct": 60,
   "score": {
-    "relative": 75,
+    "relative": 60,
     "global": 15
   },
   "categories": [
@@ -164,7 +164,7 @@
       "id": "api",
       "name": "API",
       "passed": 1,
-      "counted": 1
+      "counted": 4
     },
     {
       "id": "mcp",
@@ -189,8 +189,8 @@
       "keyword": "must",
       "tier": "required",
       "principle": "P2",
-      "status": "n_a",
-      "evidence": "no OpenAPI description the audit can request",
+      "status": "absent",
+      "evidence": "http://api.example.net/openapi.json: not https; anc sends no plaintext request",
       "hosts": []
     },
     {
@@ -234,8 +234,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P4",
-      "status": "n_a",
-      "evidence": "no API anchor host the audit can probe",
+      "status": "absent",
+      "evidence": "http://api.example.net/: not https; anc sends no plaintext request",
       "hosts": []
     },
     {
@@ -247,8 +247,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P6",
-      "status": "n_a",
-      "evidence": "no API anchor host the audit can probe",
+      "status": "absent",
+      "evidence": "http://api.example.net/: not https; anc sends no plaintext request",
       "hosts": []
     },
     {

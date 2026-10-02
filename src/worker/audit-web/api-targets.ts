@@ -3,14 +3,18 @@
 // anchor host, in declaration order. A target off the audited origin is
 // evaluated only when the follow slice settled it followed; otherwise it
 // carries the reason its rows read, or is left out when the trail names
-// none (a templated URL, a path in the auditor's own zone).
+// none (a templated URL, a path in the auditor's own zone). A target
+// declared only over plaintext is left out beside any other target, and
+// stands alone as a miss when there is none, so declaring an API over http
+// never scores above declaring nothing.
 
 import { type CatalogAnchor, isApiAnchor } from './api-catalog';
 import { sameOrigin } from './discovery-documents';
 import { type DeclaredHostReason, declaredHostReason } from './endpoint-of-record';
 import type { ApiFollowResult } from './follow-api';
 import type { Fetched } from './follow-requests';
-import { declarationKey } from './follow-trail';
+import { declarationKey, type TrailEntry } from './follow-trail';
+import type { PlaintextReason } from './handlers/shared';
 
 /**
  * An OpenAPI description the catalog declares, by its declared URL: one
@@ -21,6 +25,7 @@ export type ApiDescriptionTarget = { url: string } & (
   | { fetched: Fetched }
   | { onOrigin: true }
   | { unmet: DeclaredHostReason }
+  | { plaintext: PlaintextReason }
 );
 
 /** One API anchor host, where the hygiene probes go. */
@@ -32,6 +37,8 @@ export interface ApiHostTarget {
   declared: boolean;
   /** Why the host was not evaluated. */
   unmet?: DeclaredHostReason;
+  /** The host is declared only over plaintext, so nothing was requested from it. */
+  plaintext?: PlaintextReason;
 }
 
 export interface ApiTargets {
@@ -41,10 +48,24 @@ export interface ApiTargets {
 
 /**
  * How a target is evaluated: on the audited origin, at a declared host the
- * slice followed, left out with no reason the trail names, or not
- * evaluated for a reason.
+ * slice followed, left out with no reason the trail names, not requested
+ * over plaintext, or not evaluated for a reason.
  */
-type Reach = 'audited-origin' | 'evaluate' | 'omit' | DeclaredHostReason;
+type Reach = 'audited-origin' | 'evaluate' | 'omit' | PlaintextReason | DeclaredHostReason;
+
+function isPlaintext(reach: Reach): reach is PlaintextReason {
+  return reach === 'not https' || reach === 'redirects to http';
+}
+
+function plaintextReason(entry: TrailEntry): PlaintextReason | null {
+  if (entry.outcome !== 'not-followed' || entry.reason !== 'insecure-scheme') return null;
+  return entry.final_url === undefined ? 'not https' : 'redirects to http';
+}
+
+/** Plaintext targets only when there is nothing else to evaluate. */
+function plaintextAlone<T>(targets: T[], plaintext: (target: T) => boolean): T[] {
+  return targets.every(plaintext) ? targets : targets.filter((target) => !plaintext(target));
+}
 
 function originOf(url: string): string | null {
   try {
@@ -58,6 +79,7 @@ function descriptionTarget(url: string, reached: Reach, fetched: Fetched | undef
   if (reached === 'omit') return null;
   if (reached === 'audited-origin') return { url, onOrigin: true };
   if (reached === 'evaluate') return fetched !== undefined ? { url, fetched } : null;
+  if (isPlaintext(reached)) return { url, plaintext: reached };
   return { url, unmet: reached };
 }
 
@@ -75,7 +97,7 @@ export function apiTargets(
     const entry = settled.get(declarationKey({ kind, url }));
     if (entry === undefined) return 'omit';
     if (entry.outcome === 'followed') return 'evaluate';
-    return declaredHostReason(entry) ?? 'omit';
+    return plaintextReason(entry) ?? declaredHostReason(entry) ?? 'omit';
   };
 
   const descriptions = new Map<string, ApiDescriptionTarget>();
@@ -99,7 +121,12 @@ export function apiTargets(
     const target = { origin, anchors: group.anchors, declared: group.declared };
     if (group.reaches.some((r) => r === 'evaluate' || r === 'audited-origin')) return [target];
     const unmet = group.reaches.find((r): r is DeclaredHostReason => typeof r === 'object');
-    return unmet === undefined ? [] : [{ ...target, unmet }];
+    if (unmet !== undefined) return [{ ...target, unmet }];
+    const plaintext = group.reaches.find(isPlaintext);
+    return plaintext === undefined ? [] : [{ ...target, plaintext }];
   });
-  return { descriptions: [...descriptions.values()], hosts };
+  return {
+    descriptions: plaintextAlone([...descriptions.values()], (target) => 'plaintext' in target),
+    hosts: plaintextAlone(hosts, (target) => target.plaintext !== undefined),
+  };
 }
