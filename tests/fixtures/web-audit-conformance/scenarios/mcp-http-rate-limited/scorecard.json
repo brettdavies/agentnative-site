@@ -51,9 +51,9 @@
     "noncompliant": 0,
     "broken": 1,
     "absent": 7,
-    "n_a": 31,
+    "n_a": 29,
     "skip": 0,
-    "error": 16
+    "error": 18
   },
   "coverage_summary": {
     "must": {
@@ -525,9 +525,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P6",
-      "status": "n_a",
-      "na_reason": "posture-consistent",
-      "evidence": "no Allow-Origin on the preflight or the POST: consistent no-CORS posture",
+      "status": "error",
+      "evidence": "preflight 204 allow-origin absent; post 429 allow-origin absent",
       "hosts": [
         {
           "host": "example.com"
@@ -544,9 +543,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P6",
-      "status": "n_a",
-      "na_reason": "posture-consistent",
-      "evidence": "no Allow-Origin on the preflight or the POST: consistent no-CORS posture",
+      "status": "error",
+      "evidence": "preflight 204 allow-origin absent; post 429 allow-origin absent",
       "hosts": [
         {
           "host": "example.com"
