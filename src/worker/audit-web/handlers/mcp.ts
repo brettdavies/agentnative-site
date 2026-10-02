@@ -6,13 +6,14 @@
 // through the SSRF guard, parses JSON or SSE via parseJsonRpc, and
 // evaluates serverInfo / capabilities / tools / resources / discovery /
 // error-code / content-type. Returns n_a when no endpoint was discovered,
-// and an unprobed `absent` when wave 1 evidenced no modern lane.
+// n_a auth-required for a 401 from an endpoint that requires sign-in, and
+// an unprobed `absent` when wave 1 evidenced no modern lane.
 // CORS classification lives in the cors-preflight posture handler.
 
 import { parseJsonRpc } from '../assert';
 import type { WebCheck } from '../registry';
 import { AUDIT_PROBE_MAX_BODY_BYTES, type GuardedFetchOptions, guardedFetch } from '../ssrf';
-import { mcpEndpointRedirects, remainingDeadlineMs, timeoutMsFor } from './shared';
+import { mcpEndpointRedirects, RETRY_SHAPED_STATUSES, remainingDeadlineMs, timeoutMsFor } from './shared';
 import type { EvidenceItem, HandlerContext, McpLaneEvidence, McpModernLane, ProbeOutcome } from './types';
 
 /**
@@ -27,10 +28,14 @@ type McpOpSpec = {
   /** Which classification branch judges the answer. Conformance rows ask
    * a question the lane has already proven it serves, so no era
    * softening reaches them; era rows name a method the lane could be
-   * missing. */
-  family: 'era' | 'conformance';
+   * missing; enforcement rows ask whether a request without a token is
+   * refused, so the 401 every other row reads past is their answer. */
+  family: 'era' | 'conformance' | 'enforcement';
   /** Which protocol era's wire shape the row probes. */
   era: 'legacy' | 'modern';
+  /** The row asks a question every lane answers alike, so it groups with
+   * the shared rows whichever era's wire shape carries it. */
+  shared?: true;
   /** Wire method for a modern era probe; the Mcp-Method header and the
    * body both read it, so they cannot disagree (the -32020 condition the
    * suite itself probes for). */
@@ -72,6 +77,7 @@ const MCP_OPS = {
   'modern-header-mismatch': { family: 'conformance', era: 'modern' },
   'modern-version-reject': { family: 'conformance', era: 'modern' },
   'modern-resources-miss': { family: 'conformance', era: 'modern' },
+  'unauthenticated-tools-list': { family: 'enforcement', era: 'legacy', shared: true },
 } as const satisfies Record<string, McpOpSpec>;
 
 export type McpOp = keyof typeof MCP_OPS;
@@ -179,9 +185,19 @@ export const NEGOTIATION_OPS = opsWhere((spec) => spec.framed === true);
 /** Every row judged by the era branch, in registry order. */
 export const ERA_OPS = opsWhere((spec) => spec.family === 'era');
 
-/** The protocol era whose wire shape an op probes. */
-export function mcpOpEra(op: McpOp): McpOpSpec['era'] {
-  return specOf(op).era;
+/** Every row that asks whether a request without a token is refused. */
+export const ENFORCEMENT_OPS = opsWhere((spec) => spec.family === 'enforcement');
+
+/** The protocol era whose wire shape an MCP row's request takes; undefined for a row this handler does not probe. */
+export function mcpRequestEra(check: Pick<WebCheck, 'handler' | 'with'>): McpOpSpec['era'] | undefined {
+  const op = check.handler === 'mcp' ? (check.with as Partial<McpWith> | undefined)?.op : undefined;
+  return op !== undefined && Object.hasOwn(MCP_OPS, op) ? specOf(op).era : undefined;
+}
+
+/** The result-page lane an op's row groups under: its era's, unless every lane answers it alike. */
+export function mcpOpLane(op: McpOp): McpOpSpec['era'] | 'shared' {
+  const spec = specOf(op);
+  return spec.shared === true ? 'shared' : spec.era;
 }
 
 const SESSION_REQUIRED_CODE = -32000;
@@ -190,10 +206,6 @@ const SESSION_REQUIRED_CODE = -32000;
 // request was rejected, not mishandled. 404 is deliberately outside the
 // set so a dead endpoint earns nothing on any row that consults it.
 const TYPED_REFUSAL_STATUSES: readonly number[] = [400, 415];
-
-// Statuses whose shape is "not now" rather than "not here": a target
-// asking to be retried is reporting load, not a protocol era.
-const RETRY_SHAPED_STATUSES: readonly number[] = [408, 429];
 
 const CLIENT_INFO = { name: 'agent-web-audit', version: '1.0' };
 
@@ -464,19 +476,18 @@ function framingOf(resp: { status: number | null; headers: Record<string, string
   };
 }
 
-function buildBody(op: McpOp, method: string, protocolVersion: string): string {
+function buildBody(op: McpOp, method: string, protocolVersion: string, modernMethod: string | undefined): string {
+  if (modernMethod !== undefined) {
+    return modernProbeBody(modernMethod);
+  }
   if (op === 'initialize') {
     return legacyInitializeBody(protocolVersion);
   }
-  if (op === 'tools-list') {
+  if (op === 'tools-list' || op === 'unauthenticated-tools-list') {
     return LEGACY_TOOLS_LIST_BODY;
   }
   if (op === 'resources-list') {
     return JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'resources/list', params: {} });
-  }
-  const modernMethod = specOf(op).method;
-  if (modernMethod !== undefined) {
-    return modernProbeBody(modernMethod);
   }
   return JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: {} });
 }
@@ -495,6 +506,16 @@ export function advertisedCapabilities(items: EvidenceItem[]): readonly string[]
 /** A `capabilities` evidence row advertising the resources group. */
 export function advertisesResources(items: EvidenceItem[]): boolean {
   return advertisedCapabilities(items).includes('resources');
+}
+
+/**
+ * Whether a handshake probe (initialize or server/discover) was served a
+ * JSON-RPC result at a 2xx. An error envelope, a JSON body that carries no
+ * `result`, an unparseable body, and a refusal all serve nothing.
+ */
+export function handshakeServed(outcome: ProbeOutcome | undefined): boolean {
+  const status = outcome?.evidence[0]?.status;
+  return outcome?.jsonRpcResult === true && typeof status === 'number' && status >= 200 && status < 300;
 }
 
 /**
@@ -593,6 +614,46 @@ function modernLaneRefused(status: number | null, code: number | null): boolean 
   return status !== null && TYPED_REFUSAL_STATUSES.includes(status);
 }
 
+/**
+ * Whether a request carrying no token was refused with the 401 that tells a
+ * client how to sign in. Any other answer fails the row without misleading
+ * the caller, who either got what it asked for or a refusal, so it is
+ * noncompliant rather than broken: a server that serves some methods
+ * without a token and challenges the rest is a deliberate design, not a
+ * trap.
+ */
+function enforcementVerdict(
+  status: number | null,
+  rpc: Record<string, unknown> | null,
+  ev: EvidenceItem,
+): ProbeOutcome {
+  if (status === 401) return { status: 'pass', evidence: [{ ...ev, why: ['refused with 401'] }] };
+  const why =
+    rpc?.result !== undefined
+      ? 'a request without a token was served a result'
+      : `a request without a token was answered with HTTP ${status} instead of 401`;
+  return { status: 'noncompliant', evidence: [{ ...ev, why: [why] }] };
+}
+
+/** A 401 from an endpoint that requires sign-in: the row needs a token the auditor does not hold. */
+function signInRequired(ev: EvidenceItem): ProbeOutcome {
+  return {
+    status: 'na',
+    na_reason: 'auth-required',
+    evidence: [{ ...ev, why: [`HTTP 401 from ${String(ev.url)}`] }],
+  };
+}
+
+/**
+ * A wave-1 outcome read again once the endpoint is known to require
+ * sign-in, through the arm `runMcp` applies to every later row; null when
+ * that arm would not reach it (a failed request or a rate-limit refusal).
+ */
+export function signInRequiredOutcome(outcome: ProbeOutcome): ProbeOutcome | null {
+  const first = outcome.evidence[0];
+  return outcome.status !== 'error' && first?.status === 401 ? signInRequired(first) : null;
+}
+
 export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<ProbeOutcome> {
   const endpoint = ctx.mcpEndpoint;
   if (!endpoint) {
@@ -615,7 +676,11 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
   const spec = specOf(w.op);
   const conformance = conformanceFor(w.op);
   const negotiation = negotiationFor(w.op);
-  const modernMethod = spec.method;
+  // The token-less refusal is asked on the lane whose handshake drew the
+  // 401: a server that refuses the other lane before reading any token has
+  // not served that request without one.
+  const modernMethod =
+    spec.family === 'enforcement' && ctx.mcpAuth?.lane === 'modern' ? MCP_OPS['modern-tools-list'].method : spec.method;
   // Modern probes stay sessionless (no Mcp-Session-Id) and carry no
   // Mcp-Name: neither op is a tools/call or resources/read. Conformance
   // probes open fully table-shaped, and only the legacy three re-ask with
@@ -638,7 +703,7 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     ? LEGACY_TOOLS_LIST_BODY
     : conformance
       ? conformance.body()
-      : buildBody(w.op, w.method ?? '', ctx.protocolVersion);
+      : buildBody(w.op, w.method ?? '', ctx.protocolVersion, modernMethod);
   // Every MCP probe reads at most a small JSON-RPC envelope, so the
   // shared audit cap bounds what a hostile endpoint can make the auditor
   // buffer.
@@ -681,6 +746,21 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     ev.error_code = RATE_LIMITED_CODE;
     ev.why = ['rate limited by the target'];
     return { status: 'error', evidence: [ev] };
+  }
+
+  if (spec.family === 'enforcement') return enforcementVerdict(resp.status, rpc, ev);
+
+  // Settled ahead of every arm that reads the answer: a 401 that asks for
+  // sign-in says nothing about the surface the row asks about, and the arms
+  // below would read it as a broken one or as an era the server does not
+  // serve. An endpoint wave 1 did not settle as requiring sign-in, such as
+  // one that serves a handshake without a token, can still ask for it on
+  // this row, and its 401 reads the same once the endpoint's metadata backs it.
+  if (
+    resp.status === 401 &&
+    (ctx.mcpAuth || (await ctx.mcpSignIn?.({ challenge: wwwAuthenticate ?? null, lane: spec.era })))
+  ) {
+    return signInRequired(ev);
   }
 
   // Settled ahead of the arms below because a legacy server declines this
@@ -823,5 +903,9 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     ev.error_code = code;
     ok = code === (w.expect_code ?? -32601);
   }
-  return { status: ok ? 'pass' : 'broken', evidence: [ev] };
+  return {
+    status: ok ? 'pass' : 'broken',
+    evidence: [ev],
+    ...(rpc.result !== undefined ? { jsonRpcResult: true as const } : {}),
+  };
 }

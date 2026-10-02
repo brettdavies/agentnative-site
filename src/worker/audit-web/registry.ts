@@ -18,7 +18,8 @@ export type WebCheckHandler =
   | 'markdown-frontmatter'
   | 'content-without-js'
   | 'llms-txt-quality'
-  | 'api-hygiene';
+  | 'api-hygiene'
+  | 'protected-resource';
 
 /** Declared audit site type (the entry-point argument). */
 export type WebSiteType = 'content' | 'api';
@@ -31,6 +32,8 @@ export type AntecedentToken =
   | 'html-root'
   | 'mcp-present'
   | 'mcp-auth'
+  | 'mcp-session'
+  | 'mcp-auth-required'
   | 'mcp-resources'
   | 'api-surface'
   | 'schemas-ref'
@@ -61,6 +64,20 @@ export interface WebCheck {
   with: Record<string, unknown>;
 }
 
+/** One site design in a group of alternatives. */
+export interface WebAlternativeVariant {
+  /** The checks gated on these tokens form the variant; empty for a design with no checks of its own. */
+  antecedents: AntecedentToken[];
+  /** The variant is presented when a check gated on one of these tokens applied. */
+  presented_by: AntecedentToken[];
+}
+
+/** Site designs that cannot both be satisfied at full access, whatever the audit's vantage. */
+export interface WebAlternativeGroup {
+  group: string;
+  variants: Record<string, WebAlternativeVariant>;
+}
+
 /** One protocol lane the MCP category's rows group under, keyed by lane id. */
 export interface McpLaneSpec {
   label: string;
@@ -84,6 +101,8 @@ export interface WebAuditRegistry {
   categories: Record<string, string>;
   /** Display order is key order. */
   mcp_lanes?: Record<string, McpLaneSpec>;
+  /** Absent reads as no alternatives: every check counts in the global universe. */
+  alternatives?: WebAlternativeGroup[];
   checks: WebCheck[];
 }
 

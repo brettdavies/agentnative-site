@@ -288,6 +288,50 @@ describe('discoverMcpEndpoint', () => {
     });
     expect(endpoint).toBeNull();
   });
+
+  test('a common path answering 401 is the endpoint only when metadata on its own host names it', async () => {
+    const metadataUrl = 'https://example.com/.well-known/oauth-protected-resource';
+    const challenged = (metadata: unknown) =>
+      stubFetch((url, init) => {
+        if (url === 'https://example.com/mcp' && init?.method === 'POST') {
+          return new Response('{"error":"unauthorized"}', {
+            status: 401,
+            headers: { 'www-authenticate': `Bearer resource_metadata="${metadataUrl}"` },
+          });
+        }
+        if (url === metadataUrl && metadata !== null) {
+          return new Response(JSON.stringify(metadata), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response('not found', { status: 404 });
+      });
+    const opts = { timeoutMs: 5000 };
+    const named = await discoverMcpEndpoint('https://example.com/', DISCOVERY, {
+      ...opts,
+      fetchOptions: { fetchImpl: challenged({ resource: 'https://example.com/mcp', authorization_servers: [] }) },
+    });
+    expect(named.endpoint).toBe('https://example.com/mcp');
+    expect(named.endpointMetadata?.url).toBe(metadataUrl);
+    expect(named.endpointChallenge).toEqual({
+      challenge: `Bearer resource_metadata="${metadataUrl}"`,
+      lane: 'legacy',
+    });
+    expect(named.evidence).toContainEqual({
+      source: '/mcp',
+      endpoint: 'https://example.com/mcp',
+      probed: 'initialize (auth required)',
+      resource_metadata: metadataUrl,
+    });
+    const bare = await discoverMcpEndpoint('https://example.com/', DISCOVERY, {
+      ...opts,
+      fetchOptions: { fetchImpl: challenged(null) },
+    });
+    expect(bare.endpoint).toBeNull();
+    expect(bare.endpointMetadata).toBeNull();
+    expect(bare.endpointChallenge).toBeNull();
+  });
 });
 
 const MCP_CARD_TYPE = 'application/mcp-server-card+json';

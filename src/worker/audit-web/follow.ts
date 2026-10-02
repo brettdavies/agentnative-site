@@ -61,7 +61,7 @@ import {
 } from './follow-trail';
 import { phaseBudget, resolveUrl } from './handlers/shared';
 import type { EvidenceItem } from './handlers/types';
-import { admittingArtifact, normalizeEndpointUrl } from './reciprocity';
+import { admittingArtifact, type MetadataMatch, normalizeEndpointUrl } from './reciprocity';
 import type { WebAuditDiscoveryConfig } from './registry';
 import { DOCUMENT_MAX_BODY_BYTES, type GuardedFetchOptions, isEdgeErrorStatus, STATUS_ONLY_BODY_BYTES } from './ssrf';
 
@@ -89,6 +89,8 @@ export interface FollowInput {
 export interface FollowResult {
   /** The first declared endpoint reciprocity admitted, pinned to its final URL. */
   endpoint: string | null;
+  /** The RFC 9728 metadata that admitted that endpoint, when metadata is what did. */
+  endpointMetadata: MetadataMatch | null;
   /** Per declaration key: its entry, then the entries of what a followed card document declared. */
   entries: ReadonlyMap<string, TrailEntry[]>;
   evidence: EvidenceItem[];
@@ -124,6 +126,7 @@ export function openFollow(input: FollowInput): FollowSession {
   const entries = new Map<string, TrailEntry[]>();
   const walked = new Set<string>();
   let endpoint: string | null = null;
+  let endpointMetadata: MetadataMatch | null = null;
 
   /** A card document's trail entry, and the endpoints it names, which settle later in declaration order. */
   const cardDocumentRead = (declaration: McpDeclaration, fetched: Fetched | Settled): CardDocumentRead => {
@@ -195,15 +198,16 @@ export function openFollow(input: FollowInput): FollowSession {
     const pinned = normalizeEndpointUrl(fetched.url);
     if (pinned === null) return { outcome: 'blocked' };
     const finalUrl = pinned === normalizeEndpointUrl(declaration.url) ? undefined : pinned;
-    const admittedBy = await admittingArtifact(
+    const admitted = await admittingArtifact(
       pinned,
       input.discovery,
       requests.source,
       fetched.response.headers['www-authenticate'],
     );
-    if (admittedBy === null) return { final_url: finalUrl, outcome: 'reciprocity-refused' };
+    if (admitted === null) return { final_url: finalUrl, outcome: 'reciprocity-refused' };
     endpoint = pinned;
-    return { final_url: finalUrl, outcome: 'followed', admitted_by: admittedBy };
+    endpointMetadata = admitted.metadata;
+    return { final_url: finalUrl, outcome: 'followed', admitted_by: admitted.by };
   };
 
   /** How a declaration settles with no request: before the slice, or once an endpoint is admitted. */
@@ -264,6 +268,6 @@ export function openFollow(input: FollowInput): FollowSession {
       settled = settled.then(() => settleBatch(declarations));
       return settled;
     },
-    result: () => ({ endpoint, entries, evidence: requests.evidence, requests: requests.count() }),
+    result: () => ({ endpoint, endpointMetadata, entries, evidence: requests.evidence, requests: requests.count() }),
   };
 }

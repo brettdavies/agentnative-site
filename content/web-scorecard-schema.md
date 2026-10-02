@@ -24,6 +24,7 @@ The web scorecard is site-owned. Its `schema_version` is **0.5**, independent of
   "audit_profile": null,
   "site_type": null,
   "public_listing": false,
+  "vantage": { "network": "public", "credentialed": false },
   "follow_declarations": true,
   "declared_hosts": [ ... ],
   "registry_fingerprint": "3f2a9c1b7e40",
@@ -48,6 +49,7 @@ The web scorecard is site-owned. Its `schema_version` is **0.5**, independent of
 | `audit_profile`        | null                | engine  | Always `null` for web targets; audit profiles are a CLI concept.                                                                   |
 | `site_type`            | string \| null      | engine  | The declared site type the run scoped to: `content`, `api`, or `null` (everything ran).                                            |
 | `public_listing`       | boolean             | engine  | The submitter's opt-in to the public board listing. `false` unless explicitly set.                                                 |
+| `vantage`              | object              | engine  | Where the audit ran and whether it presented a credential. See [vantage](#vantage).                                                |
 | `follow_declarations`  | boolean, optional   | engine  | Whether the audit followed the hosts the site declares (its MCP server, its API host). Absent means no follow state was recorded.  |
 | `declared_hosts`       | array, optional     | engine  | The declared-hosts trail: one entry per host the site declares, with how the audit treated it. Absent means no trail was recorded. |
 | `registry_fingerprint` | string, optional    | stored  | The first 12 characters of the fingerprint of the check registry the score was computed under. The engine never sets it.           |
@@ -114,6 +116,24 @@ Web identity. The CLI-only header fields (`tier`, `language`, `repo`, `install`)
 | `name` | string | The audited domain (host), used as the display name. |
 | `url`  | string | The normalized audited URL. Matches `target_url`.    |
 
+## `vantage`
+
+Where the audit ran and what it could present. A score covers what an agent at that vantage can verify.
+
+```json
+"vantage": { "network": "public", "credentialed": false }
+```
+
+| Field          | Type    | Meaning                                                                                                                         |
+| -------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `network`      | string  | `public` for an anc.dev audit, run from the public internet; `local` for an `anc web <target>` run on the runner's own network. |
+| `credentialed` | boolean | `true` when a local run presented a credential to the audited MCP endpoint; otherwise `false`.                                  |
+
+Every anc.dev audit writes `public` and `false`. A local `anc web <target>` run writes `local`, with `credentialed`
+`true` when it presented a credential. The public board lists public-vantage scorecards only, so a local or credentialed
+score is never ranked beside a public one. A scorecard stored before the field existed carries no `vantage`; every such
+scorecard anc.dev holds is its own public audit.
+
 ## `declared_hosts`
 
 One entry per URL the site's discovery documents declare off its own origin, in declaration order: the AI catalog's MCP
@@ -165,24 +185,47 @@ row not evaluated because of a declared host names that host in `hosts` and `hos
 
 ## The two-score model
 
-Both scores derive from the same per-check outcomes; the engine computes them and consumers read the values straight
-from the JSON.
+Both scores derive from the same per-check outcomes and cover what an agent at the audit's [vantage](#vantage) can
+verify; the engine computes them and consumers read the values straight from the JSON.
 
 - **`score.relative`** (the headline, mirrored at top-level `score_pct`) is earned points over the maximum achievable
   for **this site's applicable checks**, so a site perfect for its type approaches 100. `n_a`, `skip`, and `error` rows
   are excluded from it. The [web leaderboard](/web) ranks by it.
-- **`score.global`** is earned points over the most a single site could earn (the maximum of a
-  **maximally agent-ready site**): every check in the registry, except that where checks are alternatives (mutually
-  exclusive outcomes of one probe, such as MCP access: an endpoint is open or protected, never both), only the
-  alternative the site presents counts, or the larger alternative when it presents neither. Exposing and nailing more
-  surfaces scores higher. It is the secondary number beside the headline, and the web leaderboard breaks ties between
-  equal relative scores by it.
+- **`score.global`** is earned points over the most a single site could earn (the maximum of a **maximally agent-ready
+  site**): every check in the registry outside a group of alternatives, plus each alternative the site presents, or the
+  largest when it presents none. Exposing and nailing more surfaces scores higher. It is the secondary number beside
+  the headline, and the web leaderboard breaks ties between equal relative scores by it.
 
 Global measures how much of the whole surface a site exposes, so a check that does not apply to a site still counts in
 its global denominator and earns nothing, whatever its `n_a` reason: a missing MCP endpoint, a declared site type, a
 deliberate no-CORS posture, or any other. A site without MCP therefore sees what adding MCP is worth. `skip` and `error`
-rows stay in the global denominator the same way. Only alternatives leave it: the one the site does not present, or the
-smaller one when it presents neither.
+rows stay in the global denominator the same way, and so does a check the audit could not reach: sign-in that blocks it,
+or a declared host that is private or unreachable, leaves the row `n_a` with that reason. A check that reached the
+server and got a definitive answer scores on that answer.
+
+Only alternatives leave the global denominator. Alternatives are site designs no single site can satisfy at once; a
+limit on what the audit could reach never forms or joins one. MCP access is the only group. An endpoint presents the
+protected design when a token-less handshake (`initialize` or `server/discover`) draws a 401 that RFC 9728
+protected-resource metadata on the endpoint's own host backs, or, when neither handshake drew a 401 or a JSON-RPC
+result, when the request that found the endpoint drew one. The three sign-in checks (`mcp-auth-challenge`,
+`mcp-auth-servers`, `mcp-auth-enforced`) count only for a site that presents the protected design or a site with no MCP
+endpoint. A check that needs a session presents the open design whenever the audit evaluates it; the open design owns no
+checks, and an endpoint can present both. The engine reads which designs a site presents from its rows alone, so a
+stored scorecard recomputes its own denominator.
+
+Sign-in blocks a check on either design, and the check reads `n_a` with reason `auth-required`:
+
+- On an endpoint that presents the protected design, sign-in blocks every check that needs a session unless the endpoint
+  answered a token-less handshake with a JSON-RPC result or refused the check's own lane, as below. A resources check
+  stays blocked while a handshake that sign-in blocked could have advertised resources.
+- On either design, sign-in blocks a check whose JSON-RPC request draws a 401 the endpoint's metadata backs, apart from
+  `mcp-auth-enforced`, which passes on that 401, so an endpoint that serves a handshake without a token and asks for
+  sign-in on its other requests never reads as broken.
+- A lane whose own handshake the server refuses as unavailable (for example with `-32601` or `-32022`) rather than with
+  a 401 is not blocked: its checks read as they do on an open server, because a token would not change that answer.
+
+A protected server's global on a public audit tops out near 68, because the session and handshake rows its sign-in
+blocks stay in its denominator; a local `anc web <target>` run that presents a credential evaluates them.
 
 Per applicable check, with per-tier difficulty weights (currently 5 for MUST, 3 for SHOULD, 1 for MAY):
 
@@ -193,6 +236,10 @@ Per applicable check, with per-tier difficulty weights (currently 5 for MUST, 3 
   the only lever against withdrawal is to stop rewarding it.
 - `broken` (present but invalid) costs 0.75 x weight at every tier: a malformed surface misleads agents, so it is worse
   than absence.
+- Which of the two a defect is depends on what an agent at the audit's vantage gets. Sign-in metadata that lists one
+  usable authorization server beside an `http` one is `noncompliant`, because the agent still signs in; a list with no
+  server the agent can use (none listed, or every entry not `https` or on a private address while the endpoint is
+  public) is `broken`, because it leaves the agent nowhere to sign in.
 - An absent MUST is a full-weight zero; an absent SHOULD is a zero that occupies only half its weight in the relative
   denominator; an absent MAY is `n_a` (truly optional, never counted against the relative score).
 - `n_a`, `skip`, and `error` rows earn nothing. They are excluded from the relative score and stay in the global
@@ -285,7 +332,8 @@ One object per check.
   violated. On the MCP family this is a well-formed JSON-RPC refusal carrying the wrong error code, or a correct refusal
   missing a required payload field. Scores above absent and well below pass.
 - `broken` — the surface exists but is invalid (malformed body, wrong content-type, an unexpected status where the
-  surface clearly exists). Scores below absent.
+  surface clearly exists), so it leads an agent to a dead end or misleads it. Scores below absent. Whether a defect
+  reads `noncompliant` or `broken` turns on what an agent at the audit's vantage gets.
 - `absent` — the surface is not there (404/410, no DNS records, no CORS headers).
 - `n_a` — excluded from the relative score and kept in the global denominator; `na_reason` says why, from a closed set:
   - `antecedent-unmet`: the check does not apply to this site.
@@ -299,10 +347,15 @@ One object per check.
   - `declared-host-blocked`: the declared host, or where it redirected, is a private address or an IP literal, which anc
     never contacts.
   - `declared-host-budget-exceeded`: anc's hourly probe limit for the declared host was reached.
-  - `auth-required`: the host requires sign-in before the check can run.
+  - `auth-required`: sign-in blocked the check, because the endpoint asks for a credential the audit does not hold.
 - `skip` — the per-audit deadline passed before the check ran.
 - `error` — an operational failure (network error, timeout); never credited, never penalized in the relative score,
   and kept in the global denominator like `n_a` and `skip`.
+
+`auth-required`, `declared-host-blocked`, and `declared-host-unreachable` mark a check the audit could not reach from
+its vantage. Such a row, like every `n_a` row, earns nothing, is excluded from the relative score, and stays in the
+global denominator. A local `anc web <target>` run evaluates what its own network reaches and, presenting a credential,
+what sign-in blocks.
 
 A handler with nothing to probe (no discovered MCP endpoint) emits `n_a` with no `na_reason`. The derived `result` line
 leads with the reason's own phrase, and the last six reasons begin "Not evaluated:", for example "Not evaluated:

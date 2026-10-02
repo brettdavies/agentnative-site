@@ -718,6 +718,7 @@ const DOCUMENTED_TOP_LEVEL = [
   'audit_profile',
   'site_type',
   'public_listing',
+  'vantage',
   'follow_declarations',
   'declared_hosts',
   'registry_fingerprint',
@@ -795,6 +796,10 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
 
   test('public_listing defaults to false when the meta omits it', () => {
     expect(produced.public_listing).toBe(false);
+  });
+
+  test('vantage records the public engine: the public internet, holding no credential', () => {
+    expect(produced.vantage).toEqual({ network: 'public', credentialed: false });
   });
 
   test('coverage_summary counts a noncompliant row as applied but not verified', () => {
@@ -1035,6 +1040,9 @@ describe('MCP rows group into protocol lanes in registry order', () => {
     ['mcp-cors-actual', 'n_a'],
     ['mcp-usage-doc', 'pass'],
     ['mcp-card-legacy-aliases', 'pass'],
+    ['mcp-auth-challenge', 'n_a'],
+    ['mcp-auth-servers', 'n_a'],
+    ['mcp-auth-enforced', 'n_a'],
   ];
   const MODERN_IDS = new Set(registry.checks.filter((check) => check.lane === 'modern').map((check) => check.id));
   // A legacy-only server: wave 1 evidenced no modern lane, so every modern

@@ -79,6 +79,18 @@ export interface WebCoverageLevel {
   verified: number;
 }
 
+/**
+ * Where an audit ran and whether it presented a credential: a score covers
+ * what an agent at that vantage can verify.
+ */
+export interface WebVantage {
+  network: 'public' | 'local';
+  credentialed: boolean;
+}
+
+/** The vantage of every audit this engine runs: the public internet, holding no credential. */
+const PUBLIC_VANTAGE: WebVantage = { network: 'public', credentialed: false };
+
 export interface WebScorecard {
   schema_version: string;
   spec_version: string;
@@ -95,6 +107,8 @@ export interface WebScorecard {
   public_listing?: boolean;
   /** The declared site type this audit ran under; null = ran everything. */
   site_type: WebSiteType | null;
+  /** A fresh build always emits it; absent on a scorecard stored before the field existed. */
+  vantage?: WebVantage;
   /** Whether the audit followed the hosts the target declares; absent reads as not evaluated. */
   follow_declarations?: boolean;
   /** The declared-hosts trail; absent reads as no trail, which is not an empty one. */
@@ -144,7 +158,7 @@ export interface WebScorecardMeta {
   /** The effective follow state and the trail it produced; a build given neither records neither. */
   followDeclarations?: boolean;
   declaredHosts?: DeclaredHostEntry[];
-  registry: Pick<WebAuditRegistry, 'category_order' | 'categories' | 'checks'>;
+  registry: Pick<WebAuditRegistry, 'category_order' | 'categories' | 'checks' | 'alternatives'>;
   scoreConfig?: ScoreConfig;
 }
 
@@ -170,7 +184,7 @@ export function buildWebScorecard(results: EngineResult[], meta: WebScorecardMet
     });
   }
 
-  const universeMax = universeMaxOf(meta.registry.checks, meta.scoreConfig);
+  const universeMax = universeMaxOf(meta.registry, results, meta.scoreConfig);
   const score = scoreWebAudit(results, universeMax, meta.scoreConfig);
 
   return {
@@ -184,6 +198,7 @@ export function buildWebScorecard(results: EngineResult[], meta: WebScorecardMet
     audit_profile: null,
     site_type: meta.siteType ?? null,
     public_listing: meta.publicListing ?? false,
+    vantage: { ...PUBLIC_VANTAGE },
     ...(meta.followDeclarations !== undefined ? { follow_declarations: meta.followDeclarations } : {}),
     ...(meta.declaredHosts !== undefined ? { declared_hosts: meta.declaredHosts } : {}),
     summary,

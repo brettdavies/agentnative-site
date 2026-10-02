@@ -499,7 +499,9 @@ exchanges (a 3xx with a \`location\` header) that the guarded fetch above the se
 except where the engine keeps a probe off hosts nothing confirmed. A request to the MCP endpoint on the audited
 origin (discovery's common-path POSTs and every probe of that endpoint) takes only hops that keep the scheme, host,
 and port: discovery records a redirect to another origin with its target and declares the target, and any other probe
-reads it as a refused redirect. A probe of an endpoint on a declared host takes no redirect at all.
+reads it as a refused redirect. A probe of an endpoint on a declared host takes no redirect at all, and neither does a
+probe of a document on that endpoint's origin (a registry path written with \`{mcp_origin}\`, which the engine replaces
+with the endpoint's scheme, host, and port).
 
 ## scorecard.json
 
@@ -511,7 +513,9 @@ evidence, so no wall-clock value reaches the file. Key order is otherwise the en
 every number is an integer. A scenario that ends in
 the engine's \`unreachable\` event writes \`{"unreachable": "<reason>"}\` instead of a scorecard. The engine runs
 under a fixed clock, so no per-audit deadline fires; per-probe timeouts appear only as declared transport
-failures.
+failures. Every scenario is a public-vantage audit holding no credential, so every scorecard records
+\`"vantage": {"network": "public", "credentialed": false}\`, and an engine under comparison runs the scenarios at
+that vantage.
 
 Each row's \`hosts\` lists the distinct hosts its raw evidence items were requested from, in evidence order, as
 \`{"host": ...}\` objects. Only an item with no \`blocked\` marker counts: a request the SSRF guard refused never

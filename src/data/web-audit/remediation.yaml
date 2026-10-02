@@ -288,6 +288,39 @@ remediation:
       and reference it from the server card and `llms.txt`. It gives an agent a one-fetch orientation.
     resources:
       - { label: anc.dev example, url: "https://anc.dev/mcp-skill.md" }
+  mcp-auth-challenge:
+    title: a 401 names the RFC 9728 metadata in its WWW-Authenticate challenge
+    goal: Name your protected-resource metadata in the WWW-Authenticate challenge of every 401
+    fix: |
+      When the MCP endpoint refuses a request that carries no access token, answer `401` with
+      `WWW-Authenticate: Bearer resource_metadata="https://<host>/.well-known/oauth-protected-resource"`,
+      naming the URL of your RFC 9728 metadata. A client reads the challenge to find the authorization
+      server; without `resource_metadata` it falls back to guessing well-known locations. The MCP
+      authorization specification requires the header on every `401`.
+    resources:
+      - { label: MCP authorization, url: "https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization" }
+      - { label: RFC 9728 section 5.1, url: "https://www.rfc-editor.org/rfc/rfc9728#section-5.1" }
+  mcp-auth-servers:
+    title: protected-resource metadata lists public https authorization_servers
+    goal: List the authorization servers that issue tokens for your MCP server in its RFC 9728 metadata
+    fix: |
+      Publish `authorization_servers` in your protected-resource metadata as an array of at least one
+      issuer URL. Each entry must be an absolute `https` URL on a public host, because a client fetches
+      that authorization server's own metadata to begin the OAuth flow. A private, loopback, or `http`
+      URL leaves every client outside your network unable to sign in.
+    resources:
+      - { label: RFC 9728 section 2, url: "https://www.rfc-editor.org/rfc/rfc9728#section-2" }
+      - { label: MCP authorization, url: "https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization" }
+  mcp-auth-enforced:
+    title: a tools/list without an access token is refused with 401
+    goal: Refuse every MCP request that carries no access token with 401
+    fix: |
+      Check the access token before dispatching any JSON-RPC method, `tools/list` included, and answer a
+      request without one with `401` and the same `WWW-Authenticate` challenge `initialize` receives. A
+      server that challenges some methods but serves `tools/list` to anyone exposes its tool catalog to
+      callers that never signed in, and leaves a client unable to tell which calls need a token.
+    resources:
+      - { label: MCP authorization, url: "https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization" }
   llms-txt:
     title: /llms.txt present with a summary and link index
     goal: Serve /llms.txt with a title, summary, and categorized link index

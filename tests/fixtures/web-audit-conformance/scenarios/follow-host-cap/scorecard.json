@@ -90,6 +90,10 @@
   "audit_profile": null,
   "site_type": null,
   "public_listing": false,
+  "vantage": {
+    "network": "public",
+    "credentialed": false
+  },
   "follow_declarations": true,
   "declared_hosts": [
     {
@@ -138,7 +142,7 @@
     "noncompliant": 0,
     "broken": 1,
     "absent": 7,
-    "n_a": 46,
+    "n_a": 49,
     "skip": 0,
     "error": 1
   },
@@ -714,6 +718,63 @@
       "keyword": "may",
       "tier": "optional",
       "principle": "P8",
+      "status": "n_a",
+      "na_reason": "declared-host-blocked",
+      "evidence": "http://10.0.0.1/mcp",
+      "hosts": [
+        {
+          "host": "10.0.0.1"
+        }
+      ],
+      "host": "10.0.0.1"
+    },
+    {
+      "id": "mcp-auth-challenge",
+      "label": "a 401 names the RFC 9728 metadata in its WWW-Authenticate challenge",
+      "category": "mcp",
+      "group": "P1",
+      "layer": "web",
+      "keyword": "may",
+      "tier": "optional",
+      "principle": "P1",
+      "status": "n_a",
+      "na_reason": "declared-host-blocked",
+      "evidence": "http://10.0.0.1/mcp",
+      "hosts": [
+        {
+          "host": "10.0.0.1"
+        }
+      ],
+      "host": "10.0.0.1"
+    },
+    {
+      "id": "mcp-auth-servers",
+      "label": "protected-resource metadata lists public https authorization_servers",
+      "category": "mcp",
+      "group": "P1",
+      "layer": "web",
+      "keyword": "may",
+      "tier": "optional",
+      "principle": "P1",
+      "status": "n_a",
+      "na_reason": "declared-host-blocked",
+      "evidence": "http://10.0.0.1/mcp",
+      "hosts": [
+        {
+          "host": "10.0.0.1"
+        }
+      ],
+      "host": "10.0.0.1"
+    },
+    {
+      "id": "mcp-auth-enforced",
+      "label": "a tools/list without an access token is refused with 401",
+      "category": "mcp",
+      "group": "P1",
+      "layer": "web",
+      "keyword": "may",
+      "tier": "optional",
+      "principle": "P1",
       "status": "n_a",
       "na_reason": "declared-host-blocked",
       "evidence": "http://10.0.0.1/mcp",

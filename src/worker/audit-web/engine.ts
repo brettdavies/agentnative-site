@@ -4,13 +4,16 @@
 // then evaluates in two waves: wave 1 probes the antecedent-source checks
 // (the WAVE1_CHECK_IDS set); wave 2 runs the dependent checks with
 // antecedents resolved from wave-1 results and the root fetch reused —
-// no duplicate `/` fetch. Each check finalizes to
+// no duplicate `/` fetch. Between the waves it settles whether the MCP
+// endpoint requires sign-in (mcp-auth.ts), once wave 1's wire probes have
+// answered. Each check finalizes to
 // pass / noncompliant / broken / absent / n_a / skip / error; an
 // applicable MAY that comes back absent is re-tagged n_a with na_reason
 // 'optional-absent', an unmet antecedent yields the na_reason its
 // resolver named or else 'antecedent-unmet', and a handler-stated
-// na_reason (the CORS pair's 'posture-consistent') passes through to the
-// result row alongside the handler's `unprobed` marker.
+// na_reason (the CORS pair's 'posture-consistent', an endpoint's
+// 'auth-required') passes through to the result row alongside the
+// handler's `unprobed` marker.
 //
 // The engine yields each result as it finalizes (KTD-6: streaming
 // transport is the route's concern) and a terminal `complete` event
@@ -38,14 +41,19 @@ import { runLlmsTxtQuality } from './handlers/llms-txt-quality';
 import { runMarkdownFrontmatter } from './handlers/markdown-frontmatter';
 import {
   advertisedCapabilities,
+  ENFORCEMENT_OPS,
   mcpModernLaneFrom,
+  mcpRequestEra,
   mcpSessionIdFrom,
   notifyMcpInitialized,
   runMcp,
+  signInRequiredOutcome,
 } from './handlers/mcp';
+import { runProtectedResource } from './handlers/protected-resource';
 import { enumerateScopedDirs, runScopedLlms } from './handlers/scoped-llms';
-import type { EvidenceItem, HandlerContext, McpLaneEvidence, ProbeOutcome } from './handlers/types';
+import type { EvidenceItem, HandlerContext, McpAuthRequired, McpLaneEvidence, ProbeOutcome } from './handlers/types';
 import { runWebMcp } from './handlers/webmcp';
+import { directArtifactSource, settleMcpAuth, signInResolver } from './mcp-auth';
 import type { WebAuditRegistry, WebCheck, WebSiteType } from './registry';
 import { buildWebScorecard, type EngineResult, type ScorecardStatus, type WebScorecard } from './scorecard';
 import { type GuardedFetchOptions, guardedFetch, isEdgeErrorStatus } from './ssrf';
@@ -103,6 +111,7 @@ const HANDLERS: Partial<Record<WebCheck['handler'], Handler>> = {
   'content-without-js': runContentWithoutJs,
   'llms-txt-quality': runLlmsTxtQuality,
   'api-hygiene': runApiHygiene,
+  'protected-resource': runProtectedResource,
 };
 
 const EVAL_RULE_HANDLERS: Partial<Record<NonNullable<WebCheck['eval']>, Handler>> = {
@@ -132,16 +141,24 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
   const first = outcome.evidence[0] ?? {};
   if (outcome.status === 'na') return String((first.why as string[] | undefined)?.join('; ') ?? 'not applicable');
 
+  if (check.handler === 'protected-resource') return ((first.why as string[] | undefined) ?? []).join('; ');
+
   if (check.handler === 'mcp') {
     if (first.error) return `${first.url}: ${first.error}`;
+    const op = check.with ? (check.with as { op?: string }).op : undefined;
     // An era verdict and a conformance defect each state their reason in
     // `why`; the response fields describe the refusal, not the surface
     // the row is scoring. A bare `error code -32022` would read as the
     // wrong code on a row whose code was right and whose payload was not.
-    if ((outcome.status === 'absent' || outcome.status === 'noncompliant') && Array.isArray(first.why)) {
+    // An enforcement row's reason is its whole finding, whatever its status.
+    if (
+      (outcome.status === 'absent' ||
+        outcome.status === 'noncompliant' ||
+        ENFORCEMENT_OPS.some((enforcementOp) => enforcementOp === op)) &&
+      Array.isArray(first.why)
+    ) {
       return (first.why as string[]).join('; ');
     }
-    const op = check.with ? (check.with as { op?: string }).op : undefined;
     if (op === 'initialize') {
       const si = first.serverInfo as { name?: string } | null;
       return si?.name
@@ -371,6 +388,9 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const retainedBodies = new Map<string, string>();
   let mcpSessionId: string | null = null;
   let mcpLanes: McpLaneEvidence = { modern: 'unknown', legacyAdvertised: [], modernAdvertised: [] };
+  let mcpAuth: McpAuthRequired | null = null;
+  let mcpSignIn: HandlerContext['mcpSignIn'];
+  const requestTimeoutMs = (): number => Math.min(perCheckTimeoutMs, Math.max(1, deadline - now()));
 
   const handlerCtx = (): HandlerContext => ({
     base,
@@ -378,7 +398,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     mcpEndpoint: declared.endpoint,
     mcpEndpointFollowed: declared.followed,
     protocolVersion: input.registry.mcp_discovery.protocol_version,
-    defaultTimeoutMs: Math.min(perCheckTimeoutMs, Math.max(1, deadline - now())),
+    defaultTimeoutMs: requestTimeoutMs(),
     root: root ?? undefined,
     scopedDirs,
     retainedBodies,
@@ -386,6 +406,8 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     fetchOptions: input.fetchOptions,
     mcpSessionId,
     mcpLanes,
+    mcpAuth,
+    mcpSignIn,
   });
 
   const probeOne = async (
@@ -418,6 +440,27 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     wave1Results.set(check.id, result);
   }
 
+  // Whether the endpoint requires sign-in is settled once wave 1's wire
+  // probes have answered, from their 401 or, when they drew none and were
+  // served nothing, from the 401 that found the endpoint; their own rows are
+  // then read again the way every later MCP row is. When that settles
+  // nothing, a later row's 401 is read against the same metadata.
+  const signIn = signInResolver({
+    endpoint: declared.endpoint,
+    known: declared.metadata,
+    source: directArtifactSource(() => (deadline - now() > 0 ? requestTimeoutMs() : null), input.fetchOptions),
+  });
+  mcpAuth = await settleMcpAuth({ observed: declared.challenge, sources, signIn });
+  if (mcpAuth === null) mcpSignIn = async (answer) => (await signIn(answer)) !== null;
+  for (const check of mcpAuth === null ? [] : wave1Checks) {
+    const outcome = sources.get(check.id);
+    const reread = check.handler === 'mcp' && outcome !== undefined ? signInRequiredOutcome(outcome) : null;
+    if (reread !== null) {
+      sources.set(check.id, reread);
+      wave1Results.set(check.id, toResult(check, reread));
+    }
+  }
+
   const actx: AntecedentContext = {
     siteType: input.siteType,
     mcpEndpoint: declared.endpoint,
@@ -425,6 +468,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     root,
     sources,
     follow: { unmet: declared.unmet },
+    mcpAuth,
   };
 
   // Section directories for the scoped-llms probes: the root llms.txt
@@ -442,7 +486,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   };
   if (mcpSessionId && declared.endpoint) {
     await notifyMcpInitialized(declared.endpoint, mcpSessionId, {
-      timeoutMs: Math.min(perCheckTimeoutMs, Math.max(1, deadline - now())),
+      timeoutMs: requestTimeoutMs(),
       fetchOptions: input.fetchOptions,
       followed: declared.followed,
     });
@@ -455,7 +499,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     if (!siteTypeApplies(check.site_types, actx)) {
       return naResult(check, { reason: 'antecedent-unmet', evidence: 'not applicable to the declared site type' });
     }
-    return antecedentGate(check, resolveAntecedent(check.antecedent, actx));
+    return antecedentGate(check, resolveAntecedent(check.antecedent, { ...actx, mcpLane: mcpRequestEra(check) }));
   };
 
   // Finalize + yield wave-1 results through the same gate.

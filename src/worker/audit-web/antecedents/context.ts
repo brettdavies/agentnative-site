@@ -6,7 +6,8 @@
 import type { NaReason } from '../../../shared/web-audit-findings';
 import type { ProbeResponse } from '../assert';
 import type { DeclaredHostReason } from '../endpoint-of-record';
-import type { EvidenceItem, ProbeOutcome } from '../handlers/types';
+import type { EvidenceItem, McpAuthRequired, ProbeOutcome } from '../handlers/types';
+import { wireProbeEvidence } from '../mcp-auth';
 import type { WebSiteType } from '../registry';
 
 export interface AntecedentContext {
@@ -20,6 +21,10 @@ export interface AntecedentContext {
   sources: ReadonlyMap<string, ProbeOutcome>;
   /** What following the declared hosts settled; absent when the audit followed none. */
   follow?: { unmet: DeclaredHostReason | null };
+  /** Set when the endpoint of record requires sign-in; absent or null when it does not. */
+  mcpAuth?: McpAuthRequired | null;
+  /** The protocol era of the MCP row being gated; absent for every other row. */
+  mcpLane?: McpAuthRequired['lane'];
 }
 
 /** Whether a check applies, does not, or cannot be decided because the root never answered. */
@@ -76,6 +81,11 @@ export function anyEvidenceStatus(items: EvidenceItem[], status: number): boolea
 /** A 401 or WWW-Authenticate challenge in a probe's evidence. */
 export function evidenceShowsAuthChallenge(items: EvidenceItem[]): boolean {
   return anyEvidenceStatus(items, 401) || items.some((item) => typeof item.www_authenticate === 'string');
+}
+
+/** A 401 or WWW-Authenticate challenge on either wave-1 MCP handshake, legacy or modern. */
+export function handshakeShowsAuthChallenge(ctx: AntecedentContext): boolean {
+  return evidenceShowsAuthChallenge(wireProbeEvidence(ctx.sources));
 }
 
 /** `n_a` for a check that needs the MCP endpoint there is none of, naming the declared host behind that when one is. */

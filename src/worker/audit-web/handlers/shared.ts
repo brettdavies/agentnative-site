@@ -1,10 +1,18 @@
 // Shared helpers for the probe handlers and the discovery and follow
 // phases: base-relative URL resolution, `{mcp_endpoint}`/`{host}`
 // substitution, per-check timeout derivation (registry `with.timeout` is
-// in seconds), redirect handling for probes of the MCP endpoint, and a
-// phase's share of the per-audit deadline.
+// in seconds), redirect handling for probes of the MCP endpoint, the
+// statuses that ask for a retry, and a phase's share of the per-audit
+// deadline.
 
 import type { GuardedFetchOptions } from '../ssrf';
+
+/**
+ * Statuses whose shape is "not now" rather than "not here": a target
+ * asking to be retried is reporting its own load, not answering what the
+ * request asked.
+ */
+export const RETRY_SHAPED_STATUSES: readonly number[] = [408, 429];
 
 /** Join a path to the base, or pass an absolute URL through unchanged. */
 export function resolveUrl(base: string, pathOrUrl: string): string {
@@ -17,10 +25,23 @@ export function resolveUrl(base: string, pathOrUrl: string): string {
   }
 }
 
-/** Replace the `{mcp_endpoint}` token; yields '' when the endpoint is unknown. */
+function originOf(url: string | null): string {
+  if (url === null) return '';
+  try {
+    return new URL(url).origin;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Replace the `{mcp_endpoint}` token and the `{mcp_origin}` token (the
+ * endpoint's scheme, host, and port); each yields '' when the endpoint is
+ * unknown.
+ */
 export function substituteEndpoint(value: string, mcpEndpoint: string | null): string {
-  if (!value.includes('{mcp_endpoint}')) return value;
-  return value.replaceAll('{mcp_endpoint}', mcpEndpoint ?? '');
+  if (!value.includes('{mcp_endpoint}') && !value.includes('{mcp_origin}')) return value;
+  return value.replaceAll('{mcp_endpoint}', mcpEndpoint ?? '').replaceAll('{mcp_origin}', originOf(mcpEndpoint));
 }
 
 type RedirectPolicy = Pick<GuardedFetchOptions, 'refuseRedirects' | 'crossOriginRedirects'>;
@@ -37,9 +58,15 @@ export function mcpEndpointRedirects(followed: boolean | undefined, method = 'PO
   return { crossOriginRedirects: method === 'GET' || method === 'HEAD' ? 'return' : 'refuse' };
 }
 
-/** Redirect handling for a probe of `rawPath`: the MCP endpoint's when the path targets it. */
+/**
+ * Redirect handling for a probe of `rawPath`: the MCP endpoint's when the
+ * path targets it. A document on a declared endpoint's host takes no
+ * redirect either, for the same reason; on the audited origin it keeps the
+ * default.
+ */
 export function endpointRedirects(rawPath: string, followed: boolean | undefined, method?: string): RedirectPolicy {
-  return rawPath.includes('{mcp_endpoint}') ? mcpEndpointRedirects(followed, method) : {};
+  if (rawPath.includes('{mcp_endpoint}')) return mcpEndpointRedirects(followed, method);
+  return rawPath.includes('{mcp_origin}') && followed === true ? { refuseRedirects: true } : {};
 }
 
 /** Replace the `{host}` token used by DoH record names. */

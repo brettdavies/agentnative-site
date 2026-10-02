@@ -18,6 +18,7 @@
 
 import { type AuditFreshness, freshnessFor, WEB_AUDIT_STALE_AFTER_MS } from '../../shared/audit-envelope';
 import { emitLog, type LogScope } from '../telemetry/log';
+import type { WebVantage } from './scorecard';
 
 export { WEB_AUDIT_STALE_AFTER_MS };
 
@@ -69,7 +70,17 @@ export type WebListedAudit = {
   score: { relative: number; global: number };
   scored_at: string;
   public_listing: boolean;
+  vantage: WebVantage['network'];
 };
+
+/**
+ * Where a stored scorecard's audit ran. A scorecard stored without a
+ * vantage was written by the public engine, the only one that predates the
+ * field.
+ */
+export function vantageNetworkOf(scorecard: unknown): WebVantage['network'] {
+  return (scorecard as { vantage?: { network?: unknown } } | null)?.vantage?.network === 'local' ? 'local' : 'public';
+}
 
 /**
  * Normalize a URL for keying and display: lowercase host, canonical
@@ -352,6 +363,7 @@ function boardMetadataOf(targetUrl: string, scorecard: unknown, scoredAt: string
     // flag must be dual-stored here; string-valued because R2 metadata is
     // string-only, and always emitted so a missing key can't read as opted-in.
     public_listing: String(sc?.public_listing ?? false),
+    vantage: vantageNetworkOf(scorecard),
   };
   if (typeof sc?.score_pct === 'number') meta.score_pct = String(sc.score_pct);
   if (typeof sc?.score?.relative === 'number') meta.relative = String(sc.score.relative);
@@ -417,12 +429,14 @@ export async function listAllWebAudits(env: WebCacheEnv, opts: ListAllWebAuditsO
 
 /**
  * Board-listing gate for a non-curated row: a user-submitted audit lists only
- * on an explicit opt-in. The single exported predicate both board surfaces
- * (the /web all view and the MCP list tool) share, so they can never drift on
- * what counts as listable. Curated rows bypass this entirely and always show.
+ * on an explicit opt-in, and only when it ran from the public vantage, so a
+ * local or credentialed run is never ranked as a public score. The single
+ * exported predicate both board surfaces (the /web all view and the MCP list
+ * tool) share, so they can never drift on what counts as listable. Curated
+ * rows bypass this gate; the aggregate rebuild applies the vantage rule to them.
  */
 export function isBoardListable(row: WebListedAudit): boolean {
-  return row.public_listing === true;
+  return row.public_listing === true && row.vantage === 'public';
 }
 
 function parseListedMetadata(meta: Record<string, string> | undefined): WebListedAudit | null {
@@ -441,6 +455,7 @@ function parseListedMetadata(meta: Record<string, string> | undefined): WebListe
     scored_at,
     // A missing key coerces to false: an unmigrated object reads as not-listed.
     public_listing: meta.public_listing === 'true',
+    vantage: meta.vantage === 'local' ? 'local' : 'public',
   };
 }
 

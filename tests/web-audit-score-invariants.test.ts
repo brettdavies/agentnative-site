@@ -34,6 +34,7 @@ import { attachInlineRemediation } from '../src/worker/audit-web/display';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
 import {
   CONFORMANCE_OPS,
+  ENFORCEMENT_OPS,
   ERA_OPS,
   LEGACY_CONFORMANCE_OPS,
   MODERN_LANE_DEPENDENT_OPS,
@@ -51,7 +52,6 @@ const BASE = 'https://example.com/';
 const registry = normalizeWebAuditRegistry(
   yaml.load(await readFile(REGISTRY_PATH, 'utf8')) as object,
 ) as unknown as WebAuditRegistry;
-const universeMax = universeMaxOf(registry.checks);
 
 const json = (body: object, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -283,7 +283,7 @@ function auditOf(label: string, fetchImpl: typeof fetch): Promise<Audit> {
     }) as AsyncGenerator<AuditEvent>) {
       if (event.type === 'result') rows.push(event.result);
     }
-    return { score: scoreWebAudit(rows, universeMax), rows };
+    return { score: scoreWebAudit(rows, universeMaxOf(registry, rows)), rows };
   })();
   audits.set(label, run);
   return run;
@@ -538,6 +538,10 @@ describe('an operational condition on the discriminator is not an era verdict', 
 });
 
 describe('the scorer prices the four scored statuses in one order, for every check', () => {
+  // The synthetic rows below name no check, so they present no alternative
+  // and every one of them scores against the same universe.
+  const universeMax = universeMaxOf(registry, []);
+
   test('pass beats noncompliant beats absent beats broken', async () => {
     // The whole model in one assertion, on synthetic rows so it reads as
     // the scorer's rule rather than an MCP-handler behavior. Every
@@ -546,9 +550,11 @@ describe('the scorer prices the four scored statuses in one order, for every che
     const at = (status: 'pass' | 'noncompliant' | 'absent' | 'broken') =>
       scoreWebAudit([{ keyword: 'should', status }, ...filler], universeMax);
     const order = ['pass', 'noncompliant', 'absent', 'broken'] as const;
+    // Global is earned over one registry-wide constant, so its rounding can
+    // tie two adjacent statuses; the strict order is asserted on earned.
     const descending = order
       .slice(1)
-      .every((status, i) => at(order[i]).earned > at(status).earned && at(order[i]).global > at(status).global);
+      .every((status, i) => at(order[i]).earned > at(status).earned && at(order[i]).global >= at(status).global);
     expect(`pass > noncompliant > absent > broken: ${descending}`).toBe('pass > noncompliant > absent > broken: true');
   });
 
@@ -657,11 +663,12 @@ describe('honouring the request Accept never scores below ignoring it', () => {
 });
 
 describe('row families are declared once and cover the registry', () => {
-  const declared = [...ERA_OPS, ...CONFORMANCE_OPS];
+  const declared = [...ERA_OPS, ...CONFORMANCE_OPS, ...ENFORCEMENT_OPS];
 
-  test('the two families partition every declared op', () => {
+  test('the three families partition every declared op', () => {
     expect(new Set(declared).size).toBe(declared.length);
     expect([...ERA_OPS].filter((op) => CONFORMANCE_OPS.includes(op)).join(',')).toBe('');
+    expect([...ENFORCEMENT_OPS].sort().join(',')).toBe('unauthenticated-tools-list');
   });
 
   test('every MCP op the registry uses is declared, and every declared op is used', () => {

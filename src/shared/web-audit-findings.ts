@@ -56,6 +56,24 @@ export function naReasonPhrase(reason: NaReason, host: string): string {
   return NA_REASON_PHRASES[reason](host);
 }
 
+/**
+ * Whether only a check that applied to the site can carry the reason. The
+ * global score reads it to tell which alternatives a site presents from its
+ * stored rows alone. `auth-required` is false although a check that applied
+ * can carry it: the antecedent gate also stamps it on checks that never did.
+ */
+export const NA_REASON_ONLY_WHEN_APPLICABLE: Readonly<Record<NaReason, boolean>> = {
+  'antecedent-unmet': false,
+  'optional-absent': true,
+  'posture-consistent': true,
+  'follow-disabled': false,
+  'reciprocity-refused': false,
+  'declared-host-unreachable': false,
+  'declared-host-blocked': false,
+  'declared-host-budget-exceeded': false,
+  'auth-required': false,
+};
+
 /** RFC-2119 normative keywords carried per check. */
 export const FINDING_KEYWORDS = ['must', 'should', 'may'] as const;
 export type FindingKeyword = (typeof FINDING_KEYWORDS)[number];

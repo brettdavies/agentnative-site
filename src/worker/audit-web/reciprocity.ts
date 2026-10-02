@@ -21,7 +21,7 @@ import {
   MCP_SERVER_CARD_TYPE,
   parseJsonObject,
 } from './discovery-documents';
-import { resolveUrl } from './handlers/shared';
+import { RETRY_SHAPED_STATUSES, resolveUrl } from './handlers/shared';
 import { hostOf } from './provenance';
 import type { WebAuditDiscoveryConfig } from './registry';
 import { DOCUMENT_MAX_BODY_BYTES, METADATA_MAX_BODY_BYTES, validatePublicUrl } from './ssrf';
@@ -116,7 +116,8 @@ export function resourceMetadataFromChallenge(challenge: string | undefined): st
   return match ? (match[1] ?? match[2] ?? null) : null;
 }
 
-export type MetadataResolution = { matched: true; url: string; metadata: JsonObject } | { matched: false };
+/** RFC 9728 metadata naming an endpoint, and where it was read. */
+export type MetadataMatch = { url: string; metadata: JsonObject };
 
 async function readMetadata(source: ArtifactSource, url: string): Promise<JsonObject | null> {
   const response = await source.get(url, { maxBodyBytes: METADATA_MAX_BODY_BYTES });
@@ -148,21 +149,55 @@ function challengeMetadataUrl(source: ArtifactSource, endpoint: string, challeng
 }
 
 /**
+ * What the nonsense-path metadata read says about a gateway that echoes any
+ * requested path. `ruled-out`: it answered below 500 without naming that
+ * path. `echoed`: it named it. `unanswered`: the read failed, timed out, ran
+ * out of budget, hit a server error, or was asked to retry (408, 429), which
+ * says nothing about the path.
+ */
+type EchoControl = 'ruled-out' | 'echoed' | 'unanswered';
+
+async function echoControl(source: ArtifactSource, origin: string): Promise<EchoControl> {
+  const response = await source.get(`${origin}${PROTECTED_RESOURCE_PATH}${ECHO_PROBE_PATH}`, {
+    maxBodyBytes: METADATA_MAX_BODY_BYTES,
+  });
+  if (response.status === null || response.status >= 500 || RETRY_SHAPED_STATUSES.includes(response.status)) {
+    return 'unanswered';
+  }
+  const echoed = response.status === 200 ? resourceOf(parseJsonObject(response)) : null;
+  return echoed === normalizeEndpointUrl(`${origin}${ECHO_PROBE_PATH}`) ? 'echoed' : 'ruled-out';
+}
+
+export interface MetadataResolveOptions {
+  /** The `WWW-Authenticate` value of a 401 the endpoint answered. */
+  challenge?: string;
+  /**
+   * The endpoint is already of record, so the metadata decides only whether
+   * it requires sign-in, never whether it exists or may be probed. An
+   * unanswered echo read then leaves the match standing, and only a read
+   * that echoed the nonsense path refuses it. Where the metadata is what
+   * finds or admits an endpoint, an unanswered read confirms nothing.
+   */
+  ofRecord?: boolean;
+}
+
+/**
  * Resolves RFC 9728 metadata for `endpoint` in order: the challenge's
  * `resource_metadata` URL when the endpoint sent one, else the
  * path-suffixed well-known location, then the root one. It matches only
  * when its `resource` normalizes to the endpoint. For an endpoint below the
- * root, metadata at a nonsense path must not echo that path back: a
- * gateway that generates metadata for any requested path confirms nothing.
+ * root, metadata at a nonsense path must not echo that path back: a gateway
+ * that generates metadata for any requested path confirms nothing.
  */
 export async function resolveProtectedResourceMetadata(
   endpoint: string,
   source: ArtifactSource,
-  challenge?: string,
-): Promise<MetadataResolution> {
+  options: MetadataResolveOptions = {},
+): Promise<MetadataMatch | null> {
+  const { challenge } = options;
   const fromChallenge = challenge === undefined ? undefined : challengeMetadataUrl(source, endpoint, challenge);
-  if (fromChallenge === null) return { matched: false };
-  let found: { url: string; metadata: JsonObject } | null = null;
+  if (fromChallenge === null) return null;
+  let found: MetadataMatch | null = null;
   for (const url of fromChallenge !== undefined ? [fromChallenge] : protectedResourceMetadataUrls(endpoint)) {
     const metadata = await readMetadata(source, url);
     if (metadata !== null) {
@@ -170,13 +205,17 @@ export async function resolveProtectedResourceMetadata(
       break;
     }
   }
-  if (found === null || resourceOf(found.metadata) !== endpoint) return { matched: false };
+  if (found === null || resourceOf(found.metadata) !== endpoint) return null;
   const { origin, pathname } = new URL(endpoint);
-  if (pathname !== '/') {
-    const echoed = resourceOf(await readMetadata(source, `${origin}${PROTECTED_RESOURCE_PATH}${ECHO_PROBE_PATH}`));
-    if (echoed === normalizeEndpointUrl(`${origin}${ECHO_PROBE_PATH}`)) return { matched: false };
-  }
-  return { matched: true, ...found };
+  if (pathname === '/') return found;
+  const echo = await echoControl(source, origin);
+  return echo === 'ruled-out' || (echo === 'unanswered' && options.ofRecord === true) ? found : null;
+}
+
+/** The artifact that admitted an endpoint, and the metadata when metadata is what did. */
+export interface Admission {
+  by: AdmittedBy;
+  metadata: MetadataMatch | null;
 }
 
 /**
@@ -188,9 +227,11 @@ export async function admittingArtifact(
   cfg: Pick<WebAuditDiscoveryConfig, 'ai_catalog' | 'card_suffix'>,
   source: ArtifactSource,
   challenge?: string,
-): Promise<AdmittedBy | null> {
-  if (await readsAsCardNaming(source, cardSuffixUrl(endpoint, cfg.card_suffix), endpoint)) return 'card';
-  if (await hostCatalogNames(source, endpoint, cfg.ai_catalog)) return 'ai-catalog';
-  if ((await resolveProtectedResourceMetadata(endpoint, source, challenge)).matched) return 'metadata';
-  return null;
+): Promise<Admission | null> {
+  if (await readsAsCardNaming(source, cardSuffixUrl(endpoint, cfg.card_suffix), endpoint)) {
+    return { by: 'card', metadata: null };
+  }
+  if (await hostCatalogNames(source, endpoint, cfg.ai_catalog)) return { by: 'ai-catalog', metadata: null };
+  const metadata = await resolveProtectedResourceMetadata(endpoint, source, { challenge });
+  return metadata === null ? null : { by: 'metadata', metadata };
 }

@@ -21,6 +21,7 @@
 #   content-without-js    SSR content floor with llms.txt twin softening
 #   llms-txt-quality      format / links / when-to-use ops on retained llms.txt
 #   api-hygiene           JSON error bodies / rate-limit headers from a safe GET
+#   protected-resource    sign-in challenge and RFC 9728 metadata an MCP endpoint served (no request)
 #
 # Fields:
 #   id          stable slug, also the remediation-doc key
@@ -99,6 +100,28 @@ mcp_lanes:
   browser:
     label: In-page tools · WebMCP
     note: browser tools exposed by the site's HTML, not by the MCP server
+
+# Alternatives: site designs that cannot both be satisfied at full access,
+# whatever the audit's vantage and whatever credential it holds. A
+# variant's checks are those gated on its `antecedents`, and a design may
+# have none of its own. It is presented when a check gated on one of its
+# `presented_by` tokens (default: its antecedents) applied: the check's
+# stored row reads anything but n_a, or an n_a reason only an applicable
+# check carries. The global universe (src/worker/audit-web/score.ts) counts
+# every check outside a group, plus each variant the site presents, or the
+# largest variant when it presents none. An access limit (sign-in the audit
+# cannot present, a private or unreachable host) never forms or joins a
+# group: a check it blocks reads n_a with its reason and stays in the
+# universe. An endpoint presents the protected design when a token-less
+# handshake, or the request that found it when neither handshake drew a
+# 401 or was served a result, draws a 401 its RFC 9728 metadata backs. A
+# check gated on mcp-session presents the open design whenever it is
+# evaluated, so an endpoint can present both.
+alternatives:
+  - group: mcp-access
+    variants:
+      open: { presented_by: [mcp-session] }
+      protected: { antecedents: [mcp-auth-required] }
 
 checks:
   # ---- API -----------------------------------------------------------------
@@ -196,7 +219,7 @@ checks:
     tier: recommended
     principle: P2
     site_types: [mcp]
-    antecedent: mcp-present
+    antecedent: mcp-session
     weight: 2
     title: initialize advertises capabilities (tools / resources / prompts)
     breadcrumb: MCP capabilities
@@ -210,7 +233,7 @@ checks:
     tier: required
     principle: P2
     site_types: [mcp]
-    antecedent: mcp-present
+    antecedent: mcp-session
     weight: 4
     title: tools/list returns a tools array with input schemas
     breadcrumb: MCP tools/list
@@ -238,7 +261,7 @@ checks:
     tier: required
     principle: P2
     site_types: [mcp]
-    antecedent: mcp-present
+    antecedent: mcp-session
     weight: 4
     title: header-routed tools/list (2026-07-28) returns tools without initialize
     breadcrumb: MCP tools/list (modern)
@@ -252,7 +275,7 @@ checks:
     tier: recommended
     principle: P2
     site_types: [mcp]
-    antecedent: mcp-present
+    antecedent: mcp-session
     weight: 3
     title: server/discover answers with server identity on the modern lane
     breadcrumb: MCP server discovery
@@ -312,7 +335,7 @@ checks:
     tier: recommended
     principle: P4
     site_types: [mcp]
-    antecedent: mcp-present
+    antecedent: mcp-session
     weight: 2
     title: tools/call with an unknown tool name returns -32602
     breadcrumb: MCP unknown tool
@@ -399,7 +422,7 @@ checks:
     tier: recommended
     principle: P4
     site_types: [mcp]
-    antecedent: mcp-present
+    antecedent: mcp-session
     weight: 3
     title: a JSON-only Accept is answered without SSE framing
     breadcrumb: MCP Accept JSON
@@ -413,7 +436,7 @@ checks:
     tier: recommended
     principle: P4
     site_types: [mcp]
-    antecedent: mcp-present
+    antecedent: mcp-session
     weight: 3
     title: an unsatisfiable Accept draws a 406 rather than an unasked-for type
     breadcrumb: MCP Accept unsatisfiable
@@ -528,6 +551,51 @@ checks:
       path_any: [/mcp-skill.md, /mcp.md, /.well-known/mcp/usage.md]
       expect: { status: [200] }
     hint: Link a short markdown usage doc (curl examples, tool list, auth, rate limits) from the card and llms.txt.
+
+  # Sign-in enforcement on an endpoint that requires it: scored only when a
+  # wire probe drew a 401 that RFC 9728 metadata on the endpoint's host
+  # backs, so an open server reads these not applicable.
+  - id: mcp-auth-challenge
+    category: mcp
+    lane: shared
+    tier: optional
+    principle: P1
+    site_types: [mcp]
+    antecedent: mcp-auth-required
+    weight: 1
+    title: a 401 names the RFC 9728 metadata in its WWW-Authenticate challenge
+    breadcrumb: MCP auth challenge
+    handler: protected-resource
+    with: { op: challenge }
+    hint: Answer an unauthenticated request with 401 and WWW-Authenticate Bearer resource_metadata="<metadata URL>" so a client finds the authorization server without guessing.
+
+  - id: mcp-auth-servers
+    category: mcp
+    lane: shared
+    tier: optional
+    principle: P1
+    site_types: [mcp]
+    antecedent: mcp-auth-required
+    weight: 1
+    title: protected-resource metadata lists public https authorization_servers
+    breadcrumb: MCP authorization servers
+    handler: protected-resource
+    with: { op: metadata }
+    hint: List at least one public https issuer URL in the authorization_servers array of the RFC 9728 metadata.
+
+  - id: mcp-auth-enforced
+    category: mcp
+    lane: shared
+    tier: optional
+    principle: P1
+    site_types: [mcp]
+    antecedent: mcp-auth-required
+    weight: 1
+    title: a tools/list without an access token is refused with 401
+    breadcrumb: MCP unauthenticated tools/list
+    handler: mcp
+    with: { op: unauthenticated-tools-list }
+    hint: Refuse every request that carries no access token with 401 and the same WWW-Authenticate challenge, tools/list included, never with a tools result.
 
   - id: webmcp
     category: mcp
@@ -1077,8 +1145,11 @@ checks:
     title: OAuth Protected Resource Metadata published (RFC 9728)
     breadcrumb: OAuth protected resource
     handler: http
+    # RFC 9728 metadata belongs to the protected resource, so it is read on
+    # the MCP endpoint's host, which a declared endpoint does not share with
+    # the audited site.
     with:
-      path: /.well-known/oauth-protected-resource
+      path: "{mcp_origin}/.well-known/oauth-protected-resource"
       expect: { status: [200], content_type: "json", body_regex: "authorization_servers|resource" }
     hint: For an authenticated MCP server, publish /.well-known/oauth-protected-resource (RFC 9728); expected absent for open servers.
 

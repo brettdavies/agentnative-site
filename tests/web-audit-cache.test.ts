@@ -8,6 +8,7 @@ import {
   get,
   getAggregate,
   getForRequest,
+  isBoardListable,
   isStale,
   keyFor,
   listAllWebAudits,
@@ -460,6 +461,19 @@ describe('put custom metadata (board fields)', () => {
     expect(putOptions.get(await keyFor(absent, SPEC_VERSION))?.customMetadata?.public_listing).toBe('false');
   });
 
+  test("vantage serializes the scorecard's network, defaulting to public when absent", async () => {
+    const { env, putOptions } = makeR2Stub();
+    const written = async (url: string, vantage?: { network: string; credentialed: boolean }) => {
+      await put(env, url, { ...sampleScorecard(url), ...(vantage === undefined ? {} : { vantage }) }, SPEC_VERSION);
+      return putOptions.get(await keyFor(url, SPEC_VERSION))?.customMetadata?.vantage;
+    };
+    expect({
+      public: await written('https://public.dev/', { network: 'public', credentialed: false }),
+      local: await written('https://local.dev/', { network: 'local', credentialed: true }),
+      absent: await written('https://absent.dev/'),
+    }).toEqual({ public: 'public', local: 'local', absent: 'public' });
+  });
+
   test('put still refuses a half-state with metadata in play', async () => {
     const { env } = makeR2Stub();
     await expect(put(env, 'https://example.com/', sampleScorecard('https://example.com/'), '')).rejects.toThrow(
@@ -512,6 +526,7 @@ describe('listAllWebAudits', () => {
       score: { relative: 80, global: 70 },
       scored_at: new Date(NOW - 60_000).toISOString(),
       public_listing: false,
+      vantage: 'public',
     });
   });
 
@@ -588,6 +603,24 @@ describe('listAllWebAudits', () => {
     expect(byDomain['opted-in.dev']).toBe(true);
     expect(byDomain['opted-out.dev']).toBe(false);
     expect(byDomain['legacy.dev']).toBe(false);
+  });
+
+  test('the board lists an opted-in audit only when it ran from the public vantage; an absent vantage is public', async () => {
+    const { env } = makeR2Stub({
+      listPages: [
+        [
+          listedEntry(HASH_A, 'public.dev', 60_000, { public_listing: 'true', vantage: 'public' }),
+          listedEntry(HASH_B, 'local.dev', 60_000, { public_listing: 'true', vantage: 'local' }),
+          listedEntry(HASH_C, 'unstamped.dev', 60_000, { public_listing: 'true' }),
+        ],
+      ],
+    });
+    const got = await listAllWebAudits(env, { specVersion: SPEC_VERSION, excludeDomains: new Set(), now: NOW });
+    expect(Object.fromEntries(got.map((e) => [e.domain, [e.vantage, isBoardListable(e)]]))).toEqual({
+      'public.dev': ['public', true],
+      'local.dev': ['local', false],
+      'unstamped.dev': ['public', true],
+    });
   });
 
   test('paginates through truncated pages and unions the results', async () => {

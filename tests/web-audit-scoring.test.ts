@@ -10,7 +10,8 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { KEYWORD_BY_TIER, normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import { AI_USER_FETCHER_PROBE_UA, CLI_PROBE_UA } from '../src/shared/user-agents';
-import { type McpOp, mcpOpEra } from '../src/worker/audit-web/handlers/mcp';
+import { type McpOp, mcpOpLane } from '../src/worker/audit-web/handlers/mcp';
+import type { WebAuditRegistry } from '../src/worker/audit-web/registry';
 import { universeMaxOf } from '../src/worker/audit-web/score';
 import { buildWebScorecard, type EngineResult } from '../src/worker/audit-web/scorecard';
 
@@ -46,6 +47,7 @@ interface NormalizedWebAuditRegistry {
   category_order: string[];
   categories: Record<string, string>;
   mcp_lanes: Record<string, { label: string; note: string }>;
+  alternatives: Array<{ group: string; variants: Record<string, { antecedents: string[]; presented_by: string[] }> }>;
   checks: NormalizedWebAuditCheck[];
 }
 
@@ -55,9 +57,9 @@ async function loadNormalized(): Promise<NormalizedWebAuditRegistry> {
 }
 
 describe('web-audit registry shape', () => {
-  test('normalizes to exactly 65 checks', async () => {
+  test('normalizes to exactly 68 checks', async () => {
     const registry = await loadNormalized();
-    expect(registry.checks.length).toBe(65);
+    expect(registry.checks.length).toBe(68);
   });
 
   test('every check carries id/category/tier/principle/keyword/site_types/antecedent/handler/weight/title/hint', async () => {
@@ -80,6 +82,7 @@ describe('web-audit registry shape', () => {
         'content-without-js',
         'llms-txt-quality',
         'api-hygiene',
+        'protected-resource',
       ]).toContain(check.handler);
       expect(Array.isArray(check.site_types) && check.site_types.length > 0).toBe(true);
       for (const st of check.site_types) expect(['content', 'api', 'mcp', 'all']).toContain(st);
@@ -158,25 +161,25 @@ describe('web-audit registry shape', () => {
     }
   });
 
-  test('tier counts are exactly required 4 / recommended 37 / optional 24', async () => {
+  test('tier counts are exactly required 4 / recommended 37 / optional 27', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.tier] = (counts[check.tier] ?? 0) + 1;
-    expect(counts).toEqual({ required: 4, recommended: 37, optional: 24 });
+    expect(counts).toEqual({ required: 4, recommended: 37, optional: 27 });
   });
 
-  test('derived keyword counts match must 4 / should 37 / may 24', async () => {
+  test('derived keyword counts match must 4 / should 37 / may 27', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.keyword] = (counts[check.keyword] ?? 0) + 1;
-    expect(counts).toEqual({ must: 4, should: 37, may: 24 });
+    expect(counts).toEqual({ must: 4, should: 37, may: 27 });
   });
 
   test('principle distribution matches the plan mapping (P5 has zero web checks)', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.principle] = (counts[check.principle] ?? 0) + 1;
-    expect(counts).toEqual({ P1: 4, P2: 24, P3: 4, P4: 14, P6: 4, P7: 5, P8: 10 });
+    expect(counts).toEqual({ P1: 7, P2: 24, P3: 4, P4: 14, P6: 4, P7: 5, P8: 10 });
     expect(counts.P5).toBeUndefined();
   });
 
@@ -206,7 +209,7 @@ describe('web-audit registry shape', () => {
       category: 'mcp',
       tier: 'required',
       keyword: 'must',
-      antecedent: 'mcp-present',
+      antecedent: 'mcp-session',
       site_types: ['mcp'],
       handler: 'mcp',
       with: { op: 'modern-tools-list' },
@@ -216,7 +219,7 @@ describe('web-audit registry shape', () => {
       category: 'mcp',
       tier: 'recommended',
       keyword: 'should',
-      antecedent: 'mcp-present',
+      antecedent: 'mcp-session',
       site_types: ['mcp'],
       handler: 'mcp',
       with: { op: 'server-discover' },
@@ -243,7 +246,12 @@ describe('web-audit registry shape', () => {
         keyword: 'should',
         principle: 'P4',
         site_types: ['mcp'],
-        antecedent: id === 'mcp-modern-resources-miss' ? 'mcp-resources' : 'mcp-present',
+        antecedent:
+          id === 'mcp-modern-resources-miss'
+            ? 'mcp-resources'
+            : id === 'mcp-unknown-tool'
+              ? 'mcp-session'
+              : 'mcp-present',
         handler: 'mcp',
         with: { op: id.replace(/^mcp-/, '') },
       });
@@ -416,17 +424,159 @@ describe('web-audit registry shape', () => {
     );
   });
 
+  // The global universe counts a group by the checks its variants'
+  // antecedents gate and presents each variant from the rows its presence
+  // tokens gate: a token claimed twice would count its checks twice or
+  // present two designs from one row, and a variant whose presence tokens
+  // gate no check could never be presented.
+  describe('alternatives', () => {
+    const gated = (id: string, antecedent: string) => ({ ...abortCheck, id, antecedent });
+    const groupedChecks = [
+      gated('session-a', 'mcp-session'),
+      gated('resources-a', 'mcp-resources'),
+      gated('protected-a', 'mcp-auth-required'),
+    ];
+    const access = {
+      group: 'mcp-access',
+      variants: { open: { presented_by: ['mcp-session'] }, protected: { antecedents: ['mcp-auth-required'] } },
+    };
+    const withAlternatives = (alternatives: unknown) =>
+      normalizeWebAuditRegistry({ ...abortBase, alternatives, checks: groupedChecks });
+    const accessWith = (variants: Record<string, unknown>) => [{ group: 'mcp-access', variants }];
+
+    test('a variant with no checks of its own is presented by its tokens, and one with checks by its antecedents unless it names others', () => {
+      expect(withAlternatives([access]).alternatives).toEqual([
+        {
+          group: 'mcp-access',
+          variants: {
+            open: { antecedents: [], presented_by: ['mcp-session'] },
+            protected: { antecedents: ['mcp-auth-required'], presented_by: ['mcp-auth-required'] },
+          },
+        },
+      ]);
+      expect(
+        withAlternatives(
+          accessWith({
+            open: { antecedents: ['mcp-session'], presented_by: ['mcp-resources'] },
+            protected: { antecedents: ['mcp-auth-required'] },
+          }),
+        ).alternatives[0].variants.open,
+      ).toEqual({ antecedents: ['mcp-session'], presented_by: ['mcp-resources'] });
+      expect(normalizeWebAuditRegistry({ ...abortBase, checks: groupedChecks }).alternatives).toEqual([]);
+    });
+
+    const malformed: Array<[string, unknown, RegExp]> = [
+      ['a block that is not an array', access, /alternatives must be an array/],
+      ['a group id that is not a slug', [{ ...access, group: 'MCP access' }], /group "MCP access" must match/],
+      ['a duplicate group', [access, access], /duplicate alternatives group "mcp-access"/],
+      ['a group without variants', [{ group: 'mcp-access' }], /"mcp-access" needs at least two variants/],
+      [
+        'a group with one variant',
+        accessWith({ protected: { antecedents: ['mcp-auth-required'] } }),
+        /"mcp-access" needs at least two variants/,
+      ],
+      [
+        'a variant written as a bare token list',
+        accessWith({ open: ['mcp-session'], protected: { antecedents: ['mcp-auth-required'] } }),
+        /"mcp-access\.open" must be a mapping/,
+      ],
+      [
+        'a variant field outside antecedents and presented_by',
+        accessWith({ open: { presented_by: ['mcp-session'], checks: [] }, protected: access.variants.protected }),
+        /"mcp-access\.open" carries unknown field "checks"/,
+      ],
+      [
+        'an empty token list',
+        accessWith({ open: { antecedents: [] }, protected: access.variants.protected }),
+        /"mcp-access\.open" antecedents needs a non-empty array of tokens/,
+      ],
+      [
+        'a variant with neither antecedents nor presence tokens',
+        accessWith({ open: {}, protected: access.variants.protected }),
+        /"mcp-access\.open" is presented by no check/,
+      ],
+      [
+        'an unknown antecedent token',
+        accessWith({ open: access.variants.open, protected: { antecedents: ['mcp-signed-in'] } }),
+        /"mcp-access\.protected" names unknown antecedent "mcp-signed-in"/,
+      ],
+      [
+        'an unknown presence token',
+        accessWith({ open: { presented_by: ['mcp-handshake'] }, protected: access.variants.protected }),
+        /"mcp-access\.open" names unknown antecedent "mcp-handshake"/,
+      ],
+      [
+        'a token in two variants of one group',
+        accessWith({ open: { antecedents: ['mcp-session'] }, protected: { antecedents: ['mcp-session'] } }),
+        /"mcp-session" belongs to both "mcp-access\.open" and "mcp-access\.protected"/,
+      ],
+      [
+        "a presence token that is another variant's antecedent",
+        accessWith({ open: { presented_by: ['mcp-auth-required'] }, protected: access.variants.protected }),
+        /"mcp-auth-required" belongs to both "mcp-access\.open" and "mcp-access\.protected"/,
+      ],
+      [
+        'a token in two groups',
+        [
+          access,
+          {
+            group: 'session',
+            variants: { held: { antecedents: ['mcp-session'] }, refused: { antecedents: ['mcp-resources'] } },
+          },
+        ],
+        /"mcp-session" belongs to both "mcp-access\.open" and "session\.held"/,
+      ],
+      [
+        'a variant whose antecedents gate no check',
+        accessWith({ open: access.variants.open, protected: { antecedents: ['mcp-auth'] } }),
+        /"mcp-access\.protected" gates no check/,
+      ],
+      [
+        'a variant whose presence tokens gate no check',
+        accessWith({ open: { presented_by: ['mcp-auth'] }, protected: access.variants.protected }),
+        /"mcp-access\.open" is presented by no check/,
+      ],
+      [
+        'a group whose every variant has no checks of its own',
+        accessWith({ open: { presented_by: ['mcp-session'] }, protected: { presented_by: ['mcp-auth-required'] } }),
+        /"mcp-access" has no variant with checks of its own/,
+      ],
+    ];
+    for (const [label, alternatives, message] of malformed) {
+      test(`${label} aborts normalization`, () => {
+        expect(() => withAlternatives(alternatives)).toThrow(message);
+      });
+    }
+  });
+
   // A lane names the protocol era a row exercises, and the handler's op table
   // is where that era is decided. An op row filed under the other lane would
-  // tell a reader the wrong era failed.
-  test("every MCP op row sits in its op's era lane", async () => {
+  // tell a reader the wrong era failed. A row every lane answers alike sits
+  // with the shared rows, which the op table also decides.
+  test("every MCP op row sits in its op's lane", async () => {
     const registry = await loadNormalized();
     const opRows = registry.checks.filter((check) => check.handler === 'mcp' && 'op' in check.with);
     expect(opRows.length).toBeGreaterThan(0);
     for (const check of opRows) {
       const op = (check.with as { op: McpOp }).op;
-      expect({ id: check.id, lane: check.lane }).toEqual({ id: check.id, lane: mcpOpEra(op) });
+      expect({ id: check.id, lane: check.lane }).toEqual({ id: check.id, lane: mcpOpLane(op) });
     }
+  });
+
+  // Only the sign-in checks are a design alternative: the session checks
+  // score on any endpoint an agent can reach, and a protected endpoint's
+  // session rows are access-limited, not a different design.
+  test('the registry declares MCP access as its one alternative group, with the sign-in checks as its only checks', async () => {
+    const registry = await loadNormalized();
+    expect(registry.alternatives).toEqual([
+      {
+        group: 'mcp-access',
+        variants: {
+          open: { antecedents: [], presented_by: ['mcp-session'] },
+          protected: { antecedents: ['mcp-auth-required'], presented_by: ['mcp-auth-required'] },
+        },
+      },
+    ]);
   });
 
   test('the lane map lists its lanes in display order', async () => {
@@ -434,10 +584,10 @@ describe('web-audit registry shape', () => {
     expect(Object.keys(registry.mcp_lanes)).toEqual(['shared', 'legacy', 'modern', 'browser']);
   });
 
-  test('normalized JSON round-trips to 65 entries', async () => {
+  test('normalized JSON round-trips to 68 entries', async () => {
     const registry = await loadNormalized();
     const roundTripped = JSON.parse(JSON.stringify(registry));
-    expect(roundTripped.checks.length).toBe(65);
+    expect(roundTripped.checks.length).toBe(68);
   });
 });
 
@@ -533,13 +683,13 @@ describe('buildWebScorecard', () => {
 // status only, so a future edit that entangles a tier/weight change with a
 // re-categorization is caught here.
 describe('scoring invariance under the API/MCP category split', () => {
-  test('the real registry keeps its 4/37/24 tier distribution and universeMax under the split', async () => {
-    const registry = await loadNormalized();
-    // 4 MUST x5 + 37 SHOULD x3 + 24 MAY x1 = 155.
-    const universeMax = universeMaxOf(
-      registry.checks.map((c) => ({ keyword: c.keyword as 'must' | 'should' | 'may' })),
-    );
-    expect(universeMax).toBe(155);
+  test('the real registry keeps its 4/37/27 tier distribution and universeMax under the split', async () => {
+    const registry = (await loadNormalized()) as unknown as WebAuditRegistry;
+    // 4 MUST x5 + 37 SHOULD x3 + 27 MAY x1 = 158 across every check.
+    expect(universeMaxOf({ checks: registry.checks }, [])).toBe(158);
+    // A site presenting neither MCP access variant counts the larger one:
+    // protected (3) over open, which has no checks of its own.
+    expect(universeMaxOf(registry, [])).toBe(158);
   });
 
   test('the same outcomes score identically whether labeled mcp-api or split into api/mcp', () => {

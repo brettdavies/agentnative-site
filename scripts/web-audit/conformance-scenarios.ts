@@ -419,6 +419,52 @@ const declaringCard = (endpoint: string): Exchange => get(CARD_PATH, json({ ...S
 const selfNamingCard = (endpoint: string): Exchange => get(`${endpoint}/server-card`, cardDocument({ ...SEP_2127_CARD, remotes: [{ type: 'streamable-http', url: endpoint }] }));
 const FOLLOWED_IDS = ['mcp-initialize', 'mcp-tools-list', 'mcp-cors-preflight', 'mcp-cors-actual', 'mcp-get-fast-fail'];
 
+const PROTECTED_RESOURCE_PATH = '/.well-known/oauth-protected-resource';
+const AUTH_SERVER = 'https://auth.example.com';
+const challenge401 = (metadataUrl: string | null, extra: Record<string, string> = {}): ExchangeResponse =>
+  res(
+    401,
+    {
+      'content-type': 'application/json',
+      ...(metadataUrl === null ? {} : { 'www-authenticate': `Bearer resource_metadata="${metadataUrl}"` }),
+      ...extra,
+    },
+    '{"error":"unauthorized"}',
+  );
+
+/**
+ * An MCP server behind OAuth at `endpoint`: every POST draws a 401 whose
+ * challenge names `metadataUrl`, apart from an unparseable body and an
+ * unsupported version claim, which it refuses before reading a token.
+ */
+function protectedMcp(endpoint: string, metadataUrl: string): Exchange[] {
+  return [
+    post(endpoint, rpcError(-32700, 400), { body_contains: 'not-json{{' }),
+    post(endpoint, rpcError(-32022, 400, { supported: [MODERN_PROTOCOL] }), {
+      headers: { 'mcp-protocol-version': UNSUPPORTED_PROTOCOL },
+    }),
+    post(endpoint, challenge401(metadataUrl, ACAO), { headers: { origin: CORS_ORIGIN } }),
+    post(endpoint, challenge401(metadataUrl)),
+    options(endpoint, res(204, ACAO, '')),
+    get(endpoint, challenge401(metadataUrl)),
+  ];
+}
+
+const ENFORCEMENT_IDS = ['mcp-auth-challenge', 'mcp-auth-servers', 'mcp-auth-enforced'];
+
+const SIGN_IN_IDS = [
+  'mcp-initialize',
+  'mcp-capabilities',
+  'mcp-tools-list',
+  'mcp-resources-list',
+  'mcp-server-discover',
+  'mcp-malformed-body',
+  'mcp-modern-version-reject',
+  'mcp-get-fast-fail',
+  'mcp-cors-preflight',
+  'mcp-cors-actual',
+];
+
 const MCP_IDS = [
   'mcp-initialize',
   'mcp-capabilities',
@@ -908,8 +954,8 @@ export const SCENARIOS: Record<string, Scenario> = {
     post(MCP_PATH, rpcError(-32099)),
   ]),
   'mcp-www-authenticate': scenario(
-    'an endpoint that challenges initialize with 401 and WWW-Authenticate is broken and satisfies the mcp-auth antecedent',
-    ['mcp-initialize', 'oauth-protected-resource', 'auth-md'],
+    'an endpoint that answers legacy POSTs with a 401 whose challenge names no metadata, while root RFC 9728 metadata names it: it requires sign-in, so the legacy session rows, the resources rows, and every row a 401 answers read auth-required, and the challenge satisfies the mcp-auth antecedent; its modern lane refuses server/discover with a method-not-found and no 401, an answer a token would not change, so the modern session rows read absent as they do on an open server',
+    ['mcp-initialize', 'mcp-server-discover', 'mcp-auth-challenge', 'oauth-protected-resource', 'auth-md'],
     [
       ...baseline(),
       ...cardSurface(),
@@ -1100,6 +1146,124 @@ export const SCENARIOS: Record<string, Scenario> = {
       ...legacyOnlyMcp({ endpoint: DECLARED_ENDPOINT, cors: 'full' }),
     ],
     { follow_declarations: false },
+  ),
+
+  // ---- endpoints that require sign-in ----------------------------------------
+  'auth-own-endpoint': scenario(
+    "the audited site's /mcp answers every POST with a 401 whose challenge names same-host RFC 9728 metadata naming it: the endpoint is found with sign-in required, rows that need no session are scored, and the rest read auth-required",
+    [...SIGN_IN_IDS, ...ENFORCEMENT_IDS, 'oauth-protected-resource'],
+    [
+      ...baseline(),
+      ...protectedMcp(MCP_PATH, u(PROTECTED_RESOURCE_PATH)),
+      get(PROTECTED_RESOURCE_PATH, json({ resource: u(MCP_PATH), authorization_servers: [AUTH_SERVER] })),
+    ],
+  ),
+  'auth-declared-endpoint': scenario(
+    "the card names a root endpoint on another host that answers 401 and publishes metadata naming it without the trailing slash: the metadata admits it, and the MCP rows are scored there with sign-in required",
+    [...SIGN_IN_IDS, ...ENFORCEMENT_IDS, 'oauth-protected-resource'],
+    [
+      ...baseline(),
+      declaringCard('https://mcp.example.net/'),
+      ...protectedMcp('https://mcp.example.net/', `https://mcp.example.net${PROTECTED_RESOURCE_PATH}`),
+      get(
+        `https://mcp.example.net${PROTECTED_RESOURCE_PATH}`,
+        json({ resource: 'https://mcp.example.net', authorization_servers: [AUTH_SERVER] }),
+      ),
+    ],
+  ),
+  'auth-enforcement-defects': scenario(
+    "an endpoint that requires sign-in lists an http authorization server and serves a legacy tools/list without a token: the challenge row passes, the metadata row is broken, and the refusal row is noncompliant",
+    ENFORCEMENT_IDS,
+    [
+      ...baseline(),
+      post(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH)), { headers: { 'mcp-protocol-version': MODERN_PROTOCOL } }),
+      post(MCP_PATH, rpcResult(TOOLS_RESULT), { body_json_method: 'tools/list' }),
+      post(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH))),
+      get(PROTECTED_RESOURCE_PATH, json({ resource: u(MCP_PATH), authorization_servers: ['http://auth.example.com'] })),
+    ],
+  ),
+  'auth-servers-mixed': scenario(
+    "an endpoint that requires sign-in lists a public https authorization server between an http one and one on a private address: an agent can still sign in through the usable server, so the metadata row is noncompliant and names both unusable entries, and none of the three is requested",
+    ['mcp-auth-servers'],
+    [
+      ...baseline(),
+      ...protectedMcp(MCP_PATH, u(PROTECTED_RESOURCE_PATH)),
+      get(
+        PROTECTED_RESOURCE_PATH,
+        json({
+          resource: u(MCP_PATH),
+          authorization_servers: ['http://auth.example.com', AUTH_SERVER, 'https://10.0.0.1/oauth'],
+        }),
+      ),
+    ],
+  ),
+  'auth-modern-only': scenario(
+    "a modern-only server behind OAuth at the audited site's /mcp refuses every legacy POST at HTTP 200 with a JSON-RPC error before reading a token, while every modern POST draws a 401 naming same-host RFC 9728 metadata that names it: the endpoint is found with sign-in required, the modern session rows and the resources rows read auth-required, the legacy session rows read the legacy refusal as they do on an open modern-only server, and the refusal row is asked on the modern lane, where it passes",
+    ['mcp-server-discover', 'mcp-modern-tools-list', 'mcp-tools-list', 'mcp-auth-enforced'],
+    [
+      ...baseline(),
+      post(MCP_PATH, rpcError(-32700, 400), { body_contains: 'not-json{{' }),
+      post(MCP_PATH, rpcError(-32022, 400, { supported: [MODERN_PROTOCOL] }), {
+        headers: { 'mcp-protocol-version': UNSUPPORTED_PROTOCOL },
+      }),
+      post(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH)), { headers: { 'mcp-protocol-version': MODERN_PROTOCOL } }),
+      post(MCP_PATH, { ...rpcError(-32022, 200, { supported: [MODERN_PROTOCOL] }), headers: { 'content-type': 'application/json', ...ACAO } }, {
+        headers: { origin: CORS_ORIGIN },
+      }),
+      post(MCP_PATH, rpcError(-32022, 200, { supported: [MODERN_PROTOCOL] })),
+      options(MCP_PATH, res(204, ACAO, '')),
+      get(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH))),
+      get(PROTECTED_RESOURCE_PATH, json({ resource: u(MCP_PATH), authorization_servers: [AUTH_SERVER] })),
+    ],
+  ),
+  'auth-open-endpoint': scenario(
+    'an open server whose card documents that no sign-in is required: no wire probe draws a 401, so the sign-in rows are `n_a`',
+    ENFORCEMENT_IDS,
+    [...baseline(), get(CARD_PATH, json({ ...SERVER_CARD, authentication: { required: false } })), ...legacyOnlyMcp()],
+  ),
+  'auth-bare-401': scenario(
+    "the audited site's /mcp answers 401 with no challenge and no metadata names it: a bare 401 is refusal evidence, so no endpoint is found",
+    ['mcp-initialize'],
+    [...baseline(), post(MCP_PATH, challenge401(null))],
+  ),
+  'auth-echoing-gateway': scenario(
+    "the audited site's /mcp answers 401 naming path-suffixed metadata, but the host answers a nonsense path's metadata with that path as its resource too: the metadata confirms nothing, so no endpoint is found",
+    ['mcp-initialize'],
+    [
+      ...baseline(),
+      post(MCP_PATH, challenge401(u(`${PROTECTED_RESOURCE_PATH}${MCP_PATH}`))),
+      get(`${PROTECTED_RESOURCE_PATH}${MCP_PATH}`, json({ resource: u(MCP_PATH), authorization_servers: [AUTH_SERVER] })),
+      get(
+        `${PROTECTED_RESOURCE_PATH}/anc-web-audit-no-such-resource`,
+        json({ resource: u('/anc-web-audit-no-such-resource'), authorization_servers: [AUTH_SERVER] }),
+      ),
+    ],
+  ),
+  'auth-echo-unanswered': scenario(
+    "the audited site's card declares its /mcp, which answers every POST with a 401 naming same-host root RFC 9728 metadata that names it, and the metadata read at a nonsense path draws a 503: the card already made the endpoint of record, so an echo read that got no answer leaves sign-in settled, the rows the 401s answer read auth-required, and none reads broken",
+    ['mcp-initialize', 'mcp-tools-list', ...ENFORCEMENT_IDS],
+    [
+      ...baseline(),
+      get(CARD_PATH, json(SERVER_CARD)),
+      ...protectedMcp(MCP_PATH, u(PROTECTED_RESOURCE_PATH)),
+      get(PROTECTED_RESOURCE_PATH, json({ resource: u(MCP_PATH), authorization_servers: [AUTH_SERVER] })),
+      get(`${PROTECTED_RESOURCE_PATH}/anc-web-audit-no-such-resource`, text('upstream error', {}, 503)),
+    ],
+  ),
+  'auth-later-401': scenario(
+    "the audited site's /mcp serves initialize without a token and refuses server/discover with a method-not-found, while every other request it reads a token for draws a 401 naming same-host RFC 9728 metadata that names it: no handshake asked for sign-in, so the endpoint presents the open design and the sign-in rows are n_a, and each later row whose 401 that metadata backs reads auth-required rather than broken",
+    ['mcp-capabilities', 'mcp-tools-list', 'mcp-resources-list', 'mcp-unknown-tool', 'mcp-accept-json', 'mcp-auth-enforced'],
+    [
+      ...baseline(),
+      post(MCP_PATH, rpcError(-32700, 400), { body_contains: 'not-json{{' }),
+      post(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH), ACAO), { headers: { origin: CORS_ORIGIN } }),
+      post(MCP_PATH, rpcResult(INITIALIZE_RESULT), { body_json_method: 'initialize' }),
+      post(MCP_PATH, rpcError(-32601), { headers: { 'mcp-method': 'server/discover' } }),
+      post(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH))),
+      options(MCP_PATH, res(204, ACAO, '')),
+      get(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH))),
+      get(PROTECTED_RESOURCE_PATH, json({ resource: u(MCP_PATH), authorization_servers: [AUTH_SERVER] })),
+    ],
   ),
 
   // ---- dns-doh ---------------------------------------------------------------

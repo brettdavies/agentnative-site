@@ -8,6 +8,7 @@ import type { RetainedDocumentKey } from '../../../shared/web-audit-documents';
 import type { NaReason } from '../../../shared/web-audit-findings';
 import type { ProbeResponse } from '../assert';
 import type { RetainedDocument } from '../discovery-documents';
+import type { SignInChallenge } from '../mcp-auth';
 import type { GuardedFetchOptions } from '../ssrf';
 
 /**
@@ -43,6 +44,22 @@ export interface McpLaneEvidence {
   modernAdvertised: readonly string[];
 }
 
+/**
+ * The MCP endpoint of record requires sign-in: a wire probe drew a 401 and
+ * RFC 9728 metadata on the endpoint's own host names that endpoint as its
+ * protected resource.
+ */
+export interface McpAuthRequired {
+  endpoint: string;
+  /** The 401's WWW-Authenticate value; null when the 401 carried none. */
+  challenge: string | null;
+  /** The handshake lane whose probe drew the 401, which the token-less refusal row asks on. */
+  lane: 'legacy' | 'modern';
+  /** Where the metadata naming the endpoint was read. */
+  metadataUrl: string;
+  metadata: Record<string, unknown>;
+}
+
 export interface ProbeOutcome {
   status: ProbeStatus;
   evidence: EvidenceItem[];
@@ -57,6 +74,12 @@ export interface ProbeOutcome {
    * was needed.
    */
   unprobed?: true;
+  /**
+   * The answer carried a JSON-RPC `result`, which is what shows a handshake
+   * served a request. Engine-internal: the row's evidence is what reaches
+   * the scorecard.
+   */
+  jsonRpcResult?: true;
   /**
    * When true, the handler exhausted the remaining per-audit budget mid-probe.
    * The engine treats the run as incomplete and the route must not cache it.
@@ -113,4 +136,12 @@ export interface HandlerContext {
    * advertisement.
    */
   mcpLanes?: McpLaneEvidence;
+  /** Set once the endpoint is known to require sign-in, so a 401 from it reads as that rather than as a defect. */
+  mcpAuth?: McpAuthRequired | null;
+  /**
+   * Set when wave 1 did not settle that the endpoint requires sign-in:
+   * whether a 401 a later row drew is backed by the endpoint's RFC 9728
+   * metadata, which then reads as sign-in the same way.
+   */
+  mcpSignIn?: (answer: SignInChallenge) => Promise<boolean>;
 }

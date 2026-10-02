@@ -421,6 +421,30 @@ describe('runWebRescore', () => {
       two.checks = [...two.checks, { ...two.checks[0], id: 'second' }];
       expect(await fpOf(two)).not.toBe(base);
     });
+
+    // An alternative group decides which checks a site's global universe
+    // counts, so every stored global depends on it.
+    test('declaring an alternative group, or changing which checks a design owns or what presents it, reflows', async () => {
+      type Variant = { antecedents: string[]; presented_by: string[] };
+      const grouped = (open: Variant) => ({
+        ...registryWith({}),
+        alternatives: [
+          {
+            group: 'mcp-access',
+            variants: { open, protected: { antecedents: ['mcp-auth-required'], presented_by: ['mcp-auth-required'] } },
+          },
+        ],
+      });
+      const base = await fpOf(registryWith({}));
+      const declared = await fpOf(grouped({ antecedents: [], presented_by: ['mcp-session'] }));
+      const owning = await fpOf(grouped({ antecedents: ['mcp-session'], presented_by: ['mcp-session'] }));
+      const presented = await fpOf(grouped({ antecedents: [], presented_by: ['mcp-resources'] }));
+      expect({
+        declared: declared === base,
+        owning: owning === declared,
+        presented: presented === declared,
+      }).toEqual({ declared: false, owning: false, presented: false });
+    });
   });
 
   test('a changed registry fingerprint reflows every domain even when all are fresh', async () => {
@@ -519,6 +543,26 @@ describe('rebuildWebAggregates', () => {
     expect(result).toEqual({ seeded: 2, scored: 1, wrote: true });
     const board = await getAggregate(env, 'leaderboard', SPEC_VERSION);
     expect(board?.entries.map((e) => e.domain)).toEqual(['a.dev']);
+  });
+
+  test('a seeded domain whose cached scorecard ran from a local vantage is left off the board', async () => {
+    const { env } = makeEnv([seedEntry('a.dev'), seedEntry('local.dev'), seedEntry('unstamped.dev')]);
+    await cachePut(
+      env,
+      'https://a.dev/',
+      { ...scorecardFor('a.dev', 70), vantage: { network: 'public', credentialed: false } },
+      SPEC_VERSION,
+    );
+    await cachePut(
+      env,
+      'https://local.dev/',
+      { ...scorecardFor('local.dev', 90), vantage: { network: 'local', credentialed: true } },
+      SPEC_VERSION,
+    );
+    await cachePut(env, 'https://unstamped.dev/', scorecardFor('unstamped.dev', 60), SPEC_VERSION);
+    await rebuildWebAggregates(env, SPEC_VERSION);
+    const board = await getAggregate(env, 'leaderboard', SPEC_VERSION);
+    expect(board?.entries.map((e) => e.domain)).toEqual(['a.dev', 'unstamped.dev']);
   });
 
   test('an empty seed writes empty aggregates (cold-start shape, not an error)', async () => {
