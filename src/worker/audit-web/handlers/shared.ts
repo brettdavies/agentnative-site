@@ -23,7 +23,7 @@ export function redirectsToHttp(resp: Pick<ProbeResponse, 'status' | 'refused'>)
 }
 
 /** The evidence item for a URL that answered only with a redirect to http. */
-export function redirectsToHttpItem(url: string, status: number | null): EvidenceItem {
+export function redirectsToHttpItem(url: string, status: number | null): EvidenceItem & { why: string[] } {
   return { url, status, ok: false, why: [REDIRECTS_TO_HTTP_WHY] };
 }
 
