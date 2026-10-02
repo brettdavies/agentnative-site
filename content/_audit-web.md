@@ -27,9 +27,9 @@ belongs to one of six categories:
   bodies (not HTML), and rate-limit headers on a safe GET.
 - **MCP**: the `initialize` handshake, `tools/list` with input schemas, `resources/list` when `capabilities.resources`
   is advertised, the modern era (protocol revision `2026-07-28`) scored as its own lane, per-era JSON-RPC error-code
-  conformance, a prompt GET answer (no held-open hang), CORS preflight and actual, the `.well-known` server card, a
-  usage doc, and WebMCP. Each protocol era scores independently: a dual-stack server earns both lanes, and a single-era
-  server fails exactly the lane it lacks.
+  conformance, a prompt GET answer (no held-open hang), CORS preflight and actual, a SEP-2127 server card (a SEP-1649
+  card at the `.well-known` path passes as the legacy shape), a usage doc, and WebMCP. Each protocol era scores
+  independently: a dual-stack server earns both lanes, and a single-era server fails exactly the lane it lacks.
 - **Agent discovery and auth**: the A2A agent card, optional `/.well-known/ai-catalog.json` (ARD), agent-skills index,
   OAuth discovery metadata, and `auth.md`.
 
