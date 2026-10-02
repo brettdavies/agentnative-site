@@ -71,7 +71,10 @@ describe('resolveAntecedent: mcp', () => {
       AUTH_REQUIRED,
     );
     const answered = challenged();
-    answered.set('mcp-server-discover', outcome('pass', [{ url: ENDPOINT, status: 200, capabilities: ['tools'] }]));
+    answered.set('mcp-server-discover', {
+      ...outcome('pass', [{ url: ENDPOINT, status: 200, capabilities: ['tools'] }]),
+      jsonRpcResult: true,
+    });
     expect(resolveAntecedent('mcp-session', ctx({ ...base, sources: answered, mcpAuth: SIGN_IN }))).toBe('apply');
     expect(resolveAntecedent('mcp-session', ctx())).toBe('n_a');
   });
@@ -90,6 +93,17 @@ describe('resolveAntecedent: mcp', () => {
         ).toEqual(AUTH_REQUIRED);
       }
     }
+  });
+
+  test('a handshake answered 200 with a JSON body that carries no result serves nothing', () => {
+    const sources = challenged();
+    sources.set(
+      'mcp-server-discover',
+      outcome('broken', [{ url: ENDPOINT, status: 200, supported_versions: null, serverInfo: null, capabilities: [] }]),
+    );
+    expect(resolveAntecedent('mcp-session', ctx({ mcpEndpoint: ENDPOINT, sources, mcpAuth: SIGN_IN }))).toEqual(
+      AUTH_REQUIRED,
+    );
   });
 
   test("a session row runs when its own lane's handshake refused the lane without asking for sign-in", () => {

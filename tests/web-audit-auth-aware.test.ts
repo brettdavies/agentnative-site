@@ -818,6 +818,39 @@ const ROWS_DRAWING_A_LATER_401 = [
   'mcp-accept-unsatisfiable',
 ];
 
+describe('a handshake answered with a JSON body that carries no JSON-RPC result', () => {
+  test('serves nothing, so on an endpoint that requires sign-in the session rows read auth-required', async () => {
+    const server = protectedServer(SAME, SAME_METADATA);
+    const { scorecard } = await audit(
+      router(
+        {
+          ...ROOT,
+          ...server,
+          [`POST ${SAME}`]: (init) =>
+            String(init?.body ?? '').includes('"method":"initialize"')
+              ? json({ message: 'sign in' })
+              : server[`POST ${SAME}`](init),
+        },
+        [],
+      ),
+      { registry: mcpRegistry() },
+    );
+    expect({
+      initialize: readings(scorecard, ['mcp-initialize']),
+      session: readings(scorecard, SESSION_ROWS),
+      signIn: readings(scorecard, ENFORCEMENT_ROWS),
+    }).toEqual({
+      initialize: { 'mcp-initialize': ['broken', null] },
+      session: authRequiredOn(SESSION_ROWS),
+      signIn: {
+        'mcp-auth-challenge': ['pass', null],
+        'mcp-auth-servers': ['pass', null],
+        'mcp-auth-enforced': ['pass', null],
+      },
+    });
+  });
+});
+
 describe('a server that serves a handshake without a token and asks for sign-in on later requests', () => {
   const registry: WebAuditRegistry = { ...REGISTRY, checks: REGISTRY.checks.filter((c) => c.category === 'mcp') };
 

@@ -510,14 +510,12 @@ export function advertisesResources(items: EvidenceItem[]): boolean {
 
 /**
  * Whether a handshake probe (initialize or server/discover) was served a
- * JSON-RPC result at a 2xx. Both write their capability advertisement on
- * the result path alone, so an error envelope, an unparseable body, and a
- * refusal carry none.
+ * JSON-RPC result at a 2xx. An error envelope, a JSON body that carries no
+ * `result`, an unparseable body, and a refusal all serve nothing.
  */
 export function handshakeServed(outcome: ProbeOutcome | undefined): boolean {
-  const first = outcome?.evidence[0];
-  const status = first?.status;
-  return typeof status === 'number' && status >= 200 && status < 300 && Array.isArray(first?.capabilities);
+  const status = outcome?.evidence[0]?.status;
+  return outcome?.jsonRpcResult === true && typeof status === 'number' && status >= 200 && status < 300;
 }
 
 /**
@@ -905,5 +903,9 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     ev.error_code = code;
     ok = code === (w.expect_code ?? -32601);
   }
-  return { status: ok ? 'pass' : 'broken', evidence: [ev] };
+  return {
+    status: ok ? 'pass' : 'broken',
+    evidence: [ev],
+    ...(rpc.result !== undefined ? { jsonRpcResult: true as const } : {}),
+  };
 }

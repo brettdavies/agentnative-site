@@ -75,6 +75,12 @@ export interface ProbeOutcome {
    */
   unprobed?: true;
   /**
+   * The answer carried a JSON-RPC `result`, which is what shows a handshake
+   * served a request. Engine-internal: the row's evidence is what reaches
+   * the scorecard.
+   */
+  jsonRpcResult?: true;
+  /**
    * When true, the handler exhausted the remaining per-audit budget mid-probe.
    * The engine treats the run as incomplete and the route must not cache it.
    */
