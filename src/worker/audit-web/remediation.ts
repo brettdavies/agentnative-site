@@ -103,8 +103,12 @@ export const PROMPT_EVIDENCE_BLOCK_MAX =
   PROMPT_EVIDENCE_MAX +
   5;
 
+// Every character a reader might end a line at: CommonMark ends one at a
+// lone CR, and other readers break at U+2028, U+2029, and NEL.
+const LINE_BREAKS = /\s*[\r\n\u2028\u2029\u0085]+\s*/g;
+
 function bounded(text: string, max: number): string {
-  const flattened = text.replace(/\s*\n\s*/g, ' ').trim();
+  const flattened = text.replace(LINE_BREAKS, ' ').trim();
   return flattened.length > max ? `${flattened.slice(0, max - 1)}…` : flattened;
 }
 
