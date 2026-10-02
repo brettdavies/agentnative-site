@@ -6,27 +6,38 @@
 // hypothetical on this surface: the page's status chips and its
 // machine-readable context element were each counting the rows themselves,
 // so a change to one had no way of reaching the other.
-//
-// This module also owns the display vocabulary. STATUS_LABELS is the single
-// enumeration of the seven web scorecard statuses; STATUS_ORDER derives from it
-// rather than repeating the list, so a status added there reaches the labels,
-// the marks, the counts, and the machine context together.
 
+import { isNotRunReason, type NaReason } from '../../shared/web-audit-findings';
+import { resultLine } from '../../shared/web-audit-result-line';
 import {
-  type DeclaredHostEntry,
   entryHostOf,
-  type FollowState,
   type RowHost,
   readDeclaredHosts,
   readFollowState,
   readRegistryFingerprint,
+  recordedHostOf,
+  recordedHostsOf,
   rowHostOf,
+  rowHostOutcomes,
+  rowHostsOf,
 } from './provenance';
-import type { McpLaneSpec } from './registry';
-import type { WebRemediationResource } from './remediation';
-import { assembleRemediation, isFixableStatus, resultLine, type WebRemediationCatalog } from './remediation';
-import { SCORED_STATUSES } from './score';
-import type { NaReason, ScorecardStatus } from './scorecard';
+import { scoreHostsClause } from './provenance-copy';
+import type { McpLaneSpec, WebAuditDiscoveryConfig } from './registry';
+import { assembleRemediation, isFixableStatus, type WebRemediationCatalog } from './remediation';
+import type { ScorecardStatus } from './scorecard';
+import {
+  blockItems,
+  emptyCategoryReason,
+  laneBlocks,
+  lanePlacement,
+  notRunSentences,
+  rollupOf,
+  rowRemedy,
+} from './summary-blocks';
+import { STATUS_ORDER } from './summary-labels';
+import { categoryProvenance, notRunNote, openapiHosts } from './summary-provenance';
+import { declaredHostsView, evaluatedHosts } from './summary-trail';
+import type { NotRun, SummaryRow, WebSummaryModel } from './summary-types';
 
 export type WebScorecardRow = {
   id: string;
@@ -46,6 +57,7 @@ export type WebScorecardShape = {
   spec_version?: string;
   target_url?: string;
   tool?: { name?: string; url?: string };
+  mcp_discovery?: unknown;
   follow_declarations?: unknown;
   declared_hosts?: unknown;
   registry_fingerprint?: unknown;
@@ -55,111 +67,12 @@ export type WebScorecardShape = {
   results?: WebScorecardRow[];
 };
 
-// Locked label strings for the two scores: the RELATIVE headline reads as the
-// site's own score; GLOBAL is explicitly framed against the maximal site so
-// the two percentages do not compete.
-export const RELATIVE_LABEL = 'site score';
-export const RELATIVE_SUBLABEL = 'relative to the checks that apply to this site';
-export const GLOBAL_LABEL = 'of a maximally agent-ready site';
-
-export const STATUS_LABELS: Record<ScorecardStatus, string> = {
-  pass: 'PASS',
-  noncompliant: 'NONCOMPLIANT',
-  broken: 'BROKEN',
-  absent: 'MISSING',
-  n_a: 'N/A',
-  skip: 'SKIP',
-  error: 'ERROR',
-};
-
-// Check-row marks: pass ✓, noncompliant ~, absent (missing) !, broken/error ✕,
-// n_a/skip –. Broken outranks absent in severity (a present-but-broken surface
-// misleads agents) so it carries the fail mark, while a noncompliant surface
-// works and reads as a partial.
-const STATUS_MARKS: Record<ScorecardStatus, string> = {
-  pass: '✓',
-  noncompliant: '~',
-  broken: '✕',
-  absent: '!',
-  n_a: '–',
-  skip: '–',
-  error: '✕',
-};
-
-/** The seven statuses in documented order, derived from the one enumeration. */
-export const STATUS_ORDER = Object.keys(STATUS_LABELS) as ScorecardStatus[];
-
-// The RFC-2119 keyword is a per-check obligation, so it renders on each check
-// row and never on a category header: a category holds a mix of keywords, and
-// the scorer weighs each check by its own, never by its group.
-export const TIER_LABELS: Record<string, string> = { must: 'MUST', should: 'SHOULD', may: 'MAY' };
-
-export function statusLabel(status: ScorecardStatus): string {
-  return STATUS_LABELS[status] ?? String(status).toUpperCase();
-}
-
-export function statusMark(status: ScorecardStatus): string {
-  return STATUS_MARKS[status] ?? '–';
-}
-
-/** One check row with its remediation already resolved. */
-export type SummaryRow = {
-  id: string;
-  label: string;
-  keyword?: string;
-  tier?: string;
-  status: ScorecardStatus;
-  unprobed: boolean;
-  /** The run observed the surface and its status warrants a fix prompt. */
-  fixable: boolean;
-  result: string;
-  goal: string;
-  /** Raw catalog text: HTML escapes it, markdown flattens it. */
-  fix: string;
-  prompt: string;
-  skillUrl: string;
-  resources: WebRemediationResource[];
-};
-
-/** One protocol lane's rows inside a category, with its own rollup. */
-export type SummaryLane = {
-  id: string;
-  label: string;
-  note: string;
-  passed: number;
-  counted: number;
-  rows: SummaryRow[];
-};
-
-export type SummaryCategory = {
-  id: string;
-  name: string;
-  passed: number;
-  counted: number;
-  rows: SummaryRow[];
-  /** Present when the registry files this category's checks under lanes; rows then render by lane. */
-  lanes?: SummaryLane[];
-};
-
-/** The registry fields lane grouping reads; a full registry satisfies it. */
+/** The registry fields lane grouping and the declared-hosts guidance read; a full registry satisfies it. */
 export interface SummaryRegistry {
   mcp_lanes?: Record<string, McpLaneSpec>;
+  mcp_discovery?: Pick<WebAuditDiscoveryConfig, 'card_suffix' | 'ai_catalog'>;
   checks: ReadonlyArray<{ id: string; lane?: string }>;
 }
-
-export type WebSummaryModel = {
-  name: string;
-  targetUrl: string;
-  relative: number;
-  global: number;
-  counts: Record<ScorecardStatus, number>;
-  categories: SummaryCategory[];
-  followDeclarations: FollowState;
-  /** Null when the scorecard recorded no trail, which is not the same as an empty one. */
-  declaredHosts: DeclaredHostEntry[] | null;
-  /** Null when the registry version the score was computed under is unknown. */
-  registryFingerprint: string | null;
-};
 
 export interface WebSummaryModelInput {
   scorecard: WebScorecardShape;
@@ -170,6 +83,10 @@ export interface WebSummaryModelInput {
   /** The live registry, whose lanes group stored rows regardless of when they were scored. */
   registry?: SummaryRegistry;
   origin: string;
+  /** The result renders in place of a saved page, so a follow state of off was this run's choice. */
+  transient?: boolean;
+  /** When the audit ran, if known. */
+  scoredAt?: string | null;
 }
 
 function scoresOf(scorecard: WebScorecardShape): { relative: number; global: number } {
@@ -191,14 +108,25 @@ function isFixable(row: WebScorecardRow): boolean {
   return row.unprobed !== true && isFixableStatus(row.status);
 }
 
+function notRunOf(row: WebScorecardRow, entryHost: string): NotRun | null {
+  return row.status === 'n_a' && isNotRunReason(row.na_reason)
+    ? { reason: row.na_reason, host: rowHostOf(row, entryHost) }
+    : null;
+}
+
 function summaryRow(
   row: WebScorecardRow,
   catalog: WebRemediationCatalog,
-  origin: string,
-  entryHost: string,
+  input: { origin: string; entryHost: string; domain: string },
 ): SummaryRow {
   const entry = catalog[row.id];
-  const assembled = assembleRemediation(entry, { checkId: row.id, origin, evidence: row.evidence });
+  const assembled = assembleRemediation(entry, {
+    checkId: row.id,
+    origin: input.origin,
+    evidence: row.evidence,
+    host: recordedHostOf(row),
+  });
+  const notRun = notRunOf(row, input.entryHost);
   return {
     id: row.id,
     label: row.label,
@@ -207,59 +135,18 @@ function summaryRow(
     status: row.status,
     unprobed: row.unprobed === true,
     fixable: isFixable(row),
-    result: resultLine(row.status, row.evidence, row.na_reason, rowHostOf(row, entryHost)),
+    result: resultLine(row.status, row.evidence, row.na_reason, rowHostOf(row, input.entryHost), rowHostOutcomes(row)),
     goal: entry?.goal ?? assembled.goal,
     fix: assembled.fix,
     prompt: assembled.prompt,
     skillUrl: assembled.skill_url,
     resources: assembled.resources,
+    host: rowHostsOf(row, input.entryHost).join(' '),
+    recordedHosts: recordedHostsOf(row),
+    hostNote: null,
+    notRun,
+    remedy: rowRemedy({ notRun }, input.domain),
   };
-}
-
-/** Each lane-filed check's lane and its position in registry order, by check id. */
-type LanePlacement = Map<string, { lane: string; index: number }>;
-
-function lanePlacement(registry: SummaryRegistry | undefined): LanePlacement {
-  const placement: LanePlacement = new Map();
-  const lanes = registry?.mcp_lanes ?? {};
-  registry?.checks.forEach((check, index) => {
-    if (check.lane && Object.hasOwn(lanes, check.lane)) placement.set(check.id, { lane: check.lane, index });
-  });
-  return placement;
-}
-
-/**
- * Split a category's rows into the registry's lanes, in lane-map order, with
- * rows in registry order inside each lane. Stored rows sit in the order their
- * probes completed, which says nothing a reader can use. A row whose id the
- * registry no longer carries lands in the first lane, after the known rows. A
- * category none of whose rows the registry files under a lane gets none.
- */
-function laneBlocks(
-  rows: readonly SummaryRow[],
-  lanes: Record<string, McpLaneSpec>,
-  placement: LanePlacement,
-): SummaryLane[] | undefined {
-  if (!rows.some((row) => placement.has(row.id))) return undefined;
-  const laneIds = Object.keys(lanes);
-  const byLane = new Map<string, SummaryRow[]>(laneIds.map((id) => [id, []]));
-  const positionOf = (row: SummaryRow) => placement.get(row.id)?.index ?? 0;
-  const known = rows.filter((row) => placement.has(row.id)).sort((a, b) => positionOf(a) - positionOf(b));
-  for (const row of known) byLane.get(placement.get(row.id)?.lane ?? laneIds[0])?.push(row);
-  byLane.get(laneIds[0])?.push(...rows.filter((row) => !placement.has(row.id)));
-  return [...byLane]
-    .filter(([, laneRows]) => laneRows.length > 0)
-    .map(([id, laneRows]) => {
-      const counted = laneRows.filter((row) => SCORED_STATUSES.has(row.status));
-      return {
-        id,
-        label: lanes[id].label,
-        note: lanes[id].note,
-        passed: counted.filter((row) => row.status === 'pass').length,
-        counted: counted.length,
-        rows: laneRows,
-      };
-    });
 }
 
 /**
@@ -276,15 +163,21 @@ export function webSummaryModel(input: WebSummaryModelInput): WebSummaryModel {
   const lanes = input.registry?.mcp_lanes ?? {};
   const placement = lanePlacement(input.registry);
   const entryHost = entryHostOf(sc.target_url) ?? input.domain;
+  const follow = readFollowState(sc.follow_declarations);
+  const trail = readDeclaredHosts(sc.declared_hosts);
+  const trailInput = { trail, discovery: sc.mcp_discovery, domain: input.domain };
 
+  const summaryRows = rows.map((row) =>
+    summaryRow(row, catalog, { origin: input.origin, entryHost, domain: input.domain }),
+  );
   const byCategory = new Map<string, SummaryRow[]>();
-  for (const row of rows) {
-    const key = row.category ?? '';
-    const bucket = byCategory.get(key) ?? [];
-    bucket.push(summaryRow(row, catalog, input.origin, entryHost));
-    byCategory.set(key, bucket);
-  }
+  rows.forEach((row, i) => {
+    const bucket = byCategory.get(row.category ?? '') ?? [];
+    bucket.push(summaryRows[i]);
+    byCategory.set(row.category ?? '', bucket);
+  });
 
+  const hostCount = follow === 'on' ? evaluatedHosts(trail).length : 0;
   return {
     name: input.name ?? sc.tool?.name ?? input.domain,
     targetUrl: sc.tool?.url ?? input.targetUrl,
@@ -292,12 +185,33 @@ export function webSummaryModel(input: WebSummaryModelInput): WebSummaryModel {
     global: globalScore,
     counts: countsOf(rows),
     categories: (sc.categories ?? []).map((category) => {
-      const categoryRows = byCategory.get(category.id) ?? [];
-      const laneRows = laneBlocks(categoryRows, lanes, placement);
-      return { ...category, rows: categoryRows, ...(laneRows ? { lanes: laneRows } : {}) };
+      const located = categoryProvenance(byCategory.get(category.id) ?? [], entryHost, trailInput);
+      const laneRows = laneBlocks(located.rows, lanes, placement, input.domain);
+      const items = blockItems(located.rows, input.domain);
+      const blocks = laneRows ? laneRows.map((lane) => lane.items) : [items];
+      return {
+        ...category,
+        notRun: rollupOf(located.rows).notRun,
+        rows: located.rows,
+        items,
+        ...(laneRows ? { lanes: laneRows } : {}),
+        hostLine: located.hostLine,
+        emptyReason: category.counted === 0 ? emptyCategoryReason(located.rows) : null,
+        notRunSentences: notRunSentences(located.rows, blocks, input.domain),
+      };
     }),
-    followDeclarations: readFollowState(sc.follow_declarations),
-    declaredHosts: readDeclaredHosts(sc.declared_hosts),
+    followDeclarations: follow,
+    declaredHosts: trail,
+    declaredHostsView: declaredHostsView({
+      ...trailInput,
+      follow,
+      transient: input.transient === true,
+      openapiHosts: openapiHosts(rows, entryHost),
+      scoredAt: input.scoredAt ?? null,
+      locations: input.registry?.mcp_discovery ?? null,
+    }),
+    hostsClause: hostCount > 0 ? scoreHostsClause(hostCount) : null,
+    notRunNote: notRunNote(summaryRows, input.domain),
     registryFingerprint: readRegistryFingerprint(sc.registry_fingerprint),
   };
 }

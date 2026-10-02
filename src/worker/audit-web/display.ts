@@ -14,16 +14,21 @@
 //     registry owns rather than values the run computed.
 //   - attachDefaultRowHosts gives a row stored without provenance the
 //     audited host, so every surface reads that row the same way.
-//   - attachInlineRemediation adds a derived result line to every row and
-//     an inline remediation object to every non-passing row.
+//   - attachInlineRemediation adds a derived result line to every row, an
+//     inline remediation object to every non-passing row, and the sentences
+//     the result page shows for rows the audit could not run.
 // All degrade gracefully: a payload without a results[] array passes
 // through unchanged, and a row whose id is absent from the registry keeps
 // its stored category, keyword, and tier. Top-level fields pass through as
 // stored, so a scorecard without a follow state, trail, or registry
 // fingerprint still reads as not evaluated rather than as an empty record.
 
-import { entryHostOf, type RowHost, recordsRowHosts, rowHostOf } from './provenance';
-import { assembleRemediation, isFixableStatus, resultLine, type WebRemediationCatalog } from './remediation';
+import { isNotRunReason } from '../../shared/web-audit-findings';
+import { resultLine } from '../../shared/web-audit-result-line';
+import { entryHostOf, type RowHost, recordedHostOf, recordsRowHosts, rowHostOf, rowHostOutcomes } from './provenance';
+import { notRunRemedy, notRunScoreNote } from './provenance-copy';
+import { assembleRemediation, isFixableStatus, type WebRemediationCatalog } from './remediation';
+import { richMarkdown } from './rich-text';
 import { categoryRollups } from './score';
 import type { NaReason, ScorecardStatus } from './scorecard';
 
@@ -119,31 +124,47 @@ export function attachDefaultRowHosts(scorecard: unknown): unknown {
  * to each non-passing (broken / noncompliant / absent) row. Passing,
  * n_a / skip, and unprobed rows carry a result line but no remediation: a
  * fix prompt derived from a request the run never sent names work the
- * audit never established was needed. `origin` targets the skill link.
+ * audit never established was needed. A row the audit could not run from
+ * where it ran carries `access_remedy`, the sentence the result page shows
+ * for it, and the scorecard carries `access_note`, the score note's
+ * sentence about every such row. `origin` targets the skill link.
  */
 export function attachInlineRemediation(scorecard: unknown, catalog: WebRemediationCatalog, origin: string): unknown {
   if (!hasResults(scorecard)) return scorecard;
   const entryHost = entryHostOf(scorecard.target_url);
+  const domain = entryHost ?? '';
+  let notRun = 0;
+  let signIn = false;
+  const results = scorecard.results.map((row) => {
+    const host = rowHostOf(row, entryHost);
+    const result = resultLine(row.status, row.evidence ?? null, row.na_reason, host, rowHostOutcomes(row));
+    if (row.status === 'n_a' && isNotRunReason(row.na_reason)) {
+      notRun += 1;
+      signIn ||= row.na_reason === 'auth-required';
+      return { ...row, result, access_remedy: richMarkdown(notRunRemedy(row.na_reason, host, domain, 1)) };
+    }
+    if (row.unprobed !== true && isFixableStatus(row.status)) {
+      const remediation = assembleRemediation(catalog[row.id], {
+        checkId: row.id,
+        origin,
+        evidence: row.evidence ?? null,
+        host: recordedHostOf(row),
+      });
+      return { ...row, result, remediation };
+    }
+    return { ...row, result };
+  });
   return {
     ...scorecard,
-    results: scorecard.results.map((row) => {
-      const result = resultLine(row.status, row.evidence ?? null, row.na_reason, rowHostOf(row, entryHost));
-      if (row.unprobed !== true && isFixableStatus(row.status)) {
-        const remediation = assembleRemediation(catalog[row.id], {
-          checkId: row.id,
-          origin,
-          evidence: row.evidence ?? null,
-        });
-        return { ...row, result, remediation };
-      }
-      return { ...row, result };
-    }),
+    ...(notRun > 0 ? { access_note: richMarkdown(notRunScoreNote(notRun, domain, signIn)) } : {}),
+    results,
   };
 }
 
 /**
  * Full read-time enrichment for the MCP JSON surfaces: split categories,
- * default row hosts, then per-row remediation. A null registry skips the
+ * per-row remediation built from the hosts each row recorded, then default
+ * row hosts for the rows that recorded none. A null registry skips the
  * category split (the stored shape stands) but the rest still applies, so a
  * failed registry load degrades the read rather than failing it.
  */
@@ -152,5 +173,5 @@ export function enrichWebScorecardForDisplay(
   opts: { registry: DisplayRegistry | null; catalog: WebRemediationCatalog; origin: string },
 ): unknown {
   const normalized = opts.registry ? normalizeScorecardCategories(stored, opts.registry) : stored;
-  return attachInlineRemediation(attachDefaultRowHosts(normalized), opts.catalog, opts.origin);
+  return attachDefaultRowHosts(attachInlineRemediation(normalized, opts.catalog, opts.origin));
 }

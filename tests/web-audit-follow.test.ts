@@ -3,10 +3,10 @@
 // full URL so every host the audit touches is visible.
 
 import { describe, expect, test } from 'bun:test';
+import { resultLine } from '../src/shared/web-audit-result-line';
 import { runWebAudit } from '../src/worker/audit-web/engine';
 import type { DomainBudget } from '../src/worker/audit-web/follow-requests';
 import { endpointRedirects, mcpEndpointRedirects } from '../src/worker/audit-web/handlers/shared';
-import { resultLine } from '../src/worker/audit-web/remediation';
 import {
   aiCatalog,
   audit,

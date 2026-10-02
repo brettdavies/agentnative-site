@@ -56,6 +56,31 @@ export function naReasonPhrase(reason: NaReason, host: string): string {
   return NA_REASON_PHRASES[reason](host);
 }
 
+const NOT_EVALUATED = 'Not evaluated: ';
+
+/**
+ * The reasons a check was not run because the audit could not reach what it
+ * probes from where it ran. Every other `n_a` reason says the check does
+ * not apply, or applies and is optional.
+ */
+export const NOT_RUN_REASONS: readonly NaReason[] = [
+  'follow-disabled',
+  'reciprocity-refused',
+  'declared-host-unreachable',
+  'declared-host-blocked',
+  'declared-host-budget-exceeded',
+  'auth-required',
+];
+
+export function isNotRunReason(reason: unknown): reason is NaReason {
+  return (NOT_RUN_REASONS as readonly unknown[]).includes(reason);
+}
+
+/** A not-run reason's phrase without its "Not evaluated: " lead, for a line that counts the rows it covers. */
+export function notRunWhy(reason: NaReason, host: string): string {
+  return naReasonPhrase(reason, host).replace(NOT_EVALUATED, '');
+}
+
 /**
  * Whether only a check that applied to the site can carry the reason. The
  * global score reads it to tell which alternatives a site presents from its

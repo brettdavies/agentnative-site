@@ -3,11 +3,11 @@
 // handler with a prefilled cache.
 
 import { describe, expect, test } from 'bun:test';
-import { NA_REASONS, naReasonPhrase } from '../src/shared/web-audit-findings';
+import { NA_REASONS, NOT_RUN_REASONS, naReasonPhrase, notRunWhy } from '../src/shared/web-audit-findings';
+import { resultLine } from '../src/shared/web-audit-result-line';
 import {
   assembleRemediation,
   PROMPT_EVIDENCE_MAX,
-  resultLine,
   type WebRemediationEntry,
 } from '../src/worker/audit-web/remediation';
 
@@ -172,6 +172,20 @@ describe('resultLine', () => {
     );
   });
 
+  test('a row over several hosts ends its line with each host and its own outcome', () => {
+    const hosts = [
+      { host: 'api.example.com', status: 'pass' },
+      { host: 'api2.example.com', status: 'broken' },
+      { host: 'api3.example.com', status: 'absent' },
+    ];
+    expect(resultLine('broken', '404 (HTML)', undefined, 'api.example.com', hosts)).toBe(
+      'Present but broken (404 (HTML)); api.example.com: pass, api2.example.com: broken, api3.example.com: missing',
+    );
+    // One host, or hosts without their own outcomes, add nothing.
+    expect(resultLine('pass', null, undefined, 'a', [{ host: 'a', status: 'pass' }])).toBe('Verified');
+    expect(resultLine('pass', null, undefined, 'a', [{ host: 'a' }, { host: 'b' }])).toBe('Verified');
+  });
+
   test('skip and error read as not-evaluated', () => {
     expect(resultLine('skip', null, undefined, 'x.dev')).toContain('Not evaluated');
     expect(resultLine('error', null, undefined, 'x.dev')).toBe('Not evaluated');
@@ -196,6 +210,17 @@ describe('resultLine', () => {
     expect(resultLine('n_a', 'initialize -> 401', 'auth-required', host)).toBe(
       'Not evaluated: mcp.example.com requires sign-in (initialize -> 401)',
     );
+  });
+
+  test('the not-run reasons are exactly the ones whose phrase reads "Not evaluated:", and each has a why', () => {
+    const notEvaluated = NA_REASONS.filter((reason) =>
+      naReasonPhrase(reason, 'h.example').startsWith('Not evaluated: '),
+    );
+    expect([...NOT_RUN_REASONS].sort()).toEqual([...notEvaluated].sort());
+    for (const reason of NOT_RUN_REASONS) {
+      expect(`Not evaluated: ${notRunWhy(reason, 'h.example')}`).toBe(naReasonPhrase(reason, 'h.example'));
+    }
+    expect(notRunWhy('auth-required', 'mcp.stripe.com')).toBe('mcp.stripe.com requires sign-in');
   });
 
   // A reason with no phrase would fall through to the generic reason-less

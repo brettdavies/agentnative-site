@@ -1,13 +1,12 @@
 // Web-audit remediation load + assembly (plan-003 U12, R10). The static
 // catalog (dist/_internal/web-remediation.json, projected from
 // remediation.yaml) carries title/goal/fix/resources per check; this
-// module assembles the audit-time artifacts: the copy-paste prompt
-// (Goal / Issue / Fix / Skill / Docs), which is site-owned catalog text
-// and therefore identical for every run of a given check, and the
-// always-shown Result line derived from status + evidence.
+// module assembles the copy-paste prompt (Goal / Fix / Skill / Docs), which
+// is site-owned catalog text and therefore identical for every run of a
+// given check, followed by the run's own observation.
 
 import { fixPath } from '../../shared/audit-routes';
-import { isRemediableStatus, type NaReason, naReasonPhrase } from '../../shared/web-audit-findings';
+import { isRemediableStatus } from '../../shared/web-audit-findings';
 import type { ScorecardStatus } from './scorecard';
 
 export interface WebRemediationResource {
@@ -179,35 +178,4 @@ export function assembleRemediation(
  */
 export function isFixableStatus(status: ScorecardStatus): boolean {
   return isRemediableStatus(status);
-}
-
-/**
- * The always-shown Result line, derived uniformly from status + evidence
- * (affirmative for pass, negative otherwise). An `n_a` row with a reason
- * leads with that reason's shared phrase, which names `host`, the row's
- * host. Bespoke per-check copy is a deferred optional override.
- */
-export function resultLine(
-  status: ScorecardStatus,
-  evidence: string | null,
-  naReason: NaReason | undefined,
-  host: string,
-): string {
-  const detail = evidence && evidence.length > 0 ? ` (${evidence})` : '';
-  switch (status) {
-    case 'pass':
-      return `Verified${detail}`;
-    case 'noncompliant':
-      return `Works but does not conform${detail}`;
-    case 'broken':
-      return `Present but broken${detail}`;
-    case 'absent':
-      return `Not found${detail}`;
-    case 'n_a':
-      return `${naReason === undefined ? 'Not applicable' : naReasonPhrase(naReason, host)}${detail}`;
-    case 'skip':
-      return `Not evaluated: audit deadline exceeded${detail}`;
-    case 'error':
-      return `Not evaluated${detail}`;
-  }
 }
