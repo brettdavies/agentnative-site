@@ -7,8 +7,9 @@
 //     on an engine failure, cheap enough for production volume. A run that
 //     completes also records what its follow slice spent: outcome counts
 //     from the declared-hosts trail, the request count, the elapsed time,
-//     and the requests per declared domain under that domain's hash, the
-//     same hash its budget's KV key carries.
+//     the requests per declared domain under that domain's hash, the same
+//     hash its budget's KV key carries, and the reservations a budget layer
+//     error decided, so an outage reads apart from a spent hour.
 //   - WEB_AUDIT_DEBUG === 'true': additionally one `web-audit.check` line
 //     per check result and a `web-audit.discovery` line with the full probe
 //     evidence, both on the emitter's debug tier. Bound in env.staging.vars
@@ -51,6 +52,7 @@ async function followFields(trail: readonly DeclaredHostEntry[], stats: FollowSt
     follow_requests: stats.requests,
     follow_elapsed_ms: stats.elapsedMs,
     follow_domain_requests: domainRequests,
+    follow_budget_errors: stats.budgetErrors,
   };
 }
 

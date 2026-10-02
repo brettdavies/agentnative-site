@@ -44,6 +44,7 @@ import {
 } from './discovery-documents';
 import { type ApiFollowResult, NO_API_FOLLOW, settleApiDeclarations } from './follow-api';
 import {
+  type BudgetLayerError,
   budgetExceeded,
   type DomainBudget,
   type Fetched,
@@ -95,6 +96,8 @@ export interface FollowStats {
   domainRequests: Readonly<Record<string, number>>;
   /** Time the slice spent settling its batches of declarations. */
   elapsedMs: number;
+  /** Reservations a budget layer error decided rather than the budget, per error. */
+  budgetErrors: Readonly<Partial<Record<BudgetLayerError, number>>>;
 }
 
 export interface FollowResult {
@@ -275,7 +278,12 @@ export function openFollow(input: FollowInput): FollowSession {
       entries,
       api,
       evidence: requests.evidence,
-      stats: { requests: requests.count(), domainRequests: requests.countByDomain(), elapsedMs },
+      stats: {
+        requests: requests.count(),
+        domainRequests: requests.countByDomain(),
+        elapsedMs,
+        budgetErrors: requests.budgetErrors(),
+      },
     }),
   };
 }

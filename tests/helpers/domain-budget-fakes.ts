@@ -5,14 +5,29 @@
 import { sha256Hex } from '../../src/worker/audit-web/cache';
 import { DECLARED_DOMAIN_BUDGET_PREFIX } from '../../src/worker/audit-web/limiter';
 
-export function memoryKv(log: string[] = []): KVNamespace {
+/**
+ * `sameKeyWriteClock` turns on Workers KV's limit of one write per key per
+ * second, timed on that clock: a second write to one key within a second
+ * of the last one that landed throws KV's 429 and is logged `kv:429 <key>`.
+ */
+export function memoryKv(log: string[] = [], options: { sameKeyWriteClock?: () => number } = {}): KVNamespace {
   const store = new Map<string, string>();
+  const landed = new Map<string, number>();
   return {
     async get(key: string) {
       log.push(`kv:get ${key}`);
       return store.get(key) ?? null;
     },
     async put(key: string, value: string) {
+      const at = options.sameKeyWriteClock?.();
+      if (at !== undefined) {
+        const last = landed.get(key);
+        if (last !== undefined && at - last < 1_000) {
+          log.push(`kv:429 ${key}`);
+          throw new Error('KV PUT failed: 429 Too Many Requests');
+        }
+        landed.set(key, at);
+      }
       log.push(`kv:put ${key}`);
       store.set(key, value);
     },

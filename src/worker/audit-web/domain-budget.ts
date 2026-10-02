@@ -7,13 +7,19 @@
 // window is the hourly ceiling the binding cannot express.
 //
 // A layer whose binding is absent admits, as the listing flip budget does
-// without KV. A layer that throws refuses: the audit still completes, with
-// that domain's hosts unprobed, and an outage spends no third party's budget.
+// without KV. A burst check or hourly read that throws refuses: the audit
+// still completes, with that domain's hosts unprobed, and an outage spends
+// no third party's budget. A write that throws after the read showed room
+// admits: the burst floor already admitted the audit and the hour had room,
+// and Workers KV refuses a second write to one key within a second, which
+// audits of one domain running at once reach routinely. The burst floor
+// still bounds those audits; the hour under-counts them. Each reservation a
+// layer error decides is counted on the audit's run record.
 
 import { getDomain } from 'tldts';
 import { sha256Hex } from './cache';
-import type { DomainBudget } from './follow-requests';
-import { consumeDeclaredDomainBudget } from './limiter';
+import type { DomainBudget, Reservation } from './follow-requests';
+import { readDeclaredDomainWindow } from './limiter';
 
 export interface DomainBudgetEnv {
   SCORE_KV?: KVNamespace;
@@ -36,19 +42,32 @@ export function registrableDomainOf(hostname: string): string {
   return getDomain(host, { allowPrivateDomains: true, validateHostname: false }) ?? host;
 }
 
+const FAILED = Symbol('failed');
+
+async function attempt<T>(run: () => Promise<T>): Promise<T | typeof FAILED> {
+  try {
+    return await run();
+  } catch {
+    return FAILED;
+  }
+}
+
 /** The declared-domain budget over `env`'s bindings; `hourlyCeiling` overrides the audits-per-hour ceiling. */
 export function declaredDomainBudget(env: DomainBudgetEnv, options: { hourlyCeiling?: number } = {}): DomainBudget {
   const { SCORE_KV: kv, WEB_AUDIT_DOMAIN_LIMITER: burst } = env;
   return {
     keyOf: registrableDomainOf,
-    reserve: async (domain) => {
-      try {
-        const hash = await sha256Hex(domain);
-        if (burst && !(await burst.limit({ key: hash })).success) return false;
-        return kv ? await consumeDeclaredDomainBudget(kv, hash, options.hourlyCeiling) : true;
-      } catch {
-        return false;
-      }
+    reserve: async (domain): Promise<Reservation> => {
+      const hash = await sha256Hex(domain);
+      const burstAdmits = burst ? await attempt(async () => (await burst.limit({ key: hash })).success) : true;
+      if (burstAdmits === FAILED) return { admitted: false, layerError: 'burst-refused' };
+      if (!burstAdmits) return { admitted: false };
+      if (!kv) return { admitted: true };
+      const take = await attempt(() => readDeclaredDomainWindow(kv, hash, options.hourlyCeiling));
+      if (take === FAILED) return { admitted: false, layerError: 'read-refused' };
+      if (take === null) return { admitted: false };
+      if ((await attempt(take)) === FAILED) return { admitted: true, layerError: 'put-admitted' };
+      return { admitted: true };
     },
   };
 }

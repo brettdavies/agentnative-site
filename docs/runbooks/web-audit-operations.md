@@ -213,11 +213,14 @@ Every audit, on every surface (the streaming route, the `audit_website` MCP tool
 summary line to Workers Logs (`observability.enabled` with 100% head sampling in `wrangler.jsonc`):
 
 - `scope: web-audit.run`: target, surface (`stream` | `mcp` | `rescore`), terminal state (`complete` | `incomplete` |
-  `unreachable` | `none` when the engine threw), discovered MCP endpoint, elapsed ms, and a per-status check count. A run
-  that reaches a terminal scorecard also carries what its follow phase spent: `follow_outcomes` (declared-hosts trail
-  entries per outcome), `follow_budget_causes` (`budget-exceeded` entries per cause), `follow_requests`,
-  `follow_elapsed_ms`, and `follow_domain_requests` (requests per declared registrable domain, keyed by the domain's
-  SHA-256, the same hash its budget key carries).
+  `unreachable` | `none` when the engine threw), discovered MCP endpoint, elapsed ms, and a per-status check count. A
+  run that reaches a terminal scorecard also carries what its follow phase spent: `follow_outcomes` (declared-hosts
+  trail entries per outcome), `follow_budget_causes` (`budget-exceeded` entries per cause), `follow_requests`,
+  `follow_elapsed_ms`, `follow_domain_requests` (requests per declared registrable domain, keyed by the domain's
+  SHA-256, the same hash its budget key carries), and `follow_budget_errors` (reservations a budget layer error decided,
+  per error: `burst-refused` and `read-refused` when the burst floor or the hourly read threw and the domain was
+  refused, `put-admitted` when the hourly write threw after a read that showed room and the audit was admitted). A
+  `domain-budget` cause that no `burst-refused` or `read-refused` error accounts for is a spent budget.
 - `scope: web-audit.error`: the engine or stream task threw; carries the target, surface, and message.
 
 Query them in the dashboard under Workers & Pages -> agentnative-site -> Logs, filtering on the `scope` field.
@@ -234,9 +237,12 @@ suffix list with its private section, so `api.stripe.com` and `mcp.stripe.com` s
   with a 2-hour TTL.
 - **Burst floor:** 10 audits per domain per 60 seconds, the `WEB_AUDIT_DOMAIN_LIMITER` rate-limit binding.
 
-A refused domain's hosts receive nothing for that audit: the trail records `budget-exceeded` with cause
-`domain-budget`, and the rows that needed those hosts read `declared-host-budget-exceeded`. A missing binding skips its
-layer; a layer that errors refuses.
+A refused domain's hosts receive nothing for that audit: the trail records `budget-exceeded` with cause `domain-budget`,
+and the rows that needed those hosts read `declared-host-budget-exceeded`. A missing binding skips its layer. A burst
+floor or hourly read that errors refuses the domain for that audit. An hourly write that errors after the read showed
+room admits it: the burst floor already admitted the audit, and Workers KV refuses a second write to one key within a
+second, which audits of one domain running at once reach routinely. The hour under-counts such a burst, and the burst
+floor still bounds it. The run record's `follow_budget_errors` counts each reservation a layer error decided.
 
 To list the domains drawing on their budget, and to find one domain's counter:
 

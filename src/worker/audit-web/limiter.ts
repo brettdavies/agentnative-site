@@ -31,6 +31,24 @@ const DECLARED_DOMAIN_HOURLY_CEILING = 30;
 export const DECLARED_DOMAIN_BUDGET_PREFIX = 'web_audit_follow';
 
 /**
+ * Reads the fixed-hour KV counter at `<prefix>:<id>:<hour bucket>`: null at
+ * the ceiling, otherwise the write that takes one unit under the shared TTL.
+ */
+async function readHourlyBucket(
+  kv: KVNamespace,
+  prefix: string,
+  id: string,
+  ceiling: number,
+): Promise<(() => Promise<void>) | null> {
+  const bucket = Math.floor(Date.now() / HOUR_MS);
+  const key = `${prefix}:${id}:${bucket}`;
+  const currentRaw = await kv.get(key);
+  const current = currentRaw ? Number.parseInt(currentRaw, 10) : 0;
+  if (Number.isNaN(current) || current >= ceiling) return null;
+  return () => kv.put(key, String(current + 1), { expirationTtl: HOURLY_KV_TTL_SECONDS });
+}
+
+/**
  * Fixed-hour KV counter behind every hourly budget: read the current
  * bucket count, refuse at the ceiling, otherwise increment under the
  * shared TTL. The key is `<prefix>:<id>:<hour bucket>`.
@@ -41,12 +59,9 @@ export async function consumeHourlyBucketBudget(
   id: string,
   ceiling: number,
 ): Promise<boolean> {
-  const bucket = Math.floor(Date.now() / HOUR_MS);
-  const key = `${prefix}:${id}:${bucket}`;
-  const currentRaw = await kv.get(key);
-  const current = currentRaw ? Number.parseInt(currentRaw, 10) : 0;
-  if (Number.isNaN(current) || current >= ceiling) return false;
-  await kv.put(key, String(current + 1), { expirationTtl: HOURLY_KV_TTL_SECONDS });
+  const take = await readHourlyBucket(kv, prefix, id, ceiling);
+  if (take === null) return false;
+  await take();
   return true;
 }
 
@@ -71,14 +86,15 @@ export async function consumeWebAuditFlipBudget(kv: KVNamespace, domainHash: str
 }
 
 /**
- * Consume one audit's unit of the hourly budget of a declared registrable
- * domain, keyed by the domain's hash. Returns false when that domain's
- * hour is spent.
+ * Reads the hourly window of a declared registrable domain, keyed by the
+ * domain's hash: null when that domain's hour is spent, otherwise the write
+ * that spends this audit's unit. The read and the write are separate calls,
+ * so a failed write can be told apart from a failed read.
  */
-export async function consumeDeclaredDomainBudget(
+export function readDeclaredDomainWindow(
   kv: KVNamespace,
   domainHash: string,
   ceiling: number = DECLARED_DOMAIN_HOURLY_CEILING,
-): Promise<boolean> {
-  return consumeHourlyBucketBudget(kv, DECLARED_DOMAIN_BUDGET_PREFIX, domainHash, ceiling);
+): Promise<(() => Promise<void>) | null> {
+  return readHourlyBucket(kv, DECLARED_DOMAIN_BUDGET_PREFIX, domainHash, ceiling);
 }
