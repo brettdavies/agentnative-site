@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import type { AuditEvent } from '../src/shared/audit-events';
 import { streamedResultLine, streamedRowHost } from '../src/shared/scoring-copy';
 import { isAuditApiPath } from '../src/worker/audit/api';
-import { WEB_AUDIT_STALE_AFTER_MS, keyFor as webKeyFor, keyFor as webKeyFor } from '../src/worker/audit-web/cache';
+import { WEB_AUDIT_STALE_AFTER_MS, keyFor as webKeyFor } from '../src/worker/audit-web/cache';
 import { rowHostsOf } from '../src/worker/audit-web/provenance';
 import { registryFingerprintPrefix, type WebAuditRegistry } from '../src/worker/audit-web/registry';
 import { keyFor as cliKeyFor } from '../src/worker/score/cache';
@@ -23,20 +23,16 @@ import {
 } from './helpers/audit-api-env';
 import { budgetKeyPrefix, memoryRateLimit } from './helpers/domain-budget-fakes';
 import {
-  html,
-  redirect,
-  requestsTo,
-  requestsTo,
-  router,
-  router,
-  type Seen,
-  type Seen,
   aiCatalog,
   cardDocument,
   cardEntry,
+  html,
   type Route,
+  redirect,
+  requestsTo,
+  router,
+  type Seen,
   sep2127Card,
-  siteDeclaring,
   siteDeclaring,
 } from './helpers/follow-fixtures';
 import { captureLogs } from './helpers/log-capture';
@@ -1080,7 +1076,7 @@ describe("POST /api/score: a run a declared domain's spent hourly budget limited
         key.startsWith(prefix) ? Promise.reject(new Error('KV GET failed')) : get(key)) as KVNamespace['get'];
     });
     for (const line of [burstFloor, layerError]) {
-      expect(line).toContain("Not saved: example.net reached anc's hourly probe limit;");
+      expect(line).toContain("Not saved: example.net reached anc's probe limit;");
       expect(line).toContain('is unchanged. Try again in a minute.');
       expect(line).not.toContain('Try again after');
     }
