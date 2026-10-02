@@ -230,12 +230,15 @@ Query them in the dashboard under Workers & Pages -> agentnative-site -> Logs, f
 Every audit that follows a site's declarations draws one unit per declared registrable domain before its first request
 there, whichever site declared it and whichever surface ran the audit. The registrable domain comes from the public
 suffix list with its private section, so `api.stripe.com` and `mcp.stripe.com` share `stripe.com`'s budget while
-`a.github.io` and `b.github.io` hold their own. Two layers, both keyed by the domain's SHA-256:
+`a.github.io` and `b.github.io` hold their own. Two layers, both keyed by the domain's SHA-256, and both approximate:
 
-- **Hourly ceiling:** 30 audits per domain per clock hour (UTC), a KV counter in `SCORE_KV` at
+- **Hourly ceiling:** about 30 audits per domain per clock hour (UTC), a KV counter in `SCORE_KV` at
   `web_audit_follow:<sha256(domain)>:<hour bucket>`, where the bucket is the epoch milliseconds divided by 3,600,000,
-  with a 2-hour TTL.
-- **Burst floor:** 10 audits per domain per 60 seconds, the `WEB_AUDIT_DOMAIN_LIMITER` rate-limit binding.
+  with a 2-hour TTL. The counter is read, then written, on an eventually consistent store, so audits that read it at
+  once can each be admitted, and an admitted audit whose write KV refuses goes uncounted.
+- **Burst floor:** about 10 audits per domain per 60 seconds in each Cloudflare location, the `WEB_AUDIT_DOMAIN_LIMITER`
+  rate-limit binding. Cloudflare keeps the binding's counters local to the location the Worker runs in and eventually
+  consistent, so audits served from different locations do not share one floor.
 
 A refused domain's hosts receive nothing for that audit: the trail records `budget-exceeded` with cause `domain-budget`,
 and the rows that needed those hosts read `declared-host-budget-exceeded`. A missing binding skips its layer. A burst

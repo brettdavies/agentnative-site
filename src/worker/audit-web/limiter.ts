@@ -20,11 +20,13 @@ const HOURLY_KV_TTL_SECONDS = 7200;
 // needs. The window is the same fixed hour the audit ceiling uses.
 const FLIP_CEILING = 5;
 
-// Audits an hour that may reach one declared registrable domain, across
-// every site and caller that declares it. Matched to the per-IP audit
+// Audits an hour that may reach one declared registrable domain, whichever
+// site declares it and whichever caller audits that site. Approximate: the
+// count is a read then a write on eventually consistent KV, so audits that
+// read it at once can each be admitted. Matched to the per-IP audit
 // ceiling, so one caller's full hour of audits of a site fits, while a
-// hostile site declaring a third party cannot turn many callers into more
-// than this many audits' worth of requests to it.
+// hostile site declaring a third party cannot turn many callers into many
+// more than this many audits' worth of requests to it.
 const DECLARED_DOMAIN_HOURLY_CEILING = 30;
 
 /** KV key prefix of the declared-domain budget: `<prefix>:<sha256(domain)>:<hour bucket>`. */

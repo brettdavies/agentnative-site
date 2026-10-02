@@ -1,10 +1,12 @@
-// The budget every declared registrable domain shares across audits and
-// callers: the follow slice reserves one unit per audit and domain before
+// The budget a declared registrable domain draws on across the audits that
+// reach it: the follow slice reserves one unit per audit and domain before
 // its first request there (follow-requests.ts). Both layers key on the
-// domain's hash. The rate-limit binding is the 60-second burst floor,
-// because the KV window is a read then a write on an eventually consistent
-// store, so audits running at once can all read the same count; the KV
-// window is the hourly ceiling the binding cannot express.
+// domain's hash, and both are approximate. The KV window is the hourly
+// ceiling the binding cannot express, a read then a write on an eventually
+// consistent store, so audits running at once can all read the same count.
+// The rate-limit binding is the 60-second burst floor beneath it, and
+// Cloudflare keeps its counters local to the location the Worker runs in
+// and eventually consistent, so the floor applies per Cloudflare location.
 //
 // A layer whose binding is absent admits, as the listing flip budget does
 // without KV. A burst check or hourly read that throws refuses: the audit
