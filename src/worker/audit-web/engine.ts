@@ -27,6 +27,7 @@ import {
   siteTypeApplies,
   WAVE1_CHECK_IDS,
 } from './antecedents';
+import { isApiAnchor } from './api-catalog';
 import type { ProbeResponse } from './assert';
 import { readDiscoveryDocuments } from './discovery';
 import { settleEndpointOfRecord } from './endpoint-of-record';
@@ -470,6 +471,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     sources,
     follow: { unmet: declared.unmet },
     mcpAuth,
+    apiAnchors: discovery.apiAnchors.filter(isApiAnchor),
   };
 
   // Section directories for the scoped-llms probes: the root llms.txt

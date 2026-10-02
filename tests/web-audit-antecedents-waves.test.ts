@@ -16,4 +16,8 @@ describe('WAVE1_CHECK_IDS', () => {
       expect(WAVE1_CHECK_IDS.has(id)).toBe(true);
     }
   });
+
+  test('api-catalog is not probed in wave 1: its anchors come from the catalog discovery already read', () => {
+    expect(WAVE1_CHECK_IDS.has('api-catalog')).toBe(false);
+  });
 });

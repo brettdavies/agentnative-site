@@ -1,7 +1,79 @@
 import { describe, expect, test } from 'bun:test';
 import { resolveAntecedent } from '../src/worker/audit-web/antecedents';
+import { catalogAnchors, isApiAnchor } from '../src/worker/audit-web/api-catalog';
 import type { ProbeResponse } from '../src/worker/audit-web/assert';
 import { ctx, htmlRoot, outcome } from './web-audit-antecedents-helpers';
+
+const CATALOG_URL = 'https://example.com/.well-known/api-catalog';
+
+function retainedCatalog(body: unknown, overrides: Partial<ProbeResponse> = {}) {
+  return {
+    url: CATALOG_URL,
+    response: {
+      status: 200,
+      headers: { 'content-type': 'application/linkset+json' },
+      body: typeof body === 'string' ? body : JSON.stringify(body),
+      error: null,
+      ...overrides,
+    },
+  };
+}
+
+// anc.dev's own catalog: one anchor whose service-desc is its MCP server card.
+const MCP_ONLY = {
+  linkset: [
+    {
+      anchor: 'https://example.com/mcp',
+      'service-desc': [{ href: 'https://example.com/.well-known/mcp/server-card.json', type: 'application/json' }],
+      'service-doc': [{ href: 'https://example.com/mcp-skill', type: 'text/html' }],
+    },
+  ],
+};
+
+describe('catalogAnchors: the linkset anchors the API category reads', () => {
+  test('an anchor is an API anchor through its first service-desc that is not an MCP surface, resolved against the catalog', () => {
+    const anchors = catalogAnchors(
+      retainedCatalog({
+        linkset: [
+          {
+            anchor: 'https://api.example.net/',
+            'service-desc': [
+              { href: 'https://api.example.net/.well-known/mcp/server-card.json' },
+              { href: '/specs/openapi.json' },
+            ],
+          },
+          { anchor: 'https://status.example.net/', 'service-doc': [{ href: 'https://status.example.net/docs' }] },
+          { 'service-desc': [{ href: '/no-anchor.json' }] },
+        ],
+      }),
+    );
+    expect(anchors).toEqual([
+      {
+        url: 'https://api.example.net/',
+        source: '/.well-known/api-catalog#/linkset/0',
+        description: {
+          url: 'https://example.com/specs/openapi.json',
+          source: '/.well-known/api-catalog#/linkset/0/service-desc/1',
+        },
+      },
+      { url: 'https://status.example.net/', source: '/.well-known/api-catalog#/linkset/1' },
+    ]);
+    expect(anchors.filter(isApiAnchor).map((a) => a.url)).toEqual(['https://api.example.net/']);
+  });
+
+  test("anc.dev's MCP-only catalog lists an anchor but no API anchor", () => {
+    const anchors = catalogAnchors(retainedCatalog(MCP_ONLY));
+    expect(anchors.map((a) => a.url)).toEqual(['https://example.com/mcp']);
+    expect(anchors.filter(isApiAnchor)).toEqual([]);
+  });
+
+  test('a catalog that did not answer 200, was cut at its cap, or has no linkset lists no anchor', () => {
+    expect(catalogAnchors(undefined)).toEqual([]);
+    expect(catalogAnchors(retainedCatalog(MCP_ONLY, { status: 404 }))).toEqual([]);
+    expect(catalogAnchors(retainedCatalog(MCP_ONLY, { truncated: true }))).toEqual([]);
+    expect(catalogAnchors(retainedCatalog({ entries: [] }))).toEqual([]);
+  });
+});
 
 describe('resolveAntecedent: api', () => {
   test('api-surface holds via each union signal independently and fails when none hold', () => {
@@ -30,6 +102,19 @@ describe('resolveAntecedent: api', () => {
     });
     expect(resolveAntecedent('api-surface', llmsApiLink)).toBe('apply');
     expect(resolveAntecedent('api-surface', ctx())).toBe('n_a');
+  });
+
+  test('api-surface holds on an API anchor in the retained api-catalog, and not on an MCP-only one', () => {
+    const anchors = catalogAnchors(
+      retainedCatalog({
+        linkset: [
+          { anchor: 'https://api.example.net/', 'service-desc': [{ href: 'https://api.example.net/openapi.json' }] },
+        ],
+      }),
+    );
+    expect(resolveAntecedent('api-surface', ctx({ apiAnchors: anchors.filter(isApiAnchor) }))).toBe('apply');
+    const mcpOnly = catalogAnchors(retainedCatalog(MCP_ONLY)).filter(isApiAnchor);
+    expect(resolveAntecedent('api-surface', ctx({ apiAnchors: mcpOnly }))).toBe('n_a');
   });
 
   test('api-surface stays n_a for an MCP-first site advertising service-desc/doc at its MCP card', () => {

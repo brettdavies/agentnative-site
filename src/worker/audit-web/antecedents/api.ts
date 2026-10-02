@@ -1,6 +1,7 @@
 // API antecedents: whether the site exposes a REST/HTTP API surface, and
 // whether it references JSON Schemas.
 
+import { MCP_TARGET_RE } from '../api-catalog';
 import type { AntecedentToken } from '../registry';
 import {
   type AntecedentContext,
@@ -36,7 +37,6 @@ const API_PATH_RE = /\/api\//i;
 // a standard it documents) has no REST API of its own, and a live OpenAPI doc
 // is caught by the openapi probe.
 const SERVICE_DESC_REL_RE = /rel\s*=\s*["']?(?:service-desc|service-doc)\b/i;
-const MCP_TARGET_RE = /\.well-known\/mcp|server-card|mcp-skill|\/mcp\b/i;
 
 /** A service-desc/doc link (Link header or <link> tag) to a non-MCP target. */
 function restServiceDescLink(ctx: AntecedentContext): boolean {
@@ -46,8 +46,13 @@ function restServiceDescLink(ctx: AntecedentContext): boolean {
   return entries.some((entry) => SERVICE_DESC_REL_RE.test(entry) && !MCP_TARGET_RE.test(entry));
 }
 
-/** Any one signal makes the api-surface antecedent hold. */
+/**
+ * Any one signal makes the api-surface antecedent hold: an API anchor in
+ * the retained api-catalog, or one of the site's own signals, each of
+ * which holds it whatever the catalog lists.
+ */
 function apiSurfaceHolds(ctx: AntecedentContext): boolean {
+  if ((ctx.apiAnchors?.length ?? 0) > 0) return true;
   if (ctx.siteType === 'api') return true;
   if (anyEvidenceStatus(sourceEvidence(ctx, 'openapi'), 200)) return true;
   if (restServiceDescLink(ctx)) return true;
