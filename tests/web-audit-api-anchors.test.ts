@@ -305,6 +305,37 @@ describe('API category on api-catalog anchors', () => {
     });
   });
 
+  test('an off-origin description that passes is not a JSON Schema reference of the audited site, which gets no schema probe', async () => {
+    const seen: Seen[] = [];
+    const { scorecard } = await auditApi(
+      site(() => linkset(anchor(`https://${API}/`, 'https://specs.example.org/openapi.json')), {
+        'GET https://specs.example.org/openapi.json': () => json(OPENAPI),
+      }),
+      seen,
+      true,
+      apiRegistry('json-schemas'),
+    );
+    expect(row(scorecard, 'openapi').status).toBe('pass');
+    expect(row(scorecard, 'json-schemas')).toMatchObject({ status: 'n_a', na_reason: 'antecedent-unmet' });
+    expect(requestsTo(seen, 'example.com').filter((r) => r.url.includes('schema'))).toEqual([]);
+  });
+
+  test("an off-origin description answering 401 is not the audited site's auth surface", async () => {
+    const seen: Seen[] = [];
+    const { scorecard } = await auditApi(
+      site(() => linkset(anchor(`https://${API}/`, 'https://specs.example.org/openapi.json')), {
+        'GET https://specs.example.org/openapi.json': () =>
+          json({ error: 'unauthorized' }, 401, { 'www-authenticate': 'Bearer realm="specs"' }),
+      }),
+      seen,
+      true,
+      apiRegistry('oauth-discovery', 'auth-md'),
+    );
+    for (const id of ['oauth-discovery', 'auth-md'])
+      expect(row(scorecard, id)).toMatchObject({ status: 'n_a', na_reason: 'antecedent-unmet' });
+    expect(requestsTo(seen, 'example.com').filter((r) => r.url.includes('auth.md'))).toEqual([]);
+  });
+
   test('with following off, rows that need an off-origin anchor or description read follow-disabled and nothing off the audited origin is requested', async () => {
     const seen: Seen[] = [];
     const { scorecard } = await auditApi(

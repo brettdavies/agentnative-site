@@ -244,9 +244,18 @@ describe('resolveAntecedent: api', () => {
   });
 
   test('schemas-ref holds on a passing openapi or a schema reference in the root', () => {
-    const openapiPass = ctx({ sources: new Map([['openapi', outcome('pass')]]) });
+    const openapiPass = ctx({
+      sources: new Map([['openapi', outcome('pass', [{ url: 'https://x.dev/openapi.json', status: 200, ok: true }])]]),
+    });
     expect(resolveAntecedent('schemas-ref', openapiPass)).toBe('apply');
     expect(resolveAntecedent('schemas-ref', ctx({ root: htmlRoot('see /schema.json for shapes') }))).toBe('apply');
     expect(resolveAntecedent('schemas-ref', ctx())).toBe('n_a');
+  });
+
+  test('schemas-ref does not hold on an openapi row that passed only on a description off the audited origin', () => {
+    const offOrigin = { url: 'https://specs.example.org/openapi.json', status: 200, ok: true, off_origin: true };
+    expect(
+      resolveAntecedent('schemas-ref', ctx({ sources: new Map([['openapi', outcome('pass', [offOrigin])]]) })),
+    ).toBe('n_a');
   });
 });

@@ -374,7 +374,7 @@
     "score": {"relative":77,"global":19},
     "results": [
       {"id":"openapi","status":"pass"},
-      {"id":"json-schemas","status":"n_a","na_reason":"optional-absent"},
+      {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
       {"id":"api-catalog","status":"pass"},
       {"id":"json-errors","status":"pass"},
       {"id":"rate-limit-headers","status":"absent"},

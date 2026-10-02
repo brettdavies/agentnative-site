@@ -204,14 +204,9 @@
       "tier": "optional",
       "principle": "P2",
       "status": "n_a",
-      "na_reason": "optional-absent",
-      "evidence": "https://example.com/api/schema/input.json -> 404 (status 404 not in [200])",
-      "hosts": [
-        {
-          "host": "example.com"
-        }
-      ],
-      "host": "example.com"
+      "na_reason": "antecedent-unmet",
+      "evidence": "no JSON Schema references detected",
+      "hosts": []
     },
     {
       "id": "api-catalog",

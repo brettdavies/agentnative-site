@@ -7,6 +7,7 @@ import {
   type AntecedentContext,
   type AntecedentResolver,
   anyEvidenceStatus,
+  ownOriginEvidence,
   retainedBody,
   sourceEvidence,
   sourcePassed,
@@ -64,8 +65,17 @@ function apiSurfaceHolds(ctx: AntecedentContext): boolean {
 
 const apiSurface: AntecedentResolver = (ctx) => (apiSurfaceHolds(ctx) ? 'apply' : 'n_a');
 
+/**
+ * The OpenAPI row passed on a description the audited origin serves. One
+ * an API anchor declares on another host references no schema the
+ * audited site serves at its own paths.
+ */
+function ownOpenApiPassed(ctx: AntecedentContext): boolean {
+  return sourcePassed(ctx, 'openapi') && ownOriginEvidence(ctx, 'openapi').some((item) => item.ok === true);
+}
+
 const schemasRef: AntecedentResolver = (ctx) => {
-  if (sourcePassed(ctx, 'openapi')) return 'apply';
+  if (ownOpenApiPassed(ctx)) return 'apply';
   const root = ctx.root;
   if (root && SCHEMAS_RE.test(root.body)) return 'apply';
   return 'n_a';

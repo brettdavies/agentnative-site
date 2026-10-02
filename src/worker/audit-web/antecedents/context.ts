@@ -70,6 +70,11 @@ export function sourceEvidence(ctx: AntecedentContext, checkId: string): Evidenc
   return ctx.sources.get(checkId)?.evidence ?? [];
 }
 
+/** A wave-1 row's evidence from the audited origin, without what it read from hosts the site declares. */
+export function ownOriginEvidence(ctx: AntecedentContext, checkId: string): EvidenceItem[] {
+  return sourceEvidence(ctx, checkId).filter((item) => item.off_origin !== true);
+}
+
 export function retainedBody(ctx: AntecedentContext, checkId: string): string {
   for (const item of sourceEvidence(ctx, checkId)) {
     if (typeof item.body === 'string') return item.body;
