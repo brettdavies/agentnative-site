@@ -58,7 +58,7 @@ export function assessResponse(
   resp: ProbeResponse,
   w: HttpWith,
   base: string,
-): { ok: boolean; item: EvidenceItem } {
+): { ok: boolean; item: EvidenceItem & { why: string[] } } {
   const expect = w.expect ?? {};
   const asserted = assertHttp(expect, resp);
   const recovery =
