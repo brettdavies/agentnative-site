@@ -38,6 +38,7 @@ import pathlib
 import re
 import subprocess
 import sys
+from collections import Counter
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 
@@ -291,37 +292,51 @@ BLOCKS = (
     ("tests/e2e/flows.e2e.ts", "test.describe('privacy posture page'"),
 )
 
-# Banner-delimited sections to remove whole, as (path, title substring). The
-# suite separates sections with a rule comment; a section is removed from its
-# rule through to the next one, so its prose goes with its tests.
+# Banner-delimited sections to remove, as (path, title substring). The suite
+# separates sections with a rule comment. A section's tests are BLOCKS; what
+# goes here is its banner and the comment prose under it, which ends at the
+# first line of code or the next banner, because code another section owns can
+# sit between this banner and the next.
 BANNER_SECTIONS = (
     ("tests/wrangler-config.test.ts", "Telemetry-lake R2 bindings + Logpush opt-in"),
     ("tests/wrangler-config.test.ts", "TELEMETRY_ENVIRONMENT var"),
 )
 
-# Regex-delimited regions, as (path, pattern, replacement).
-REGIONS = (
+# Regex-delimited regions, as (path, pattern, replacement, titles it removes).
+REGIONS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     (
         "tests/build.test.ts",
         r"\n  test\('privacy twin opens with frontmatter derived from its source; HTML stays clean'.*?\n  \}\);\n",
         "\n",
+        ("privacy twin opens with frontmatter derived from its source; HTML stays clean",),
     ),
     (
         "tests/wrangler-config.test.ts",
-        r"// The daily lake-freshness check names its environment from this var and\n(?:// .*\n)+\n",
+        r"// The daily lake-freshness check names its environment from this var and\n(?://[^\n]*\n)+\n",
         "",
+        (),
     ),
     (
         "tests/wrangler-config.test.ts",
-        r"// R2 Data Catalog enablement on the lake buckets lives in the Cloudflare\n(?:// .*\n)+\n",
+        r"// R2 Data Catalog enablement on the lake buckets lives in the Cloudflare\n(?://[^\n]*\n)+\n",
         "",
+        (),
     ),
     (
         "RELEASES.md",
         r"\n#### R2 telemetry-lake catalog\n.*?\n(?=## Live-scoring \(v3\) release procedure\n)",
         "\n",
+        (),
     ),
 )
+
+# A describe or test opening and its title. Every removal names what it may
+# take: an exact edit owns the titles in its own text, a block owns the
+# titles inside its braces, a region owns the titles it lists, and a banner
+# section owns none. A title that disappears without an owner is code the
+# feature does not own, so the cut fails rather than shipping a tree with
+# unrelated tests missing.
+TITLE_RE = re.compile(r"^[ \t]*(?:test\.)?(?:describe|test)\(\s*'([^'\n]*)'", re.M)
 
 # Nothing in a withheld tree may mention these.
 RESIDUE = (
@@ -359,20 +374,30 @@ RULE = "// " + "-" * 75 + "\n"
 
 
 def _drop_banner_section(text: str, title: str) -> str | None:
-    """Removes a rule-delimited section, from its rule through to the next one."""
+    """Removes a rule-delimited banner and the comment prose under it."""
     i = text.find(title)
     if i == -1:
         return None
     start = text.rfind(RULE, 0, i)
     if start == -1:
         return None
-    # Two rules bracket the title; the section body follows the second.
+    # Two rules bracket the title; the section's prose follows the second.
     after_title = text.find(RULE, i)
     if after_title == -1:
         return None
-    nxt = text.find(RULE, after_title + len(RULE))
-    end = nxt if nxt != -1 else len(text)
+    end = after_title + len(RULE)
+    while end < len(text) and not text.startswith(RULE, end):
+        nl = text.find("\n", end)
+        stop = len(text) if nl == -1 else nl + 1
+        line = text[end:stop].strip()
+        if line and not line.startswith("//"):
+            break
+        end = stop
     return text[:start] + text[end:]
+
+
+def _titles(text: str) -> Counter[str]:
+    return Counter(TITLE_RE.findall(text))
 
 
 def main() -> int:
@@ -382,6 +407,23 @@ def main() -> int:
 
     changed: list[str] = []
     errors: list[str] = []
+    # Every edit reads and writes these in-memory copies, so --check runs the
+    # same chain of removals the real cut does and the ownership guard sees
+    # the final text either way.
+    texts: dict[str, str] = {}
+    originals: dict[str, str] = {}
+    owned: dict[str, Counter[str]] = {}
+
+    def load(rel: str) -> str | None:
+        if rel not in texts:
+            p = REPO / rel
+            if not p.exists():
+                return None
+            texts[rel] = originals[rel] = p.read_text()
+        return texts[rel]
+
+    def own(rel: str, titles: Counter[str]) -> None:
+        owned.setdefault(rel, Counter()).update(titles)
 
     for rel in DELETE:
         p = REPO / rel
@@ -392,10 +434,9 @@ def main() -> int:
             subprocess.run(["trash", str(p)], check=True)
 
     for rel, old, new in EDITS:
-        p = REPO / rel
-        if not p.exists():
+        s = load(rel)
+        if s is None:
             continue
-        s = p.read_text()
         n = s.count(old)
         if n == 0:
             continue  # already applied
@@ -403,55 +444,55 @@ def main() -> int:
             errors.append(f"{rel}: {n} matches for an edit expecting one; the feature changed shape")
             continue
         changed.append(f"edit   {rel}")
-        if not args.check:
-            p.write_text(s.replace(old, new))
+        own(rel, _titles(old) - _titles(new))
+        texts[rel] = s.replace(old, new)
 
     for rel, opening in BLOCKS:
-        p = REPO / rel
-        if not p.exists():
-            continue
-        s = p.read_text()
-        if opening not in s:
+        s = load(rel)
+        if s is None or opening not in s:
             continue
         out = _drop_block(s, opening)
         if out is None:
             errors.append(f"{rel}: unbalanced braces after {opening[:60]}")
             continue
         changed.append(f"block  {rel}: {opening[:50]}")
-        if not args.check:
-            p.write_text(out)
+        own(rel, _titles(s) - _titles(out))
+        texts[rel] = out
 
     for rel, title in BANNER_SECTIONS:
-        p = REPO / rel
-        if not p.exists():
-            continue
-        t = p.read_text()
-        if title not in t:
+        t = load(rel)
+        if t is None or title not in t:
             continue
         out = _drop_banner_section(t, title)
         if out is None:
             errors.append(f"{rel}: could not bracket the section titled {title!r}")
             continue
         changed.append(f"section {rel}: {title}")
-        if not args.check:
-            p.write_text(out)
+        texts[rel] = out
 
-    for rel, pattern, repl in REGIONS:
-        p = REPO / rel
-        if not p.exists():
-            continue
-        s = p.read_text()
-        if not re.search(pattern, s, re.DOTALL):
+    for rel, pattern, repl, titles in REGIONS:
+        s = load(rel)
+        if s is None or not re.search(pattern, s, re.DOTALL):
             continue
         changed.append(f"region {rel}")
-        if not args.check:
-            p.write_text(re.sub(pattern, repl, s, count=1, flags=re.DOTALL))
+        own(rel, Counter(titles))
+        texts[rel] = re.sub(pattern, repl, s, count=1, flags=re.DOTALL)
+
+    for rel, text in texts.items():
+        unowned = _titles(originals[rel]) - _titles(text) - owned.get(rel, Counter())
+        if unowned:
+            errors.append(f"{rel}: removes tests the lake does not own: {sorted(unowned)}")
 
     if errors:
         for e in errors:
             print(f"DRIFT: {e}", file=sys.stderr)
         print("\nThe lake changed shape on dev. Update this script to match before cutting.", file=sys.stderr)
         return 1
+
+    if not args.check:
+        for rel, text in texts.items():
+            if text != originals[rel]:
+                (REPO / rel).write_text(text)
 
     if args.check:
         if changed:
