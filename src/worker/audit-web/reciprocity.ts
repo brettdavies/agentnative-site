@@ -86,23 +86,37 @@ async function cardNaming(source: ArtifactSource, url: string, endpoint: string)
   return response.status === 200 && cardNamesEndpoint(parseJsonObject(response), url, endpoint) ? response : null;
 }
 
-async function hostCatalogNames(source: ArtifactSource, endpoint: string, catalogPath: string): Promise<boolean> {
+/** A card read where it was found; an inline catalog card is the catalog URL with a JSON Pointer fragment. */
+type AdmittingCard = { url: string; response: ProbeResponse };
+
+/** The first card the endpoint host's own AI catalog lists, inline or by a same-host URL, that names the endpoint. */
+async function hostCatalogCard(
+  source: ArtifactSource,
+  endpoint: string,
+  catalogPath: string,
+): Promise<AdmittingCard | null> {
   const catalogUrl = resolveUrl(new URL(endpoint).origin, catalogPath);
   const response = await source.get(catalogUrl, { maxBodyBytes: DOCUMENT_MAX_BODY_BYTES });
   const catalog = response.status === 200 ? parseJsonObject(response) : null;
   for (const entry of catalog === null ? [] : catalogCardEntries(catalog)) {
     if ('data' in entry) {
-      if (cardNamesEndpoint(entry.data, catalogUrl, endpoint)) return true;
+      if (cardNamesEndpoint(entry.data, catalogUrl, endpoint)) {
+        return {
+          url: `${catalogUrl}#/entries/${entry.index}/data`,
+          response: { ...response, body: JSON.stringify(entry.data) },
+        };
+      }
     } else if ('url' in entry) {
       const cardUrl = resolveUrl(catalogUrl, entry.url);
       if (!sameHost(cardUrl, endpoint)) {
         source.decline(cardUrl, 'catalog card on another host');
-      } else if ((await cardNaming(source, cardUrl, endpoint)) !== null) {
-        return true;
+        continue;
       }
+      const card = await cardNaming(source, cardUrl, endpoint);
+      if (card !== null) return { url: cardUrl, response: card };
     }
   }
-  return false;
+  return null;
 }
 
 /** RFC 9728 §3.1: the path-suffixed well-known location, then the root one. */
@@ -232,8 +246,8 @@ export function httpsOnly(source: ArtifactSource): ArtifactSource {
 export interface Admission {
   by: AdmittedBy;
   metadata: MetadataMatch | null;
-  /** The card at <endpoint> + card suffix, when it is what admitted the endpoint. */
-  card?: { url: string; response: ProbeResponse };
+  /** The card at <endpoint> + card suffix, or the one the host's AI catalog lists, when a card admitted the endpoint. */
+  card?: AdmittingCard;
 }
 
 /**
@@ -250,7 +264,8 @@ export async function admittingArtifact(
   const cardUrl = cardSuffixUrl(endpoint, cfg.card_suffix);
   const card = await cardNaming(reading, cardUrl, endpoint);
   if (card !== null) return { by: 'card', metadata: null, card: { url: cardUrl, response: card } };
-  if (await hostCatalogNames(reading, endpoint, cfg.ai_catalog)) return { by: 'ai-catalog', metadata: null };
+  const catalogCard = await hostCatalogCard(reading, endpoint, cfg.ai_catalog);
+  if (catalogCard !== null) return { by: 'ai-catalog', metadata: null, card: catalogCard };
   const metadata = await resolveProtectedResourceMetadata(endpoint, reading, { challenge });
   return metadata === null ? null : { by: 'metadata', metadata };
 }

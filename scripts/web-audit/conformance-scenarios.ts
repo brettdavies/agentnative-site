@@ -1215,6 +1215,17 @@ export const SCENARIOS: Record<string, Scenario> = {
       ...legacyOnlyMcp({ endpoint: DECLARED_ENDPOINT, cors: 'full' }),
     ],
   ),
+  'follow-host-catalog-card': scenario(
+    "the well-known SEP-1649 card names an endpoint on another host that serves no card at `<endpoint>/server-card`, but its host's own AI catalog lists, by URL, a SEP-2127 card naming it: that card admits the endpoint and, outranking the SEP-1649 card, passes the card check with no advisory",
+    ['mcp-server-card'],
+    [
+      ...baseline(),
+      declaringCard(DECLARED_ENDPOINT),
+      get('https://mcp.example.net/.well-known/ai-catalog.json', aiCatalog(cardEntry({ url: 'https://mcp.example.net/cards/mcp.json' }))),
+      get('https://mcp.example.net/cards/mcp.json', cardDocument({ ...SEP_2127_CARD, remotes: [{ type: 'streamable-http', url: DECLARED_ENDPOINT }] })),
+      ...legacyOnlyMcp({ endpoint: DECLARED_ENDPOINT, cors: 'full' }),
+    ],
+  ),
   'follow-reciprocity-refused': scenario(
     'the declared endpoint answers GET with 405 and Allow: POST but publishes no card, catalog entry, or metadata naming it: no wire probe, and the MCP rows name the host that did not confirm it',
     FOLLOWED_IDS,

@@ -1348,6 +1348,47 @@ describe('mcp-server-card scores the card discovery kept', () => {
     });
   });
 
+  test("an inline card in the endpoint host's own AI catalog that admitted the endpoint outranks the SEP-1649 card that declared it", async () => {
+    const hostCatalog = 'https://mcp.example.net/.well-known/ai-catalog.json';
+    const row = await cardRow(
+      site(
+        {
+          [`GET ${WELL_KNOWN_CARD_URL}`]: () => json({ name: 'example', mcp_endpoint: DECLARED_ENDPOINT }),
+          [`GET ${hostCatalog}`]: () =>
+            json({ specVersion: '1.0', entries: [{ type: MCP_CARD_TYPE, data: declaredCard }] }),
+        },
+        false,
+      ),
+    );
+    expect({ status: row.status, advisory: row.advisory, evidence: row.evidence, host: row.host }).toEqual({
+      status: 'pass',
+      advisory: undefined,
+      evidence: `${hostCatalog}#/entries/0/data -> 200`,
+      host: 'mcp.example.net',
+    });
+  });
+
+  test("a card the endpoint host's own AI catalog lists by URL, which admitted the endpoint, is the card of record", async () => {
+    const hostCard = 'https://mcp.example.net/cards/mcp.json';
+    const row = await cardRow(
+      site(
+        {
+          'POST https://example.com/mcp': () =>
+            new Response(null, { status: 307, headers: { location: DECLARED_ENDPOINT } }),
+          'GET https://mcp.example.net/.well-known/ai-catalog.json': () =>
+            json({ specVersion: '1.0', entries: [{ type: MCP_CARD_TYPE, url: '/cards/mcp.json' }] }),
+          [`GET ${hostCard}`]: () => cardTyped(declaredCard),
+        },
+        false,
+      ),
+    );
+    expect({ status: row.status, advisory: row.advisory, evidence: row.evidence }).toEqual({
+      status: 'pass',
+      advisory: undefined,
+      evidence: `${hostCard} -> 200`,
+    });
+  });
+
   test("a card the slice read for an endpoint the audited site's own endpoint superseded is not the card of record", async () => {
     const row = await cardRow(
       site(

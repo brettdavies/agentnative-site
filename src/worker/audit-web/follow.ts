@@ -34,9 +34,10 @@
 // The trail follows declaration order, never completion order.
 //
 // The slice keeps the card it read for the endpoint it admitted (the card
-// document that named it, or the card at <endpoint> + card suffix that
-// admitted it, whichever stands higher), so the card check can score a
-// card published on the endpoint's host rather than the audited origin.
+// document that named it, or the card that admitted it, at <endpoint> +
+// card suffix or listed in the host's AI catalog, whichever stands
+// higher), so the card check can score a card published on the endpoint's
+// host rather than the audited origin.
 
 import type { ApiDeclaration } from './api-catalog';
 import {
