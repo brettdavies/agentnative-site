@@ -30,6 +30,25 @@ const FIXTURE_MCP_SEED = JSON.stringify({
   authentication: { required: false, schemes: [], documentation: 'https://anc.dev/auth.md' },
 });
 
+const FIXTURE_SERVER_CARD_SEED = JSON.stringify({
+  $schema: 'https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json',
+  name: 'dev.anc/anc',
+  version: '0.1.0',
+  description: 'fixture',
+  remotes: [{ type: 'streamable-http', url: 'https://anc.dev/mcp' }],
+});
+
+const FIXTURE_AI_CATALOG = JSON.stringify({
+  specVersion: '1.0',
+  entries: [
+    {
+      identifier: 'urn:air:anc.dev:mcp:anc',
+      type: 'application/mcp-server-card+json',
+      url: 'https://anc.dev/mcp/server-card',
+    },
+  ],
+});
+
 const FIXTURE_API_CATALOG = JSON.stringify({
   linkset: [
     {
@@ -78,6 +97,8 @@ function req(url: string, init: RequestInit = {}): Request {
 function makeEnv(bodyByPath: Record<string, string> = {}) {
   const defaults: Record<string, string> = {
     '/_internal/mcp-server-card.json': FIXTURE_MCP_SEED,
+    '/_internal/mcp-server-card-sep2127.json': FIXTURE_SERVER_CARD_SEED,
+    '/.well-known/ai-catalog.json': FIXTURE_AI_CATALOG,
     '/.well-known/api-catalog': FIXTURE_API_CATALOG,
     '/.well-known/oauth-protected-resource': FIXTURE_OAUTH_PR,
     '/.well-known/oauth-authorization-server': FIXTURE_OAUTH_AS,
@@ -277,6 +298,72 @@ describe('MCP descriptor aliases — 301 to the canonical (R9)', () => {
       authentication: { documentation: string };
     };
     expect(body.authentication.documentation).toBe('https://staging.example/auth.md');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Worker: SEP-2127 server card and AI catalog
+// ---------------------------------------------------------------------------
+
+describe('SEP-2127 server card and AI catalog: worker red-team', () => {
+  test('GET /mcp/server-card serves the card media type, CORS-open and cacheable', async () => {
+    const res = await worker.fetch(req('https://anc.dev/mcp/server-card'), makeEnv(), {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('application/mcp-server-card+json; charset=utf-8');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+    expect(res.headers.get('Cache-Control') ?? '').toContain('max-age=300');
+  });
+
+  test('a markdown Accept on /mcp/server-card still gets the card', async () => {
+    const res = await worker.fetch(
+      req('https://anc.dev/mcp/server-card', { headers: { accept: 'text/markdown' } }),
+      makeEnv(),
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('application/mcp-server-card+json; charset=utf-8');
+  });
+
+  test('a non-GET on /mcp/server-card returns 405 Allow: GET', async () => {
+    const res = await worker.fetch(
+      req('https://anc.dev/mcp/server-card', { method: 'POST' }),
+      makeEnv(),
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(405);
+    expect(res.headers.get('Allow')).toBe('GET');
+  });
+
+  test('a malformed card seed returns 503 instead of an unhandled exception', async () => {
+    const res = await worker.fetch(
+      req('https://anc.dev/mcp/server-card'),
+      makeEnv({ '/_internal/mcp-server-card-sep2127.json': 'not json' }),
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(503);
+    expect(await res.text()).toContain('unavailable');
+  });
+
+  test('GET /.well-known/ai-catalog.json serves the catalog media type, CORS-open and noindex', async () => {
+    const res = await worker.fetch(
+      req('https://anc.dev/.well-known/ai-catalog.json'),
+      makeEnv(),
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('application/ai-catalog+json; charset=utf-8');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+    expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
+  });
+
+  test('a non-GET on the AI catalog returns 405 Allow: GET', async () => {
+    const res = await worker.fetch(
+      req('https://anc.dev/.well-known/ai-catalog.json', { method: 'POST' }),
+      makeEnv(),
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(405);
+    expect(res.headers.get('Allow')).toBe('GET');
   });
 });
 

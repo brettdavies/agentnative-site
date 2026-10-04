@@ -2,17 +2,21 @@
 // 11-mcp-catalog so the catalog publish order stays semantically grouped).
 //
 // Emits operational signals:
-//   dist/_internal/mcp-server-card.json — build seed for the SEP-1649 MCP
-//                                       server card (served at the RFC path
-//                                       /.well-known/mcp/server-card.json).
-//   dist/.well-known/security.txt       — RFC 9116 vulnerability-reporting contact
-//   dist/.well-known/ai.txt             — agent / AI-access declaration
+//   dist/_internal/mcp-server-card-sep2127.json: build seed for the SEP-2127
+//     server card, served at /mcp/server-card
+//   dist/.well-known/ai-catalog.json: AI catalog listing that card
+//   dist/_internal/mcp-server-card.json: build seed for the superseded
+//     SEP-1649 card, served at /.well-known/mcp/server-card.json
+//   dist/.well-known/security.txt: RFC 9116 vulnerability-reporting contact
+//   dist/.well-known/ai.txt: agent / AI-access declaration
 //
-// Legacy pointer aliases (/.well-known/mcp, /mcp.json, /.well-known/mcp.json)
-// 301 to the canonical path; see src/worker/index.ts.
+// The Worker serves each seed and the catalog with their URLs rewritten to
+// the request's origin; the SEP-1649 pointer aliases (/.well-known/mcp,
+// /mcp.json, /.well-known/mcp.json) 301 to that card. See src/worker/index.ts.
 //
-// All three lift from streamsgrp's 07-well-known.mjs (anc and streamsgrp
-// converged on the same wire shape during the cross-repo MCP work).
+// The SEP-1649 card, security.txt, and ai.txt lift from streamsgrp's
+// 07-well-known.mjs (anc and streamsgrp converged on the same wire shape
+// during the cross-repo MCP work).
 //
 // The canonical contact for anc.dev is the operator's iCloud address;
 // both security.txt and ai.txt point at the same inbox. Apex-domain
@@ -25,27 +29,77 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { AUDIT_PATH } from '../shared/audit-routes';
-import { ANC_VERSION, expiresInOneYearIso, resolveBaseUrl } from './util.mjs';
+import {
+  AI_CATALOG_PATH,
+  MCP_SERVER_CARD_PATH,
+  MCP_SERVER_CARD_SCHEMA_URL,
+  MCP_SERVER_CARD_SEED_PATH,
+  MCP_SERVER_CARD_TYPE,
+  MCP_SERVER_NAME,
+  MCP_SERVER_VERSION,
+  SEP_1649_CARD_SEED_PATH,
+} from '../shared/mcp-discovery';
+import { ANC_VERSION, canonicalBaseUrl, expiresInOneYearIso, resolveBaseUrl } from './util.mjs';
 
 const MCP_SPEC_VERSION = '2026-07-28';
-const MCP_CARD_SCHEMA = 'https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json';
 const MCP_CARD_VERSION = '1.0';
 const ANC_CONTACT = '97-boss-beetle@icloud.com';
+const MCP_DESCRIPTION = 'agent-native CLI standard registry: scorecards, principles, vendored spec';
+const MCP_TITLE = 'anc.dev agent-native CLI standard registry';
 
-function buildMcpDescriptor(baseUrl) {
-  const description = 'agent-native CLI standard registry: scorecards, principles, vendored spec';
-  const authMd = `${baseUrl}/auth.md`;
-  // SEP-1649 server card (canonical at /.well-known/mcp/server-card.json) plus
-  // U6 pointer fields retained for legacy alias consumers (mcp_endpoint, documentation).
+// A card's name and its catalog identifier name the server, not the
+// deployment serving them, so both stay on the canonical host the way
+// <link rel="canonical"> does, and a staging build lists the same server.
+const CANONICAL_HOST = new URL(canonicalBaseUrl()).host;
+const MCP_CARD_NAME = `${CANONICAL_HOST.split('.').reverse().join('.')}/${MCP_SERVER_NAME}`;
+const MCP_CATALOG_IDENTIFIER = `urn:air:${CANONICAL_HOST}:mcp:${MCP_SERVER_NAME}`;
+
+function buildServerCard(baseUrl) {
   return `${JSON.stringify(
     {
-      $schema: MCP_CARD_SCHEMA,
+      $schema: MCP_SERVER_CARD_SCHEMA_URL,
+      name: MCP_CARD_NAME,
+      title: MCP_TITLE,
+      description: MCP_DESCRIPTION,
+      version: MCP_SERVER_VERSION,
+      websiteUrl: `${baseUrl}/mcp-skill`,
+      remotes: [{ type: 'streamable-http', url: `${baseUrl}/mcp` }],
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+function buildAiCatalog(baseUrl) {
+  return `${JSON.stringify(
+    {
+      specVersion: '1.0',
+      entries: [
+        {
+          identifier: MCP_CATALOG_IDENTIFIER,
+          type: MCP_SERVER_CARD_TYPE,
+          url: `${baseUrl}${MCP_SERVER_CARD_PATH}`,
+        },
+      ],
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+function buildMcpDescriptor(baseUrl) {
+  const authMd = `${baseUrl}/auth.md`;
+  // The SEP-1649 card, superseded by the SEP-2127 card above and kept for
+  // clients that read `protocolVersion` and `mcp_endpoint` from it. Its
+  // `documentation` names the client guide's section on the two cards.
+  return `${JSON.stringify(
+    {
       mcp_endpoint: `${baseUrl}/mcp`,
       version: MCP_CARD_VERSION,
-      description,
-      documentation: `${baseUrl}/mcp-skill.md`,
+      description: MCP_DESCRIPTION,
+      documentation: `${baseUrl}/mcp-skill.md#server-cards`,
       serverInfo: {
-        name: 'anc.dev agent-native CLI standard registry',
+        name: MCP_TITLE,
         version: ANC_VERSION,
       },
       protocolVersion: MCP_SPEC_VERSION,
@@ -105,12 +159,18 @@ function buildAiTxt(baseUrl) {
 }
 
 /**
- * Emit the three .well-known files into dist/.well-known/.
+ * Emit the server card seeds, the AI catalog, security.txt, and ai.txt.
  *
  * @param {object} args
  * @param {string} args.distDir
  * @param {string=} args.baseUrl — explicit override; defaults via resolveBaseUrl
- * @returns {Promise<{ mcpDescriptorSeedPath: string, securityPath: string, aiPath: string }>}
+ * @returns {Promise<{
+ *   mcpServerCardSeedPath: string,
+ *   aiCatalogPath: string,
+ *   mcpDescriptorSeedPath: string,
+ *   securityPath: string,
+ *   aiPath: string,
+ * }>}
  */
 export async function emitDiscovery({ distDir, baseUrl }) {
   const base = resolveBaseUrl(baseUrl);
@@ -119,10 +179,14 @@ export async function emitDiscovery({ distDir, baseUrl }) {
   await mkdir(wellKnownDir, { recursive: true });
   await mkdir(internalDir, { recursive: true });
 
-  const mcpDescriptorSeedPath = join(internalDir, 'mcp-server-card.json');
+  const mcpServerCardSeedPath = join(distDir, MCP_SERVER_CARD_SEED_PATH);
+  const aiCatalogPath = join(distDir, AI_CATALOG_PATH);
+  const mcpDescriptorSeedPath = join(distDir, SEP_1649_CARD_SEED_PATH);
   const securityPath = join(wellKnownDir, 'security.txt');
   const aiPath = join(wellKnownDir, 'ai.txt');
 
+  await writeFile(mcpServerCardSeedPath, buildServerCard(base));
+  await writeFile(aiCatalogPath, buildAiCatalog(base));
   await writeFile(mcpDescriptorSeedPath, buildMcpDescriptor(base));
   await writeFile(securityPath, buildSecurityTxt(base));
   await writeFile(aiPath, buildAiTxt(base));
@@ -130,7 +194,7 @@ export async function emitDiscovery({ distDir, baseUrl }) {
   // Retired static pointer file; aliases are Worker-served from the seed above.
   await unlink(join(wellKnownDir, 'mcp')).catch(() => {});
 
-  return { mcpDescriptorSeedPath, securityPath, aiPath };
+  return { mcpServerCardSeedPath, aiCatalogPath, mcpDescriptorSeedPath, securityPath, aiPath };
 }
 
 // Agent-readiness discovery surfaces (api-catalog, OAuth metadata, agent-skills,
@@ -236,8 +300,10 @@ function buildAuthMd(baseUrl) {
     '## Endpoints',
     '',
     `- MCP server (streamable HTTP): \`${baseUrl}/mcp\` - JSON-RPC, MCP spec revision \`${MCP_SPEC_VERSION}\`.`,
-    `- MCP server card (SEP-1649): \`${baseUrl}/.well-known/mcp/server-card.json\`.`,
-    `- MCP pointer aliases (301 to the server card): \`${baseUrl}/.well-known/mcp\`, \`${baseUrl}/mcp.json\`.`,
+    `- MCP server card (SEP-2127): \`${baseUrl}${MCP_SERVER_CARD_PATH}\`.`,
+    `- AI catalog listing the server card: \`${baseUrl}${AI_CATALOG_PATH}\`.`,
+    `- MCP server card (SEP-1649, superseded): \`${baseUrl}/.well-known/mcp/server-card.json\`.`,
+    `- MCP pointer aliases (301 to the SEP-1649 card): \`${baseUrl}/.well-known/mcp\`, \`${baseUrl}/mcp.json\`.`,
     `- API catalog: \`${baseUrl}/.well-known/api-catalog\`.`,
     `- OAuth protected resource: \`${baseUrl}/.well-known/oauth-protected-resource\`.`,
     `- OAuth authorization server: \`${baseUrl}/.well-known/oauth-authorization-server\`.`,
@@ -253,7 +319,7 @@ function buildAuthMd(baseUrl) {
     '`/.well-known/oauth-authorization-server`, `/.well-known/jwks.json`) is published for',
     'agent-readiness scanners. The `token_endpoint` (`/oauth2/token`) exists only to answer',
     'discovery probes: POSTs return a typed `public_catalog` error and issue no credentials.',
-    'The server card (`/.well-known/mcp/server-card.json`) declares `authentication.required: false`',
+    'The SEP-1649 server card (`/.well-known/mcp/server-card.json`) declares `authentication.required: false`',
     'and points here via `authentication.documentation`. OAuth PRM/AS `resource_documentation` /',
     '`service_documentation` also resolve to this file.',
     '',

@@ -3,12 +3,13 @@
 // entries that name cards, and the API catalog; what a card declares; and
 // the evidence row each read leaves. No I/O in this module.
 
+import { MCP_SERVER_CARD_TYPE } from '../../shared/mcp-discovery';
 import type { RetainedDocumentKey } from '../../shared/web-audit-documents';
 import type { ProbeResponse } from './assert';
 import { resolveUrl } from './handlers/shared';
 import type { EvidenceItem } from './handlers/types';
 
-export const MCP_SERVER_CARD_TYPE = 'application/mcp-server-card+json';
+export { MCP_SERVER_CARD_TYPE };
 
 // Bounds the card reads one catalog can cause, whatever it lists.
 const MAX_CATALOG_CARDS = 4;

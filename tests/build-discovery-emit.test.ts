@@ -17,10 +17,62 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import Ajv2020 from 'ajv/dist/2020';
+import addFormats from 'ajv-formats';
 import { emitAgentReadiness, emitDiscovery } from '../src/build/11a-discovery-emit.mjs';
+import { readCardSchema } from '../src/build/web-audit-card-schema.mjs';
+import type { McpEnv } from '../src/worker/mcp/server';
+import { mcpInitialize, resetMcpTestState } from './helpers/mcp-rpc';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..');
 const DIST_DIR = join(REPO_ROOT, 'dist');
+
+// The wire contract is written out rather than imported: a test that reads
+// the constant it checks cannot notice the constant changing.
+const SEP_2127_SCHEMA_URL = 'https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json';
+const SERVER_CARD_TYPE = 'application/mcp-server-card+json';
+const SERVER_CARD_SEED = join(DIST_DIR, '_internal', 'mcp-server-card-sep2127.json');
+const AI_CATALOG = join(DIST_DIR, '.well-known', 'ai-catalog.json');
+
+type ServerCard = {
+  $schema: string;
+  name: string;
+  version: string;
+  description: string;
+  remotes: Array<{ type: string; url: string }>;
+};
+
+type AiCatalog = { specVersion: string; entries: Array<{ identifier: string; type: string; url: string }> };
+
+async function readJson<T>(path: string): Promise<T> {
+  return JSON.parse(await readFile(path, 'utf8')) as T;
+}
+
+/** Every way `card` falls short of the vendored SEP-2127 schema, as a full validator reports it. */
+function schemaErrors(card: unknown): string[] {
+  const ajv = new Ajv2020({ allErrors: true });
+  addFormats(ajv);
+  ajv.addSchema(readCardSchema() as { $defs: Record<string, unknown> }, 'card');
+  const validate = ajv.getSchema('card#/$defs/ServerCard');
+  if (validate === undefined) throw new Error('the vendored schema defines no ServerCard');
+  return validate(card) ? [] : (validate.errors ?? []).map((e) => `${e.instancePath || '/'} ${e.message}`);
+}
+
+/** A Worker env whose assets are the built dist/ directory. */
+function distAssetsEnv(): McpEnv {
+  return {
+    ASSETS: {
+      async fetch(input: Request | string): Promise<Response> {
+        const path = new URL(typeof input === 'string' ? input : input.url).pathname;
+        try {
+          return new Response(await readFile(join(DIST_DIR, path)), { status: 200 });
+        } catch {
+          return new Response('not found', { status: 404 });
+        }
+      },
+    } as unknown as Fetcher,
+  };
+}
 
 describe('sitemap names the result surface, not the retired boards', () => {
   test('every seeded domain has a result entry and no retired board path is listed', async () => {
@@ -46,10 +98,9 @@ describe('MCP server card seed (built dist/)', () => {
     expect(() => JSON.parse(raw)).not.toThrow();
   });
 
-  test('carries U6 pointer fields and SEP-1649 server-card fields in one document', async () => {
+  test('keeps the SEP-1649 shape and pointer fields, with no $schema', async () => {
     const raw = await readFile(join(DIST_DIR, '_internal', 'mcp-server-card.json'), 'utf8');
     const parsed = JSON.parse(raw) as {
-      $schema: string;
       mcp_endpoint: string;
       version: string;
       description: string;
@@ -65,7 +116,7 @@ describe('MCP server card seed (built dist/)', () => {
       };
       authentication: { required: boolean; schemes: string[]; documentation: string };
     };
-    expect(parsed.$schema).toContain('mcp-server-card');
+    expect(parsed).not.toHaveProperty('$schema');
     expect(parsed.mcp_endpoint).toBe('https://anc.dev/mcp');
     expect(parsed.version).toBe('1.0');
     expect(parsed.protocolVersion).toBe('2026-07-28');
@@ -77,13 +128,50 @@ describe('MCP server card seed (built dist/)', () => {
     expect(parsed.authentication.required).toBe(false);
     expect(parsed.authentication.schemes).toEqual([]);
     expect(parsed.authentication.documentation).toBe('https://anc.dev/auth.md');
-    expect(parsed.documentation).toBe('https://anc.dev/mcp-skill.md');
+    // The client guide's server-cards section names the SEP-2127 card that supersedes this one.
+    expect(parsed.documentation).toBe('https://anc.dev/mcp-skill.md#server-cards');
     expect(typeof parsed.serverInfo.name).toBe('string');
     expect(typeof parsed.serverInfo.version).toBe('string');
   });
 
   test('retired static pointer file is not emitted', async () => {
     await expect(readFile(join(DIST_DIR, '.well-known', 'mcp'), 'utf8')).rejects.toThrow();
+  });
+});
+
+describe('SEP-2127 server card seed (built dist/)', () => {
+  test('validates against the vendored extension schema', async () => {
+    const card = await readJson<ServerCard>(SERVER_CARD_SEED);
+    expect(schemaErrors(card)).toEqual([]);
+    expect(card.$schema).toBe(SEP_2127_SCHEMA_URL);
+  });
+
+  test('declares one streamable-http remote at the MCP endpoint', async () => {
+    const card = await readJson<ServerCard>(SERVER_CARD_SEED);
+    expect(card.remotes).toEqual([{ type: 'streamable-http', url: 'https://anc.dev/mcp' }]);
+  });
+
+  test('names and versions the server the way the endpoint reports itself', async () => {
+    resetMcpTestState();
+    const card = await readJson<ServerCard>(SERVER_CARD_SEED);
+    const serverInfo = (await mcpInitialize(distAssetsEnv())).result?.serverInfo;
+    expect(card.version).toBe(serverInfo?.version ?? '');
+    expect(card.name.split('/')[1]).toBe(serverInfo?.name ?? '');
+  });
+});
+
+describe('.well-known/ai-catalog.json (built dist/)', () => {
+  test('lists the server card under the card media type at the card location', async () => {
+    const catalog = await readJson<AiCatalog>(AI_CATALOG);
+    const card = await readJson<ServerCard>(SERVER_CARD_SEED);
+    expect(catalog.specVersion).toBe('1.0');
+    expect(catalog.entries).toHaveLength(1);
+    const [entry] = catalog.entries;
+    expect(entry.type).toBe(SERVER_CARD_TYPE);
+    // SEP-2127 reserves <streamable-http-url>/server-card as an endpoint's card location.
+    expect(entry.url).toBe(`${card.remotes[0].url}/server-card`);
+    expect(entry.url).toBe('https://anc.dev/mcp/server-card');
+    expect(entry.identifier).toMatch(/^urn:air:anc\.dev:mcp:[a-z0-9-]+$/);
   });
 });
 
@@ -128,13 +216,20 @@ describe('emitDiscovery() in isolation', () => {
       expect(stats.mcpDescriptorSeedPath).toBe(join(tmp, '_internal', 'mcp-server-card.json'));
       expect(stats.securityPath).toBe(join(tmp, '.well-known', 'security.txt'));
       expect(stats.aiPath).toBe(join(tmp, '.well-known', 'ai.txt'));
+      expect(stats.mcpServerCardSeedPath).toBe(join(tmp, '_internal', 'mcp-server-card-sep2127.json'));
+      expect(stats.aiCatalogPath).toBe(join(tmp, '.well-known', 'ai-catalog.json'));
 
       const mcp = JSON.parse(await readFile(stats.mcpDescriptorSeedPath, 'utf8')) as {
         mcp_endpoint: string;
         documentation: string;
       };
       expect(mcp.mcp_endpoint).toBe('https://example.test/mcp');
-      expect(mcp.documentation).toBe('https://example.test/mcp-skill.md');
+      expect(mcp.documentation).toBe('https://example.test/mcp-skill.md#server-cards');
+
+      const card = await readJson<ServerCard>(stats.mcpServerCardSeedPath);
+      expect(card.remotes[0].url).toBe('https://example.test/mcp');
+      const catalog = await readJson<AiCatalog>(stats.aiCatalogPath);
+      expect(catalog.entries[0].url).toBe('https://example.test/mcp/server-card');
 
       const security = await readFile(stats.securityPath, 'utf8');
       expect(security).toContain('Canonical: https://example.test/.well-known/security.txt');
@@ -297,6 +392,8 @@ describe('auth.md (built dist/)', () => {
     expect(raw).toContain('oauth-protected-resource');
     expect(raw).toContain('oauth-authorization-server');
     expect(raw).toContain('/.well-known/mcp/server-card.json');
+    expect(raw).toContain('https://anc.dev/mcp/server-card');
+    expect(raw).toContain('https://anc.dev/.well-known/ai-catalog.json');
   });
 });
 
@@ -384,6 +481,8 @@ function lineColumnForOffset(buf: Buffer, offset: number): { line: number; colum
 describe('operational discovery surfaces are pure ASCII (mojibake gate)', () => {
   const PATHS = [
     join(DIST_DIR, '_internal', 'mcp-server-card.json'),
+    SERVER_CARD_SEED,
+    AI_CATALOG,
     join(DIST_DIR, '.well-known', 'security.txt'),
     join(DIST_DIR, '.well-known', 'ai.txt'),
     join(DIST_DIR, '.well-known', 'api-catalog'),
@@ -420,7 +519,13 @@ describe('emitDiscovery() emits pure ASCII (isolation pass)', () => {
     await mkdir(tmp, { recursive: true });
     try {
       const stats = await emitDiscovery({ distDir: tmp, baseUrl: 'https://example.test' });
-      for (const path of [stats.mcpDescriptorSeedPath, stats.securityPath, stats.aiPath]) {
+      for (const path of [
+        stats.mcpDescriptorSeedPath,
+        stats.mcpServerCardSeedPath,
+        stats.aiCatalogPath,
+        stats.securityPath,
+        stats.aiPath,
+      ]) {
         const hit = await findNonAsciiByte(path);
         expect(hit).toBeNull();
       }

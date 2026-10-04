@@ -7,15 +7,13 @@
 
 import { McpServer } from '@modelcontextprotocol/server';
 import { createMcpHandler } from 'agents/mcp/server';
+import { MCP_SERVER_NAME, MCP_SERVER_VERSION } from '../../shared/mcp-discovery';
 import type { AuditJob } from '../audit/job';
 import { type Catalog, getWarmCatalog } from './catalog';
 import { getMcpEnv } from './env-context';
 import { buildInstructions, SPEC_REVISION } from './instructions';
 import { registerResources } from './resources';
 import { type RegisterToolsEnv, registerTools } from './tools';
-
-const SERVER_NAME = 'anc';
-const SERVER_VERSION = '0.1.0';
 
 // DNS-rebinding defense. The SDK only derives a default Host allowlist for
 // localhost and `workers.dev` endpoints, so a custom domain is unchecked until
@@ -75,8 +73,8 @@ function createAncServer(catalog: Catalog): McpServer {
   const env = getMcpEnv();
   const server = new McpServer(
     {
-      name: SERVER_NAME,
-      version: SERVER_VERSION,
+      name: MCP_SERVER_NAME,
+      version: MCP_SERVER_VERSION,
     },
     {
       capabilities: {
