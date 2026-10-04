@@ -12,6 +12,7 @@ function row(over: Partial<FindingRow>): FindingRow {
     status: 'absent',
     unprobed: false,
     result: null,
+    host: null,
     prompt: 'fix it',
     order,
     ...over,
@@ -54,7 +55,7 @@ describe('selectAssemblePrompts', () => {
 });
 
 describe('findingRowsFromElements', () => {
-  test('reads the canonical row root and its conditional prompt carrier', () => {
+  test('reads the canonical row root, its host, and its conditional prompt carrier', () => {
     const el = (attrs: Record<string, string>, child?: Record<string, string>): Element =>
       ({
         getAttribute: (name: string) => attrs[name] ?? null,
@@ -69,6 +70,7 @@ describe('findingRowsFromElements', () => {
             'data-tier': 'required',
             'data-status': 'absent',
             'data-unprobed': 'false',
+            'data-host': 'api.example.net',
           },
           { 'data-copy-text': 'p1' },
         ),
@@ -90,6 +92,7 @@ describe('findingRowsFromElements', () => {
         status: 'absent',
         unprobed: false,
         result: null,
+        host: 'api.example.net',
         prompt: 'p1',
         order: 0,
       },
@@ -100,6 +103,7 @@ describe('findingRowsFromElements', () => {
         status: 'pass',
         unprobed: false,
         result: null,
+        host: null,
         prompt: null,
         order: 1,
       },

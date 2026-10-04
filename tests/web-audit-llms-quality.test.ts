@@ -1,10 +1,13 @@
 // Engine coverage for the llms.txt quality trio: format, links, when-to-use.
 
 import { describe, expect, test } from 'bun:test';
+import { resultLine } from '../src/shared/web-audit-result-line';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
+import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
 import { runLlmsTxtQuality } from '../src/worker/audit-web/handlers/llms-txt-quality';
 import type { HandlerContext } from '../src/worker/audit-web/handlers/types';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
+import { stubFetch } from './helpers/stub-fetch';
 
 function makeCheck(partial: Partial<WebCheck> & { id: string }): WebCheck {
   return {
@@ -38,7 +41,13 @@ const CHECKS: WebCheck[] = [
 function registryOf(checks: WebCheck[]): WebAuditRegistry {
   return {
     version: 1,
-    mcp_discovery: { well_known: ['/.well-known/mcp.json'], common_paths: ['/mcp'], protocol_version: '2025-06-18' },
+    mcp_discovery: {
+      ai_catalog: '/.well-known/ai-catalog.json',
+      card_suffix: '/server-card',
+      well_known: ['/.well-known/mcp.json'],
+      common_paths: ['/mcp'],
+      protocol_version: '2025-06-18',
+    },
     category_order: ['content-for-agents'],
     categories: { 'content-for-agents': 'Content for agents' },
     checks,
@@ -66,21 +75,19 @@ Use the MCP when you need to search the catalog.
 - [Guide](https://example.com/guide.md)
 `;
 
-function siteFetch(handler: (url: string) => Response): typeof fetch {
-  return (async (input: RequestInfo | URL) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-    return handler(url);
-  }) as typeof fetch;
-}
-
 describe('llms.txt quality trio', () => {
   test('presence passes and format fails as two distinct rows', async () => {
-    const fetchImpl = siteFetch((url) => {
+    const fetchImpl = stubFetch((url) => {
       if (url.endsWith('/llms.txt')) return new Response('# Only a heading\n', { status: 200 });
       return new Response('html', { status: 200, headers: { 'content-type': 'text/html' } });
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const rows = resultsOf(events);
     expect(rows.find((r) => r.id === 'llms-txt')?.status).toBe('pass');
@@ -88,13 +95,18 @@ describe('llms.txt quality trio', () => {
   });
 
   test('format passes and a broken link misses llms-txt-links', async () => {
-    const fetchImpl = siteFetch((url) => {
+    const fetchImpl = stubFetch((url) => {
       if (url.endsWith('/llms.txt')) return new Response(FORMATTED, { status: 200 });
       if (url.endsWith('/guide.md')) return new Response('gone', { status: 404 });
       return new Response('html', { status: 200, headers: { 'content-type': 'text/html' } });
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const rows = resultsOf(events);
     expect(rows.find((r) => r.id === 'llms-txt-format')?.status).toBe('pass');
@@ -103,12 +115,12 @@ describe('llms.txt quality trio', () => {
   });
 
   test('when-to-use heading present vs absent', async () => {
-    const withHeading = siteFetch((url) => {
+    const withHeading = stubFetch((url) => {
       if (url.endsWith('/llms.txt')) return new Response(FORMATTED, { status: 200 });
       if (url.endsWith('/guide.md')) return new Response('# Guide\n\nBody.\n', { status: 200 });
       return new Response('html', { status: 200, headers: { 'content-type': 'text/html' } });
     });
-    const withoutHeading = siteFetch((url) => {
+    const withoutHeading = stubFetch((url) => {
       if (url.endsWith('/llms.txt')) {
         return new Response('# Site\n\n> Summary\n\n- [Guide](https://example.com/guide.md)\n', { status: 200 });
       }
@@ -121,6 +133,7 @@ describe('llms.txt quality trio', () => {
           url: 'https://example.com/',
           registry: registryOf(CHECKS),
           fetchOptions: { fetchImpl: withHeading },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
         }),
       ),
     );
@@ -130,6 +143,7 @@ describe('llms.txt quality trio', () => {
           url: 'https://example.com/',
           registry: registryOf(CHECKS),
           fetchOptions: { fetchImpl: withoutHeading },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
         }),
       ),
     );
@@ -138,12 +152,17 @@ describe('llms.txt quality trio', () => {
   });
 
   test('all three quality rows are n_a when root llms.txt is absent', async () => {
-    const fetchImpl = siteFetch((url) => {
+    const fetchImpl = stubFetch((url) => {
       if (url.endsWith('/llms.txt')) return new Response('nope', { status: 404 });
       return new Response('html', { status: 200, headers: { 'content-type': 'text/html' } });
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const rows = resultsOf(events);
     for (const id of ['llms-txt-format', 'llms-txt-links', 'llms-txt-when-to-use'] as const) {
@@ -180,6 +199,156 @@ describe('llms.txt quality trio', () => {
     expect(JSON.stringify(outcome.evidence)).toContain('nested-probe budget exhausted');
   });
 
+  describe('links over http', () => {
+    const LINKS_CHECK = CHECKS.find((c) => c.id === 'llms-txt-links') as WebCheck;
+    const linksCtx = (body: string, fetchImpl: typeof fetch): HandlerContext => ({
+      base: 'https://example.com/',
+      host: 'example.com',
+      mcpEndpoint: null,
+      protocolVersion: '2025-06-18',
+      defaultTimeoutMs: 5000,
+      retainedBodies: new Map([['llms-txt', body]]),
+      fetchOptions: { fetchImpl },
+    });
+    const answering = (sent: string[], routes: Record<string, () => Response>) =>
+      stubFetch((url) => {
+        sent.push(url);
+        const route = routes[url];
+        return route ? route() : new Response('ok', { status: 200 });
+      });
+
+    test('an http link is never requested and reads noncompliant', async () => {
+      const sent: string[] = [];
+      const body =
+        '# Site\n\n> Summary\n\n- [Guide](https://example.com/guide.md)\n- [Plain](http://example.com/plain.md)\n';
+      const outcome = await runLlmsTxtQuality(LINKS_CHECK, linksCtx(body, answering(sent, {})));
+      expect(sent).toEqual(['https://example.com/guide.md']);
+      expect(outcome.status).toBe('noncompliant');
+      expect(outcome.evidence).toEqual([
+        { url: 'https://example.com/guide.md', status: 200, ok: true, link_verdict: 'pass' },
+        {
+          url: 'http://example.com/plain.md',
+          blocked: 'not https',
+          ok: false,
+          why: ['not https; anc sends no plaintext request'],
+          link_verdict: 'noncompliant',
+        },
+      ]);
+    });
+
+    test('a link that redirects to http is not followed and reads noncompliant', async () => {
+      const sent: string[] = [];
+      const body = '# Site\n\n> Summary\n\n- [Old](https://example.com/old.md)\n';
+      const fetchImpl = answering(sent, {
+        'https://example.com/old.md': () =>
+          new Response(null, { status: 301, headers: { location: 'http://example.com/old.md' } }),
+      });
+      const outcome = await runLlmsTxtQuality(LINKS_CHECK, linksCtx(body, fetchImpl));
+      expect(sent).toEqual(['https://example.com/old.md']);
+      expect(outcome).toEqual({
+        status: 'noncompliant',
+        evidence: [
+          {
+            url: 'https://example.com/old.md',
+            status: 301,
+            ok: false,
+            why: ['redirects to http; anc sends no plaintext request'],
+            link_verdict: 'noncompliant',
+          },
+        ],
+      });
+    });
+
+    test('misses decide the row in the order broken, absent, noncompliant, error', async () => {
+      const order = ['broken', 'absent', 'noncompliant', 'error'] as const;
+      const links: Record<(typeof order)[number], [string, () => Response]> = {
+        broken: ['https://example.com/broken.md', () => new Response('down', { status: 503 })],
+        noncompliant: ['http://example.com/plain.md', () => new Response('plaintext', { status: 200 })],
+        absent: ['https://example.com/gone.md', () => new Response('gone', { status: 404 })],
+        error: [
+          'https://example.com/flaky.md',
+          () => {
+            throw new TypeError('fetch failed');
+          },
+        ],
+      };
+      for (let i = 0; i < order.length; i++) {
+        const present = order.slice(i).reverse();
+        const body = `# Site\n\n> Summary\n\n${present.map((miss) => `- [${miss}](${links[miss][0]})`).join('\n')}\n`;
+        const routes = Object.fromEntries(present.map((miss) => links[miss]));
+        const outcome = await runLlmsTxtQuality(LINKS_CHECK, linksCtx(body, answering([], routes)));
+        expect({ present, status: outcome.status }).toEqual({ present, status: order[i] });
+      }
+    });
+
+    test('a dead link beside an http link reads absent: listing an http link never lifts the row', async () => {
+      const sent: string[] = [];
+      const body =
+        '# Site\n\n> Summary\n\n- [Gone](https://example.com/gone.md)\n- [Plain](http://example.com/plain.md)\n';
+      const fetchImpl = answering(sent, { 'https://example.com/gone.md': () => new Response('gone', { status: 404 }) });
+      const outcome = await runLlmsTxtQuality(LINKS_CHECK, linksCtx(body, fetchImpl));
+      expect(sent).toEqual(['https://example.com/gone.md']);
+      expect(outcome.status).toBe('absent');
+    });
+  });
+
+  test('the links row names the link that decided it, not the first link probed', async () => {
+    const llms = [
+      '# Site',
+      '',
+      '> Summary',
+      '',
+      '- [Guide](https://example.com/guide.md)',
+      '- [Old](https://example.com/old.md)',
+      '- [Plain](http://example.com/plain.md)',
+      '- [Down](https://example.com/down.md)',
+      '',
+    ];
+    const linksRow = async (lines: string[]) => {
+      const sent: string[] = [];
+      const fetchImpl = stubFetch((url) => {
+        sent.push(url);
+        if (url.endsWith('/llms.txt')) return new Response(lines.join('\n'), { status: 200 });
+        if (url === 'https://example.com/old.md') {
+          return new Response(null, { status: 301, headers: { location: 'http://example.com/old.md' } });
+        }
+        if (url === 'https://example.com/down.md') return new Response('down', { status: 503 });
+        return new Response('ok', { status: 200 });
+      });
+      const events = await collect(
+        runWebAudit({
+          url: 'https://example.com/',
+          registry: registryOf(CHECKS),
+          fetchOptions: { fetchImpl },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
+        }),
+      );
+      const row = resultsOf(events).find((r) => r.id === 'llms-txt-links');
+      if (row === undefined) throw new Error('no llms-txt-links row');
+      return {
+        status: row.status,
+        result: resultLine(row.status, row.evidence ?? null, row.na_reason, 'example.com'),
+        plaintext: sent.filter((u) => u.startsWith('http:')),
+      };
+    };
+    expect(await linksRow(llms)).toEqual({
+      status: 'broken',
+      result: 'Present but broken (https://example.com/down.md -> 503)',
+      plaintext: [],
+    });
+    expect(await linksRow(llms.filter((line) => !line.includes('down.md')))).toEqual({
+      status: 'noncompliant',
+      result:
+        'Listed, but not over https (https://example.com/old.md -> 301 (redirects to http; anc sends no plaintext request))',
+      plaintext: [],
+    });
+    expect(await linksRow(llms.filter((line) => !line.includes('down.md') && !line.includes('old.md')))).toEqual({
+      status: 'noncompliant',
+      result: 'Listed, but not over https (http://example.com/plain.md: not https; anc sends no plaintext request)',
+      plaintext: [],
+    });
+  });
+
   test('a handler that overruns the audit deadline marks the run incomplete', async () => {
     const fetchImpl = (async () => {
       await new Promise((resolve) => setTimeout(resolve, 40));
@@ -199,6 +368,7 @@ describe('llms.txt quality trio', () => {
         fetchOptions: { fetchImpl },
         perAuditDeadlineMs: 25,
         perCheckTimeoutMs: 80,
+        domainBudget: ALWAYS_ADMIT_BUDGET,
       }),
     );
     const complete = events.find((e) => e.type === 'complete');

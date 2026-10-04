@@ -15,6 +15,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { PROBE_UA_TOKENS } from '../shared/user-agents.ts';
+import { RETAINED_DOCUMENT_KEYS } from '../shared/web-audit-documents.ts';
 
 export const KEYWORD_BY_TIER = Object.freeze({
   required: 'must',
@@ -34,6 +35,7 @@ export const WEB_AUDIT_HANDLERS = new Set([
   'content-without-js',
   'llms-txt-quality',
   'api-hygiene',
+  'protected-resource',
 ]);
 export const WEB_AUDIT_SITE_TYPES = new Set(['content', 'api', 'mcp', 'all']);
 export const WEB_AUDIT_ANTECEDENTS = new Set([
@@ -42,6 +44,8 @@ export const WEB_AUDIT_ANTECEDENTS = new Set([
   'html-root',
   'mcp-present',
   'mcp-auth',
+  'mcp-session',
+  'mcp-auth-required',
   'mcp-resources',
   'api-surface',
   'schemas-ref',
@@ -52,8 +56,14 @@ export const WEB_AUDIT_ANTECEDENTS = new Set([
   'robots-present',
   'auth-present',
 ]);
-export const WEB_AUDIT_EVAL_RULES = new Set(['legacy-alias-redirects', 'scoped-discovery']);
+export const WEB_AUDIT_EVAL_RULES = new Set([
+  'legacy-alias-redirects',
+  'scoped-discovery',
+  'retained-document',
+  'api-description',
+]);
 export const CORS_SURFACES = new Set(['preflight', 'actual']);
+const PROTECTED_RESOURCE_OPS = new Set(['challenge', 'metadata']);
 
 /**
  * Expand `{ua:...}` tokens in a check's `with.headers` User-Agent from the
@@ -87,7 +97,7 @@ const CHECK_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
  * error on any missing/invalid field so the build fails loudly.
  *
  * @param {object} doc — js-yaml load of src/data/web-audit/registry.yaml
- * @returns {{ version: number, mcp_discovery: object, categories: Record<string,string>, mcp_lanes: Record<string,{label: string, note: string}>, checks: Array<object> }}
+ * @returns {{ version: number, mcp_discovery: object, category_order: string[], categories: Record<string,string>, mcp_lanes: Record<string,{label: string, note: string}>, alternatives: Array<{ group: string, variants: Record<string, { antecedents: string[], presented_by: string[] }> }>, checks: Array<object> }}
  */
 export function normalizeWebAuditRegistry(doc) {
   if (!doc || typeof doc !== 'object') {
@@ -101,6 +111,14 @@ export function normalizeWebAuditRegistry(doc) {
     typeof discovery.protocol_version !== 'string'
   ) {
     throw new Error('web-audit registry: mcp_discovery must carry well_known[], common_paths[], protocol_version');
+  }
+  for (const key of ['ai_catalog', 'card_suffix']) {
+    const value = discovery[key];
+    if (typeof value !== 'string' || !value.startsWith('/')) {
+      throw new Error(
+        `web-audit registry: mcp_discovery.${key} must be a path starting with "/" (got ${JSON.stringify(value)})`,
+      );
+    }
   }
   const categories = doc.categories;
   if (!categories || typeof categories !== 'object') {
@@ -215,9 +233,19 @@ export function normalizeWebAuditRegistry(doc) {
     // `error`, which the scorer excludes from both scores while the run
     // still terminates complete and caches — a silently short scorecard.
     // Required per-handler `with` fields are therefore build-time gates.
+    if (check.eval === 'retained-document' && !RETAINED_DOCUMENT_KEYS.includes(check.with.retained)) {
+      throw new Error(
+        `web-audit registry: check "${id}" declares retained-document, so with.retained must name a document discovery keeps (${RETAINED_DOCUMENT_KEYS.join(', ')}), got ${JSON.stringify(check.with.retained)}`,
+      );
+    }
     if (check.handler === 'cors-preflight' && !CORS_SURFACES.has(check.with.surface)) {
       throw new Error(
         `web-audit registry: check "${id}" needs with.surface "preflight" or "actual" (got ${JSON.stringify(check.with.surface)})`,
+      );
+    }
+    if (check.handler === 'protected-resource' && !PROTECTED_RESOURCE_OPS.has(check.with.op)) {
+      throw new Error(
+        `web-audit registry: check "${id}" needs with.op "challenge" or "metadata" (got ${JSON.stringify(check.with.op)})`,
       );
     }
 
@@ -243,6 +271,8 @@ export function normalizeWebAuditRegistry(doc) {
   return {
     version: doc.version ?? 1,
     mcp_discovery: {
+      ai_catalog: discovery.ai_catalog,
+      card_suffix: discovery.card_suffix,
       well_known: discovery.well_known,
       common_paths: discovery.common_paths,
       protocol_version: discovery.protocol_version,
@@ -250,8 +280,105 @@ export function normalizeWebAuditRegistry(doc) {
     category_order: categoryOrder,
     categories,
     mcp_lanes: mcpLanes,
+    alternatives: normalizeAlternatives(doc.alternatives, normalized),
     checks: normalized,
   };
+}
+
+const VARIANT_FIELDS = new Set(['antecedents', 'presented_by']);
+
+/**
+ * A variant's token list: absent reads as none, and a present one is a
+ * non-empty array of known antecedent tokens.
+ *
+ * @param {unknown} value
+ * @param {string} name The `<group>.<variant>` label errors carry.
+ * @param {string} field
+ * @returns {string[]}
+ */
+function variantTokens(value, name, field) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`web-audit registry: alternatives variant "${name}" ${field} needs a non-empty array of tokens`);
+  }
+  for (const token of value) {
+    if (!WEB_AUDIT_ANTECEDENTS.has(token)) {
+      throw new Error(`web-audit registry: alternatives variant "${name}" names unknown antecedent "${token}"`);
+    }
+  }
+  return [...value];
+}
+
+/**
+ * Validate the alternative groups against the normalized checks. Pure. A
+ * variant's checks are those gated on its `antecedents`, and it is
+ * presented when a check gated on one of its `presented_by` tokens applied
+ * (default: its antecedents). The global score counts a group by those
+ * tokens, so a token claimed by two variants would count its checks twice
+ * or present two designs from one row, and a variant whose presence tokens
+ * gate no check could never be presented.
+ *
+ * @param {unknown} groups The YAML `alternatives` value; absent means none.
+ * @param {Array<{ antecedent: string }>} checks The normalized checks.
+ * @returns {Array<{ group: string, variants: Record<string, { antecedents: string[], presented_by: string[] }> }>}
+ */
+function normalizeAlternatives(groups, checks) {
+  if (groups === undefined) return [];
+  if (!Array.isArray(groups)) {
+    throw new Error('web-audit registry: alternatives must be an array of groups');
+  }
+  const gates = (tokens) => checks.some((check) => tokens.includes(check.antecedent));
+  const groupIds = new Set();
+  const claimedBy = new Map();
+  return groups.map((entry) => {
+    const group = entry?.group;
+    if (typeof group !== 'string' || !CHECK_ID_RE.test(group)) {
+      throw new Error(
+        `web-audit registry: alternatives group ${JSON.stringify(group)} must match /^[a-z0-9][a-z0-9-]*$/`,
+      );
+    }
+    if (groupIds.has(group)) throw new Error(`web-audit registry: duplicate alternatives group "${group}"`);
+    groupIds.add(group);
+    const variants = entry.variants;
+    if (!variants || typeof variants !== 'object' || Array.isArray(variants) || Object.keys(variants).length < 2) {
+      throw new Error(`web-audit registry: alternatives group "${group}" needs at least two variants`);
+    }
+    const normalizedVariants = {};
+    for (const [variant, spec] of Object.entries(variants)) {
+      const name = `${group}.${variant}`;
+      if (!CHECK_ID_RE.test(variant)) {
+        throw new Error(`web-audit registry: alternatives variant "${name}" must match /^[a-z0-9][a-z0-9-]*$/`);
+      }
+      if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
+        throw new Error(`web-audit registry: alternatives variant "${name}" must be a mapping`);
+      }
+      const unknown = Object.keys(spec).find((key) => !VARIANT_FIELDS.has(key));
+      if (unknown !== undefined) {
+        throw new Error(`web-audit registry: alternatives variant "${name}" carries unknown field "${unknown}"`);
+      }
+      const antecedents = variantTokens(spec.antecedents, name, 'antecedents');
+      const presentedBy =
+        spec.presented_by === undefined ? [...antecedents] : variantTokens(spec.presented_by, name, 'presented_by');
+      if (antecedents.length > 0 && !gates(antecedents)) {
+        throw new Error(`web-audit registry: alternatives variant "${name}" gates no check`);
+      }
+      if (!gates(presentedBy)) {
+        throw new Error(`web-audit registry: alternatives variant "${name}" is presented by no check`);
+      }
+      for (const token of new Set([...antecedents, ...presentedBy])) {
+        const prior = claimedBy.get(token);
+        if (prior !== undefined) {
+          throw new Error(`web-audit registry: antecedent "${token}" belongs to both "${prior}" and "${name}"`);
+        }
+        claimedBy.set(token, name);
+      }
+      normalizedVariants[variant] = { antecedents, presented_by: presentedBy };
+    }
+    if (Object.values(normalizedVariants).every((variant) => variant.antecedents.length === 0)) {
+      throw new Error(`web-audit registry: alternatives group "${group}" has no variant with checks of its own`);
+    }
+    return { group, variants: normalizedVariants };
+  });
 }
 
 /**

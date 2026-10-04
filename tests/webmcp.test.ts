@@ -34,6 +34,7 @@ type Stub = {
   attrs: Record<string, string>;
   value: string;
   checked: boolean;
+  disabled: boolean;
   hidden: boolean;
   textContent: string;
   children: Stub[];
@@ -73,6 +74,7 @@ function stubEl(init: {
   attrs?: Record<string, string>;
   value?: string;
   checked?: boolean;
+  disabled?: boolean;
   hidden?: boolean;
   textContent?: string;
   children?: Stub[];
@@ -82,6 +84,7 @@ function stubEl(init: {
     attrs,
     value: init.value ?? '',
     checked: init.checked ?? false,
+    disabled: init.disabled ?? false,
     hidden: init.hidden ?? false,
     textContent: init.textContent ?? '',
     children: init.children ?? [],
@@ -176,6 +179,7 @@ type ResultRow = {
   tier?: string;
   unprobed?: boolean;
   prompt?: string;
+  host?: string;
 };
 
 const CONTEXT_DEFAULTS = {
@@ -200,6 +204,7 @@ function resultDoc(rows: ResultRow[], context: Partial<typeof CONTEXT_DEFAULTS> 
       'data-tier': row.tier ?? 'required',
       'data-status': row.status,
       'data-unprobed': row.unprobed === true ? 'true' : 'false',
+      ...(row.host !== undefined ? { 'data-host': row.host } : {}),
     };
     const children = row.prompt
       ? [
@@ -427,6 +432,7 @@ describe('execute helpers (Document stub)', () => {
       status: 'broken',
       unprobed: false,
       result: null,
+      host: null,
       remediable: true,
     });
     expect({ total: page.total, returned: page.returned, omitted: page.omitted, next: page.next_offset }).toEqual({
@@ -434,6 +440,26 @@ describe('execute helpers (Document stub)', () => {
       returned: 5,
       omitted: 0,
       next: null,
+    });
+  });
+
+  test("get_worksheet reads each row's host from the row root", () => {
+    const doc = resultDoc([
+      { id: 'mcp-initialize', keyword: 'must', status: 'absent', prompt: 'fix', host: 'mcp.example.net' },
+      {
+        id: 'json-errors',
+        keyword: 'should',
+        status: 'broken',
+        prompt: 'fix',
+        host: 'api.example.net files.example.net',
+      },
+      { id: 'llms-txt', keyword: 'should', status: 'absent', prompt: 'fix' },
+    ]);
+    const items = JSON.parse(getWorksheet(doc, {})).items as Array<{ id: string; host: string | null }>;
+    expect(Object.fromEntries(items.map((item) => [item.id, item.host]))).toEqual({
+      'mcp-initialize': 'mcp.example.net',
+      'json-errors': 'api.example.net files.example.net',
+      'llms-txt': null,
     });
   });
 
@@ -595,12 +621,43 @@ describe('execute helpers (Document stub)', () => {
     const page = homeDoc();
     fillTarget(page.doc, { target: 'ripgrep' });
     const state = JSON.parse(getPageState(page.doc, '/')) as Record<string, unknown>;
-    expect(state).toEqual({ path: '/', surface: 'cli', target: 'ripgrep', listing: false });
+    expect(state).toEqual({ path: '/', surface: 'cli', target: 'ripgrep', follow_declarations: null, listing: false });
+  });
+
+  test('get_page_state reports the follow checkbox beside the listing box, and no listing choice while that box is disabled', () => {
+    const page = homeDoc({ surface: 'web', target: 'stripe.dev', listing: true });
+    const follow = stubEl({ attrs: { 'data-audit-follow': '', type: 'checkbox' }, checked: true });
+    page.form.children.push(follow);
+    const on = JSON.parse(getPageState(page.doc, '/audit')) as Record<string, unknown>;
+    expect(on).toEqual({
+      path: '/audit',
+      surface: 'web',
+      target: 'stripe.dev',
+      follow_declarations: true,
+      listing: true,
+    });
+    // Unticking follow disables the listing box, so the submit sends no listing.
+    follow.checked = false;
+    page.listing.disabled = true;
+    const off = JSON.parse(getPageState(page.doc, '/audit')) as Record<string, unknown>;
+    expect(off).toEqual({
+      path: '/audit',
+      surface: 'web',
+      target: 'stripe.dev',
+      follow_declarations: false,
+      listing: null,
+    });
   });
 
   test('a page with no entry form reports no surface rather than guessing one', () => {
     const state = JSON.parse(getPageState(stubDoc([]), '/score/anc.dev')) as Record<string, unknown>;
-    expect(state).toEqual({ path: '/score/anc.dev', surface: null, target: '', listing: null });
+    expect(state).toEqual({
+      path: '/score/anc.dev',
+      surface: null,
+      target: '',
+      follow_declarations: null,
+      listing: null,
+    });
   });
 
   test('execute returns a DOMString and never calls fetch or reaches the progress page', async () => {
@@ -823,18 +880,22 @@ describe('catalog prompts fit the WebMCP output cap (R21, KTD4)', () => {
     const ids = Object.keys(catalog);
     expect(ids.length).toBeGreaterThan(0);
     // Worst case is the biggest catalog entry carrying a maximal evidence
-    // block, because that is what a real audited row assembles to. Proving
-    // the static text alone would leave the block's budget unaccounted for.
+    // block and the longest host a DNS name can be, because that is what a
+    // real audited row assembles to. Proving the static text alone would
+    // leave the block's budget unaccounted for.
     const worstEvidence = 'e'.repeat(PROMPT_EVIDENCE_MAX * 2);
+    const worstHost = `${'h'.repeat(63)}.`.repeat(4).slice(0, 253);
     let largest = { id: ids[0], prompt: '' };
     for (const id of ids) {
       const { prompt } = assembleRemediation(catalog[id], {
         checkId: id,
         origin: 'https://anc.dev',
         evidence: worstEvidence,
+        host: worstHost,
       });
       if (prompt.length > largest.prompt.length) largest = { id, prompt };
     }
+    expect(largest.prompt).toContain(`Host: ${worstHost}`);
     const doc = resultDoc([{ id: largest.id, keyword: 'must', status: 'absent', prompt: largest.prompt }]);
 
     const direct = getFixPrompt(doc, { id: largest.id });

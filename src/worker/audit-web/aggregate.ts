@@ -12,6 +12,7 @@ import {
   canonicalTargetOf,
   keyFor,
   putAggregate,
+  vantageNetworkOf,
   type WebAggregateEntry,
   type WebCacheEnv,
 } from './cache';
@@ -48,7 +49,8 @@ type ScoreShape = { score_pct?: number; score?: { relative?: number; global?: nu
 /**
  * Rebuild both aggregates from the per-domain R2 entries. A seeded domain
  * with no cached entry (never scored, or orphaned by a SPEC_VERSION bump)
- * is omitted from the board rather than failing the rebuild.
+ * is omitted from the board rather than failing the rebuild, and so is one
+ * whose entry ran from a local vantage: the board ranks public scores only.
  */
 export async function rebuildWebAggregates(
   env: WebAggregateEnv,
@@ -59,7 +61,7 @@ export async function rebuildWebAggregates(
   for (const s of seed) {
     const target = canonicalTargetOf(new URL(s.url));
     const cached = await cacheGet(env, await keyFor(target, specVersion));
-    if (!cached) continue;
+    if (!cached || vantageNetworkOf(cached.scorecard) !== 'public') continue;
     const scorecard = cached.scorecard as ScoreShape | null;
     if (typeof scorecard?.score_pct !== 'number') continue;
     entries.push({
@@ -74,8 +76,10 @@ export async function rebuildWebAggregates(
       },
     });
   }
-  // /web ranks by GLOBAL; the homepage pane headlines the site score, so
-  // its top-N slice ranks by RELATIVE.
+  // Every HTML and markdown board re-ranks by RELATIVE at render time, so
+  // this GLOBAL order reaches only list_website_audits, which returns the
+  // stored entries as-is. The homepage slice is cut by RELATIVE so its
+  // top-N matches the pane that renders it.
   sortByGlobal(entries);
   const wroteBoard = await putAggregate(env, 'leaderboard', entries, specVersion);
   const byRelative = entries.slice();
@@ -110,8 +114,7 @@ export async function rebuildAggregatesIfSeeded(
   }
 }
 
-// GLOBAL is the default board order; ties break by relative then domain
-// (same ordering the board renderer applies).
+// GLOBAL order for the stored board; ties break by relative then domain.
 function sortByGlobal(entries: WebAggregateEntry[]): void {
   entries.sort((a, b) => {
     const byGlobal = b.score.global - a.score.global;

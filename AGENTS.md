@@ -107,7 +107,7 @@ session-time summary.
 Resources: `anc://registry` (concrete) plus four templates `anc://tool/{slug}`, `anc://principle/{n}`,
 `anc://spec/{section}`, `anc://scorecard/{binary}`.
 
-**Four rate limits, two cost profiles.** `MCP_LIMITER` gates every `POST /mcp` at 60 requests per 60 seconds per IP and
+**Five rate limits, two cost profiles.** `MCP_LIMITER` gates every `POST /mcp` at 60 requests per 60 seconds per IP and
 falls back to a shared `anon` bucket on missing `cf-connecting-ip`. `MCP_AUDIT_LIMITER` gates `score_cli` cache-miss
 audits only, at 5 fresh audits per 60 minutes per IP, with **no anon fallback**. `audit_website` fresh audits key
 `WEB_AUDIT_LIMITER_IP` (30 per 60 seconds per IP burst, no anon fallback) plus a shared 30-per-hour-per-IP ceiling;
@@ -117,18 +117,24 @@ Turnstile solve mints a `__Host-anc-session` cookie, `WEB_AUDIT_LIMITER` caps 10
 `<sid>:<sha256(target)>`, and `WEB_AUDIT_LIMITER_IP` is the coarse per-IP fallback. The hourly window is enforced in two
 layers: the CF Rate Limiting binding only accepts `period: 10 | 60`, so the binding holds the per-60-seconds burst floor
 and an application-side KV-backed per-hour window in `SCORE_KV` (`mcp_audit:<ip>:<hour_bucket>` /
-`web_audit:<ip>:<hour_bucket>`, 2-hour TTL) enforces the 30-per-hour ceiling.
+`web_audit:<ip>:<hour_bucket>`, 2-hour TTL) enforces the 30-per-hour ceiling. `WEB_AUDIT_DOMAIN_LIMITER` protects third
+parties rather than anc's own capacity: every audit that follows a site's declarations, on any surface, draws one unit
+per declared registrable domain before its first request there, keyed on `sha256(registrable domain)`. The binding is
+the burst floor at 10 audits per 60 seconds, applied per Cloudflare location, and a KV-backed window in `SCORE_KV`
+(`web_audit_follow:<sha256(domain)>:<hour_bucket>`, 2-hour TTL) is the hourly ceiling at 30 audits. Both layers are
+approximate, and a refused domain's hosts receive nothing for that audit.
 
 **Cost gate: `score_cli` never bypasses the cache.** No `force_refresh` flag and no path through the surface that forces
 a fresh audit on an already-cached binary. `get_scorecard` is the cheap signal; `score_cli` is the metered one. The two
 tools compose the same `/api/score` orchestration core, so cache semantics never drift between MCP and the human form on
 `/`.
 
-**Four kill switches, surgical.** `MCP_ENABLED` and `MCP_LIVE_SCORING_ENABLED` are secrets in both environments, flipped
+**Five kill switches, surgical.** `MCP_ENABLED` and `MCP_LIVE_SCORING_ENABLED` are secrets in both environments, flipped
 with `wrangler secret put` and no deploy; an unset secret reads as off, so absence fails closed. `MCP_LEGACY_ENABLED` is
 a committed var, `"true"` in the top-level and `env.staging` `vars` blocks; its sunset flip is a committed edit through
-a PR, with `wrangler deploy --var` as the transient drill override. `WEB_AUDIT_ENABLED` is a `vars` binding on staging
-and a `wrangler secret put` value on production. A binding name is a var or a secret, never both: `wrangler secret put`
+a PR, with `wrangler deploy --var` as the transient drill override. `WEB_AUDIT_ENABLED` and `WEB_AUDIT_FOLLOW_ENABLED`
+are `vars` bindings on staging and `wrangler secret put` values on production, where an unset value reads as off. A
+binding name is a var or a secret, never both: `wrangler secret put`
 against a declared var name is rejected with Cloudflare API 10053. Production commands carry no `--env` flag, because
 production is the top-level config and there is no `env.production` block. Per-flag shapes, flip verbs, and the `--var`
 hazards: the [operator runbook](docs/runbooks/mcp-operator.md).
@@ -141,6 +147,10 @@ hazards: the [operator runbook](docs/runbooks/mcp-operator.md).
   at the shell before the SDK handles legacy `initialize` / stateless legacy calls; modern SEP-2243 requests stay live.
 - `WEB_AUDIT_ENABLED`: gates the website audit (`audit_website` and the endpoint's web lane). Falsy returns `audited:
   false` with a disabled message; `get_website_audit` still serves cached web scorecards.
+- `WEB_AUDIT_FOLLOW_ENABLED`: gates following the hosts a site declares (its MCP server, its API host) on every web
+  audit: the endpoint's web lane, `audit_website`, and the rescore. Falsy keeps audits running on the site's own origin;
+  the stored scorecard records `follow_declarations: false` and rows that need a declared host read `n_a` with reason
+  `follow-disabled`.
 
 **Errors carry on two layers.** Tool-level failures return `CallToolResult` with `isError: true` plus a textual message;
 the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error envelopes at HTTP 200
@@ -267,7 +277,8 @@ bun run dev    # http://localhost:8787, staging bindings, local Worker
 ```
 
 `--env staging` is load-bearing: it picks up the staging container image pin, the always-pass Turnstile test sitekey,
-the staging-only `MCP_CACHE_BYPASS_ALLOWED` / `WEB_AUDIT_ENABLED` vars, and the staging R2 / KV / rate-limit namespaces.
+the staging-only `MCP_CACHE_BYPASS_ALLOWED` / `WEB_AUDIT_ENABLED` / `WEB_AUDIT_FOLLOW_ENABLED` vars, and the staging
+R2 / KV / rate-limit namespaces.
 The top-level (production) env may carry a container pin that fails to boot locally. `--local` keeps the rate-limit
 namespaces, R2, and asset directory in-process; dropping it would route to the deployed staging Worker and bypass the
 local build.

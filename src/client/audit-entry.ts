@@ -5,6 +5,8 @@
 //                 no-JS submit and a WebMCP hop both land here)
 //   first touch . load Turnstile, so a visitor who only scrolls never does
 //   chip ........ fill the target, on the lane the chip belongs to
+//   follow ...... unticking "Include hosts this site declares" disables the
+//                 listing box and shows the note that the result is not saved
 //   submit ...... validate for the lane; flip the segment when the target's
 //                 shape is the other lane's; startAudit acquires the token on
 //                 this click, stashes it, and navigates to the progress page
@@ -25,6 +27,8 @@ type EntryElements = {
   input: HTMLInputElement;
   submit: HTMLButtonElement;
   listing: HTMLInputElement | null;
+  follow: HTMLInputElement | null;
+  listingNote: HTMLElement | null;
   status: HTMLElement | null;
   radios: HTMLInputElement[];
   chips: HTMLButtonElement[];
@@ -39,6 +43,8 @@ function find(form: HTMLFormElement): EntryElements | null {
     input,
     submit,
     listing: form.querySelector<HTMLInputElement>('[data-audit-listing]'),
+    follow: form.querySelector<HTMLInputElement>('[data-audit-follow]'),
+    listingNote: form.querySelector<HTMLElement>('[data-audit-listing-note]'),
     status: form.querySelector<HTMLElement>('[data-audit-status]'),
     radios: [...form.querySelectorAll<HTMLInputElement>('input[name="lane"]')],
     chips: [...form.querySelectorAll<HTMLButtonElement>('[data-audit-example]')],
@@ -50,13 +56,28 @@ function isLane(value: string | null | undefined): value is Lane {
 }
 
 /**
+ * Whether a submit follows the hosts the site declares. Only a visitor who
+ * chose the website lane saw the box, so every other path follows, the
+ * default.
+ */
+export function followChoice(entered: Lane, resolved: Lane, checked: boolean | null): boolean {
+  return !(entered === 'web' && resolved === 'web' && checked === false);
+}
+
+/**
  * The listing decision a submit carries, or null when the visitor never saw
  * the box: it lives in the website pane, so a target's shape flipping the lane
- * leaves its unchecked state meaning nothing. Null omits the field, which
- * leaves whatever listing the site already has alone.
+ * leaves its unchecked state meaning nothing. A run that does not follow
+ * declared hosts is not saved, so it carries none either. Null omits the
+ * field, which leaves whatever listing the site already has alone.
  */
-export function listingChoice(entered: Lane, resolved: Lane, checked: boolean | null): boolean | null {
-  return entered === 'web' && resolved === 'web' ? checked : null;
+export function listingChoice(
+  entered: Lane,
+  resolved: Lane,
+  checked: boolean | null,
+  following: boolean,
+): boolean | null {
+  return entered === 'web' && resolved === 'web' && following ? checked : null;
 }
 
 function bind(el: EntryElements): void {
@@ -77,7 +98,21 @@ function bind(el: EntryElements): void {
     el.status.textContent = text;
   };
 
+  // An unsaved run cannot list the site, so the box goes inert and is
+  // described by the note that says why for as long as following is off.
+  const syncListing = (): void => {
+    const off = el.follow !== null && !el.follow.checked;
+    if (el.listing) {
+      el.listing.disabled = off;
+      if (off && el.listingNote) el.listing.setAttribute('aria-describedby', el.listingNote.id);
+      else el.listing.removeAttribute('aria-describedby');
+    }
+    if (el.listingNote) el.listingNote.hidden = !off;
+  };
+
   for (const radio of el.radios) radio.addEventListener('change', placeholder);
+  el.follow?.addEventListener('change', syncListing);
+  syncListing();
 
   const params = new URLSearchParams(window.location.search);
   const requestedLane = params.get('lane');
@@ -105,7 +140,9 @@ function bind(el: EntryElements): void {
 
   // A page restored from the back-forward cache keeps the acquiring state.
   window.addEventListener('pageshow', (event) => {
-    if (!event.persisted || !sitekey) return;
+    if (!event.persisted) return;
+    syncListing();
+    if (!sitekey) return;
     el.submit.removeAttribute('aria-disabled');
     say('');
   });
@@ -121,10 +158,11 @@ function bind(el: EntryElements): void {
       return;
     }
     if (classified.lane !== entered) setLane(classified.lane);
-    const listing = listingChoice(entered, classified.lane, el.listing ? el.listing.checked : null);
+    const follow = followChoice(entered, classified.lane, el.follow ? el.follow.checked : null);
+    const listing = listingChoice(entered, classified.lane, el.listing ? el.listing.checked : null, follow);
     el.submit.setAttribute('aria-disabled', 'true');
     say('Verifying…');
-    void startAudit({ target: el.input.value, lane: entered, listing }).then((result) => {
+    void startAudit({ target: el.input.value, lane: entered, listing, follow }).then((result) => {
       if (result.ok) return;
       el.submit.removeAttribute('aria-disabled');
       say(result.message);

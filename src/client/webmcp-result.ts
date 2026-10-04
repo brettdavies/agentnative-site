@@ -94,6 +94,7 @@ export function getWorksheet(doc: Document, input: Record<string, unknown>): str
       status: row.status,
       unprobed: row.unprobed,
       result: row.result,
+      host: row.host,
       remediable: isRemediable(row) && row.prompt !== null,
     })),
   });
@@ -308,7 +309,7 @@ export function resultTools(opts: ToolsForOpts): WebMcpTool[] {
   return [
     {
       name: 'get_worksheet',
-      description: `List findings on this scorecard as JSON rows of id, keyword, tier, status, unprobed, remediable. ${FILTER_DOC}`,
+      description: `List findings on this scorecard as JSON rows of id, keyword, tier, status, unprobed, result, host (where the evidence came from), remediable. ${FILTER_DOC}`,
       inputSchema: selectionSchema(true),
       annotations: { readOnlyHint: true },
       execute(input) {

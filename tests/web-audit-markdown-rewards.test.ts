@@ -8,6 +8,7 @@
 import { describe, expect, test } from 'bun:test';
 import { AI_USER_FETCHER_PROBE_UA, CLI_PROBE_UA } from '../src/shared/user-agents';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
+import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
 
 function makeCheck(partial: Partial<WebCheck> & { id: string }): WebCheck {
@@ -78,7 +79,13 @@ const NEW_CHECK_IDS = [...MAY_CHECK_IDS, 'markdown-vary'] as const;
 function registryOf(checks: WebCheck[]): WebAuditRegistry {
   return {
     version: 1,
-    mcp_discovery: { well_known: ['/.well-known/mcp.json'], common_paths: ['/mcp'], protocol_version: '2025-06-18' },
+    mcp_discovery: {
+      ai_catalog: '/.well-known/ai-catalog.json',
+      card_suffix: '/server-card',
+      well_known: ['/.well-known/mcp.json'],
+      common_paths: ['/mcp'],
+      protocol_version: '2025-06-18',
+    },
     category_order: ['content-for-agents'],
     categories: { 'content-for-agents': 'Content for agents' },
     checks,
@@ -159,7 +166,12 @@ describe('markdown-to-agents rewards: a site that serves the twin to every clien
   test('all four markdown checks pass', async () => {
     const { fetchImpl } = siteFetch(twinRoot);
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(MARKDOWN_CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(MARKDOWN_CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const rows = resultsOf(events);
     for (const id of NEW_CHECK_IDS) {
@@ -170,7 +182,12 @@ describe('markdown-to-agents rewards: a site that serves the twin to every clien
   test('the three remaining MAY passes are counted as verified MAY coverage; markdown-vary is SHOULD', async () => {
     const { fetchImpl } = siteFetch(twinRoot);
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(MARKDOWN_CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(MARKDOWN_CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const sc = scorecardOf(events);
     expect(sc.coverage_summary.may.total).toBe(3);
@@ -181,7 +198,12 @@ describe('markdown-to-agents rewards: a site that serves the twin to every clien
   test('markdown-vary reuses the canonical root fetch instead of issuing a second plain GET /', async () => {
     const { fetchImpl, seen } = siteFetch(twinRoot);
     await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(MARKDOWN_CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(MARKDOWN_CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     // Exactly one header-less GET / : the canonical root fetch. markdown-vary
     // carries no headers, so it reuses that response and adds no fetch.
@@ -199,7 +221,12 @@ describe('markdown-to-agents rewards: a site that ships no markdown at all', () 
   test('the four checks are n_a with na_reason antecedent-unmet', async () => {
     const { fetchImpl } = siteFetch(noMarkdownRoot);
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(MARKDOWN_CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(MARKDOWN_CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const rows = resultsOf(events);
     for (const id of NEW_CHECK_IDS) {
@@ -212,7 +239,12 @@ describe('markdown-to-agents rewards: a site that ships no markdown at all', () 
   test('gated-out MAY checks are excluded from the coverage totals (and the relative denominator)', async () => {
     const { fetchImpl } = siteFetch(noMarkdownRoot);
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(MARKDOWN_CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(MARKDOWN_CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const sc = scorecardOf(events);
     expect(sc.coverage_summary.may.total).toBe(0);
@@ -230,7 +262,12 @@ describe('markdown-to-agents rewards: a markdown site that never adopts the affo
   test('the three MAY checks are n_a with na_reason optional-absent (applicable, unimplemented, no penalty)', async () => {
     const { fetchImpl } = siteFetch(shipsMdButUnimplemented);
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(MARKDOWN_CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(MARKDOWN_CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const rows = resultsOf(events);
     for (const id of MAY_CHECK_IDS) {
@@ -245,7 +282,12 @@ describe('markdown-to-agents rewards: a markdown site that never adopts the affo
     // this check; do not move it off the homepage.
     const { fetchImpl } = siteFetch(shipsMdButUnimplemented);
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(MARKDOWN_CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(MARKDOWN_CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const row = resultsOf(events).find((r) => r.id === 'markdown-vary');
     expect(row?.status).toBe('absent');
@@ -260,7 +302,12 @@ describe('markdown-to-agents rewards: a markdown site that never adopts the affo
     }
     const { fetchImpl } = siteFetch(variesOnEncodingOnly);
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(MARKDOWN_CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(MARKDOWN_CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const row = resultsOf(events).find((r) => r.id === 'markdown-vary');
     expect(row?.status).toBe('absent');

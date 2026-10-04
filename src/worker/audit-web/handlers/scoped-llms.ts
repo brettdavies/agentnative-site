@@ -11,7 +11,7 @@
 
 import type { WebCheck } from '../registry';
 import { guardedFetch, validatePublicUrl } from '../ssrf';
-import { timeoutMsFor } from './shared';
+import { redirectsToHttp, redirectsToHttpItem, timeoutMsFor } from './shared';
 import type { HandlerContext, ProbeOutcome, ProbeStatus } from './types';
 
 const DEFAULT_MAX_CANDIDATES = 8;
@@ -70,6 +70,11 @@ export async function runScopedLlms(check: WebCheck, ctx: HandlerContext): Promi
       continue;
     }
     const resp = await guardedFetch(url, {}, { ...ctx.fetchOptions, timeoutMs });
+    if (redirectsToHttp(resp)) {
+      evidence.push(redirectsToHttpItem(url, resp.status));
+      misses.push('absent');
+      continue;
+    }
     if (resp.error !== null) {
       evidence.push({ url, status: null, error: resp.error });
       misses.push('error');

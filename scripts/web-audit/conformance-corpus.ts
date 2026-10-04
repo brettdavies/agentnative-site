@@ -12,8 +12,9 @@ import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../../src/build/13-web-audit-registry.mjs';
 import type { ExpectBlock } from '../../src/worker/audit-web/assert';
 import { runWebAudit } from '../../src/worker/audit-web/engine';
+import { ALWAYS_ADMIT_BUDGET } from '../../src/worker/audit-web/follow-requests';
 import type { WebAuditRegistry, WebSiteType } from '../../src/worker/audit-web/registry';
-import type { WebScorecard } from '../../src/worker/audit-web/scorecard';
+import type { NaReason, ScorecardStatus, WebScorecard } from '../../src/worker/audit-web/scorecard';
 import { SCENARIOS } from './conformance-scenarios';
 
 export const REPO_ROOT = join(import.meta.dir, '..', '..');
@@ -47,6 +48,8 @@ export type Scenario = {
   target: string;
   site_type: WebSiteType | null;
   spec_version: string;
+  /** Whether the run follows the hosts the target declares; absent means it does. */
+  follow_declarations?: boolean;
   unmatched: ExchangeResponse;
   allow_unmatched: boolean;
   exchanges: Exchange[];
@@ -160,6 +163,8 @@ export async function runScenario(name: string, scenario: Scenario, registry: We
     registry,
     siteType: scenario.site_type,
     specVersion: scenario.spec_version,
+    followDeclarations: scenario.follow_declarations ?? true,
+    domainBudget: ALWAYS_ADMIT_BUDGET,
     fetchOptions: { fetchImpl: stubFetchFor(scenario, log) },
     now: () => FIXED_NOW_MS,
   });
@@ -359,6 +364,46 @@ export function regexParityFixture(registry: WebAuditRegistry): RegexParityFixtu
 }
 
 // ---------------------------------------------------------------------------
+// scores.json
+// ---------------------------------------------------------------------------
+
+type ScoreIndexRow = { id: string; status: ScorecardStatus; na_reason?: NaReason };
+
+type ScoreIndexEntry =
+  | { unreachable: true }
+  | { score_pct: number; score: { relative: number; global: number }; results: ScoreIndexRow[] };
+
+function scoreIndexEntry(output: string): ScoreIndexEntry {
+  const parsed = JSON.parse(output) as { unreachable: string } | WebScorecard;
+  if ('unreachable' in parsed) return { unreachable: true };
+  return {
+    score_pct: parsed.score_pct,
+    score: { relative: parsed.score.relative, global: parsed.score.global },
+    results: parsed.results.map((row) => ({
+      id: row.id,
+      status: row.status,
+      ...(row.na_reason !== undefined ? { na_reason: row.na_reason } : {}),
+    })),
+  };
+}
+
+/** One line per row, so a moved status is a one-line diff. */
+function scoresJson(entries: ReadonlyArray<[string, ScoreIndexEntry]>): string {
+  const blocks = entries.map(([name, entry]) => {
+    if ('unreachable' in entry) return `  ${JSON.stringify(name)}: ${JSON.stringify(entry)}`;
+    const rows = entry.results.map((row) => `      ${JSON.stringify(row)}`);
+    return [
+      `  ${JSON.stringify(name)}: {`,
+      `    "score_pct": ${JSON.stringify(entry.score_pct)},`,
+      `    "score": ${JSON.stringify(entry.score)},`,
+      rows.length === 0 ? '    "results": []' : `    "results": [\n${rows.join(',\n')}\n    ]`,
+      '  }',
+    ].join('\n');
+  });
+  return `{\n${blocks.join(',\n')}\n}\n`;
+}
+
+// ---------------------------------------------------------------------------
 // Corpus generation
 // ---------------------------------------------------------------------------
 
@@ -393,6 +438,7 @@ function scenarioJson(scenario: Scenario): string {
     target: scenario.target,
     site_type: scenario.site_type,
     spec_version: scenario.spec_version,
+    ...(scenario.follow_declarations !== undefined ? { follow_declarations: scenario.follow_declarations } : {}),
     unmatched: scenario.unmatched,
     allow_unmatched: scenario.allow_unmatched,
     exchanges: scenario.exchanges,
@@ -419,6 +465,7 @@ and \`tests/web-audit-conformance-corpus.test.ts\` fails when the two disagree.
 tests/fixtures/web-audit-conformance/
   README.md                        this file
   regex-parity.json                every registry pattern x a fixed probe table -> RegExp boolean
+  scores.json                      every scenario's scores and row statuses, one line per row
   scenarios/<name>/scenario.json   input: target, site type, exchanges, unmatched policy
   scenarios/<name>/scorecard.json  output: the engine's scorecard, normalized as described below
 \`\`\`
@@ -431,6 +478,9 @@ tests/fixtures/web-audit-conformance/
 - \`target\`: the URL handed to the engine.
 - \`site_type\`: \`"content"\`, \`"api"\` or \`null\` (run everything).
 - \`spec_version\`: the literal both engines are given for the run.
+- \`follow_declarations\` (optional): \`false\` runs with following off, so no declared host is requested and the
+  trail records each declaration not followed. Absent means \`true\`. Both engines run every scenario with a per-domain
+  budget that admits every domain, so no budget state reaches a golden.
 - \`unmatched\`: the response for a request no exchange matches, either a transport failure
   (\`{"error": "Name: message"}\`) or a full response.
 - \`allow_unmatched\`: when false, generation fails if any request reaches the unmatched policy.
@@ -441,11 +491,21 @@ parser; \`headers\` is a subset match on lowercase names with exact values; \`bo
 request body as JSON and compares its top-level \`method\`; \`body_contains\` is a substring match on the raw
 body.
 
-Responses carry lowercase header names with single string values and a UTF-8 text body exactly as the engine
-reads it. No response carries \`content-encoding\`: decompression is pinned by transport tests, not by the
-corpus. A transport failure is \`{"error": "Name: message"}\`, the string \`ProbeResponse.error\` carries at the
-seam; a \`TimeoutError\` is always recorded as \`TimeoutError: deadline exceeded\`. Redirects are ordinary
-exchanges (a 3xx with a \`location\` header) that the guarded fetch above the seam follows with a new request.
+Responses carry lowercase header names with single string values and a UTF-8 text body exactly as the engine reads it.
+No response carries \`content-encoding\`: decompression is pinned by transport tests, not by the corpus. A transport
+failure is \`{"error": "Name: message"}\`, the string \`ProbeResponse.error\` carries at the seam; a \`TimeoutError\` is
+always recorded as \`TimeoutError: deadline exceeded\`. Redirects are ordinary exchanges (a 3xx with a \`location\`
+header) that the guarded fetch above the seam follows with a new request, except where the engine keeps a probe off
+hosts nothing confirmed. The guarded fetch sends nothing over \`http\`: a request URL on \`http\` never reaches the seam
+and reads as a failure with the error \`not requested: not https\`, and a redirect to \`http\` it would otherwise follow
+is not taken, so the probe's answer is that redirect's status and headers with an empty body and the error \`redirect
+refused: <status> to <location>: not https\`. A request to the MCP endpoint on the audited origin (discovery's
+common-path POSTs and every probe of that endpoint) takes only hops that keep the scheme, host, and port: discovery
+records a redirect to another origin with its target and declares the target, and any other probe reads it as a
+refused redirect. A probe of an endpoint on a declared host takes no redirect at all, and neither does a probe of a
+document on that endpoint's origin (a registry path written with \`{mcp_origin}\`, which the engine replaces with the
+endpoint's scheme, host, and port). The GET an API anchor host off the audited origin receives takes only hops that
+keep the scheme, host, and port, and a redirect to another origin is its answer.
 
 ## scorecard.json
 
@@ -457,7 +517,41 @@ evidence, so no wall-clock value reaches the file. Key order is otherwise the en
 every number is an integer. A scenario that ends in
 the engine's \`unreachable\` event writes \`{"unreachable": "<reason>"}\` instead of a scorecard. The engine runs
 under a fixed clock, so no per-audit deadline fires; per-probe timeouts appear only as declared transport
-failures.
+failures. Every scenario is a public-vantage audit holding no credential, so every scorecard records
+\`"vantage": {"network": "public", "credentialed": false}\`, and an engine under comparison runs the scenarios at
+that vantage.
+
+Each row's \`hosts\` lists the distinct hosts its raw evidence items were requested from, in evidence order, as
+\`{"host": ...}\` objects. Only an item with no \`blocked\` marker counts: a URL the SSRF guard refused, or one never
+requested because it is not \`https\`, reached no host. An item with a string \`url\` counts that URL's host; one with no
+\`url\` and a non-empty string \`host\` counts that value, which is how a row a declared host kept from being evaluated
+names that host. The host is the WHATWG URL \`host\`, which keeps a non-default port (\`example.com:8443\`), so an engine
+whose URL library drops the port must add it back. An item whose \`url\` does not parse contributes nothing, and a row
+with no counting item has \`hosts: []\`. \`host\` is present, holding the same value, exactly when \`hosts\` has one entry.
+A row that evaluates several targets (the API rows when the api-catalog lists API anchors: one per declared
+description, one per anchor host) marks each target's items with its outcome, and when those items name more than one
+host each \`hosts\` entry also carries \`status\`: the worst outcome among that host's targets (\`broken\`, then
+\`noncompliant\`, \`absent\`, \`error\`, \`pass\`), or \`n_a\` with the first such target's \`na_reason\` when none on that host
+was evaluated. The row's own status is the same rule over all its targets.
+
+\`declared_hosts\` holds one entry per URL the target's discovery documents declare off its origin, in declaration
+order (the AI catalog's card entries, the card under the discovered endpoint, then the well-known cards; the endpoints a
+followed card document names come right after that document's entry), then the api-catalog's anchors in linkset order
+(\`api-anchor\`; one with no \`service-desc\` other than an MCP surface reads \`not-followed\` with reason
+\`no-service-desc\`), then the description each API anchor declares (\`api-description\`) in the same order, then the
+targets the common-path POSTs were redirected to off the origin, in probe order and with the redirecting path as
+their \`surface\`, never in the order requests complete. A URL declared twice keeps its first entry. Endpoints are tried
+one at a time in that order and the first that its own host confirms becomes the endpoint, so every later endpoint
+reads \`not-followed\`. A declared URL or redirect hop on \`http\` that the guard admits is never requested and
+reads \`not-followed\` with reason \`insecure-scheme\`, a refused hop recorded as its \`final_url\`.
+
+## scores.json
+
+One entry per scenario, keyed by scenario name in sorted order: \`score_pct\`, \`score\` (\`relative\` and
+\`global\`), and \`results\`, one line per row in registry order carrying the row's \`id\`, \`status\`, and
+\`na_reason\` when it has one. A scenario that ends unreachable reads \`{"unreachable": true}\`. Every value is
+copied from the scenario's \`scorecard.json\`, so the file adds no contract of its own; it turns a regeneration that
+moves a score or a row status into a short diff of one file instead of a change buried in a full golden.
 
 ## regex-parity.json
 
@@ -478,14 +572,17 @@ export async function generateCorpus(registry: WebAuditRegistry): Promise<Map<st
   const ids = new Set(registry.checks.map((check) => check.id));
   const names = Object.keys(SCENARIOS).sort();
   const files = new Map<string, string>();
+  const scores: Array<[string, ScoreIndexEntry]> = [];
   for (const name of names) {
     const scenario = SCENARIOS[name];
     validateScenario(name, scenario, ids);
     const run = await runScenario(name, scenario, registry);
     files.set(`scenarios/${name}/scenario.json`, scenarioJson(scenario));
     files.set(`scenarios/${name}/scorecard.json`, run.output);
+    scores.push([name, scoreIndexEntry(run.output)]);
   }
   files.set('regex-parity.json', `${JSON.stringify(regexParityFixture(registry), null, 2)}\n`);
+  files.set('scores.json', scoresJson(scores));
   files.set('README.md', readme(names));
   return files;
 }

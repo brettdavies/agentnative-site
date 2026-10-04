@@ -9,8 +9,11 @@ import {
   enrichWebScorecardForDisplay,
   normalizeScorecardCategories,
 } from '../src/worker/audit-web/display';
+import { notRunRemedy, notRunScoreNote } from '../src/worker/audit-web/provenance-copy';
 import type { WebRemediationCatalog } from '../src/worker/audit-web/remediation';
+import { richMarkdown } from '../src/worker/audit-web/rich-text';
 import { categoryRollups } from '../src/worker/audit-web/score';
+import { buildWebScorecard } from '../src/worker/audit-web/scorecard';
 
 // A registry that splits the combined API/MCP surface into two categories,
 // the exact display-only change that leaves old-shape cached scorecards
@@ -314,5 +317,206 @@ describe('attachInlineRemediation', () => {
     };
     expect(out.results[0].remediation?.skill_url).toBe('https://anc.dev/fix/no-catalog-entry');
     expect(out.results[0].remediation?.prompt).toContain('--- begin evidence ---\nmissing\n--- end evidence ---');
+  });
+});
+
+describe('provenance on stored scorecards', () => {
+  type ProvenanceShape = {
+    results: Array<{ id: string; hosts?: Array<{ host: string }>; host?: string }>;
+  } & Record<string, unknown>;
+
+  test('a row carrying neither hosts nor host reads as the audited host; a row carrying them keeps its own', () => {
+    const stored = {
+      target_url: 'https://example.com/',
+      results: [
+        { id: 'openapi', status: 'pass', evidence: 'openapi -> 200' },
+        {
+          id: 'json-schemas',
+          status: 'absent',
+          evidence: 'json-schemas -> 404',
+          hosts: [{ host: 'api.example.com' }],
+          host: 'api.example.com',
+        },
+        { id: 'mcp-tools-list', status: 'n_a', na_reason: 'antecedent-unmet', evidence: null, hosts: [] },
+      ],
+    };
+    const out = enrichWebScorecardForDisplay(stored, {
+      registry: SPLIT_REGISTRY,
+      catalog: CATALOG,
+      origin: 'https://anc.dev',
+    }) as ProvenanceShape;
+    const byId = new Map(out.results.map((r) => [r.id, r]));
+    expect(byId.get('openapi')).toMatchObject({ hosts: [{ host: 'example.com' }], host: 'example.com' });
+    expect(byId.get('json-schemas')).toMatchObject({ hosts: [{ host: 'api.example.com' }], host: 'api.example.com' });
+    expect(byId.get('mcp-tools-list')?.hosts).toEqual([]);
+    expect('host' in (byId.get('mcp-tools-list') ?? {})).toBe(false);
+  });
+
+  test('a row with a malformed hosts value reads as the audited host in its fields and its result line alike', () => {
+    const stored = {
+      target_url: 'https://example.com/',
+      results: [
+        { id: 'mcp-initialize', status: 'n_a', na_reason: 'declared-host-unreachable', evidence: null, hosts: null },
+      ],
+    };
+    const out = enrichWebScorecardForDisplay(stored, {
+      registry: SPLIT_REGISTRY,
+      catalog: CATALOG,
+      origin: 'https://anc.dev',
+    }) as { results: Array<{ hosts?: unknown; host?: string; result?: string }> };
+    expect(out.results[0]).toMatchObject({
+      hosts: [{ host: 'example.com' }],
+      host: 'example.com',
+      result: 'Not evaluated: example.com did not answer',
+    });
+  });
+
+  test("a declared-host reason's result line names the row host, or the audited host for a row without provenance", () => {
+    const stored = {
+      target_url: 'https://example.com/',
+      results: [
+        {
+          id: 'mcp-tools-list',
+          status: 'n_a',
+          na_reason: 'auth-required',
+          evidence: null,
+          hosts: [{ host: 'mcp.example.com' }],
+          host: 'mcp.example.com',
+        },
+        { id: 'mcp-initialize', status: 'n_a', na_reason: 'declared-host-unreachable', evidence: null },
+      ],
+    };
+    const out = enrichWebScorecardForDisplay(stored, {
+      registry: SPLIT_REGISTRY,
+      catalog: CATALOG,
+      origin: 'https://anc.dev',
+    }) as { results: Array<{ id: string; result?: string }> };
+    const byId = new Map(out.results.map((r) => [r.id, r.result]));
+    expect(byId.get('mcp-tools-list')).toBe('Not evaluated: mcp.example.com requires sign-in');
+    expect(byId.get('mcp-initialize')).toBe('Not evaluated: example.com did not answer');
+  });
+
+  test('a scorecard missing every provenance field enriches without a follow state, a trail, or a fingerprint', () => {
+    const out = enrichWebScorecardForDisplay(oldShapeStored(), {
+      registry: SPLIT_REGISTRY,
+      catalog: CATALOG,
+      origin: 'https://anc.dev',
+    }) as ProvenanceShape;
+    expect('follow_declarations' in out).toBe(false);
+    expect('declared_hosts' in out).toBe(false);
+    expect('registry_fingerprint' in out).toBe(false);
+    expect('vantage' in out).toBe(false);
+    for (const row of out.results) expect(row).toMatchObject({ hosts: [{ host: 'example.com' }], host: 'example.com' });
+  });
+
+  test('a stored scorecard keeps the vantage its audit recorded on every full-result read', () => {
+    const fresh = buildWebScorecard(
+      [
+        {
+          id: 'openapi',
+          title: 'OpenAPI',
+          principle: 'P2',
+          keyword: 'must',
+          tier: 'required',
+          category: 'api',
+          weight: 5,
+          status: 'pass',
+          evidence: 'openapi -> 200',
+          raw_evidence: [{ url: 'https://example.com/openapi.json', status: 200 }],
+        },
+      ],
+      {
+        targetUrl: 'https://example.com/',
+        domain: 'example.com',
+        mcpEndpoint: null,
+        discoveryEvidence: [],
+        specVersion: '0.5.0',
+        registry: {
+          category_order: ['api', 'mcp'],
+          categories: { api: 'API', mcp: 'MCP' },
+          checks: [{ id: 'openapi', keyword: 'must', antecedent: 'none' }] as never,
+        },
+      },
+    );
+    const stored = JSON.parse(JSON.stringify(fresh)) as unknown;
+    const out = enrichWebScorecardForDisplay(stored, {
+      registry: SPLIT_REGISTRY,
+      catalog: CATALOG,
+      origin: 'https://anc.dev',
+    }) as ProvenanceShape;
+    expect(out.vantage).toEqual({ network: 'public', credentialed: false });
+  });
+
+  test('a prompt names the host a row recorded, and a row stored before provenance gets no Host line', () => {
+    const stored = {
+      target_url: 'https://example.com/',
+      results: [
+        {
+          id: 'openapi',
+          status: 'absent',
+          evidence: 'missing',
+          hosts: [{ host: 'api.example.net' }],
+          host: 'api.example.net',
+        },
+        { id: 'mcp-tools-list', status: 'broken', evidence: 'no tools array' },
+      ],
+    };
+    const out = enrichWebScorecardForDisplay(stored, {
+      registry: SPLIT_REGISTRY,
+      catalog: CATALOG,
+      origin: 'https://anc.dev',
+    }) as { results: Array<{ id: string; host?: string; remediation?: { prompt: string; host: string | null } }> };
+    const [openapi, tools] = out.results;
+    expect(openapi.remediation?.prompt).toContain('--- begin evidence ---\nHost: api.example.net\nmissing\n');
+    expect(tools.remediation?.prompt).not.toContain('Host:');
+    expect(tools.remediation?.host).toBeNull();
+    // The audited host still reaches the row itself, as every surface reads it.
+    expect(tools.host).toBe('example.com');
+  });
+
+  test('a sign-in row names no local command while no published anc release includes one', () => {
+    const stored = {
+      target_url: 'https://stripe.dev/',
+      results: [
+        { id: 'mcp-tools-list', status: 'n_a', na_reason: 'auth-required', evidence: null, host: 'mcp.stripe.com' },
+      ],
+    };
+    const out = attachInlineRemediation(stored, CATALOG, 'https://anc.dev') as {
+      access_note?: string;
+      results: Array<{ access_remedy?: string }>;
+    };
+    const text = `${out.results[0].access_remedy} ${out.access_note}`;
+    expect(text).not.toContain('anc web');
+    expect(text).not.toContain('ANC_WEB_TOKEN');
+    expect(out.results[0].access_remedy).toBe("anc's public audit holds no sign-in for mcp.stripe.com.");
+  });
+
+  test('once a published anc release includes the local web audit, the remedy and the note name its command', () => {
+    expect(richMarkdown(notRunRemedy('auth-required', 'mcp.stripe.com', 'stripe.dev', 2, true))).toBe(
+      "anc's public audit holds no sign-in for mcp.stripe.com. Run `anc web stripe.dev` with `ANC_WEB_TOKEN` set to a token for mcp.stripe.com to evaluate these checks from your own network.",
+    );
+    expect(richMarkdown(notRunScoreNote(1, 'example.com', false, true))).toBe(
+      'Global keeps the 1 check this audit could not run in its maximum; run `anc web example.com` to evaluate it from your own network.',
+    );
+  });
+
+  test('rows the audit could not run carry their remedy, and the scorecard the score note sentence', () => {
+    const stored = {
+      target_url: 'https://example.com/',
+      results: [
+        { id: 'mcp-tools-list', status: 'n_a', na_reason: 'declared-host-blocked', evidence: null, host: '10.0.0.1' },
+        { id: 'openapi', status: 'n_a', na_reason: 'optional-absent', evidence: null },
+      ],
+    };
+    const out = attachInlineRemediation(stored, CATALOG, 'https://anc.dev') as {
+      access_note?: string;
+      results: Array<{ id: string; access_remedy?: string }>;
+    };
+    expect(out.results[0].access_remedy).toBe("anc's public audit never contacts 10.0.0.1, a private or IP address.");
+    expect(out.results[1].access_remedy).toBeUndefined();
+    expect(out.access_note).toBe('Global keeps the 1 check this audit could not run in its maximum.');
+    expect('access_note' in (attachInlineRemediation({ results: [] }, CATALOG, 'https://anc.dev') as object)).toBe(
+      false,
+    );
   });
 });

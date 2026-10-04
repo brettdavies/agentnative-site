@@ -1,7 +1,7 @@
 // Map engine results into the web scorecard (plan U5, reshaped per
 // plan-003 U4/KTD-8).
 //
-// Schema 0.4: the headline is a top-level `score_pct` (the RELATIVE
+// The headline is a top-level `score_pct` (the RELATIVE
 // score) beside a `score { relative, global }` pair and per-category
 // `categories[]` rollups; there is no badge (no embeddable web badge).
 // Each result row carries its visible `category` plus `principle` as a
@@ -9,7 +9,9 @@
 // surfaces). `group` mirrors `principle` for the interim shared-renderer
 // path; the category-grouped web renderer replaces that consumer.
 
-import type { EvidenceItem, NaReason } from './handlers/types';
+import type { NaReason } from '../../shared/web-audit-findings';
+import type { EvidenceItem } from './handlers/types';
+import { type DeclaredHostEntry, type RowHost, rowHostFields } from './provenance';
 import type { WebAuditRegistry, WebCheckKeyword, WebCheckTier, WebSiteType } from './registry';
 import {
   type CategoryRollup,
@@ -20,7 +22,7 @@ import {
   universeMaxOf,
 } from './score';
 
-export type { NaReason } from './handlers/types';
+export type { NaReason } from '../../shared/web-audit-findings';
 
 /**
  * Web scorecard status vocabulary. `absent`, `noncompliant` and `broken`
@@ -66,12 +68,28 @@ export interface WebScorecardResultRow {
    */
   unprobed?: true;
   evidence: string | null;
+  /** The distinct hosts the row's evidence was requested from, in evidence order. */
+  hosts: RowHost[];
+  /** Present only when `hosts` holds exactly one entry. */
+  host?: string;
 }
 
 export interface WebCoverageLevel {
   total: number;
   verified: number;
 }
+
+/**
+ * Where an audit ran and whether it presented a credential: a score covers
+ * what an agent at that vantage can verify.
+ */
+export interface WebVantage {
+  network: 'public' | 'local';
+  credentialed: boolean;
+}
+
+/** The vantage of every audit this engine runs: the public internet, holding no credential. */
+const PUBLIC_VANTAGE: WebVantage = { network: 'public', credentialed: false };
 
 export interface WebScorecard {
   schema_version: string;
@@ -89,6 +107,14 @@ export interface WebScorecard {
   public_listing?: boolean;
   /** The declared site type this audit ran under; null = ran everything. */
   site_type: WebSiteType | null;
+  /** A fresh build always emits it; absent on a scorecard stored before the field existed. */
+  vantage?: WebVantage;
+  /** Whether the audit followed the hosts the target declares; absent reads as not evaluated. */
+  follow_declarations?: boolean;
+  /** The declared-hosts trail; absent reads as no trail, which is not an empty one. */
+  declared_hosts?: DeclaredHostEntry[];
+  /** The registry fingerprint prefix the score was computed under; never set by the engine. */
+  registry_fingerprint?: string;
   summary: Record<ScorecardStatus, number>;
   coverage_summary: { must: WebCoverageLevel; should: WebCoverageLevel; may: WebCoverageLevel };
   score_pct: number;
@@ -99,7 +125,7 @@ export interface WebScorecard {
 
 // Web scorecard schema version, independent of the CLI schema (0.7) and
 // of agentnative-spec. Documented in content/web-scorecard-schema.md.
-export const WEB_SCHEMA_VERSION = '0.4';
+export const WEB_SCHEMA_VERSION = '0.5';
 
 function coverageLevel(results: EngineResult[], keyword: WebCheckKeyword): WebCoverageLevel {
   let total = 0;
@@ -129,7 +155,10 @@ export interface WebScorecardMeta {
    * here means a first-ever audit and safely collapses to false.
    */
   publicListing?: boolean;
-  registry: Pick<WebAuditRegistry, 'category_order' | 'categories' | 'checks'>;
+  /** The effective follow state and the trail it produced; a build given neither records neither. */
+  followDeclarations?: boolean;
+  declaredHosts?: DeclaredHostEntry[];
+  registry: Pick<WebAuditRegistry, 'category_order' | 'categories' | 'checks' | 'alternatives'>;
   scoreConfig?: ScoreConfig;
 }
 
@@ -151,10 +180,11 @@ export function buildWebScorecard(results: EngineResult[], meta: WebScorecardMet
       ...(r.na_reason !== undefined ? { na_reason: r.na_reason } : {}),
       ...(r.unprobed === true ? { unprobed: true as const } : {}),
       evidence: r.evidence === '' ? null : r.evidence,
+      ...rowHostFields(r.raw_evidence),
     });
   }
 
-  const universeMax = universeMaxOf(meta.registry.checks, meta.scoreConfig);
+  const universeMax = universeMaxOf(meta.registry, results, meta.scoreConfig);
   const score = scoreWebAudit(results, universeMax, meta.scoreConfig);
 
   return {
@@ -168,6 +198,9 @@ export function buildWebScorecard(results: EngineResult[], meta: WebScorecardMet
     audit_profile: null,
     site_type: meta.siteType ?? null,
     public_listing: meta.publicListing ?? false,
+    vantage: { ...PUBLIC_VANTAGE },
+    ...(meta.followDeclarations !== undefined ? { follow_declarations: meta.followDeclarations } : {}),
+    ...(meta.declaredHosts !== undefined ? { declared_hosts: meta.declaredHosts } : {}),
     summary,
     coverage_summary: {
       must: coverageLevel(results, 'must'),

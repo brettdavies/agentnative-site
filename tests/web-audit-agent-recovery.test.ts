@@ -4,6 +4,7 @@
 import { describe, expect, test } from 'bun:test';
 import { AI_USER_FETCHER_PROBE_UA } from '../src/shared/user-agents';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
+import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
 
 function makeCheck(partial: Partial<WebCheck> & { id: string }): WebCheck {
@@ -73,7 +74,13 @@ const RECOVERY_CHECKS: WebCheck[] = [
 function registryOf(checks: WebCheck[]): WebAuditRegistry {
   return {
     version: 1,
-    mcp_discovery: { well_known: ['/.well-known/mcp.json'], common_paths: ['/mcp'], protocol_version: '2025-06-18' },
+    mcp_discovery: {
+      ai_catalog: '/.well-known/ai-catalog.json',
+      card_suffix: '/server-card',
+      well_known: ['/.well-known/mcp.json'],
+      common_paths: ['/mcp'],
+      protocol_version: '2025-06-18',
+    },
     category_order: ['discoverability', 'content-for-agents', 'bot-crawl-policy'],
     categories: {
       discoverability: 'Discoverability',
@@ -119,7 +126,12 @@ describe('agent-friendly 404 family', () => {
       return new Response(RICH_HTML, { status: 200, headers: { 'content-type': 'text/html' } });
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(RECOVERY_CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(RECOVERY_CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     expect(resultsOf(events).find((r) => r.id === 'agent-friendly-404')?.status).toBe('broken');
   });
@@ -137,7 +149,12 @@ describe('agent-friendly 404 family', () => {
       return new Response(RICH_HTML, { status: 200, headers: { 'content-type': 'text/html' } });
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(RECOVERY_CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(RECOVERY_CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const rows = resultsOf(events);
     expect(rows.find((r) => r.id === 'agent-friendly-404')?.status).toBe('pass');
@@ -157,7 +174,12 @@ describe('agent-friendly 404 family', () => {
       return new Response(RICH_HTML, { status: 200, headers: { 'content-type': 'text/html' } });
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(RECOVERY_CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(RECOVERY_CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     expect(resultsOf(events).find((r) => r.id === 'agent-friendly-404-md')?.status).toBe('pass');
   });
@@ -175,7 +197,12 @@ describe('agent-friendly 404 family', () => {
       return new Response(RICH_HTML, { status: 200, headers: { 'content-type': 'text/html' } });
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(RECOVERY_CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(RECOVERY_CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     expect(resultsOf(events).find((r) => r.id === 'agent-friendly-404-md')?.status).toBe('absent');
   });
@@ -193,7 +220,12 @@ describe('agent-friendly 404 family', () => {
       return new Response(RICH_HTML, { status: 200, headers: { 'content-type': 'text/html' } });
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(RECOVERY_CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(RECOVERY_CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     expect(resultsOf(events).find((r) => r.id === 'agent-friendly-404-md')?.status).toBe('absent');
   });
@@ -210,7 +242,12 @@ describe('content-without-js floor', () => {
       return new Response(THIN_HTML, { status: 200, headers: { 'content-type': 'text/html' } });
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(RECOVERY_CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(RECOVERY_CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     expect(resultsOf(events).find((r) => r.id === 'content-without-js')?.status).toBe('absent');
   });
@@ -225,7 +262,12 @@ describe('content-without-js floor', () => {
       return new Response(THIN_HTML, { status: 200, headers: { 'content-type': 'text/html' } });
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(RECOVERY_CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(RECOVERY_CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const row = resultsOf(events).find((r) => r.id === 'content-without-js');
     expect(row?.status).toBe('n_a');
@@ -244,7 +286,12 @@ describe('agent-ua reachability', () => {
       return new Response(RICH_HTML, { status: 200, headers: { 'content-type': 'text/html' } });
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(RECOVERY_CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(RECOVERY_CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const row = resultsOf(events).find((r) => r.id === 'agent-ua-reachable');
     expect(row?.status).toBe('broken');
@@ -260,7 +307,12 @@ describe('agent-ua reachability', () => {
       return new Response(RICH_HTML, { status: 200, headers: { 'content-type': 'text/html' } });
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(RECOVERY_CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(RECOVERY_CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     expect(resultsOf(events).find((r) => r.id === 'agent-ua-reachable')?.status).toBe('pass');
   });

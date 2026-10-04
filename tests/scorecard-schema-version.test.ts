@@ -1,10 +1,11 @@
-// Drift guard for content/scorecard-schema.md's stated current
-// schema_version. The doc is prose, so nothing structural stops a "Current:
-// 0.6." reference from outliving a schema bump — this test pins the doc's
-// two current-version surfaces (the top-level example JSON and the
-// field-table "Current: X." sentence) to the maximum of the build's
-// SUPPORTED_SCHEMA_VERSIONS. When the supported set gains a new maximum,
-// this fails until the doc is updated alongside it.
+// Drift guard for the stated current CLI scorecard schema_version. The docs
+// are prose, so nothing structural stops a "Current: 0.6." reference from
+// outliving a schema bump: this test pins content/scorecard-schema.md's two
+// current-version surfaces (the top-level example JSON and the field-table
+// "Current: X." sentence) and content/web-scorecard-schema.md's "(currently
+// X)" pointer to the maximum of the build's SUPPORTED_SCHEMA_VERSIONS. When
+// the supported set gains a new maximum, this fails until the docs are
+// updated alongside it.
 
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
@@ -13,6 +14,7 @@ import { compareVersions, SUPPORTED_SCHEMA_VERSIONS } from '../src/build/scoreca
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
 const DOC_PATH = join(REPO_ROOT, 'content', 'scorecard-schema.md');
+const WEB_DOC_PATH = join(REPO_ROOT, 'content', 'web-scorecard-schema.md');
 
 function maxSupportedVersion(): string {
   return [...SUPPORTED_SCHEMA_VERSIONS].sort(compareVersions).at(-1) as string;
@@ -37,6 +39,13 @@ describe('scorecard-schema doc current-version drift guard', () => {
     const doc = await readFile(DOC_PATH, 'utf8');
     const m = doc.match(/Current: (\d+\.\d+)\./);
     expect(SUPPORTED_SCHEMA_VERSIONS.has((m as RegExpMatchArray)[1])).toBe(true);
+  });
+
+  test('the web scorecard page names max(SUPPORTED_SCHEMA_VERSIONS) as the current CLI schema', async () => {
+    const doc = await readFile(WEB_DOC_PATH, 'utf8');
+    const m = doc.match(/CLI scorecard schema \(currently\s+(\d+\.\d+)\)/);
+    expect(m).not.toBeNull();
+    expect((m as RegExpMatchArray)[1]).toBe(maxSupportedVersion());
   });
 
   test('the historical "Added in 0.6." field annotations are preserved', async () => {

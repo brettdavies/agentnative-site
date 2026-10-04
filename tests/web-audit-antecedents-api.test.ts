@@ -1,7 +1,114 @@
 import { describe, expect, test } from 'bun:test';
 import { resolveAntecedent } from '../src/worker/audit-web/antecedents';
+import { apiDeclarations, catalogAnchors, isApiAnchor } from '../src/worker/audit-web/api-catalog';
 import type { ProbeResponse } from '../src/worker/audit-web/assert';
 import { ctx, htmlRoot, outcome } from './web-audit-antecedents-helpers';
+
+const CATALOG_URL = 'https://example.com/.well-known/api-catalog';
+
+function retainedCatalog(body: unknown, overrides: Partial<ProbeResponse> = {}) {
+  return {
+    url: CATALOG_URL,
+    response: {
+      status: 200,
+      headers: { 'content-type': 'application/linkset+json' },
+      body: typeof body === 'string' ? body : JSON.stringify(body),
+      error: null,
+      ...overrides,
+    },
+  };
+}
+
+// anc.dev's own catalog: one anchor whose service-desc is its MCP server card.
+const MCP_ONLY = {
+  linkset: [
+    {
+      anchor: 'https://example.com/mcp',
+      'service-desc': [{ href: 'https://example.com/.well-known/mcp/server-card.json', type: 'application/json' }],
+      'service-doc': [{ href: 'https://example.com/mcp-skill', type: 'text/html' }],
+    },
+  ],
+};
+
+describe('catalogAnchors: the linkset anchors the API category reads', () => {
+  test('an anchor is an API anchor through its first service-desc that is not an MCP surface, resolved against the catalog', () => {
+    const anchors = catalogAnchors(
+      retainedCatalog({
+        linkset: [
+          {
+            anchor: 'https://api.example.net/',
+            'service-desc': [
+              { href: 'https://api.example.net/.well-known/mcp/server-card.json' },
+              { href: '/specs/openapi.json' },
+            ],
+          },
+          { anchor: 'https://status.example.net/', 'service-doc': [{ href: 'https://status.example.net/docs' }] },
+          { 'service-desc': [{ href: '/no-anchor.json' }] },
+        ],
+      }),
+    );
+    expect(anchors).toEqual([
+      {
+        url: 'https://api.example.net/',
+        source: '/.well-known/api-catalog#/linkset/0',
+        description: {
+          url: 'https://example.com/specs/openapi.json',
+          source: '/.well-known/api-catalog#/linkset/0/service-desc/1',
+        },
+      },
+      { url: 'https://status.example.net/', source: '/.well-known/api-catalog#/linkset/1' },
+    ]);
+    expect(anchors.filter(isApiAnchor).map((a) => a.url)).toEqual(['https://api.example.net/']);
+  });
+
+  test('only the first eight linkset contexts are read, so an anchor listed after them has no declaration', () => {
+    const linkset = Array.from({ length: 9 }, (_, i) => ({
+      anchor: `https://api${i + 1}.example.net/`,
+      'service-desc': [{ href: `https://api${i + 1}.example.net/openapi.json` }],
+    }));
+    const anchors = catalogAnchors(retainedCatalog({ linkset }));
+    expect(anchors.map((a) => a.url)).toEqual(linkset.slice(0, 8).map((context) => context.anchor));
+    expect(apiDeclarations(anchors).some((d) => d.url.startsWith('https://api9.'))).toBe(false);
+  });
+
+  test("anc.dev's MCP-only catalog lists an anchor but no API anchor", () => {
+    const anchors = catalogAnchors(retainedCatalog(MCP_ONLY));
+    expect(anchors.map((a) => a.url)).toEqual(['https://example.com/mcp']);
+    expect(anchors.filter(isApiAnchor)).toEqual([]);
+  });
+
+  test('a catalog that did not answer 200, was cut at its cap, or has no linkset lists no anchor', () => {
+    expect(catalogAnchors(undefined)).toEqual([]);
+    expect(catalogAnchors(retainedCatalog(MCP_ONLY, { status: 404 }))).toEqual([]);
+    expect(catalogAnchors(retainedCatalog(MCP_ONLY, { truncated: true }))).toEqual([]);
+    expect(catalogAnchors(retainedCatalog({ entries: [] }))).toEqual([]);
+  });
+
+  test('the declarations are every anchor, the ones without an API description not followed, then each description', () => {
+    const anchors = catalogAnchors(
+      retainedCatalog({
+        linkset: [
+          { anchor: 'https://api.example.net/', 'service-desc': [{ href: 'https://specs.example.org/openapi.json' }] },
+          { anchor: 'https://status.example.net/' },
+        ],
+      }),
+    );
+    expect(apiDeclarations(anchors)).toEqual([
+      { kind: 'api-anchor', url: 'https://api.example.net/', source: '/.well-known/api-catalog#/linkset/0' },
+      {
+        kind: 'api-anchor',
+        url: 'https://status.example.net/',
+        source: '/.well-known/api-catalog#/linkset/1',
+        not_followed: 'no-service-desc',
+      },
+      {
+        kind: 'api-description',
+        url: 'https://specs.example.org/openapi.json',
+        source: '/.well-known/api-catalog#/linkset/0/service-desc/0',
+      },
+    ]);
+  });
+});
 
 describe('resolveAntecedent: api', () => {
   test('api-surface holds via each union signal independently and fails when none hold', () => {
@@ -30,6 +137,19 @@ describe('resolveAntecedent: api', () => {
     });
     expect(resolveAntecedent('api-surface', llmsApiLink)).toBe('apply');
     expect(resolveAntecedent('api-surface', ctx())).toBe('n_a');
+  });
+
+  test('api-surface holds on an API anchor in the retained api-catalog, and not on an MCP-only one', () => {
+    const anchors = catalogAnchors(
+      retainedCatalog({
+        linkset: [
+          { anchor: 'https://api.example.net/', 'service-desc': [{ href: 'https://api.example.net/openapi.json' }] },
+        ],
+      }),
+    );
+    expect(resolveAntecedent('api-surface', ctx({ apiAnchors: anchors.filter(isApiAnchor) }))).toBe('apply');
+    const mcpOnly = catalogAnchors(retainedCatalog(MCP_ONLY)).filter(isApiAnchor);
+    expect(resolveAntecedent('api-surface', ctx({ apiAnchors: mcpOnly }))).toBe('n_a');
   });
 
   test('api-surface stays n_a for an MCP-first site advertising service-desc/doc at its MCP card', () => {
@@ -134,9 +254,18 @@ describe('resolveAntecedent: api', () => {
   });
 
   test('schemas-ref holds on a passing openapi or a schema reference in the root', () => {
-    const openapiPass = ctx({ sources: new Map([['openapi', outcome('pass')]]) });
+    const openapiPass = ctx({
+      sources: new Map([['openapi', outcome('pass', [{ url: 'https://x.dev/openapi.json', status: 200, ok: true }])]]),
+    });
     expect(resolveAntecedent('schemas-ref', openapiPass)).toBe('apply');
     expect(resolveAntecedent('schemas-ref', ctx({ root: htmlRoot('see /schema.json for shapes') }))).toBe('apply');
     expect(resolveAntecedent('schemas-ref', ctx())).toBe('n_a');
+  });
+
+  test('schemas-ref does not hold on an openapi row that passed only on a description off the audited origin', () => {
+    const offOrigin = { url: 'https://specs.example.org/openapi.json', status: 200, ok: true, off_origin: true };
+    expect(
+      resolveAntecedent('schemas-ref', ctx({ sources: new Map([['openapi', outcome('pass', [offOrigin])]]) })),
+    ).toBe('n_a');
   });
 });

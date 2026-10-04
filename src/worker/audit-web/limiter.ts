@@ -20,6 +20,41 @@ const HOURLY_KV_TTL_SECONDS = 7200;
 // needs. The window is the same fixed hour the audit ceiling uses.
 const FLIP_CEILING = 5;
 
+// Audits an hour that may reach one declared registrable domain, whichever
+// site declares it and whichever caller audits that site. Approximate: the
+// count is a read then a write on eventually consistent KV, so audits that
+// read it at once can each be admitted. Matched to the per-IP audit
+// ceiling, so one caller's full hour of audits of a site fits, while a
+// hostile site declaring a third party cannot turn many callers into many
+// more than this many audits' worth of requests to it.
+export const DECLARED_DOMAIN_HOURLY_CEILING = 30;
+
+/** KV key prefix of the declared-domain budget: `<prefix>:<sha256(domain)>:<hour bucket>`. */
+export const DECLARED_DOMAIN_BUDGET_PREFIX = 'web_audit_follow';
+
+/** When the fixed hour holding `now` ends, which is when every hourly window opens its next bucket. */
+export function hourWindowEndsAt(now: number): string {
+  return new Date((Math.floor(now / HOUR_MS) + 1) * HOUR_MS).toISOString();
+}
+
+/**
+ * Reads the fixed-hour KV counter at `<prefix>:<id>:<hour bucket>`: null at
+ * the ceiling, otherwise the write that takes one unit under the shared TTL.
+ */
+async function readHourlyBucket(
+  kv: KVNamespace,
+  prefix: string,
+  id: string,
+  ceiling: number,
+): Promise<(() => Promise<void>) | null> {
+  const bucket = Math.floor(Date.now() / HOUR_MS);
+  const key = `${prefix}:${id}:${bucket}`;
+  const currentRaw = await kv.get(key);
+  const current = currentRaw ? Number.parseInt(currentRaw, 10) : 0;
+  if (Number.isNaN(current) || current >= ceiling) return null;
+  return () => kv.put(key, String(current + 1), { expirationTtl: HOURLY_KV_TTL_SECONDS });
+}
+
 /**
  * Fixed-hour KV counter behind every hourly budget: read the current
  * bucket count, refuse at the ceiling, otherwise increment under the
@@ -31,12 +66,9 @@ export async function consumeHourlyBucketBudget(
   id: string,
   ceiling: number,
 ): Promise<boolean> {
-  const bucket = Math.floor(Date.now() / HOUR_MS);
-  const key = `${prefix}:${id}:${bucket}`;
-  const currentRaw = await kv.get(key);
-  const current = currentRaw ? Number.parseInt(currentRaw, 10) : 0;
-  if (Number.isNaN(current) || current >= ceiling) return false;
-  await kv.put(key, String(current + 1), { expirationTtl: HOURLY_KV_TTL_SECONDS });
+  const take = await readHourlyBucket(kv, prefix, id, ceiling);
+  if (take === null) return false;
+  await take();
   return true;
 }
 
@@ -58,4 +90,18 @@ export async function consumeWebAuditHourlyBudget(kv: KVNamespace, ip: string): 
  */
 export async function consumeWebAuditFlipBudget(kv: KVNamespace, domainHash: string): Promise<boolean> {
   return consumeHourlyBucketBudget(kv, 'web_audit_flip', domainHash, FLIP_CEILING);
+}
+
+/**
+ * Reads the hourly window of a declared registrable domain, keyed by the
+ * domain's hash: null when that domain's hour is spent, otherwise the write
+ * that spends this audit's unit. The read and the write are separate calls,
+ * so a failed write can be told apart from a failed read.
+ */
+export function readDeclaredDomainWindow(
+  kv: KVNamespace,
+  domainHash: string,
+  ceiling: number = DECLARED_DOMAIN_HOURLY_CEILING,
+): Promise<(() => Promise<void>) | null> {
+  return readHourlyBucket(kv, DECLARED_DOMAIN_BUDGET_PREFIX, domainHash, ceiling);
 }

@@ -13,6 +13,7 @@
 #   scripts/web-audit/run.sh --target https://anc.dev/    # audit a public target (post-release)
 #   scripts/web-audit/run.sh --json                       # full scorecard JSON
 #   scripts/web-audit/run.sh --site-type api              # force the declared site type
+#   scripts/web-audit/run.sh --no-follow-declarations     # skip the hosts the site declares
 #
 # Exit codes (with --check): 0 pass, 1 present-but-failing, 2 setup error, 3 not evaluable.
 # Add --no-build to reuse the existing dist/ (skips the rebuild).
@@ -49,7 +50,8 @@ done
 case "$TARGET" in
   *agentnative-site-staging*)
     OP_READ="${OP_READ:-$HOME/.claude/skills/1password/scripts/read_field.sh}"
-    OP_ITEM="Cloudflare Access Service Token - agentnative-site-staging"
+    # CF Service Token - Staging CLI (agentnative-site)
+    OP_ITEM="iuutxdlnh3ujmylvzmuflraeia"
     if [ ! -x "$OP_READ" ]; then
       echo "FATAL: 1Password helper not found at $OP_READ (install the 1password skill or export OP_READ)." >&2
       exit 2

@@ -1,11 +1,11 @@
-// Runtime web-leaderboard renderer: the /web board, its markdown twin,
-// and the homepage frontpage rows, all rendered at request time from the
-// R2 board aggregate. Web entries carry the two-score pair (RELATIVE is the
-// default sort; GLOBAL is the `?sort=global` toggle) and no tier/language/
-// principle columns; the toggle behavior lives in src/client/web-leaderboard.ts
-// and operates on the rendered rows. When the aggregate is absent or empty
-// (cold start, or a SPEC_VERSION bump that rotated every key) the board
-// renders a scoring-in-progress empty state rather than failing.
+// Runtime web-leaderboard renderer: the website pane of the merged
+// leaderboard, its markdown rows, and the homepage pane rows, all rendered
+// at request time from the R2 board aggregates. Web entries carry the
+// two-score pair and no tier/language/principle columns; every surface
+// ranks by RELATIVE, the headline the meter shows, with GLOBAL as the
+// tie-break. When the aggregate is absent or empty (cold start, or a
+// SPEC_VERSION bump that rotated every key) the board renders a
+// scoring-in-progress empty state rather than failing.
 
 import { AUDIT_PATH, auditPath, leaderboardPath, SCORECARDS_PATH, scorePath } from '../../shared/audit-routes';
 import { bandOf, escHtml, renderMeter } from '../../shared/scorecard-format.mjs';
@@ -137,7 +137,7 @@ export function buildBoardMarkdownRows(entries: WebBoardEntry[], origin: string)
  */
 export function buildFrontpageBoardRows(entries: WebAggregateEntry[]): string {
   // The homepage pane headlines the site score (RELATIVE) and ranks by it,
-  // matching /web's default sort.
+  // matching the website board.
   return rankWebEntries(entries, 'relative')
     .map((entry) => {
       const pct = entry.score.relative;

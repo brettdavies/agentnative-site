@@ -4,6 +4,7 @@
 // Bodies and headers here are contract bytes: a change regenerates goldens
 // on both sides of the CLI port.
 
+import { OPENAPI_MAX_BODY_BYTES } from '../../src/worker/audit-web/ssrf';
 import type { Exchange, ExchangeResponse, Scenario } from './conformance-corpus';
 
 const BASE = 'https://example.com/';
@@ -155,6 +156,11 @@ const LLMS_TXT_FULL = [
 ].join('\n');
 
 const LLMS_TXT_H1_ONLY = '# Example\n';
+const HTTP_LINK = 'http://example.com/docs/plain.md';
+const LLMS_TXT_HTTP_LINK = LLMS_TXT_FULL.replace(
+  '\n\n## When to use',
+  `\n- [Plain](${HTTP_LINK}): the same docs over plaintext\n\n## When to use`,
+);
 
 const LLMS_FULL_TXT = '# Example\n\n## Guide\n\nEverything in one fetch.\n';
 const SCOPED_LLMS = '# Docs\n\n- [Guide](/docs/guide.md)\n';
@@ -169,6 +175,13 @@ const OPENAPI = {
 };
 const API_PROBE_PATH = '/v1/items/anc-web-audit-no-such';
 const API_FALLBACK_PATH = '/anc-web-audit-no-such-api';
+const OPENAPI_YAML = 'openapi: 3.1.0\ninfo:\n  title: Example files API\n  version: 1.0.0\npaths: {}\n';
+const API_ERROR = { error: { type: 'invalid_request_error', message: 'Unrecognized request URL' } };
+// Stripe-shaped: the `openapi` key follows a components object that alone
+// runs past the bytes the description read takes.
+const OPENAPI_PAST_THE_CAP = JSON.stringify({ components: { schemas: { padding: 'x'.repeat(OPENAPI_MAX_BODY_BYTES) } }, ...OPENAPI });
+const linkset = (...contexts: unknown[]): ExchangeResponse =>
+  res(200, { 'content-type': 'application/linkset+json' }, JSON.stringify({ linkset: contexts }));
 
 const SERVER_CARD = {
   name: 'example',
@@ -179,6 +192,23 @@ const SERVER_CARD = {
 const SERVER_CARD_WITH_AUTH = { ...SERVER_CARD, authentication: { type: 'oauth2' } };
 const CARD_PATH = '/.well-known/mcp/server-card.json';
 const CARD_ALIASES = ['/.well-known/mcp', '/.well-known/mcp.json', '/mcp.json'];
+const CARD_SUFFIX_PATH = `${MCP_PATH}/server-card`;
+
+const MCP_CARD_TYPE = 'application/mcp-server-card+json';
+const SEP_2127_CARD = {
+  $schema: 'https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json',
+  name: 'com.example/example',
+  version: '1.0.0',
+  description: 'Example MCP server',
+  remotes: [{ type: 'streamable-http', url: 'https://example.com/mcp' }],
+};
+const cardDocument = (card: unknown): ExchangeResponse => res(200, { 'content-type': MCP_CARD_TYPE }, JSON.stringify(card));
+const aiCatalog = (...entries: unknown[]): ExchangeResponse => json({ specVersion: '1.0', entries });
+const cardEntry = (fields: Record<string, unknown>) => ({
+  identifier: 'urn:air:example.com:mcp:example',
+  type: MCP_CARD_TYPE,
+  ...fields,
+});
 
 const TOOLS_RESULT = { tools: [{ name: 'search', description: 'Search', inputSchema: { type: 'object' } }, { name: 'ping' }] };
 const RESOURCES_RESULT = { resources: [{ uri: 'anc://registry', name: 'registry' }] };
@@ -200,6 +230,8 @@ const ACAO = {
 };
 
 type McpOptions = {
+  /** Where the server answers; the audited site's /mcp unless a declared host serves it. */
+  endpoint?: string;
   session?: string;
   cors?: 'full' | 'none' | 'preflight-only' | 'post-only';
   toolsFraming?: 'json' | 'sse';
@@ -229,15 +261,17 @@ function modernMcp(): Exchange[] {
 }
 
 /** A server that does not serve the modern lane refuses every header-routed probe. */
-function noModernLane(): Exchange[] {
+function noModernLane(opts: McpOptions = {}): Exchange[] {
+  const at = opts.endpoint ?? MCP_PATH;
   return [
-    post(MCP_PATH, rpcError(-32601), { headers: { 'mcp-protocol-version': MODERN_PROTOCOL } }),
-    post(MCP_PATH, rpcError(-32601), { headers: { 'mcp-protocol-version': UNSUPPORTED_PROTOCOL } }),
+    post(at, rpcError(-32601), { headers: { 'mcp-protocol-version': MODERN_PROTOCOL } }),
+    post(at, rpcError(-32601), { headers: { 'mcp-protocol-version': UNSUPPORTED_PROTOCOL } }),
   ];
 }
 
 /** Legacy-lane (initialize + JSON-RPC) rules. */
 function legacyMcp(opts: McpOptions = {}): Exchange[] {
+  const at = opts.endpoint ?? MCP_PATH;
   const sessionHeaders: Record<string, string> =
     opts.session === undefined ? {} : { 'mcp-session-id': opts.session };
   const postAcao = opts.cors === 'full' || opts.cors === 'post-only' ? ACAO : {};
@@ -250,27 +284,28 @@ function legacyMcp(opts: McpOptions = {}): Exchange[] {
         )
       : rpcResult(TOOLS_RESULT);
   return [
-    post(MCP_PATH, rpcError(-32700, 400), { body_contains: 'not-json{{' }),
-    post(MCP_PATH, rpcError(-32600, 400), { body_contains: '[{' }),
-    post(MCP_PATH, rpcResult(TOOLS_RESULT), { headers: { accept: 'application/json' }, body_json_method: 'tools/list' }),
-    post(MCP_PATH, text('Not Acceptable', {}, 406), { headers: { accept: 'application/xml' } }),
-    post(MCP_PATH, rpcResult(opts.initializeResult ?? INITIALIZE_RESULT, sessionHeaders), {
+    post(at, rpcError(-32700, 400), { body_contains: 'not-json{{' }),
+    post(at, rpcError(-32600, 400), { body_contains: '[{' }),
+    post(at, rpcResult(TOOLS_RESULT), { headers: { accept: 'application/json' }, body_json_method: 'tools/list' }),
+    post(at, text('Not Acceptable', {}, 406), { headers: { accept: 'application/xml' } }),
+    post(at, rpcResult(opts.initializeResult ?? INITIALIZE_RESULT, sessionHeaders), {
       body_json_method: 'initialize',
     }),
-    post(MCP_PATH, res(202, {}, ''), { body_json_method: 'notifications/initialized' }),
-    post(MCP_PATH, rpcResult(TOOLS_RESULT, postAcao), { headers: { origin: CORS_ORIGIN }, body_json_method: 'tools/list' }),
-    post(MCP_PATH, toolsResponse, { body_json_method: 'tools/list' }),
-    post(MCP_PATH, rpcResult(RESOURCES_RESULT), { body_json_method: 'resources/list' }),
-    post(MCP_PATH, rpcError(-32602), { body_json_method: 'tools/call' }),
-    post(MCP_PATH, rpcError(-32601), { body_json_method: 'nonexistent/method' }),
+    post(at, res(202, {}, ''), { body_json_method: 'notifications/initialized' }),
+    post(at, rpcResult(TOOLS_RESULT, postAcao), { headers: { origin: CORS_ORIGIN }, body_json_method: 'tools/list' }),
+    post(at, toolsResponse, { body_json_method: 'tools/list' }),
+    post(at, rpcResult(RESOURCES_RESULT), { body_json_method: 'resources/list' }),
+    post(at, rpcError(-32602), { body_json_method: 'tools/call' }),
+    post(at, rpcError(-32601), { body_json_method: 'nonexistent/method' }),
   ];
 }
 
 /** The non-POST surfaces of an MCP endpoint: the preflight and the GET. */
 function mcpEdges(opts: McpOptions = {}): Exchange[] {
+  const at = opts.endpoint ?? MCP_PATH;
   const preflight =
     opts.cors === 'full' || opts.cors === 'preflight-only' ? res(204, ACAO, '') : res(204, {}, '');
-  return [options(MCP_PATH, preflight), get(MCP_PATH, text('Method Not Allowed', { allow: 'POST' }, 405))];
+  return [options(at, preflight), get(at, text('Method Not Allowed', { allow: 'POST' }, 405))];
 }
 
 function dualStackMcp(opts: McpOptions = {}): Exchange[] {
@@ -278,7 +313,7 @@ function dualStackMcp(opts: McpOptions = {}): Exchange[] {
 }
 
 function legacyOnlyMcp(opts: McpOptions = {}): Exchange[] {
-  return [...mcpEdges(opts), ...noModernLane(), ...legacyMcp(opts)];
+  return [...mcpEdges(opts), ...noModernLane(opts), ...legacyMcp(opts)];
 }
 
 function modernOnlyMcp(opts: McpOptions = {}): Exchange[] {
@@ -356,6 +391,7 @@ function fullSite(): Exchange[] {
     ...contentSurface(),
     ...apiSurface(),
     ...cardSurface(SERVER_CARD_WITH_AUTH),
+    get(CARD_SUFFIX_PATH, NOT_FOUND),
     ...dualStackMcp({ cors: 'full' }),
     ...discoveryAndAuthSurface(),
     ...dnsAll((name) => (name.startsWith('_index') ? dohAnswer(name) : DOH_NXDOMAIN)),
@@ -366,7 +402,12 @@ function scenario(
   description: string,
   covers: string[],
   exchanges: Exchange[],
-  opts: { site_type?: 'content' | 'api' | null; unmatched?: ExchangeResponse; allow_unmatched?: boolean } = {},
+  opts: {
+    site_type?: 'content' | 'api' | null;
+    unmatched?: ExchangeResponse;
+    allow_unmatched?: boolean;
+    follow_declarations?: boolean;
+  } = {},
 ): Scenario {
   return {
     description,
@@ -374,6 +415,7 @@ function scenario(
     target: BASE,
     site_type: opts.site_type ?? null,
     spec_version: SPEC_VERSION,
+    ...(opts.follow_declarations !== undefined ? { follow_declarations: opts.follow_declarations } : {}),
     unmatched: opts.unmatched ?? NOT_FOUND,
     allow_unmatched: opts.allow_unmatched ?? true,
     exchanges,
@@ -381,6 +423,62 @@ function scenario(
 }
 
 const baseline = (): Exchange[] => [get('/', html(rootHtml()))];
+
+// A declared host serving a legacy-lane MCP server at /mcp.
+const DECLARED_ENDPOINT = 'https://mcp.example.net/mcp';
+
+const REDIRECTED_ENDPOINT = 'https://mcp.example.org/mcp';
+const HTTP_DECLARED_ENDPOINT = 'http://mcp.example.net/mcp';
+const HTTP_REDIRECT_HOP = 'http://mcp.example.org/mcp';
+const declaringCard = (endpoint: string): Exchange => get(CARD_PATH, json({ ...SERVER_CARD, mcp_endpoint: endpoint }));
+const selfNamingCard = (endpoint: string): Exchange => get(`${endpoint}/server-card`, cardDocument({ ...SEP_2127_CARD, remotes: [{ type: 'streamable-http', url: endpoint }] }));
+const FOLLOWED_IDS = ['mcp-initialize', 'mcp-tools-list', 'mcp-cors-preflight', 'mcp-cors-actual', 'mcp-get-fast-fail'];
+
+const PROTECTED_RESOURCE_PATH = '/.well-known/oauth-protected-resource';
+const AUTH_SERVER = 'https://auth.example.com';
+const challenge401 = (metadataUrl: string | null, extra: Record<string, string> = {}): ExchangeResponse =>
+  res(
+    401,
+    {
+      'content-type': 'application/json',
+      ...(metadataUrl === null ? {} : { 'www-authenticate': `Bearer resource_metadata="${metadataUrl}"` }),
+      ...extra,
+    },
+    '{"error":"unauthorized"}',
+  );
+
+/**
+ * An MCP server behind OAuth at `endpoint`: every POST draws a 401 whose
+ * challenge names `metadataUrl`, apart from an unparseable body and an
+ * unsupported version claim, which it refuses before reading a token.
+ */
+function protectedMcp(endpoint: string, metadataUrl: string): Exchange[] {
+  return [
+    post(endpoint, rpcError(-32700, 400), { body_contains: 'not-json{{' }),
+    post(endpoint, rpcError(-32022, 400, { supported: [MODERN_PROTOCOL] }), {
+      headers: { 'mcp-protocol-version': UNSUPPORTED_PROTOCOL },
+    }),
+    post(endpoint, challenge401(metadataUrl, ACAO), { headers: { origin: CORS_ORIGIN } }),
+    post(endpoint, challenge401(metadataUrl)),
+    options(endpoint, res(204, ACAO, '')),
+    get(endpoint, challenge401(metadataUrl)),
+  ];
+}
+
+const ENFORCEMENT_IDS = ['mcp-auth-challenge', 'mcp-auth-servers', 'mcp-auth-enforced'];
+
+const SIGN_IN_IDS = [
+  'mcp-initialize',
+  'mcp-capabilities',
+  'mcp-tools-list',
+  'mcp-resources-list',
+  'mcp-server-discover',
+  'mcp-malformed-body',
+  'mcp-modern-version-reject',
+  'mcp-get-fast-fail',
+  'mcp-cors-preflight',
+  'mcp-cors-actual',
+];
 
 const MCP_IDS = [
   'mcp-initialize',
@@ -540,6 +638,23 @@ export const SCENARIOS: Record<string, Scenario> = {
       get('/s4', redirect(u('/s5'))),
       get('/s5', text('Contact: mailto:security@example.com\n')),
     ],
+  ),
+  'run-document-redirects-to-http': scenario(
+    'the audited site answers /llms.txt and its API catalog with a redirect to the same path over http, where each would answer: neither hop is taken, and each document reads as missing (llms.txt absent, the optional API catalog n_a), its evidence naming the redirect to http',
+    ['llms-txt', 'api-catalog'],
+    [
+      ...baseline(),
+      get('/llms.txt', redirect('http://example.com/llms.txt')),
+      get('http://example.com/llms.txt', text(LLMS_TXT_FULL)),
+      get('/.well-known/api-catalog', redirect('http://example.com/.well-known/api-catalog')),
+      get('http://example.com/.well-known/api-catalog', linkset()),
+    ],
+  ),
+  'run-root-redirects-to-http': scenario(
+    'every https request, the root included, redirects to the http root, which would answer: the run ends unreachable after the root request alone, and nothing is requested over http',
+    ['agent-ua-reachable', 'content-without-js'],
+    [get('/', redirect('http://example.com/')), get('http://example.com/', html(rootHtml()))],
+    { allow_unmatched: false },
   ),
   'run-body-over-cap': scenario(
     'bodies past the 64 KiB probe cap are truncated: a huge tools/list no longer parses and a huge JSON error body reads as non-JSON',
@@ -759,6 +874,15 @@ export const SCENARIOS: Record<string, Scenario> = {
     ...modernMcp(),
     ...legacyMcp(),
   ]),
+  'cors-post-rate-limited-no-cors': scenario('a bare preflight beside a POST answered HTTP 408 is an operational unknown on both rows, not a declared posture', ['mcp-cors-preflight', 'mcp-cors-actual'], [
+    ...baseline(),
+    ...cardSurface(),
+    options(MCP_PATH, res(204, {}, '')),
+    get(MCP_PATH, text('Method Not Allowed', {}, 405)),
+    post(MCP_PATH, text('Request Timeout', {}, 408), { headers: { origin: CORS_ORIGIN } }),
+    ...modernMcp(),
+    ...legacyMcp(),
+  ]),
 
   // ---- mcp handler -----------------------------------------------------------
   'mcp-dual-stack': scenario('a dual-stack server passes every legacy, modern, conformance and negotiation row', MCP_IDS, [
@@ -870,9 +994,52 @@ export const SCENARIOS: Record<string, Scenario> = {
     ...mcpEdges(),
     post(MCP_PATH, rpcError(-32099)),
   ]),
+  'mcp-http-rate-limited': scenario(
+    'an HTTP 429 or 408 answer is an operational error on every row whatever body rides it, like a -32099 refusal',
+    MCP_IDS,
+    [
+      ...baseline(),
+      ...cardSurface(),
+      ...mcpEdges(),
+      post(MCP_PATH, rpcError(-32000, 429), { body_json_method: 'initialize' }),
+      post(MCP_PATH, rpcError(-32000, 429), { headers: { 'mcp-method': 'server/discover' } }),
+      post(MCP_PATH, text('Request Timeout', {}, 408), { headers: { 'mcp-protocol-version': MODERN_PROTOCOL } }),
+      post(MCP_PATH, text('Too Many Requests', { 'retry-after': '60' }, 429)),
+    ],
+  ),
+  'mcp-discover-rate-limited': scenario(
+    'a 429 on server/discover alone leaves the modern lane unknown, so the modern rows probe on their own answers instead of reading absent',
+    [
+      'mcp-server-discover',
+      'mcp-modern-tools-list',
+      'mcp-modern-unknown-method',
+      'mcp-modern-clientcaps',
+      'mcp-modern-header-mismatch',
+      'mcp-modern-version-reject',
+      'mcp-modern-resources-miss',
+    ],
+    [
+      ...baseline(),
+      ...cardSurface(),
+      post(MCP_PATH, text('Too Many Requests', { 'retry-after': '60' }, 429), { headers: { 'mcp-method': 'server/discover' } }),
+      ...dualStackMcp(),
+    ],
+  ),
+  'mcp-edges-rate-limited': scenario(
+    'the GET and the preflight answer HTTP 429, the preflight with Allow-Origin, while the Origin-bearing POST carries Allow-Origin: the GET fast-fail and preflight rows are operational errors, and the actual row, which its own Allow-Origin settles, passes',
+    ['mcp-get-fast-fail', 'mcp-cors-preflight', 'mcp-cors-actual'],
+    [
+      ...baseline(),
+      ...cardSurface(),
+      options(MCP_PATH, text('Too Many Requests', { ...ACAO, 'retry-after': '60' }, 429)),
+      get(MCP_PATH, text('Too Many Requests', { 'retry-after': '60' }, 429)),
+      ...modernMcp(),
+      ...legacyMcp({ cors: 'post-only' }),
+    ],
+  ),
   'mcp-www-authenticate': scenario(
-    'an endpoint that challenges initialize with 401 and WWW-Authenticate is broken and satisfies the mcp-auth antecedent',
-    ['mcp-initialize', 'oauth-protected-resource', 'auth-md'],
+    'an endpoint that answers legacy POSTs with a 401 whose challenge names no metadata, while root RFC 9728 metadata names it: it requires sign-in, so the legacy session rows, the resources rows, and every row a 401 answers read auth-required, and the challenge satisfies the mcp-auth antecedent; its modern lane refuses server/discover with a method-not-found and no 401, an answer a token would not change, so the modern session rows read absent as they do on an open server',
+    ['mcp-initialize', 'mcp-server-discover', 'mcp-auth-challenge', 'oauth-protected-resource', 'auth-md'],
     [
       ...baseline(),
       ...cardSurface(),
@@ -931,6 +1098,282 @@ export const SCENARIOS: Record<string, Scenario> = {
     ...noModernLane(),
     ...legacyMcp(),
   ]),
+
+  // ---- discovery order: SEP-2127 catalog, card suffix, SEP-1649 --------------
+  'discovery-catalog-card': scenario(
+    'an AI catalog entry names a SEP-2127 card on the audited origin; its streamable-http remote is the endpoint, so no common path is POSTed',
+    ['ai-catalog', 'mcp-initialize'],
+    [
+      ...baseline(),
+      get('/.well-known/ai-catalog.json', aiCatalog(cardEntry({ url: u(CARD_SUFFIX_PATH) }))),
+      get(CARD_SUFFIX_PATH, cardDocument(SEP_2127_CARD)),
+      ...legacyOnlyMcp(),
+    ],
+  ),
+  'discovery-catalog-inline-card': scenario(
+    'an AI catalog entry carries its SEP-2127 card inline; the card is read in place and its remote is the endpoint',
+    ['ai-catalog', 'mcp-initialize'],
+    [...baseline(), get('/.well-known/ai-catalog.json', aiCatalog(cardEntry({ data: SEP_2127_CARD }))), ...legacyOnlyMcp()],
+  ),
+  'discovery-catalog-declarations': scenario(
+    'catalog cards off the audited origin or behind a URL template are declared, never requested; discovery falls through to initialize',
+    ['mcp-initialize'],
+    [
+      ...baseline(),
+      get(
+        '/.well-known/ai-catalog.json',
+        aiCatalog(
+          cardEntry({ url: 'https://cards.example.net/example/server-card' }),
+          cardEntry({ data: { ...SEP_2127_CARD, remotes: [{ type: 'streamable-http', url: 'https://{tenant}.example.com/mcp' }] } }),
+        ),
+      ),
+      ...legacyOnlyMcp(),
+    ],
+  ),
+  'discovery-suffix-card': scenario(
+    'no catalog and no well-known card: initialize finds the endpoint, and the SEP-2127 card under the endpoint at /mcp/server-card is the card of record',
+    ['mcp-initialize'],
+    [...baseline(), get(CARD_SUFFIX_PATH, cardDocument(SEP_2127_CARD)), ...legacyOnlyMcp()],
+  ),
+  'discovery-legacy-card': scenario(
+    'a SEP-1649 card at the well-known path names the endpoint in transport.url; no common path is POSTed and the card suffix answers 404',
+    ['well-known-mcp-card', 'mcp-initialize'],
+    [
+      ...baseline(),
+      get(CARD_PATH, json({ name: 'example', transport: { type: 'streamable-http', url: 'https://example.com/mcp' } })),
+      ...legacyOnlyMcp(),
+    ],
+  ),
+  'discovery-card-generations-auth': scenario(
+    'an inline SEP-2127 catalog card and a SEP-1649 card declaring authentication name one endpoint that never answers 401; the catalog card wins the endpoint and the SEP-1649 declaration still satisfies the auth antecedents, so the OAuth rows are scored',
+    ['oauth-protected-resource', 'auth-md'],
+    [
+      ...baseline(),
+      get('/.well-known/ai-catalog.json', aiCatalog(cardEntry({ data: SEP_2127_CARD }))),
+      get(CARD_PATH, json(SERVER_CARD_WITH_AUTH)),
+      ...legacyOnlyMcp(),
+      get('/.well-known/oauth-protected-resource', json({ resource: 'https://example.com/mcp', authorization_servers: ['https://example.com'] })),
+      get('/.well-known/auth.md', md('# Auth\n\nRegister at /signup, then send a bearer token.\n')),
+    ],
+  ),
+
+  // ---- declared-host follow ---------------------------------------------------
+  'follow-card-admit': scenario(
+    'the card names an endpoint on another host, whose own card at `<endpoint>/server-card` names it: the MCP rows are scored there',
+    FOLLOWED_IDS,
+    [
+      ...baseline(),
+      declaringCard(DECLARED_ENDPOINT),
+      selfNamingCard(DECLARED_ENDPOINT),
+      ...legacyOnlyMcp({ endpoint: DECLARED_ENDPOINT, cors: 'full' }),
+    ],
+  ),
+  'follow-reciprocity-refused': scenario(
+    'the declared endpoint answers GET with 405 and Allow: POST but publishes no card, catalog entry, or metadata naming it: no wire probe, and the MCP rows name the host that did not confirm it',
+    FOLLOWED_IDS,
+    [
+      ...baseline(),
+      declaringCard(DECLARED_ENDPOINT),
+      get(DECLARED_ENDPOINT, text('Method Not Allowed', { allow: 'POST' }, 405)),
+    ],
+  ),
+  'follow-redirect-hop': scenario(
+    'the declared endpoint redirects once to another public host whose card names the final URL: the final URL is the endpoint and the trail records both',
+    FOLLOWED_IDS,
+    [
+      ...baseline(),
+      declaringCard(DECLARED_ENDPOINT),
+      get(DECLARED_ENDPOINT, redirect(REDIRECTED_ENDPOINT, 302)),
+      selfNamingCard(REDIRECTED_ENDPOINT),
+      ...legacyOnlyMcp({ endpoint: REDIRECTED_ENDPOINT, cors: 'full' }),
+    ],
+  ),
+  'follow-own-redirect-admit': scenario(
+    "the audited site's /mcp answers the discovery POSTs with a 307 to another host whose card at `<endpoint>/server-card` names it: no POST follows the redirect, the target is confirmed like a declared endpoint, and the MCP rows are scored there",
+    FOLLOWED_IDS,
+    [
+      ...baseline(),
+      post(MCP_PATH, redirect(REDIRECTED_ENDPOINT, 307)),
+      selfNamingCard(REDIRECTED_ENDPOINT),
+      ...legacyOnlyMcp({ endpoint: REDIRECTED_ENDPOINT, cors: 'full' }),
+    ],
+  ),
+  'follow-own-redirect-refused': scenario(
+    "the audited site's /mcp answers the discovery POSTs with a 307 to another host that publishes nothing naming that URL: no POST or OPTIONS reaches the host, and the MCP rows name the host that did not confirm it",
+    FOLLOWED_IDS,
+    [...baseline(), post(MCP_PATH, redirect(DECLARED_ENDPOINT, 307))],
+  ),
+  'follow-host-cap': scenario(
+    'four declared hosts each redirect into a private range and are blocked; the fifth exceeds the per-audit host cap and is never requested',
+    ['mcp-initialize'],
+    [
+      ...baseline(),
+      get(
+        '/.well-known/ai-catalog.json',
+        aiCatalog(
+          ...[1, 2, 3, 4].map((n) =>
+            cardEntry({ data: { ...SEP_2127_CARD, remotes: [{ type: 'streamable-http', url: `https://h${n}.example.net/mcp` }] } }),
+          ),
+        ),
+      ),
+      declaringCard('https://h5.example.net/mcp'),
+      ...[1, 2, 3, 4].map((n) => get(`https://h${n}.example.net/mcp`, redirect('http://10.0.0.1/mcp', 302))),
+    ],
+  ),
+  'follow-disabled': scenario(
+    'the same declared endpoint as follow-card-admit with following off: nothing off the audited origin is requested and the MCP rows read follow-disabled',
+    FOLLOWED_IDS,
+    [
+      ...baseline(),
+      declaringCard(DECLARED_ENDPOINT),
+      selfNamingCard(DECLARED_ENDPOINT),
+      ...legacyOnlyMcp({ endpoint: DECLARED_ENDPOINT, cors: 'full' }),
+    ],
+    { follow_declarations: false },
+  ),
+  'follow-http-declarations': scenario(
+    'the AI catalog names an https endpoint that redirects to http, the card names an http endpoint, and the api-catalog anchors an http API host whose description is http, each host answering as one the audit would follow: nothing is requested over http, every entry reads not-followed with reason insecure-scheme (the redirected one with its hop as the final URL), and no MCP or API row is evaluated at any of them: the API rows read absent, as nothing declared over http earns more than a missing API',
+    ['mcp-initialize', 'openapi', 'json-errors'],
+    [
+      ...baseline(),
+      get(
+        '/.well-known/ai-catalog.json',
+        aiCatalog(cardEntry({ data: { ...SEP_2127_CARD, remotes: [{ type: 'streamable-http', url: REDIRECTED_ENDPOINT }] } })),
+      ),
+      get(REDIRECTED_ENDPOINT, redirect(HTTP_REDIRECT_HOP, 302)),
+      selfNamingCard(HTTP_REDIRECT_HOP),
+      declaringCard(HTTP_DECLARED_ENDPOINT),
+      selfNamingCard(HTTP_DECLARED_ENDPOINT),
+      ...legacyOnlyMcp({ endpoint: HTTP_DECLARED_ENDPOINT, cors: 'full' }),
+      get(
+        '/.well-known/api-catalog',
+        linkset({
+          anchor: 'http://api.example.net/',
+          'service-desc': [{ href: 'http://api.example.net/openapi.json', type: 'application/openapi+json' }],
+        }),
+      ),
+      get('http://api.example.net/openapi.json', json(OPENAPI)),
+      get(`http://api.example.net${API_PROBE_PATH}`, json(API_ERROR, 404)),
+    ],
+  ),
+
+  // ---- endpoints that require sign-in ----------------------------------------
+  'auth-own-endpoint': scenario(
+    "the audited site's /mcp answers every POST with a 401 whose challenge names same-host RFC 9728 metadata naming it: the endpoint is found with sign-in required, rows that need no session are scored, and the rest read auth-required",
+    [...SIGN_IN_IDS, ...ENFORCEMENT_IDS, 'oauth-protected-resource'],
+    [
+      ...baseline(),
+      ...protectedMcp(MCP_PATH, u(PROTECTED_RESOURCE_PATH)),
+      get(PROTECTED_RESOURCE_PATH, json({ resource: u(MCP_PATH), authorization_servers: [AUTH_SERVER] })),
+    ],
+  ),
+  'auth-declared-endpoint': scenario(
+    "the card names a root endpoint on another host that answers 401 and publishes metadata naming it without the trailing slash: the metadata admits it, and the MCP rows are scored there with sign-in required",
+    [...SIGN_IN_IDS, ...ENFORCEMENT_IDS, 'oauth-protected-resource'],
+    [
+      ...baseline(),
+      declaringCard('https://mcp.example.net/'),
+      ...protectedMcp('https://mcp.example.net/', `https://mcp.example.net${PROTECTED_RESOURCE_PATH}`),
+      get(
+        `https://mcp.example.net${PROTECTED_RESOURCE_PATH}`,
+        json({ resource: 'https://mcp.example.net', authorization_servers: [AUTH_SERVER] }),
+      ),
+    ],
+  ),
+  'auth-enforcement-defects': scenario(
+    "an endpoint that requires sign-in lists an http authorization server and serves a legacy tools/list without a token: the challenge row passes, the metadata row is broken, and the refusal row is noncompliant",
+    ENFORCEMENT_IDS,
+    [
+      ...baseline(),
+      post(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH)), { headers: { 'mcp-protocol-version': MODERN_PROTOCOL } }),
+      post(MCP_PATH, rpcResult(TOOLS_RESULT), { body_json_method: 'tools/list' }),
+      post(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH))),
+      get(PROTECTED_RESOURCE_PATH, json({ resource: u(MCP_PATH), authorization_servers: ['http://auth.example.com'] })),
+    ],
+  ),
+  'auth-servers-mixed': scenario(
+    "an endpoint that requires sign-in lists a public https authorization server between an http one and one on a private address: an agent can still sign in through the usable server, so the metadata row is noncompliant and names both unusable entries, and none of the three is requested",
+    ['mcp-auth-servers'],
+    [
+      ...baseline(),
+      ...protectedMcp(MCP_PATH, u(PROTECTED_RESOURCE_PATH)),
+      get(
+        PROTECTED_RESOURCE_PATH,
+        json({
+          resource: u(MCP_PATH),
+          authorization_servers: ['http://auth.example.com', AUTH_SERVER, 'https://10.0.0.1/oauth'],
+        }),
+      ),
+    ],
+  ),
+  'auth-modern-only': scenario(
+    "a modern-only server behind OAuth at the audited site's /mcp refuses every legacy POST at HTTP 200 with a JSON-RPC error before reading a token, while every modern POST draws a 401 naming same-host RFC 9728 metadata that names it: the endpoint is found with sign-in required, the modern session rows and the resources rows read auth-required, the legacy session rows read the legacy refusal as they do on an open modern-only server, and the refusal row is asked on the modern lane, where it passes",
+    ['mcp-server-discover', 'mcp-modern-tools-list', 'mcp-tools-list', 'mcp-auth-enforced'],
+    [
+      ...baseline(),
+      post(MCP_PATH, rpcError(-32700, 400), { body_contains: 'not-json{{' }),
+      post(MCP_PATH, rpcError(-32022, 400, { supported: [MODERN_PROTOCOL] }), {
+        headers: { 'mcp-protocol-version': UNSUPPORTED_PROTOCOL },
+      }),
+      post(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH)), { headers: { 'mcp-protocol-version': MODERN_PROTOCOL } }),
+      post(MCP_PATH, { ...rpcError(-32022, 200, { supported: [MODERN_PROTOCOL] }), headers: { 'content-type': 'application/json', ...ACAO } }, {
+        headers: { origin: CORS_ORIGIN },
+      }),
+      post(MCP_PATH, rpcError(-32022, 200, { supported: [MODERN_PROTOCOL] })),
+      options(MCP_PATH, res(204, ACAO, '')),
+      get(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH))),
+      get(PROTECTED_RESOURCE_PATH, json({ resource: u(MCP_PATH), authorization_servers: [AUTH_SERVER] })),
+    ],
+  ),
+  'auth-open-endpoint': scenario(
+    'an open server whose card documents that no sign-in is required: no wire probe draws a 401, so the sign-in rows are `n_a`',
+    ENFORCEMENT_IDS,
+    [...baseline(), get(CARD_PATH, json({ ...SERVER_CARD, authentication: { required: false } })), ...legacyOnlyMcp()],
+  ),
+  'auth-bare-401': scenario(
+    "the audited site's /mcp answers 401 with no challenge and no metadata names it: a bare 401 is refusal evidence, so no endpoint is found",
+    ['mcp-initialize'],
+    [...baseline(), post(MCP_PATH, challenge401(null))],
+  ),
+  'auth-echoing-gateway': scenario(
+    "the audited site's /mcp answers 401 naming path-suffixed metadata, but the host answers a nonsense path's metadata with that path as its resource too: the metadata confirms nothing, so no endpoint is found",
+    ['mcp-initialize'],
+    [
+      ...baseline(),
+      post(MCP_PATH, challenge401(u(`${PROTECTED_RESOURCE_PATH}${MCP_PATH}`))),
+      get(`${PROTECTED_RESOURCE_PATH}${MCP_PATH}`, json({ resource: u(MCP_PATH), authorization_servers: [AUTH_SERVER] })),
+      get(
+        `${PROTECTED_RESOURCE_PATH}/anc-web-audit-no-such-resource`,
+        json({ resource: u('/anc-web-audit-no-such-resource'), authorization_servers: [AUTH_SERVER] }),
+      ),
+    ],
+  ),
+  'auth-echo-unanswered': scenario(
+    "the audited site's card declares its /mcp, which answers every POST with a 401 naming same-host root RFC 9728 metadata that names it, and the metadata read at a nonsense path draws a 503: the card already made the endpoint of record, so an echo read that got no answer leaves sign-in settled, the rows the 401s answer read auth-required, and none reads broken",
+    ['mcp-initialize', 'mcp-tools-list', ...ENFORCEMENT_IDS],
+    [
+      ...baseline(),
+      get(CARD_PATH, json(SERVER_CARD)),
+      ...protectedMcp(MCP_PATH, u(PROTECTED_RESOURCE_PATH)),
+      get(PROTECTED_RESOURCE_PATH, json({ resource: u(MCP_PATH), authorization_servers: [AUTH_SERVER] })),
+      get(`${PROTECTED_RESOURCE_PATH}/anc-web-audit-no-such-resource`, text('upstream error', {}, 503)),
+    ],
+  ),
+  'auth-later-401': scenario(
+    "the audited site's /mcp serves initialize without a token and refuses server/discover with a method-not-found, while every other request it reads a token for draws a 401 naming same-host RFC 9728 metadata that names it: no handshake asked for sign-in, so the endpoint presents the open design and the sign-in rows are n_a, and each later row whose 401 that metadata backs reads auth-required rather than broken",
+    ['mcp-capabilities', 'mcp-tools-list', 'mcp-resources-list', 'mcp-unknown-tool', 'mcp-accept-json', 'mcp-auth-enforced'],
+    [
+      ...baseline(),
+      post(MCP_PATH, rpcError(-32700, 400), { body_contains: 'not-json{{' }),
+      post(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH), ACAO), { headers: { origin: CORS_ORIGIN } }),
+      post(MCP_PATH, rpcResult(INITIALIZE_RESULT), { body_json_method: 'initialize' }),
+      post(MCP_PATH, rpcError(-32601), { headers: { 'mcp-method': 'server/discover' } }),
+      post(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH))),
+      options(MCP_PATH, res(204, ACAO, '')),
+      get(MCP_PATH, challenge401(u(PROTECTED_RESOURCE_PATH))),
+      get(PROTECTED_RESOURCE_PATH, json({ resource: u(MCP_PATH), authorization_servers: [AUTH_SERVER] })),
+    ],
+  ),
 
   // ---- dns-doh ---------------------------------------------------------------
   'dns-aid-pass': scenario('the first resolver answers Status 0 with a record for the index name', ['dns-aid'], [
@@ -1070,6 +1513,27 @@ export const SCENARIOS: Record<string, Scenario> = {
     get('/llms.txt', text(LLMS_TXT_FULL)),
     get('/docs/guide.md', md(GUIDE_MD)),
   ]),
+  'llms-quality-dead-and-http-link': scenario(
+    'an llms.txt that lists a dead link and an http link: the http link is never requested, though it would answer with a server error that would read broken, and the dead link decides the links row, which reads absent',
+    ['llms-txt-links'],
+    [
+      ...baseline(),
+      get('/llms.txt', text(LLMS_TXT_HTTP_LINK)),
+      get('/docs/guide.md', md(GUIDE_MD)),
+      get(HTTP_LINK, SERVER_ERROR),
+    ],
+  ),
+  'llms-quality-http-link': scenario(
+    'an llms.txt that lists an http link beside resolving https links: the http link is never requested, though it would answer, and the links row reads noncompliant naming it',
+    ['llms-txt-links'],
+    [
+      ...baseline(),
+      get('/llms.txt', text(LLMS_TXT_HTTP_LINK)),
+      get('/docs/guide.md', md(GUIDE_MD)),
+      get('/docs/api.md', md(GUIDE_MD)),
+      get(HTTP_LINK, md(GUIDE_MD)),
+    ],
+  ),
 
   // ---- api-hygiene -------------------------------------------------------------
   'api-hygiene-pass': scenario('a documented 4xx GET answered with a JSON error body and rate-limit headers passes both rows', ['json-errors', 'rate-limit-headers'], [
@@ -1089,4 +1553,46 @@ export const SCENARIOS: Record<string, Scenario> = {
     get('/openapi.json', json(OPENAPI)),
     get(API_PROBE_PATH, json({ items: [] })),
   ]),
+  'api-anchor-hosts': scenario(
+    'a Stripe-shaped api-catalog anchors two API hosts and an MCP endpoint with no service-desc: the OpenAPI row scores each declared description where it is hosted (JSON on one host, YAML on the other), the hygiene rows probe each anchor host once (the documented 4xx path, then the nonsense path) and list both hosts in anchor order, JSON errors pass and rate-limit headers are missing at both, the third anchor is recorded not followed and never requested, and no hygiene probe reaches the audited site',
+    ['openapi', 'api-catalog', 'json-errors', 'rate-limit-headers'],
+    [
+      ...baseline(),
+      get(
+        '/.well-known/api-catalog',
+        linkset(
+          {
+            anchor: 'https://api.example.net/',
+            'service-desc': [{ href: 'https://api.example.net/openapi.json', type: 'application/openapi+json' }],
+            'service-doc': [{ href: 'https://example.com/docs/api', type: 'text/html' }],
+          },
+          {
+            anchor: 'https://files.example.net/',
+            'service-desc': [{ href: 'https://files.example.net/openapi.yaml', type: 'application/openapi+yaml' }],
+          },
+          { anchor: 'https://mcp.example.net/mcp', 'service-doc': [{ href: 'https://example.com/docs/mcp', type: 'text/html' }] },
+        ),
+      ),
+      get('https://api.example.net/openapi.json', json(OPENAPI)),
+      get(`https://api.example.net${API_PROBE_PATH}`, json(API_ERROR, 404)),
+      get('https://files.example.net/openapi.yaml', res(200, { 'content-type': 'application/yaml' }, OPENAPI_YAML)),
+      get(`https://files.example.net${API_FALLBACK_PATH}`, json(API_ERROR, 404)),
+    ],
+  ),
+  'api-description-over-cap': scenario(
+    'an API anchor declares a JSON description larger than the 512 KiB read cap whose `openapi` key sits after its components, past the bytes read: the OpenAPI row counts it present from the truncated read, and the hygiene probes, with no parsed description to take a path from, fall back to the nonsense path on the anchor host',
+    ['openapi'],
+    [
+      ...baseline(),
+      get(
+        '/.well-known/api-catalog',
+        linkset({
+          anchor: 'https://api.example.net/',
+          'service-desc': [{ href: 'https://api.example.net/openapi.json', type: 'application/openapi+json' }],
+        }),
+      ),
+      get('https://api.example.net/openapi.json', res(200, { 'content-type': 'application/json' }, OPENAPI_PAST_THE_CAP)),
+      get(`https://api.example.net${API_FALLBACK_PATH}`, json(API_ERROR, 404)),
+    ],
+  ),
 };

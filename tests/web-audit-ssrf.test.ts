@@ -2,7 +2,10 @@
 // for every probe fetch the web audit makes: private / loopback /
 // link-local / CGNAT / cloud-metadata destinations must be blocked in
 // every encoding form, redirects must be re-validated per hop, and the
-// public happy path must still succeed.
+// public happy path must still succeed. The follow phase adds two more
+// boundaries: no declared URL, redirect hop, or metadata location reaches
+// a private destination, and no wire probe reaches a host that did not
+// publish an artifact naming the endpoint, whichever way it failed to.
 
 import { describe, expect, test } from 'bun:test';
 import { AUDIT_USER_AGENT } from '../src/shared/user-agents';
@@ -12,13 +15,20 @@ import {
   STATUS_ONLY_BODY_BYTES,
   validatePublicUrl,
 } from '../src/worker/audit-web/ssrf';
-
-function stubFetch(handler: (url: string, init?: RequestInit) => Response | Promise<Response>): typeof fetch {
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-    return handler(url, init);
-  }) as typeof fetch;
-}
+import {
+  audit,
+  cardDocument,
+  html,
+  json,
+  type Route,
+  redirect,
+  router,
+  type Seen,
+  sep2127Card,
+  siteDeclaring,
+  wireProbesTo,
+} from './helpers/follow-fixtures';
+import { stubFetch } from './helpers/stub-fetch';
 
 describe('validatePublicUrl', () => {
   test('allows a public https URL', () => {
@@ -39,6 +49,8 @@ describe('validatePublicUrl', () => {
     ['rfc1918 172.16/12', 'http://172.20.1.1/'],
     ['gcp metadata hostname', 'http://metadata.google.internal/'],
     ['localhost hostname', 'http://localhost:8787/'],
+    ['localhost with trailing dots', 'http://localhost../'],
+    ['metadata hostname with trailing dots', 'http://metadata.google.internal../'],
     ['decimal ip literal (127.0.0.1)', 'http://2130706433/'],
     ['octal ip literal (127.0.0.1)', 'http://0177.0.0.1/'],
     ['hex ip literal (127.0.0.1)', 'http://0x7f.0.0.1/'],
@@ -108,6 +120,129 @@ describe('guardedFetch', () => {
     expect(fetched).toEqual(['https://example.com/']);
     expect(resp.status).toBeNull();
     expect(resp.error).toContain('blocked');
+  });
+
+  test('an http request URL is refused as insecure-scheme and never sent', async () => {
+    const sent: string[] = [];
+    const fetchImpl = stubFetch((url) => {
+      sent.push(url);
+      return new Response('plaintext', { status: 200 });
+    });
+    for (const method of ['GET', 'POST', 'OPTIONS']) {
+      const resp = await guardedFetch('http://example.com/llms.txt', { method }, { fetchImpl });
+      expect({ method, status: resp.status, error: resp.error, refused: resp.refused }).toEqual({
+        method,
+        status: null,
+        error: 'not requested: not https',
+        refused: 'insecure-scheme',
+      });
+    }
+    expect(sent).toEqual([]);
+  });
+
+  test('a redirect from https to http is not taken: the redirect is the answer, refused as insecure-scheme', async () => {
+    const sent: string[] = [];
+    const fetchImpl = stubFetch((url) => {
+      sent.push(url);
+      if (url === 'https://example.com/a') return new Response(null, { status: 308, headers: { Location: '/b' } });
+      if (url === 'https://example.com/b') {
+        return new Response(null, { status: 301, headers: { Location: 'http://example.com/b' } });
+      }
+      return new Response('plaintext', { status: 200 });
+    });
+    const resp = await guardedFetch('https://example.com/a', {}, { fetchImpl });
+    expect(sent).toEqual(['https://example.com/a', 'https://example.com/b']);
+    expect(resp).toMatchObject({
+      status: 301,
+      headers: { location: 'http://example.com/b' },
+      body: '',
+      error: 'redirect refused: 301 to http://example.com/b: not https',
+      refused: 'insecure-scheme',
+    });
+  });
+
+  test('with redirects refused, a redirect answer is a failure naming its target and no hop is taken', async () => {
+    const fetched: string[] = [];
+    const fetchImpl = stubFetch((url) => {
+      fetched.push(url);
+      return url === 'https://example.com/mcp'
+        ? new Response(null, { status: 307, headers: { Location: 'https://elsewhere.example.org/mcp' } })
+        : new Response('final', { status: 200 });
+    });
+    const resp = await guardedFetch(
+      'https://example.com/mcp',
+      { method: 'POST' },
+      { fetchImpl, refuseRedirects: true },
+    );
+    expect(fetched).toEqual(['https://example.com/mcp']);
+    expect(resp.status).toBeNull();
+    expect(resp.error).toBe('redirect refused: 307 to https://elsewhere.example.org/mcp');
+  });
+
+  test('with cross-origin redirects returned, same-origin hops are followed and a cross-origin redirect comes back as-is', async () => {
+    const sent: Array<{ method: string; url: string; body: string }> = [];
+    const fetchImpl = stubFetch((url, init) => {
+      sent.push({ method: init?.method ?? 'GET', url, body: String(init?.body ?? '') });
+      if (url === 'https://example.com/mcp') return new Response(null, { status: 308, headers: { Location: '/mcp/' } });
+      if (url === 'https://example.com/mcp/') {
+        return new Response(null, { status: 307, headers: { Location: 'https://victim.example/hook' } });
+      }
+      return new Response('replayed', { status: 200 });
+    });
+    const resp = await guardedFetch(
+      'https://example.com/mcp',
+      { method: 'POST', body: '{"method":"initialize"}' },
+      { fetchImpl, crossOriginRedirects: 'return' },
+    );
+    expect(sent).toEqual([
+      { method: 'POST', url: 'https://example.com/mcp', body: '{"method":"initialize"}' },
+      { method: 'POST', url: 'https://example.com/mcp/', body: '{"method":"initialize"}' },
+    ]);
+    expect(resp.status).toBe(307);
+    expect(resp.headers.location).toBe('https://victim.example/hook');
+    expect(resp.error).toBeNull();
+  });
+
+  test('a redirect that keeps the host but changes the scheme or port leaves the origin', async () => {
+    for (const location of ['http://example.com/mcp', 'https://example.com:8443/mcp']) {
+      const sent: string[] = [];
+      const fetchImpl = stubFetch((url) => {
+        sent.push(url);
+        return url === 'https://example.com/mcp'
+          ? new Response(null, { status: 307, headers: { Location: location } })
+          : new Response('replayed', { status: 200 });
+      });
+      const resp = await guardedFetch(
+        'https://example.com/mcp',
+        { method: 'POST' },
+        { fetchImpl, crossOriginRedirects: 'return' },
+      );
+      expect({ location, sent, status: resp.status }).toEqual({
+        location,
+        sent: ['https://example.com/mcp'],
+        status: 307,
+      });
+    }
+  });
+
+  test('with cross-origin redirects refused, a same-origin hop is followed and a cross-origin one is a failure naming its target', async () => {
+    const sent: string[] = [];
+    const fetchImpl = stubFetch((url) => {
+      sent.push(url);
+      if (url === 'https://example.com/mcp') return new Response(null, { status: 308, headers: { Location: '/mcp/' } });
+      if (url === 'https://example.com/mcp/') {
+        return new Response(null, { status: 302, headers: { Location: 'https://victim.example/hook' } });
+      }
+      return new Response('replayed', { status: 200 });
+    });
+    const resp = await guardedFetch(
+      'https://example.com/mcp',
+      { method: 'POST' },
+      { fetchImpl, crossOriginRedirects: 'refuse' },
+    );
+    expect(sent).toEqual(['https://example.com/mcp', 'https://example.com/mcp/']);
+    expect(resp.status).toBeNull();
+    expect(resp.error).toBe('redirect refused: 302 to https://victim.example/hook');
   });
 
   test('follows allowed redirects and returns the final response', async () => {
@@ -185,6 +320,34 @@ describe('guardedFetch', () => {
     expect(capped.status).toBe(200);
     expect(capped.body.length).toBe(AUDIT_PROBE_MAX_BODY_BYTES);
   });
+
+  test('a body stopped at its cap is flagged truncated; one that fits is not', async () => {
+    const cap = 1024;
+    const streamOf = (...chunks: number[]) =>
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const size of chunks) controller.enqueue(new Uint8Array(size).fill(120));
+          controller.close();
+        },
+      });
+    const read = (body: ReadableStream<Uint8Array> | string) =>
+      guardedFetch('https://example.com/', {}, { fetchImpl: stubFetch(() => new Response(body)), maxBodyBytes: cap });
+
+    const oneChunkOver = await read('x'.repeat(cap + 1));
+    expect(oneChunkOver.body.length).toBe(cap);
+    expect(oneChunkOver.truncated).toBe(true);
+
+    const overAtChunkBoundary = await read(streamOf(cap, 16));
+    expect(overAtChunkBoundary.body.length).toBe(cap);
+    expect(overAtChunkBoundary.truncated).toBe(true);
+
+    const exactlyCap = await read(streamOf(cap / 2, cap / 2));
+    expect(exactlyCap.body.length).toBe(cap);
+    expect('truncated' in exactlyCap).toBe(false);
+
+    const underCap = await read('x'.repeat(cap - 1));
+    expect('truncated' in underCap).toBe(false);
+  });
 });
 
 describe('guardedFetch user-agent', () => {
@@ -217,5 +380,111 @@ describe('guardedFetch user-agent', () => {
     );
     expect(seen?.['User-Agent']).toBe('custom-probe/1');
     expect(seen?.['user-agent']).toBeUndefined();
+  });
+});
+
+describe('follow phase egress', () => {
+  function timeout(): never {
+    const err = new Error('deadline exceeded');
+    err.name = 'TimeoutError';
+    throw err;
+  }
+
+  // One way each for the declared host to fail to confirm the endpoint.
+  const collapses: Array<[string, (endpoint: string, host: string) => Record<string, Route>, Route?]> = [
+    ['DNS failure', () => ({}), () => Promise.reject(new TypeError('getaddrinfo ENOTFOUND'))],
+    ['404 card', () => ({})],
+    [
+      'card naming another URL',
+      (endpoint, host) => ({
+        [`GET ${endpoint}/server-card`]: () => cardDocument(sep2127Card(`https://${host}/other`)),
+      }),
+    ],
+    [
+      'unparseable card',
+      (endpoint) => ({ [`GET ${endpoint}/server-card`]: () => new Response('{"remotes": [', { status: 200 }) }),
+    ],
+    [
+      'mismatched metadata',
+      (_endpoint, host) => ({
+        [`GET https://${host}/.well-known/oauth-protected-resource/mcp`]: () =>
+          json({ resource: `https://${host}/elsewhere` }),
+      }),
+    ],
+    [
+      'metadata timeout',
+      (_endpoint, host) => ({ [`GET https://${host}/.well-known/oauth-protected-resource/mcp`]: timeout }),
+    ],
+    ['HTML GET answer', (endpoint) => ({ [`GET ${endpoint}`]: () => html() })],
+    [
+      '405 with Allow: POST and no card',
+      (endpoint) => ({
+        [`GET ${endpoint}`]: () => new Response('Method Not Allowed', { status: 405, headers: { allow: 'POST' } }),
+      }),
+    ],
+  ];
+
+  test('every reciprocity failure leaves the same trail entry and row reason, and no wire probe', async () => {
+    const shapes = new Set<string>();
+    for (const [index, [name, routes, fallback]] of collapses.entries()) {
+      const host = `h${index + 1}.example.net`;
+      const endpoint = `https://${host}/mcp`;
+      const seen: Seen[] = [];
+      const fetchImpl = router({ ...siteDeclaring(endpoint), ...routes(endpoint, host) }, seen, (init) => {
+        const last = seen[seen.length - 1];
+        if (fallback !== undefined && new URL(last.url).host === host) return fallback(init);
+        return new Response('not found', { status: 404 });
+      });
+      const { scorecard } = await audit(fetchImpl);
+      const initialize = scorecard.results.find((r) => r.id === 'mcp-initialize');
+      const shape = JSON.stringify({ trail: scorecard.declared_hosts, initialize }).replaceAll(host, 'HOST');
+      shapes.add(shape);
+      expect({ name, wire: wireProbesTo(seen, host) }).toEqual({ name, wire: [] });
+      expect({ name, reason: initialize?.na_reason }).toEqual({ name, reason: 'reciprocity-refused' });
+    }
+    expect(shapes.size).toBe(1);
+  });
+
+  test('no declared URL, redirect hop, or metadata location reaches a private destination', async () => {
+    const privateUrls = [
+      'http://127.0.0.1/mcp',
+      'http://localhost/mcp',
+      'http://169.254.169.254/latest/meta-data',
+      'http://metadata.google.internal/computeMetadata',
+      'http://[::1]/mcp',
+      'http://10.1.2.3/mcp',
+    ];
+    const isPrivate = (url: string) => privateUrls.some((p) => new URL(p).host === new URL(url).host);
+    for (const target of privateUrls) {
+      const viaDeclaration: Seen[] = [];
+      await audit(router(siteDeclaring(target), viaDeclaration));
+      const viaHop: Seen[] = [];
+      await audit(
+        router(
+          {
+            ...siteDeclaring('https://mcp.example.net/mcp'),
+            'GET https://mcp.example.net/mcp': () => redirect(target),
+          },
+          viaHop,
+        ),
+      );
+      const viaChallenge: Seen[] = [];
+      await audit(
+        router(
+          {
+            ...siteDeclaring('https://mcp.example.net/mcp'),
+            'GET https://mcp.example.net/mcp': () =>
+              new Response(null, {
+                status: 401,
+                headers: { 'www-authenticate': `Bearer resource_metadata="${target}"` },
+              }),
+          },
+          viaChallenge,
+        ),
+      );
+      for (const seen of [viaDeclaration, viaHop, viaChallenge]) {
+        expect({ target, reached: seen.filter((r) => isPrivate(r.url)) }).toEqual({ target, reached: [] });
+      }
+    }
   });
 });

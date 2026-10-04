@@ -6,14 +6,18 @@
 //   readWebTier ............ the unmetered cache decision (serve, patch, audit)
 //   patchWebListing ........ the listing-only write, scored_at preserved
 //   runWebAuditStream ...... the engine as shared events, R2 write, purge,
-//                            aggregate rebuild, one terminal event
+//                            aggregate rebuild, one terminal event; a run
+//                            that does not follow declared hosts, or one a
+//                            declared domain's spent budget held back,
+//                            saves no scorecard and ends on a transient
+//                            envelope
 //
 // The core never reads a token, a session, or a limiter; admission is the
 // caller's. It keeps stale-serve-when-disabled (a caller decides to serve
 // a stale hit as data when the kill switch is off), the listing patch, and
 // the per-domain flip budget.
 
-import { type AuditEnvelope, buildWebEnvelope } from '../../shared/audit-envelope';
+import { type AuditEnvelope, buildWebEnvelope, transientWebEnvelope } from '../../shared/audit-envelope';
 import { type AuditEvent, CTA_RETRY } from '../../shared/audit-events';
 import { type NotifyEnv, notifyFailure } from '../notify';
 import { SPEC_VERSION } from '../spec-version.gen';
@@ -31,20 +35,29 @@ import {
   WEB_AUDIT_STALE_AFTER_MS,
 } from './cache';
 import { enrichWebScorecardForDisplay } from './display';
+import { type DomainBudgetEnv, declaredDomainBudget } from './domain-budget';
 import { runWebAudit } from './engine';
+import type { DomainRefusal } from './follow-requests';
+import { effectiveFollow, type FollowSwitchEnv } from './follow-switch';
+import { heldRun } from './held-run';
 import { queueHitMinPurge, webDomainTag, webTag } from './hit-min-purge';
+import { rowHostFields } from './provenance';
 import {
   decidePublicListingWrite,
   enforcePublicListingFlipLimit,
   type PublicListingWrite,
   resolveAuditListing,
+  standingPublicListing,
 } from './public-listing';
-import { loadWebAuditRegistry, type WebAuditRegistry, type WebSiteType } from './registry';
+import { loadWebAuditRegistry, type WebAuditRegistry, type WebSiteType, withRegistryFingerprint } from './registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remediation';
-import type { EngineResult } from './scorecard';
+import type { EngineResult, WebScorecard } from './scorecard';
 import { validatePublicUrl } from './ssrf';
+import type { WebScorecardShape } from './summary-model';
+import { buildWebSummaryBody } from './summary-render';
+import type { TransientReason } from './summary-transient';
 
-export interface WebCoreEnv extends AuditLogEnv, NotifyEnv {
+export interface WebCoreEnv extends AuditLogEnv, NotifyEnv, FollowSwitchEnv, DomainBudgetEnv {
   ASSETS: Fetcher;
   SCORE_CACHE: R2Bucket;
   SCORE_KV?: KVNamespace;
@@ -80,6 +93,16 @@ export type WebTier =
   | { kind: 'patch'; write: Extract<PublicListingWrite, { path: 'patch' }>; cached: CachedWebAudit }
   | { kind: 'audit'; cached: CachedWebAudit | null; listing: boolean; write: PublicListingWrite };
 
+/** The target's stored audit, or null when none was ever saved. */
+async function readStoredWebAudit(env: WebCoreEnv, target: WebTarget): Promise<CachedWebAudit | null> {
+  return cacheGet(env, await keyFor(target.canonical, SPEC_VERSION));
+}
+
+/** The listing a run that saves nothing carries: the target's stored choice, unlisted when it has none. */
+export async function readStandingListing(env: WebCoreEnv, target: WebTarget): Promise<boolean> {
+  return standingPublicListing(await readStoredWebAudit(env, target));
+}
+
 /**
  * The unmetered read tier. A fresh hit with no differing listing choice
  * serves; a fresh hit with a differing explicit choice patches; a stale
@@ -91,7 +114,7 @@ export async function readWebTier(
   target: WebTarget,
   publicListing: boolean | undefined,
 ): Promise<WebTier> {
-  const cached = await cacheGet(env, await keyFor(target.canonical, SPEC_VERSION));
+  const cached = await readStoredWebAudit(env, target);
   const write = decidePublicListingWrite({ explicit: publicListing, cached });
   const fresh = cached !== null && !isStale(cached.scored_at, WEB_AUDIT_STALE_AFTER_MS);
   if (cached && fresh && write.path === 'serve-cached') return { kind: 'serve', cached, fresh: true };
@@ -128,7 +151,14 @@ async function displayInputs(
  */
 export async function webEnvelope(
   env: WebCoreEnv,
-  input: { tier: 'cache' | 'live'; host: string; record: CachedWebAudit; origin: string },
+  input: {
+    tier: 'cache' | 'live';
+    host: string;
+    record: CachedWebAudit;
+    origin: string;
+    /** Why the result was not saved; set, the envelope carries no URLs and its body in their place. */
+    transient?: TransientReason;
+  },
 ): Promise<AuditEnvelope> {
   const { registry, catalog } = await displayInputs(env);
   const scorecard = enrichWebScorecardForDisplay(input.record.scorecard, {
@@ -136,12 +166,24 @@ export async function webEnvelope(
     catalog,
     origin: input.origin,
   });
-  return buildWebEnvelope({
+  const envelope = buildWebEnvelope({
     tier: input.tier,
     target: input.host,
     record: { ...input.record, scorecard },
     origin: input.origin,
   });
+  if (!input.transient) return envelope;
+  const summaryHtml = buildWebSummaryBody({
+    scorecard: scorecard as WebScorecardShape,
+    domain: input.host,
+    targetUrl: input.record.target_url,
+    remediation: catalog,
+    registry: registry ?? undefined,
+    origin: input.origin,
+    freshness: envelope.freshness,
+    transient: input.transient,
+  });
+  return transientWebEnvelope(envelope, summaryHtml);
 }
 
 export type PatchOutcome =
@@ -183,12 +225,18 @@ export type RunWebAuditInput = {
   target: WebTarget;
   siteType: WebSiteType | null;
   listing: boolean;
+  /**
+   * The caller's follow choice; the operator's switch can still turn
+   * following off. A caller that opts out gets a result that is never saved.
+   */
+  followDeclarations: boolean;
   origin: string;
   probeFetch?: typeof fetch;
   surface: 'stream' | 'mcp';
 };
 
 function checkEvent(result: EngineResult): AuditEvent {
+  const { host, hosts } = rowHostFields(result.raw_evidence);
   return {
     type: 'check',
     id: result.id,
@@ -196,6 +244,9 @@ function checkEvent(result: EngineResult): AuditEvent {
     keyword: result.keyword,
     status: result.status,
     evidence: result.evidence,
+    ...(host !== undefined ? { host } : {}),
+    ...(hosts.length > 1 ? { hosts } : {}),
+    ...(result.na_reason !== undefined ? { na_reason: result.na_reason } : {}),
   };
 }
 
@@ -203,14 +254,20 @@ function checkEvent(result: EngineResult): AuditEvent {
  * Run the engine and yield shared events: `discovery`, one `check` per
  * result, then one terminal event. A complete run is written to R2, the
  * board tags are queued for purge, the seeded aggregates are rebuilt, and
- * the terminal is `complete` carrying the live envelope; a deadline-bound
- * run yields `incomplete` and is never persisted; an unreachable target
- * or a thrown engine yields `error`.
+ * the terminal is `complete` carrying the live envelope; a complete run the
+ * caller opted out of following, or one a declared domain's spent hourly
+ * budget held back from replacing a saved scorecard, saves no scorecard,
+ * rebuilds nothing, and ends on the transient envelope, though a held run
+ * still writes the listing it resolved onto the saved scorecard; a
+ * deadline-bound run yields `incomplete` and is never persisted; an
+ * unreachable target or a thrown engine yields `error`.
  */
 export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerator<AuditEvent> {
   const { env, target } = input;
-  let scorecard: unknown = null;
+  let scorecard: WebScorecard | null = null;
   let complete = false;
+  let refusals: Readonly<Record<string, DomainRefusal>> = {};
+  const followDeclarations = effectiveFollow(env, input.followDeclarations);
   try {
     const registry = await loadWebAuditRegistry(env);
     for await (const event of instrumentAuditEvents(
@@ -220,10 +277,12 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
         siteType: input.siteType,
         publicListing: input.listing,
         specVersion: SPEC_VERSION,
+        followDeclarations,
+        domainBudget: declaredDomainBudget(env),
         fetchOptions: input.probeFetch ? { fetchImpl: input.probeFetch } : undefined,
       }),
       env,
-      { target: target.canonical, surface: input.surface },
+      { target: target.canonical, surface: input.surface, followDeclarations },
     )) {
       if (event.type === 'discovery') {
         yield { type: 'discovery', mcp_endpoint: event.endpoint };
@@ -238,6 +297,7 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
       } else if (event.type === 'complete') {
         scorecard = event.scorecard;
         complete = event.complete;
+        refusals = event.follow.budgetRefusals;
       }
     }
     // One scoring instant per run, spent on both persistence and the
@@ -245,18 +305,23 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
     // a different clock for the same audit.
     const scoredAt = complete && scorecard ? new Date().toISOString() : null;
     if (scorecard && scoredAt) {
-      const wrote = await cachePut(env, target.canonical, scorecard, SPEC_VERSION, scoredAt);
-      if (wrote) queueHitMinPurge([webTag(), webDomainTag(target.host)]);
-      await rebuildAggregatesIfSeeded(env, target.host, SPEC_VERSION);
+      const stamped = await withRegistryFingerprint(scorecard, registry);
+      const held = input.followDeclarations ? await heldRun(env, target, stamped, input.listing, refusals) : null;
+      const transient: TransientReason | undefined = input.followDeclarations ? held?.reason : { kind: 'opt-out' };
+      if (!transient) {
+        const wrote = await cachePut(env, target.canonical, stamped, SPEC_VERSION, scoredAt);
+        if (wrote) queueHitMinPurge([webTag(), webDomainTag(target.host)]);
+        await rebuildAggregatesIfSeeded(env, target.host, SPEC_VERSION);
+      }
       const record: CachedWebAudit = {
         spec_version: SPEC_VERSION,
         target_url: target.canonical,
-        scorecard,
+        scorecard: held ? scorecardWithPublicListing(stamped, held.listing) : stamped,
         scored_at: scoredAt,
       };
       yield {
         type: 'complete',
-        ...(await webEnvelope(env, { tier: 'live', host: target.host, record, origin: input.origin })),
+        ...(await webEnvelope(env, { tier: 'live', host: target.host, record, origin: input.origin, transient })),
       };
       return;
     }
@@ -266,9 +331,9 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
     logAuditError(target.canonical, input.surface, err);
     yield { type: 'error', error: { code: 'unreachable', message, cta: CTA_RETRY } };
     await notifyFailure(env, {
-      key: 'web-audit-stream',
-      subject: 'web-audit stream task failed',
-      text: `The streaming audit task threw for ${target.canonical}: ${message}`,
+      key: `web-audit-${input.surface}`,
+      subject: `web-audit ${input.surface} task failed`,
+      text: `The ${input.surface} audit task threw for ${target.canonical}: ${message}`,
     });
   }
 }

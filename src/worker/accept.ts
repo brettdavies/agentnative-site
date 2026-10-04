@@ -229,18 +229,11 @@ function applyUaClass(headers: Headers, siteClass: Preference): void {
  * detectPreference already does, then canonicalize Accept and UA so Workers
  * Caching keys on the class rather than raw header strings. GET /mcp uses
  * detectMcpGetFormat so the JSON 301 cannot share a cache object with the
- * HTML/markdown page. www.anc.dev coalesces to anc.dev on production only.
+ * HTML/markdown page.
  */
 export function classifyGatewayRequest(request: Request): Request {
   const url = new URL(request.url);
-  if (url.hostname === 'www.anc.dev') {
-    url.hostname = 'anc.dev';
-  }
-
-  if (!isGetOrHead(request.method)) {
-    if (url.href === request.url) return request;
-    return new Request(url, request);
-  }
+  if (!isGetOrHead(request.method)) return request;
 
   const headers = new Headers(request.headers);
   const siteClass = detectPreference(request);

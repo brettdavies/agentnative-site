@@ -22,10 +22,16 @@ the old content, and the deploy hook re-scores it once the release lands (see
 
 ## The audit endpoint
 
-`POST /api/score` with a JSON body `{ target, site_type?, public_listing?, turnstile_token }` streams NDJSON for either
-lane; a website target is any host or URL. The terminal `complete` event is the shared result envelope: `{ kind, tier,
-target, scorecard_url, markdown_url, json_url, freshness, spec_version, scorecard }`, carrying the full web scorecard
-(schema `0.4`). `site_type` is optional (`content` | `api`); omit it to let the audit auto-detect.
+`POST /api/score` with a JSON body `{ target, site_type?, public_listing?, follow_declarations?, turnstile_token }`
+streams NDJSON for either lane; a website target is any host or URL. The terminal `complete` event is the shared result
+envelope: `{ kind, tier, target, scorecard_url, markdown_url, json_url, freshness, spec_version, scorecard }`, carrying
+the full web scorecard (schema `0.5`). `site_type` is optional (`content` | `api`); omit it to let the audit
+auto-detect.
+
+`follow_declarations` defaults to `true`. `false` audits only the site itself and is transient: it skips the cache tier
+and the in-flight flags, claims no audit job, writes nothing to R2, rebuilds no board, and its `complete` event carries
+null result URLs with `summary_html` in their place. A `public_listing` that differs from the stored choice answers
+`400 listing_requires_follow`; a non-boolean value answers `400 invalid_follow_declarations`.
 
 A cache hit answers with a single `application/json` body instead of a stream: the same envelope with no `type`.
 Content-type is the discriminator: `application/json` means served from cache, NDJSON means the engine ran. Both shapes
@@ -51,6 +57,7 @@ scripts/web-audit/run.sh                              # full report + score for 
 scripts/web-audit/run.sh --check mcp-get-fast-fail    # one check; exit 0 = pass, 1 = failing, 3 = not evaluable
 scripts/web-audit/run.sh --target https://anc.dev/    # a public target (e.g. production after a release)
 scripts/web-audit/run.sh --json                       # the full scorecard as JSON
+scripts/web-audit/run.sh --no-follow-declarations     # audit only the site, not the hosts it declares
 scripts/web-audit/run.sh --no-build                   # reuse the existing dist/ (skip the rebuild)
 ```
 
@@ -112,6 +119,44 @@ Workflow's own audit path, so it is not subject to the on-demand endpoint's per-
 checks in `registry.yaml` is a registry-shape change; the post-deploy rescore after this kind of PR reflows every
 curated seed. Stale `/score/<domain>` pages keep serving the previous row set until that reflow: missing check ids are
 omitted, not shown as ghost rows.
+
+**The follow switch and the rescore.** The rescore follows the hosts each site declares only while
+`WEB_AUDIT_FOLLOW_ENABLED` is on. While it is off, a re-audit saves each seeded scorecard as not followed:
+`follow_declarations: false`, with every row that needs a declared host `n_a` for reason `follow-disabled`. Beside the
+fingerprint, KV records the follow state the last rescore ran with (`web_rescore:follow_enabled`, `true` or `false`; any
+value but `true` reads as `false`), and a flip in either direction forces the same full reflow a registry change does.
+A flip reflows nothing until the next rescore trigger, so after flipping the switch, fire the manual trigger above to
+re-score the board under the new state at once.
+
+**Which registry a score ran under.** The fingerprint hashes the registry without its site-only fields together with
+`FOLLOW_POLICY_VERSION` (`src/worker/audit-web/registry.ts`), so a release that changes the follow policy reflows the
+seeds even when `registry.yaml` is untouched. Every complete audit anc.dev returns or saves records the fingerprint's
+first 12 characters as `registry_fingerprint`; the board metadata in R2 carries it (or `unknown`), the result page
+closes its checks with "Scored against registry `<prefix>`.", and the markdown twin ends its freshness line with the
+same sentence. A scorecard saved before the field existed reads "Registry version not recorded." until it is re-audited.
+After a reflow, the recorded fingerprint starts with the prefix the seeded pages show:
+
+```bash
+wrangler kv key get --binding SCORE_KV --remote web_rescore:registry_fp   # add --env staging for staging
+```
+
+**When to fire the manual trigger.** Three events need the manual trigger above, because no hook fires the rescore
+for them:
+
+- **A flip of `WEB_AUDIT_FOLLOW_ENABLED`.** The flip changes the recorded follow state, and the manual run reflows every
+  seed under it.
+- **A rollback.** `wrangler rollback` fires no deploy hook. When the restored build's registry or follow policy differs
+  from the release it replaces, its fingerprint differs from the one KV recorded, and the manual run reflows every seed
+  under the restored registry.
+- **Domain-budget deferrals in a reflow.** A seed whose rows a declared domain's spent hourly budget left unevaluated is
+  not saved when it has a saved scorecard from the last 24 hours, or one R2 could not read: the rescore logs `scope:
+  web-rescore` with `cause: domain-budget`, skips that seed, and its saved scorecard stays on the board. A seed with no
+  saved scorecard (a new seed, or every seed after a vendored-spec bump, which changes the cache key) is saved as any
+  audit, so it is never left off the board. A saved scorecard older than 24 hours is replaced too, so a third party that
+  keeps a declared domain's hour spent cannot freeze a seed's score. Seeds that declare one domain drain its hour
+  together, so a release reflow can defer several. Fire the manual trigger after the hour turns (the next full UTC hour,
+  when every hourly budget opens a new bucket). A deferred seed keeps the scorecard it had, which records the registry
+  it was scored under before the reflow, so the next trigger re-audits it whatever its age.
 
 **Secrets.** `WEB_RESCORE_SECRET` is a `wrangler secret put` value on both Workers (`--env staging` and production) and
 lives in the GitHub environment secret `ANC_WEB_RESCORE_SECRET` for the deploy hook. Rotate by setting a new value in
@@ -200,10 +245,46 @@ Every audit, on every surface (the streaming route, the `audit_website` MCP tool
 summary line to Workers Logs (`observability.enabled` with 100% head sampling in `wrangler.jsonc`):
 
 - `scope: web-audit.run`: target, surface (`stream` | `mcp` | `rescore`), terminal state (`complete` | `incomplete` |
-  `unreachable` | `none` when the engine threw), discovered MCP endpoint, elapsed ms, and a per-status check count.
+  `unreachable` | `none` when the engine threw), discovered MCP endpoint, elapsed ms, and a per-status check count. A
+  run that reaches a terminal scorecard also carries what its follow phase spent: `follow_outcomes` (declared-hosts
+  trail entries per outcome), `follow_budget_causes` (`budget-exceeded` entries per cause), `follow_requests`,
+  `follow_elapsed_ms`, `follow_domain_requests` (requests per declared registrable domain, keyed by the domain's
+  SHA-256, the same hash its budget key carries), and `follow_budget_errors` (reservations a budget layer error decided,
+  per error: `burst-refused` and `read-refused` when the burst floor or the hourly read threw and the domain was
+  refused, `put-admitted` when the hourly write threw after a read that showed room and the audit was admitted). A
+  `domain-budget` cause that no `burst-refused` or `read-refused` error accounts for is a spent budget.
 - `scope: web-audit.error`: the engine or stream task threw; carries the target, surface, and message.
 
 Query them in the dashboard under Workers & Pages -> agentnative-site -> Logs, filtering on the `scope` field.
+
+### The declared-domain budget
+
+Every audit that follows a site's declarations draws one unit per declared registrable domain before its first request
+there, whichever site declared it and whichever surface ran the audit. The registrable domain comes from the public
+suffix list with its private section, so `api.stripe.com` and `mcp.stripe.com` share `stripe.com`'s budget while
+`a.github.io` and `b.github.io` hold their own. Two layers, both keyed by the domain's SHA-256, and both approximate:
+
+- **Hourly ceiling:** about 30 audits per domain per clock hour (UTC), a KV counter in `SCORE_KV` at
+  `web_audit_follow:<sha256(domain)>:<hour bucket>`, where the bucket is the epoch milliseconds divided by 3,600,000,
+  with a 2-hour TTL. The counter is read, then written, on an eventually consistent store, so audits that read it at
+  once can each be admitted, and an admitted audit whose write KV refuses goes uncounted.
+- **Burst floor:** about 10 audits per domain per 60 seconds in each Cloudflare location, the `WEB_AUDIT_DOMAIN_LIMITER`
+  rate-limit binding. Cloudflare keeps the binding's counters local to the location the Worker runs in and eventually
+  consistent, so audits served from different locations do not share one floor.
+
+A refused domain's hosts receive nothing for that audit: the trail records `budget-exceeded` with cause `domain-budget`,
+and the rows that needed those hosts read `declared-host-budget-exceeded`. A missing binding skips its layer. A burst
+floor or hourly read that errors refuses the domain for that audit. An hourly write that errors after the read showed
+room admits it: the burst floor already admitted the audit, and Workers KV refuses a second write to one key within a
+second, which audits of one domain running at once reach routinely. The hour under-counts such a burst, and the burst
+floor still bounds it. The run record's `follow_budget_errors` counts each reservation a layer error decided.
+
+To list the domains drawing on their budget, and to find one domain's counter:
+
+```bash
+wrangler kv key list --binding SCORE_KV --remote --prefix "web_audit_follow:"   # add --env staging for staging
+printf '%s' stripe.com | sha256sum                                              # the hash in that domain's key
+```
 
 ### Debug logging
 
@@ -226,6 +307,10 @@ A target behind a bot-blocking CDN produces one of two log signatures:
   evidence names the status.
 - `terminal: "unreachable"`: nothing (root fetch or discovery probe) returned an HTTP status. The engine ends the run
   without caching, the page and tool report the target as unreachable. The CDN tarpits datacenter clients.
+
+A root that is http or redirects to http also ends `unreachable`, right after the root fetch, with the reason
+`<target> redirects to http, and anc sends no plaintext request.` (or `is not https`). anc never takes that hop, so the
+site has to serve its root over https before it can be scored; a stored or board score stays as it was.
 
 Probes identify themselves with the `anc-web-audit/1.0` User-Agent (`AUDIT_USER_AGENT` in
 `src/worker/audit-web/ssrf.ts`), which several CDNs treat more leniently than UA-less requests. Do not change it to

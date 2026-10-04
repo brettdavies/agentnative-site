@@ -15,6 +15,8 @@ import {
   SCENARIOS_DIR,
 } from '../scripts/web-audit/conformance-corpus';
 import { SCENARIOS } from '../scripts/web-audit/conformance-scenarios';
+import { scoreWebAudit, universeMaxOf } from '../src/worker/audit-web/score';
+import type { WebScorecard } from '../src/worker/audit-web/scorecard';
 
 function committedFiles(): Map<string, string> {
   const out = new Map<string, string>();
@@ -59,6 +61,58 @@ describe('web-audit conformance corpus', () => {
       if (committed.get(name) !== generated.get(name)) {
         throw new Error(`${name} is stale; run bun scripts/web-audit/gen-fixtures.ts and commit the result`);
       }
+    }
+  });
+
+  // Saving an audit stamps the registry fingerprint; the engine never does,
+  // so the Rust port reproduces the goldens without hashing a registry.
+  test('no golden carries a registry fingerprint', () => {
+    const stamped = [...committedFiles()]
+      .filter(([, text]) => text.includes('registry_fingerprint'))
+      .map(([name]) => name);
+    expect(stamped).toEqual([]);
+  });
+
+  // The index exists so a regeneration that moves a score reads as a short
+  // diff of one file; it is only worth reading if it agrees with the goldens.
+  test('scores.json indexes each golden: its scores and every row id, status, and na_reason', () => {
+    const committed = committedFiles();
+    const index = JSON.parse(committed.get('scores.json') ?? 'null') as Record<string, unknown>;
+    expect(Object.keys(index)).toEqual(Object.keys(SCENARIOS).sort());
+    for (const name of Object.keys(index)) {
+      const golden = JSON.parse(committed.get(`scenarios/${name}/scorecard.json`) ?? 'null') as {
+        unreachable?: string;
+        score_pct: number;
+        score: { relative: number; global: number };
+        results: Array<{ id: string; status: string; na_reason?: string }>;
+      };
+      const expected =
+        golden.unreachable !== undefined
+          ? { unreachable: true }
+          : {
+              score_pct: golden.score_pct,
+              score: { relative: golden.score.relative, global: golden.score.global },
+              results: golden.results.map((row) => ({
+                id: row.id,
+                status: row.status,
+                ...(row.na_reason !== undefined ? { na_reason: row.na_reason } : {}),
+              })),
+            };
+      expect({ name, entry: index[name] }).toEqual({ name, entry: expected });
+    }
+  });
+
+  // Which alternatives a site presents is read from its rows, so a stored
+  // scorecard, a re-render, and the CLI's port all reach the global the
+  // engine published without rerunning the audit.
+  test("every golden's scores recompute from its stored rows and the registry", () => {
+    for (const name of Object.keys(SCENARIOS).sort()) {
+      const golden = JSON.parse(readFileSync(join(SCENARIOS_DIR, name, 'scorecard.json'), 'utf8')) as
+        | WebScorecard
+        | { unreachable: string };
+      if ('unreachable' in golden) continue;
+      const score = scoreWebAudit(golden.results, universeMaxOf(registry, golden.results));
+      expect({ name, relative: score.relative, global: score.global }).toEqual({ name, ...golden.score });
     }
   });
 

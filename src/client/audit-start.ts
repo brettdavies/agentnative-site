@@ -7,7 +7,7 @@
 //     |-- classify the target ......... rejected: return the reason, no acquire
 //     |-- guard ....................... a click while one is in flight is dropped
 //     |-- acquire the token ........... failed: release the guard, return turnstile_failed
-//     |-- stash(target, record) ....... token, listing, entered lane, refresh
+//     |-- stash(target, record) ....... token, listing, follow, entered lane, refresh
 //     '-- navigate(/scoring?target=) .. &refresh=1 on a refresh click
 
 import { classifyTarget, type Lane, scoringPath, type TargetRejection } from '../shared/audit-routes';
@@ -19,6 +19,8 @@ export type StartAuditInput = {
   /** The lane the visitor had selected; the target's shape decides the real lane. */
   lane: Lane;
   listing: boolean | null;
+  /** False when the visitor chose not to follow the hosts the site declares; absent follows. */
+  follow?: boolean;
   refresh?: boolean;
 };
 
@@ -77,7 +79,13 @@ export async function startAudit(input: StartAuditInput, deps: StartAuditDeps = 
     } catch {
       return { ok: false, reason: 'turnstile_failed', message: 'Verification failed. Please try again.' };
     }
-    stash(classified.target, { token, listing: input.listing, entered_lane: input.lane, refresh });
+    stash(classified.target, {
+      token,
+      listing: input.listing,
+      follow: input.follow !== false,
+      entered_lane: input.lane,
+      refresh,
+    });
     (deps.navigate ?? navigateSameTab)(scoringPath(classified.target, { refresh }));
     return { ok: true, target: classified.target, lane: classified.lane, entered_lane: input.lane };
   } finally {

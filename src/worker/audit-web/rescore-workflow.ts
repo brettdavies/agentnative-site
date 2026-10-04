@@ -1,8 +1,9 @@
 // Web-rescore Workflow: staleness-batched, self-draining. Each cycle
 // selects the seeded domains whose cached audit is oldest and older than
-// the eligibility window (or never audited), takes up to RESCORE_BATCH_SIZE
-// of them oldest-first, audits each in its own step, then rebuilds both
-// board aggregates. It loops cycles until no eligible domain remains, so
+// the eligibility window (or never audited, or scored under a registry
+// other than the current one), takes up to RESCORE_BATCH_SIZE of them
+// oldest-first, audits each in its own step, then rebuilds both board
+// aggregates. It loops cycles until no eligible domain remains, so
 // the board list is dynamic: a single run drains the whole queue in bounded
 // batches regardless of board size, and anything a run cannot reach stays
 // stale and is picked up by the next run.
@@ -17,24 +18,34 @@
 // not here — the run is idempotent and re-triggerable.
 //
 // A registry-shape change (a check retiered, a category split, a new check)
-// is detected via a KV fingerprint and forces one full reflow so every
-// cached scorecard re-renders under the new shape; see REGISTRY_FINGERPRINT_KEY.
+// or a flip of the follow kill switch is detected against what KV recorded
+// on the last run and forces one full reflow, so every cached scorecard is
+// re-scored under the new shape and follow state; see
+// REGISTRY_FINGERPRINT_KEY and FOLLOW_STATE_KEY.
 
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
 import { SPEC_VERSION } from '../spec-version.gen';
 import { emitLog } from '../telemetry/log';
 import { rebuildWebAggregates, type WebAggregateEnv } from './aggregate';
 import { type AuditLogEnv, instrumentAuditEvents } from './audit-log';
-import { get as cacheGet, put as cachePut, canonicalTargetOf, isStale, keyFor } from './cache';
+import { type CachedWebAudit, get as cacheGet, put as cachePut, canonicalTargetOf, isStale, keyFor } from './cache';
+import { type DomainBudgetEnv, declaredDomainBudget } from './domain-budget';
+import { domainBudgetHold } from './domain-budget-hold';
 import { runWebAudit } from './engine';
+import { effectiveFollow, type FollowSwitchEnv } from './follow-switch';
 import { homeTag, invokeCachedPurge, webDomainTag, webTag } from './hit-min-purge';
-import { loadWebAuditRegistry } from './registry';
+import { readRegistryFingerprint } from './provenance';
+import { fingerprintPrefix, loadWebAuditRegistry, registryFingerprint, withRegistryFingerprint } from './registry';
+import type { WebScorecard } from './scorecard';
 import { isSeededDomain, loadWebSeed, type WebSeedEntry } from './seed';
 
 // The Workflow shares the Worker's bindings; SCORE_KV is optional so the
 // registry-change gate degrades to plain staleness batching when it is
 // absent (e.g. a minimal test env).
-export type WebRescoreEnv = WebAggregateEnv & AuditLogEnv & { SCORE_KV?: KVNamespace };
+export type WebRescoreEnv = WebAggregateEnv &
+  AuditLogEnv &
+  FollowSwitchEnv &
+  DomainBudgetEnv & { SCORE_KV?: KVNamespace };
 
 // Narrow structural view of the Workflow binding (mirrors the RateLimit
 // pattern): enough surface for the trigger helper and its tests.
@@ -45,9 +56,18 @@ export type WebRescoreWorkflowBinding = {
 
 export type RescoreStep = Pick<WorkflowStep, 'do'>;
 
+/**
+ * What one seeded domain's audit did: saved its scorecard, or held it back
+ * because a declared domain's spent hourly budget left rows unevaluated.
+ * A hold is an answer, not a failure, so the Workflow step does not retry
+ * it: each retry would audit the site again and charge every other domain
+ * it declares, inside an hour whose refusal cannot change.
+ */
+export type RescoreAuditOutcome = { kind: 'saved' } | { kind: 'deferred'; cause: 'domain-budget' };
+
 export interface RescoreDeps {
   /** Audits one canonical target to completion and caches it; throws on failure. */
-  audit?: (env: WebRescoreEnv, targetUrl: string) => Promise<void>;
+  audit?: (env: WebRescoreEnv, targetUrl: string) => Promise<RescoreAuditOutcome>;
   rebuild?: (env: WebRescoreEnv, specVersion: string) => Promise<unknown>;
   /** One HIT-min purge after a rebuild cycle. Receives the union of tags. */
   purgeTags?: (tags: string[]) => Promise<void>;
@@ -60,8 +80,8 @@ export interface RescoreDeps {
    * reflow. Setting it also bypasses the gate (tests drive the window
    * directly). */
   eligibleAfterMs?: number;
-  /** Injectable registry fingerprint for the change gate; defaults to a
-   * SHA-256 of the normalized registry JSON. */
+  /** Injectable registry fingerprint for the change gate; defaults to the
+   * fingerprint of the registry the audits load. */
   fingerprint?: (env: WebRescoreEnv) => Promise<string>;
 }
 
@@ -103,44 +123,30 @@ const RESCORE_MAX_CYCLES = 200;
 // age out.
 const REGISTRY_FINGERPRINT_KEY = 'web_rescore:registry_fp';
 
+// KV marker for the follow state the last rescore ran with: "true" or
+// "false", the switch as audits read it, so "TRUE" and an unset secret
+// record one state rather than minting a reflow between them. A flip
+// changes what every seed's declared-host rows can hold, so it forces a
+// reflow as a registry change does. It is kept apart from the fingerprint
+// so staging and production, whose switches differ, agree on that.
+const FOLLOW_STATE_KEY = 'web_rescore:follow_enabled';
+
 /**
- * Registry fields no stored scorecard depends on.
- *
- * The fingerprint answers one question: could this registry produce a
- * different scorecard than the cached ones? A field no audit consumes cannot,
- * and hashing it spends the whole audit budget re-deriving identical evidence
- * across every seeded domain. `breadcrumb` labels a check's own page in the
- * site's URL trail; its only reader is the build that emits those pages.
- * `lane` and the `mcp_lanes` map group MCP rows on the result page, read from
- * the live registry at render time, so a stored scorecard picks up a lane
- * change on its next render without a re-audit.
- *
- * Membership here is a claim that the field is build-only or read from the
- * live registry at render time, never copied into a stored scorecard.
- * Anything absent from this set counts as scoring shape, so a new field
- * reflows until someone establishes otherwise.
+ * Run one seeded domain's audit to completion and cache the scorecard,
+ * unless a declared domain's spent hourly budget left rows unevaluated and
+ * the seed has a saved scorecard, or one the store could not read: that
+ * scorecard then stands, and its unchanged scored_at keeps the domain
+ * eligible for the next rescore. A seed with none saved is saved as any
+ * audit, so it is never left off the board.
  */
-const SITE_ONLY_REGISTRY_FIELDS: ReadonlySet<string> = new Set(['breadcrumb', 'lane', 'mcp_lanes']);
-
-/** SHA-256 hex of the normalized registry JSON minus its site-only fields. */
-export async function registryFingerprint(env: WebRescoreEnv): Promise<string> {
-  const registry = await loadWebAuditRegistry(env);
-  // A replacer rather than a rebuilt object: it drops the named keys while
-  // leaving every surviving key in its original order, so the digest stays
-  // stable across runs.
-  const shape = JSON.stringify(registry, (key, value) => (SITE_ONLY_REGISTRY_FIELDS.has(key) ? undefined : value));
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(shape));
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-/** Run one seeded domain's audit to completion and cache the scorecard. */
-export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string): Promise<void> {
+export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string): Promise<RescoreAuditOutcome> {
   const registry = await loadWebAuditRegistry(env);
   // Curated seeds are always listed; deriving the flag here keeps a rescore
   // or reflow re-audit from resetting the stored opt-in to the default in
   // the envelope and the R2 board metadata.
   const publicListing = await isSeededDomain(env, new URL(targetUrl).host);
-  let scorecard: unknown = null;
+  const followDeclarations = effectiveFollow(env, true);
+  let scorecard: WebScorecard | null = null;
   let complete = false;
   for await (const event of instrumentAuditEvents(
     runWebAudit({
@@ -149,10 +155,12 @@ export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string):
       siteType: null,
       publicListing,
       specVersion: SPEC_VERSION,
+      followDeclarations,
+      domainBudget: declaredDomainBudget(env),
       perAuditDeadlineMs: RESCORE_AUDIT_DEADLINE_MS,
     }),
     env,
-    { target: targetUrl, surface: 'rescore' },
+    { target: targetUrl, surface: 'rescore', followDeclarations },
   )) {
     if (event.type === 'complete') {
       scorecard = event.scorecard;
@@ -164,15 +172,36 @@ export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string):
   if (!complete || !scorecard) {
     throw new Error(`audit did not complete within the deadline for ${targetUrl}`);
   }
-  await cachePut(env, targetUrl, scorecard, SPEC_VERSION);
+  const stamped = await withRegistryFingerprint(scorecard, registry);
+  if ((await domainBudgetHold(env, targetUrl, stamped)) !== null) return { kind: 'deferred', cause: 'domain-budget' };
+  await cachePut(env, targetUrl, stamped, SPEC_VERSION);
+  return { kind: 'saved' };
+}
+
+async function currentRegistryFingerprint(env: WebRescoreEnv): Promise<string> {
+  return registryFingerprint(await loadWebAuditRegistry(env));
 }
 
 type BatchItem = { domain: string; target: string };
 
 /**
- * The eligible seeded domains for the next cycle: never audited or audited
- * before the eligibility window, excluding any already attempted this run,
- * sorted oldest-first and capped at `batchSize`. A never-audited or
+ * Whether a cached scorecard records a registry other than `prefix`, the
+ * current one; a scorecard that records none reads as another. A seed a
+ * reflow deferred keeps the scorecard it had, so this rather than its age
+ * makes it eligible on the next trigger. Null `prefix` (no gate ran) never
+ * counts.
+ */
+function scoredUnderOtherRegistry(cached: CachedWebAudit | null, prefix: string | null): boolean {
+  if (prefix === null || cached === null) return false;
+  const scorecard = cached.scorecard as { registry_fingerprint?: unknown } | null;
+  return readRegistryFingerprint(scorecard?.registry_fingerprint) !== prefix;
+}
+
+/**
+ * The eligible seeded domains for the next cycle: never audited, audited
+ * before the eligibility window, or scored under a registry other than
+ * `registryPrefix`, excluding any already attempted this run, sorted
+ * oldest-first and capped at `batchSize`. A never-audited or
  * unparseable-stamp entry sorts first (treated as epoch-old).
  */
 async function selectStaleBatch(
@@ -182,13 +211,16 @@ async function selectStaleBatch(
   batchSize: number,
   now: number,
   eligibleAfterMs: number,
+  registryPrefix: string | null,
 ): Promise<BatchItem[]> {
   const rows: Array<{ domain: string; target: string; scoredAtMs: number }> = [];
   for (const entry of seed) {
     if (attempted.has(entry.domain)) continue;
     const target = canonicalTargetOf(new URL(entry.url));
     const cached = await cacheGet(env, await keyFor(target, SPEC_VERSION));
-    if (!isStale(cached?.scored_at, eligibleAfterMs, now)) continue;
+    if (!isStale(cached?.scored_at, eligibleAfterMs, now) && !scoredUnderOtherRegistry(cached, registryPrefix)) {
+      continue;
+    }
     const parsed = cached?.scored_at ? Date.parse(cached.scored_at) : 0;
     rows.push({ domain: entry.domain, target, scoredAtMs: Number.isNaN(parsed) ? 0 : parsed });
   }
@@ -200,7 +232,11 @@ async function selectStaleBatch(
  * The Workflow body, extracted so tests can drive it with a fake step and
  * injected audit/rebuild. A per-domain failure (after step retries) is
  * logged and skipped — the domain drops off that board rebuild and, because
- * its scored_at never advanced, is retried by the next run.
+ * its scored_at never advanced, is retried by the next run. A domain-budget
+ * deferral is logged with its cause and skipped on the first attempt; the
+ * board keeps its saved scorecard, and the next run picks it up by age, or
+ * whatever its age when a reflow deferred it, because its scorecard still
+ * records the registry it was scored under before.
  */
 export async function runWebRescore(
   env: WebRescoreEnv,
@@ -214,23 +250,27 @@ export async function runWebRescore(
 
   const seed = await step.do('load-seed', async () => loadWebSeed(env));
 
-  // Registry-change gate: when the current registry fingerprint differs
-  // from the one KV recorded on the last run, reflow every cached scorecard
-  // (eligibility 0) so the board re-renders under the new shape, then record
-  // the new fingerprint below. An explicit deps.eligibleAfterMs (tests)
+  // Registry-change gate: when the current registry fingerprint or follow
+  // state differs from the one KV recorded on the last run, reflow every
+  // cached scorecard (eligibility 0) so the board re-renders under the new
+  // shape, then record both below. An explicit deps.eligibleAfterMs (tests)
   // bypasses the gate; a missing SCORE_KV degrades to plain staleness batching.
   let eligibleAfterMs = deps.eligibleAfterMs ?? RESCORE_ELIGIBLE_AFTER_MS;
-  let fingerprintToRecord: string | null = null;
+  let shapeToRecord: { fingerprint: string; follow: string } | null = null;
+  let registryPrefix: string | null = null;
   if (deps.eligibleAfterMs === undefined && env.SCORE_KV) {
     const kv = env.SCORE_KV;
-    const compute = deps.fingerprint ?? registryFingerprint;
+    const compute = deps.fingerprint ?? currentRegistryFingerprint;
     const currentFp = await step.do('registry-fingerprint', async () => compute(env));
+    registryPrefix = fingerprintPrefix(currentFp);
+    const currentFollow = await step.do('follow-switch', async () => String(effectiveFollow(env, true)));
     const priorFp = await step.do('registry-fingerprint:prior', async () =>
       kv.get(REGISTRY_FINGERPRINT_KEY).catch(() => null),
     );
-    if (priorFp !== currentFp) {
+    const priorFollow = await step.do('follow-switch:prior', async () => kv.get(FOLLOW_STATE_KEY).catch(() => null));
+    if (priorFp !== currentFp || priorFollow !== currentFollow) {
       eligibleAfterMs = 0;
-      fingerprintToRecord = currentFp;
+      shapeToRecord = { fingerprint: currentFp, follow: currentFollow };
     }
   }
 
@@ -241,16 +281,19 @@ export async function runWebRescore(
 
   for (; cycle < RESCORE_MAX_CYCLES; cycle++) {
     const batch = await step.do(`select:${cycle}`, async () =>
-      selectStaleBatch(env, seed, attempted, batchSize, clock(), eligibleAfterMs),
+      selectStaleBatch(env, seed, attempted, batchSize, clock(), eligibleAfterMs, registryPrefix),
     );
     if (batch.length === 0) break;
     const cycleAudited: string[] = [];
     for (const { domain, target } of batch) {
       attempted.add(domain);
       try {
-        await step.do(`audit:${domain}`, AUDIT_STEP_CONFIG, async () => {
-          await audit(env, target);
-        });
+        const outcome = await step.do(`audit:${domain}`, AUDIT_STEP_CONFIG, async () => audit(env, target));
+        if (outcome.kind === 'deferred') {
+          emitLog({ scope: 'web-rescore' }, { domain, cause: outcome.cause });
+          skipped.push(domain);
+          continue;
+        }
         audited.push(domain);
         cycleAudited.push(domain);
       } catch (err) {
@@ -276,14 +319,15 @@ export async function runWebRescore(
     if (deps.purgeTags) await deps.purgeTags([homeTag(), webTag()]);
   }
 
-  // Record the new fingerprint only after the reflow drains, so a run that
-  // dies partway re-forces on the next trigger instead of stranding the
-  // remaining domains under the old shape.
-  if (fingerprintToRecord !== null && env.SCORE_KV) {
+  // Record the new fingerprint and follow state only after the reflow
+  // drains, so a run that dies partway re-forces on the next trigger instead
+  // of stranding the remaining domains under the old shape.
+  if (shapeToRecord !== null && env.SCORE_KV) {
     const kv = env.SCORE_KV;
-    const fp = fingerprintToRecord;
+    const { fingerprint, follow } = shapeToRecord;
     await step.do('registry-fingerprint:record', async () => {
-      await kv.put(REGISTRY_FINGERPRINT_KEY, fp);
+      await kv.put(REGISTRY_FINGERPRINT_KEY, fingerprint);
+      await kv.put(FOLLOW_STATE_KEY, follow);
     });
   }
   return { audited, skipped, cycles: cycle };

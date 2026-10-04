@@ -197,7 +197,7 @@ ${webHeroHtml}
         <div>
           <h2 id="board-heading">See where things stand</h2>
           <p data-s="cli">Curated CLIs, ranked by credit-weighted agent-readiness.</p>
-          <p data-s="web">Public sites, ranked by global agent-readiness.</p>
+          <p data-s="web">Public sites, ranked by agent-readiness on the checks that apply to each.</p>
         </div>
         <div class="board-controls">
 ${renderAuditForm({ idPrefix: 'home' })}

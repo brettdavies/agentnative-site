@@ -106,6 +106,11 @@ describe('wrangler.jsonc — inherited-property overrides (anc.dev routing-drift
     expect(patterns).toEqual(['anc.dev', 'www.anc.dev']);
   });
 
+  test('every request reaches the Worker before the asset layer, so www.anc.dev redirects static paths too', () => {
+    const assets = config.assets as Record<string, unknown> | undefined;
+    expect(assets?.run_worker_first).toBe(true);
+  });
+
   test('top-level `route` singular is NOT used (same hazard shape as `routes`; staging would inherit silently)', () => {
     // The Wrangler config supports both `route` (single) and `routes`
     // (array). Both are inheritable. If a future PR ever switches to the
@@ -175,6 +180,17 @@ describe('wrangler.jsonc — env.staging mirrors required non-inheritable bindin
       expect(shapeOf(list, 'WEB_AUDIT_LIMITER')).toEqual({ limit: 10, period: 60 });
       expect(shapeOf(list, 'WEB_AUDIT_LIMITER_IP')).toEqual({ limit: 30, period: 60 });
     }
+  });
+
+  test('the declared-domain burst floor is bound in both environments, each on its own namespace', () => {
+    const entryOf = (list: unknown) =>
+      (list as Array<Record<string, unknown>>).find((r) => r.name === 'WEB_AUDIT_DOMAIN_LIMITER');
+    const production = entryOf(config.ratelimits);
+    const stagingEntry = entryOf(staging.ratelimits);
+    for (const entry of [production, stagingEntry]) {
+      expect(entry?.simple).toEqual({ limit: 10, period: 60 });
+    }
+    expect(production?.namespace_id).not.toBe(stagingEntry?.namespace_id);
   });
 
   test('env.staging.durable_objects declares the SCORE binding', () => {
@@ -303,5 +319,171 @@ describe('RELEASES.md — R2 score-cache lifecycle setup commands (plan U7)', ()
     expect(releases).toMatch(
       /wrangler r2 bucket lifecycle add anc-score-cache-staging scores-7day-ttl scores\/ --expire-days 7/,
     );
+  });
+});
+
+describe('RELEASES-RATIONALE.md — R2 score-cache key shape (plan U7)', () => {
+  // The cache key prefix `scores/{binary}/{anc-version}.json` is the
+  // load-bearing fact behind the lifecycle rule's `scores/` filter. The
+  // rationale + key shape live in RELEASES-RATIONALE.md (RELEASES.md is the
+  // runbook). If the prefix moves, the architecture doc must move with
+  // it — this drift-guard makes the prefix change visible in CI.
+
+  const architecturePath = join(import.meta.dir, '..', 'RELEASES-RATIONALE.md');
+  const architecture = readFileSync(architecturePath, 'utf8');
+
+  test('mentions the canonical cache key prefix so a future audit can grep for it', () => {
+    expect(architecture).toMatch(/scores\/\{binary\}\/\{anc-version\}\.json/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Workers Caching per-entrypoint map (edge HIT restore U1)
+// ---------------------------------------------------------------------------
+
+// Top-level `cache.enabled` plus an `exports` map is the skip-Worker HIT
+// lever (R10 / KTD1 / KTD5). Unlisted WorkerEntrypoints inherit cache-on,
+// so ContainerProxy must be opted out; Sandbox and WebRescoreWorkflow stay
+// out of `type: worker` unless dry-run proves the map is exclusive.
+// `cross_version_cache` stays unset so a new Worker version starts cold.
+// env.staging mirrors the same map because staging is the skip-Worker proof
+// surface (KTD6) and inheritable keys must be explicit in this repo.
+
+const SITE_CACHE_EXPORT = 'Cached';
+
+function workerExportCache(
+  exportsMap: Record<string, unknown> | undefined,
+  name: string,
+): { type: unknown; cache: { enabled?: unknown } | undefined } {
+  const entry = exportsMap?.[name] as Record<string, unknown> | undefined;
+  if (!entry) throw new Error(`exports.${name} missing`);
+  return {
+    type: entry.type,
+    cache: entry.cache as { enabled?: unknown } | undefined,
+  };
+}
+
+function assertEntrypointCacheMap(block: Record<string, unknown>, label: string): void {
+  const cache = block.cache as Record<string, unknown> | undefined;
+  expect(cache, `${label} cache block`).toBeDefined();
+  expect(cache?.enabled, `${label} cache.enabled`).toBe(true);
+  expect(Object.hasOwn(cache ?? {}, 'cross_version_cache'), `${label} cache.cross_version_cache must be unset`).toBe(
+    false,
+  );
+
+  const exportsMap = block.exports as Record<string, unknown> | undefined;
+  expect(exportsMap, `${label} exports`).toBeDefined();
+
+  const def = workerExportCache(exportsMap, 'default');
+  expect(def.type).toBe('worker');
+  expect(def.cache?.enabled, `${label} default cache`).toBe(false);
+
+  const inner = workerExportCache(exportsMap, SITE_CACHE_EXPORT);
+  expect(inner.type).toBe('worker');
+  expect(inner.cache?.enabled, `${label} ${SITE_CACHE_EXPORT} cache`).toBe(true);
+
+  const proxy = workerExportCache(exportsMap, 'ContainerProxy');
+  expect(proxy.type).toBe('worker');
+  expect(proxy.cache?.enabled, `${label} ContainerProxy cache`).toBe(false);
+
+  expect(exportsMap?.Sandbox, `${label} must not list Sandbox as type: worker`).toBeUndefined();
+  expect(exportsMap?.WebRescoreWorkflow, `${label} must not list WebRescoreWorkflow as type: worker`).toBeUndefined();
+}
+
+describe('wrangler.jsonc — Workers Caching per-entrypoint map (edge HIT restore U1)', () => {
+  const config = loadWranglerConfig();
+  const staging = getStagingEnv(config);
+
+  test('package.json pins wrangler ^4.124.0 so cache.enabled is a real schema key', () => {
+    const pkg = JSON.parse(readFileSync(join(import.meta.dir, '..', 'package.json'), 'utf8')) as {
+      devDependencies: { wrangler: string };
+    };
+    expect(pkg.devDependencies.wrangler).toBe('^4.124.0');
+  });
+
+  test('top-level pins inner cache on, default and ContainerProxy cache off, cross_version_cache unset', () => {
+    assertEntrypointCacheMap(config, 'top-level');
+  });
+
+  test('env.staging mirrors the same cache/exports map', () => {
+    assertEntrypointCacheMap(staging, 'env.staging');
+  });
+
+  test('generated types include cache.purge on the cached entrypoint context', () => {
+    const dts = readFileSync(join(import.meta.dir, '..', 'src/worker-configuration.d.ts'), 'utf8');
+    const ctx = dts.match(/interface ExecutionContext(?:<[^>]*>)?\s*\{[\s\S]*?\n\}/);
+    expect(ctx, 'ExecutionContext interface').toBeTruthy();
+    expect(ctx?.[0]).toMatch(/cache\?: CacheContext/);
+    expect(dts).toMatch(/interface CacheContext \{\s*purge\(options: CachePurgeOptions\): Promise<CachePurgeResult>;/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MCP kill-switch binding shapes (plan U6)
+// ---------------------------------------------------------------------------
+
+// A Worker binding name is either a var or a secret, never both: `wrangler
+// secret put` against a deployed var name fails with Cloudflare API 10053, so a
+// name that drifts to a second shape breaks the operator's flip at the moment
+// the runbook is being followed under pressure. `MCP_LEGACY_ENABLED` is the
+// committed-var carve-out and is declared `"true"` in both blocks so the
+// production sunset flip has a declared home; `MCP_ENABLED` and
+// `MCP_LIVE_SCORING_ENABLED` are secret-bound, which is what buys the
+// zero-deploy flip that no redeploy can clobber. These guards pin the shape in
+// config so the drift is caught here rather than mid-incident.
+
+const SECRET_BOUND_MCP_FLAGS = ['MCP_ENABLED', 'MCP_LIVE_SCORING_ENABLED'] as const;
+
+describe('wrangler.jsonc — MCP kill-switch binding shapes (plan U6)', () => {
+  const config = loadWranglerConfig();
+  const staging = getStagingEnv(config);
+
+  test('top-level vars declares MCP_LEGACY_ENABLED as the string "true"', () => {
+    const vars = config.vars as Record<string, unknown> | undefined;
+    expect(vars, 'top-level vars block').toBeDefined();
+    expect(vars?.MCP_LEGACY_ENABLED).toBe('true');
+  });
+
+  test('env.staging.vars declares MCP_LEGACY_ENABLED as the string "true"', () => {
+    const vars = staging.vars as Record<string, unknown> | undefined;
+    expect(vars, 'env.staging vars block').toBeDefined();
+    expect(vars?.MCP_LEGACY_ENABLED).toBe('true');
+  });
+
+  test('the secret-bound MCP flags are declared in no vars block (CF 10053 guard)', () => {
+    const blocks: Array<[string, Record<string, unknown>]> = [
+      ['top-level', config],
+      ['env.staging', staging],
+    ];
+    for (const [label, block] of blocks) {
+      const vars = (block.vars ?? {}) as Record<string, unknown>;
+      for (const name of SECRET_BOUND_MCP_FLAGS) {
+        expect(Object.hasOwn(vars, name), `${label} vars must not declare ${name}`).toBe(false);
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Follow kill switch binding shape
+// ---------------------------------------------------------------------------
+
+// The follow switch is a var on staging and a secret in production, created
+// before the release that reads it. A top-level var of the same name would
+// make that `wrangler secret put` fail with Cloudflare API 10053, and every
+// deploy would reset whatever the operator flipped.
+
+describe('wrangler.jsonc — WEB_AUDIT_FOLLOW_ENABLED binding shape', () => {
+  const config = loadWranglerConfig();
+  const staging = getStagingEnv(config);
+
+  test('env.staging.vars declares WEB_AUDIT_FOLLOW_ENABLED as the string "true"', () => {
+    const vars = staging.vars as Record<string, unknown> | undefined;
+    expect(vars?.WEB_AUDIT_FOLLOW_ENABLED).toBe('true');
+  });
+
+  test('the top-level vars block does not declare WEB_AUDIT_FOLLOW_ENABLED', () => {
+    const vars = (config.vars ?? {}) as Record<string, unknown>;
+    expect(Object.hasOwn(vars, 'WEB_AUDIT_FOLLOW_ENABLED')).toBe(false);
   });
 });

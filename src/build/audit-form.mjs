@@ -12,6 +12,12 @@
 // The segment radios carry the page-scope ids (`s-cli`, `s-web`), so the one
 // control that picks the lane also swaps every `[data-s]` pane on the page
 // and restores the visitor's saved surface.
+//
+// The website pane holds two choices. Following declared hosts is on by
+// default; unticking it makes the run transient, so the client disables the
+// listing box and points its description at the note saying why. The note
+// starts hidden and undescribed because a description referenced while
+// hidden is still announced.
 
 import { auditPath } from '../shared/audit-routes.ts';
 import { escHtml } from '../shared/esc-html.ts';
@@ -46,6 +52,8 @@ function examples(list) {
 export function renderAuditForm({ idPrefix }) {
   const inputId = `${idPrefix}-target`;
   const helpId = `${idPrefix}-help`;
+  const followHelpId = `${idPrefix}-follow-help`;
+  const listingNoteId = `${idPrefix}-listing-note`;
   return `<form class="audit-form" method="get" action="${auditPath()}" novalidate data-audit-form>
   <div class="seg" role="radiogroup" aria-label="What to audit">
     <input type="radio" name="lane" value="cli" id="s-cli" checked /><label for="s-cli">CLI</label>
@@ -55,10 +63,18 @@ export function renderAuditForm({ idPrefix }) {
     <input id="${inputId}" name="target" type="text" autocomplete="off" spellcheck="false" placeholder="ripgrep" data-placeholder-web="anc.dev" required aria-label="A CLI tool, an install command, a GitHub URL, or a website" aria-describedby="${helpId}" data-audit-target />
     <button type="submit" class="btn btn--primary" data-audit-submit>Audit</button>
   </div>
-  <label class="audit-hero__optin" data-s="web">
-    <input type="checkbox" name="public_listing" value="true" data-audit-listing />
-    List this site on the public web leaderboard
-  </label>
+  <div class="audit-form__web" data-s="web">
+    <label class="audit-hero__optin">
+      <input type="checkbox" name="follow_declarations" value="true" checked aria-describedby="${followHelpId}" data-audit-follow />
+      Include hosts this site declares (MCP server, API)
+    </label>
+    <p id="${followHelpId}" class="audit-form__note">anc sends a few requests to each host the site points to. Unchecked, the result is not saved or listed.</p>
+    <label class="audit-hero__optin">
+      <input type="checkbox" name="public_listing" value="true" data-audit-listing />
+      List this site on the public web leaderboard
+    </label>
+    <p id="${listingNoteId}" class="audit-form__note" data-audit-listing-note hidden>Results without declared hosts are not saved or listed.</p>
+  </div>
   <p id="${helpId}" class="live-score__help">
     <span data-s="cli">${examples(CLI_EXAMPLES)}</span>
     <span data-s="web">${examples(WEB_EXAMPLES)}</span>

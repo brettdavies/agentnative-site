@@ -47,6 +47,8 @@ import {
   type WebRescoreTriggerEnv,
 } from './audit-web/rescore-trigger';
 import type { WebRescoreWorkflowBinding } from './audit-web/rescore-workflow';
+import { canonicalHostRedirect } from './canonical-host';
+import { DISCOVERY_CORS_HEADERS } from './discovery-cors';
 import { applyHeaders, isRepresentationPinned } from './headers';
 import { getWarmCatalog, loadCatalog } from './mcp/catalog';
 import { coerceMcpJsonResponse, stripCorsHeaders } from './mcp/coerce-json-response';
@@ -166,11 +168,16 @@ export interface Env {
   // path; WEB_AUDIT_LIMITER_IP is the coarse per-IP fallback (30/60s) and
   // also the per-IP burst limiter the audit_website MCP tool keys directly.
   // WEB_AUDIT_ENABLED is the secret-backed kill switch covering both the
-  // webapp route and the MCP fresh path. Optional so tests that don't
-  // exercise the web audit can stub a minimal env.
+  // webapp route and the MCP fresh path. WEB_AUDIT_FOLLOW_ENABLED switches
+  // off only the following of declared hosts; audits keep running.
+  // WEB_AUDIT_DOMAIN_LIMITER is the per-declared-domain burst floor under
+  // the hourly KV window every audit's follow slice draws on. Optional so
+  // tests that don't exercise the web audit can stub a minimal env.
   WEB_AUDIT_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   WEB_AUDIT_LIMITER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> };
+  WEB_AUDIT_DOMAIN_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   WEB_AUDIT_ENABLED?: string;
+  WEB_AUDIT_FOLLOW_ENABLED?: string;
   // Web-rescore bindings. WEB_RESCORE_WORKFLOW is the Workflow that fans
   // out the weekly board rescore; WEB_RESCORE_SECRET (wrangler secret)
   // auths the POST /api/web-rescore deploy hook. Optional so tests that
@@ -405,11 +412,6 @@ const DISCOVERY_GET_ONLY_PATHS = new Set([
   '/.well-known/oauth-authorization-server',
   '/.well-known/api-catalog',
 ]);
-
-/** Read-only discovery JSON may be fetched cross-origin by agent tools and scanners. */
-const DISCOVERY_CORS_HEADERS = {
-  'access-control-allow-origin': '*',
-} as const;
 
 async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
@@ -1018,7 +1020,8 @@ const WEB_RESCORE_CRON = '0 9 * * SUN';
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const started = Date.now();
-    const response = await loopbackCachedFetch(ctx, env, classifyGatewayRequest(request));
+    const response =
+      canonicalHostRedirect(request) ?? (await loopbackCachedFetch(ctx, env, classifyGatewayRequest(request)));
     recordPageRequest(request, response, Date.now() - started);
     return response;
   },
