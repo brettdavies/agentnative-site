@@ -9,7 +9,9 @@ import {
   enrichWebScorecardForDisplay,
   normalizeScorecardCategories,
 } from '../src/worker/audit-web/display';
+import { notRunRemedy, notRunScoreNote } from '../src/worker/audit-web/provenance-copy';
 import type { WebRemediationCatalog } from '../src/worker/audit-web/remediation';
+import { richMarkdown } from '../src/worker/audit-web/rich-text';
 import { categoryRollups } from '../src/worker/audit-web/score';
 import { buildWebScorecard } from '../src/worker/audit-web/scorecard';
 
@@ -472,6 +474,32 @@ describe('provenance on stored scorecards', () => {
     expect(tools.host).toBe('example.com');
   });
 
+  test('a sign-in row names no local command while no published anc release includes one', () => {
+    const stored = {
+      target_url: 'https://stripe.dev/',
+      results: [
+        { id: 'mcp-tools-list', status: 'n_a', na_reason: 'auth-required', evidence: null, host: 'mcp.stripe.com' },
+      ],
+    };
+    const out = attachInlineRemediation(stored, CATALOG, 'https://anc.dev') as {
+      access_note?: string;
+      results: Array<{ access_remedy?: string }>;
+    };
+    const text = `${out.results[0].access_remedy} ${out.access_note}`;
+    expect(text).not.toContain('anc web');
+    expect(text).not.toContain('ANC_WEB_TOKEN');
+    expect(out.results[0].access_remedy).toBe("anc's public audit holds no sign-in for mcp.stripe.com.");
+  });
+
+  test('once a published anc release includes the local web audit, the remedy and the note name its command', () => {
+    expect(richMarkdown(notRunRemedy('auth-required', 'mcp.stripe.com', 'stripe.dev', 2, true))).toBe(
+      "anc's public audit holds no sign-in for mcp.stripe.com. Run `anc web stripe.dev` with `ANC_WEB_TOKEN` set to a token for mcp.stripe.com to evaluate these checks from your own network.",
+    );
+    expect(richMarkdown(notRunScoreNote(1, 'example.com', false, true))).toBe(
+      'Global keeps the 1 check this audit could not run in its maximum; run `anc web example.com` to evaluate it from your own network.',
+    );
+  });
+
   test('rows the audit could not run carry their remedy, and the scorecard the score note sentence', () => {
     const stored = {
       target_url: 'https://example.com/',
@@ -484,13 +512,9 @@ describe('provenance on stored scorecards', () => {
       access_note?: string;
       results: Array<{ id: string; access_remedy?: string }>;
     };
-    expect(out.results[0].access_remedy).toBe(
-      "anc's public audit never contacts 10.0.0.1, a private or IP address. Run `anc web example.com` to evaluate this check from your own network.",
-    );
+    expect(out.results[0].access_remedy).toBe("anc's public audit never contacts 10.0.0.1, a private or IP address.");
     expect(out.results[1].access_remedy).toBeUndefined();
-    expect(out.access_note).toBe(
-      'Global keeps the 1 check this audit could not run in its maximum; run `anc web example.com` to evaluate it from your own network.',
-    );
+    expect(out.access_note).toBe('Global keeps the 1 check this audit could not run in its maximum.');
     expect('access_note' in (attachInlineRemediation({ results: [] }, CATALOG, 'https://anc.dev') as object)).toBe(
       false,
     );

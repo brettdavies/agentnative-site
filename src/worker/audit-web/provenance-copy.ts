@@ -1,8 +1,8 @@
 // The words a website result uses for where its evidence came from: the
 // declared-hosts section, the host lines on categories and rows, the
-// not-run groups, and what a reader can run to evaluate what the public
-// audit could not. Written once as rich text, so the page, its markdown
-// twin, and the MCP reads say the same sentences.
+// not-run groups, and why the public audit could not evaluate a check.
+// Written once as rich text, so the page, its markdown twin, and the MCP
+// reads say the same sentences.
 
 import type { NaReason } from '../../shared/web-audit-findings';
 import { MAX_FOLLOWED_HOSTS } from './follow-requests';
@@ -147,14 +147,27 @@ const NOT_RUN_CAUSES: Readonly<Partial<Record<NaReason, (host: string, domain: s
   'auth-required': (host) => `anc's public audit holds no sign-in for ${host}.`,
 };
 
+// No published anc release includes `anc web`, so a remedy that named it
+// would send a reader to a command that fails; the reason a check did not
+// run is stated either way.
+export const ANC_WEB_RELEASED = false;
+
 /**
- * Why the public audit could not evaluate a not-run row or group, and the
- * command that evaluates it from the reader's own network.
+ * Why the public audit could not evaluate a not-run row or group, and, when
+ * a published anc release includes it, the command that evaluates it from
+ * the reader's own network.
  */
-export function notRunRemedy(reason: NaReason, host: string, domain: string, count: number): Rich {
+export function notRunRemedy(
+  reason: NaReason,
+  host: string,
+  domain: string,
+  count: number,
+  commandReleased: boolean = ANC_WEB_RELEASED,
+): Rich {
   const cause = NOT_RUN_CAUSES[reason]?.(host, domain);
-  const run = cause === undefined ? 'Run ' : `${cause} Run `;
   const what = count === 1 ? 'this check' : 'these checks';
+  if (!commandReleased) return [cause ?? `anc's public audit could not run ${what}.`];
+  const run = cause === undefined ? 'Run ' : `${cause} Run `;
   const command = { code: `anc web ${domain}` };
   const tail = ` to evaluate ${what} from your own network.`;
   return reason === 'auth-required'
@@ -163,8 +176,14 @@ export function notRunRemedy(reason: NaReason, host: string, domain: string, cou
 }
 
 /** The score note's sentence for a result holding rows the public audit could not run. */
-export function notRunScoreNote(count: number, domain: string, needsSignIn: boolean): Rich {
+export function notRunScoreNote(
+  count: number,
+  domain: string,
+  needsSignIn: boolean,
+  commandReleased: boolean = ANC_WEB_RELEASED,
+): Rich {
   const rows = count === 1 ? '1 check' : `${count} checks`;
+  if (!commandReleased) return [`Global keeps the ${rows} this audit could not run in its maximum.`];
   const them = count === 1 ? 'it' : 'them';
   const signIn: Rich = needsSignIn ? [', with ', { code: 'ANC_WEB_TOKEN' }, ' set for the ones that need sign-in'] : [];
   return [
