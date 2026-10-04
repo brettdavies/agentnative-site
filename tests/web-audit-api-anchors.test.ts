@@ -280,34 +280,36 @@ describe('API category on api-catalog anchors', () => {
   });
 
   describe.each(DESCRIPTION_PLACEMENTS)('an OpenAPI description %s', (_where, placement) => {
-    test.each(
-      PRESENT_PAST_THE_CAP,
-    )('cut at the cap as %s, its marker past the cap, counts as present with its evidence marked truncated', async (_shape, contentType, body) => {
-      const { openapi, evidence, seen } = await auditDescription(placement, contentType, body);
-      expect(openapi.status).toBe('pass');
-      expect(evidence[0]).toMatchObject({
-        url: placement.url,
-        status: 200,
-        ok: true,
-        truncated: true,
-        why: ['status 200 in [200]', 'description larger than 512 KiB; read in part, presence counted'],
-      });
-      expect(evidence[0]?.off_origin === true).toBe(placement.offOrigin);
-      expect(hygieneProbes(seen)).toEqual([`${new URL(placement.anchor).origin}${FALLBACK_PATH}`]);
-    });
+    test.each(PRESENT_PAST_THE_CAP)(
+      'cut at the cap as %s, its marker past the cap, counts as present with its evidence marked truncated',
+      async (_shape, contentType, body) => {
+        const { openapi, evidence, seen } = await auditDescription(placement, contentType, body);
+        expect(openapi.status).toBe('pass');
+        expect(evidence[0]).toMatchObject({
+          url: placement.url,
+          status: 200,
+          ok: true,
+          truncated: true,
+          why: ['status 200 in [200]', 'description larger than 512 KiB; read in part, presence counted'],
+        });
+        expect(evidence[0]?.off_origin === true).toBe(placement.offOrigin);
+        expect(hygieneProbes(seen)).toEqual([`${new URL(placement.anchor).origin}${FALLBACK_PATH}`]);
+      },
+    );
 
-    test.each(
-      NOT_A_DESCRIPTION_PAST_THE_CAP,
-    )('cut at the cap as %s keeps its miss', async (_shape, contentType, body) => {
-      const { openapi, evidence } = await auditDescription(placement, contentType, body);
-      expect(openapi.status).toBe('broken');
-      expect(evidence[0]).toMatchObject({
-        url: placement.url,
-        ok: false,
-        truncated: true,
-        why: ['status 200 in [200]', 'body no match /openapi|swagger/'],
-      });
-    });
+    test.each(NOT_A_DESCRIPTION_PAST_THE_CAP)(
+      'cut at the cap as %s keeps its miss',
+      async (_shape, contentType, body) => {
+        const { openapi, evidence } = await auditDescription(placement, contentType, body);
+        expect(openapi.status).toBe('broken');
+        expect(evidence[0]).toMatchObject({
+          url: placement.url,
+          ok: false,
+          truncated: true,
+          why: ['status 200 in [200]', 'body no match /openapi|swagger/'],
+        });
+      },
+    );
 
     test('read whole without the marker keeps its miss', async () => {
       const { openapi, evidence } = await auditDescription(

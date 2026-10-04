@@ -96,7 +96,7 @@ describe('the visible trail and its markup agree', () => {
     const block = /<script type="application\/ld\+json">([\s\S]*?)<\/script>/.exec(html);
     const graph = (JSON.parse(block?.[1] ?? '{}') as { '@graph': Array<Record<string, unknown>> })['@graph'];
     const crumbs = graph.find((n) => n['@type'] === 'BreadcrumbList');
-    expect((crumbs?.itemListElement as Array<{ item: string }>).at(-1)?.item).toBe(
+    expect((crumbs?.itemListElement as Array<{ item: string }> | undefined)?.at(-1)?.item).toBe(
       `${CANONICAL_SITE_URL}/score/anc.dev`,
     );
   });
