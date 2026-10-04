@@ -97,6 +97,31 @@ describe('the built registry carries the vendored schema required fields', () =>
       });
     }
   });
+
+  test('the handler names each mistyped field and malformed remotes the full schema refuses', async () => {
+    const check = await builtCardCheck(VENDORED_CARD_SCHEMA_PATH);
+    const validate = fullValidator();
+    const [remote] = VALID_CARD.remotes;
+    const cases: Array<{ card: Record<string, unknown>; problem: string }> = [
+      ...check.with.required.map(({ field }) => ({
+        card: { ...VALID_CARD, [field]: 42 },
+        problem: `${field} is not string`,
+      })),
+      ...check.with.remote_required.map(({ field }) => ({
+        card: { ...VALID_CARD, remotes: [{ ...remote, [field]: 42 }] },
+        problem: `remotes[0] ${field} is not string`,
+      })),
+      { card: { ...VALID_CARD, remotes: remote }, problem: 'remotes is not an array' },
+      { card: { ...VALID_CARD, remotes: [42] }, problem: 'remotes[0] is not an object' },
+    ];
+    for (const { card, problem } of cases) {
+      expect({ problem, schemaAccepts: validate(card), problems: sep2127Problems(card, check.with) }).toEqual({
+        problem,
+        schemaAccepts: false,
+        problems: [problem],
+      });
+    }
+  });
 });
 
 describe('the registry build stops without a readable server card schema', () => {
