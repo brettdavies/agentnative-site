@@ -213,7 +213,9 @@ from deleting a tool that has not run yet. The script is the record of what is h
 rather than re-derived by hand at each cut, and it is deliberately brittle: an exact
 match that no longer matches is a hard error, because a silently skipped edit ships the feature. After applying, it
 greps the tree for every marker the feature owns and fails on any survivor, which catches a miss whichever edit caused
-it. `--check` reports without writing and exits non-zero while anything is still pending.
+it. It also fails when a removal takes a `describe` or `test` the feature does not own, so an edit that matches too much
+cannot strip unrelated tests from `main`. `--check` runs the same removals in memory, reports without writing, and exits
+non-zero while anything is still pending.
 
 | Feature        | Script                                      | Held back because                                                        |
 | -------------- | ------------------------------------------- | ------------------------------------------------------------------------ |
