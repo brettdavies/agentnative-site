@@ -10,20 +10,23 @@
     },
     {
       "source": "/.well-known/mcp/server-card.json",
-      "status": 200,
-      "shape": "sep-1649",
-      "endpoint": "https://mcp.example.net/mcp",
-      "blocked": "off-origin endpoint declaration"
+      "status": 404
     },
     {
       "source": "/.well-known/ai-catalog.json",
       "document": "ai-catalog",
-      "status": 404
+      "status": 200,
+      "shape": "ai-catalog"
     },
     {
       "source": "/.well-known/api-catalog",
       "document": "api-catalog",
       "status": 404
+    },
+    {
+      "source": "/.well-known/ai-catalog.json#/entries/0",
+      "card_url": "https://mcp.example.net/mcp/server-card",
+      "blocked": "off-origin card declaration"
     },
     {
       "source": "/mcp",
@@ -71,7 +74,14 @@
   "follow_declarations": true,
   "declared_hosts": [
     {
-      "surface": "/.well-known/mcp/server-card.json",
+      "surface": "/.well-known/ai-catalog.json#/entries/0",
+      "kind": "card-document",
+      "url": "https://mcp.example.net/mcp/server-card",
+      "host": "mcp.example.net",
+      "outcome": "followed"
+    },
+    {
+      "surface": "https://mcp.example.net/mcp/server-card",
       "kind": "mcp-endpoint",
       "url": "https://mcp.example.net/mcp",
       "host": "mcp.example.net",
@@ -80,11 +90,11 @@
     }
   ],
   "summary": {
-    "pass": 23,
+    "pass": 24,
     "noncompliant": 0,
     "broken": 1,
     "absent": 14,
-    "n_a": 29,
+    "n_a": 28,
     "skip": 0,
     "error": 1
   },
@@ -98,8 +108,8 @@
       "verified": 18
     },
     "may": {
-      "total": 3,
-      "verified": 3
+      "total": 4,
+      "verified": 4
     }
   },
   "score_pct": 66,
@@ -141,8 +151,8 @@
     {
       "id": "agent-discovery-auth",
       "name": "Agent discovery & auth",
-      "passed": 0,
-      "counted": 0
+      "passed": 1,
+      "counted": 1
     }
   ],
   "results": [
@@ -1229,9 +1239,8 @@
       "keyword": "may",
       "tier": "optional",
       "principle": "P8",
-      "status": "n_a",
-      "na_reason": "optional-absent",
-      "evidence": "https://example.com/.well-known/ai-catalog.json -> 404 (status 404 not in [200])",
+      "status": "pass",
+      "evidence": "https://example.com/.well-known/ai-catalog.json -> 200",
       "hosts": [
         {
           "host": "example.com"

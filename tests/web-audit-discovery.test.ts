@@ -1254,7 +1254,7 @@ describe('mcp-server-card scores the card discovery kept', () => {
     new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } });
   const inlineCatalog = (card: unknown) => json({ specVersion: '1.0', entries: [{ type: MCP_CARD_TYPE, data: card }] });
 
-  async function cardRow(fetchImpl: typeof fetch) {
+  async function cardAudit(fetchImpl: typeof fetch) {
     const events = await collect(
       runWebAudit({
         url: 'https://example.com/',
@@ -1267,8 +1267,163 @@ describe('mcp-server-card scores the card discovery kept', () => {
     if (complete?.type !== 'complete') throw new Error('no complete event');
     const row = complete.scorecard.results.find((r) => r.id === 'mcp-server-card');
     if (row === undefined) throw new Error('no mcp-server-card row');
-    return row;
+    return { row, scorecard: complete.scorecard };
   }
+
+  async function cardRow(fetchImpl: typeof fetch) {
+    return (await cardAudit(fetchImpl)).row;
+  }
+
+  const WELL_KNOWN_CARD_URL = 'https://example.com/.well-known/mcp/server-card.json';
+  const STRAY_WELL_KNOWN_URL = 'https://example.com/.well-known/mcp.json';
+  const SUFFIX_URL = 'https://example.com/mcp/server-card';
+  const DECLARED_ENDPOINT = 'https://mcp.example.net/mcp';
+  const DECLARED_CARD_URL = `${DECLARED_ENDPOINT}/server-card`;
+  const declaredCard = { ...SEP_2127_CARD, remotes: [{ type: 'streamable-http', url: DECLARED_ENDPOINT }] };
+  const cardTyped = (value: unknown) =>
+    new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': MCP_CARD_TYPE } });
+  const bodyTyped = (body: string, type: string) =>
+    new Response(body, { status: 200, headers: { 'content-type': type } });
+
+  /** Answers `METHOD url` routes, POSTs to the audited site's /mcp only when `ownEndpoint`, and 404s the rest. */
+  const site = (routes: Record<string, () => Response>, ownEndpoint: boolean) =>
+    stubFetch((url, init) => {
+      const method = init?.method ?? 'GET';
+      if (ownEndpoint && method === 'POST' && url === 'https://example.com/mcp') return initializeResponse();
+      return routes[`${method} ${url}`]?.() ?? new Response('not found', { status: 404 });
+    });
+
+  test('a catalog card on the endpoint host, read by the follow slice, is the card of record and passes', async () => {
+    const { row } = await cardAudit(
+      site(
+        {
+          [`GET ${CATALOG_URL}`]: () =>
+            json({ specVersion: '1.0', entries: [{ type: MCP_CARD_TYPE, url: DECLARED_CARD_URL }] }),
+          [`GET ${DECLARED_CARD_URL}`]: () => cardTyped(declaredCard),
+        },
+        false,
+      ),
+    );
+    expect({ status: row.status, advisory: row.advisory, evidence: row.evidence, host: row.host }).toEqual({
+      status: 'pass',
+      advisory: undefined,
+      evidence: `${DECLARED_CARD_URL} -> 200`,
+      host: 'mcp.example.net',
+    });
+  });
+
+  test("the followed endpoint's own SEP-2127 card outranks the SEP-1649 card that declared it", async () => {
+    const { row, scorecard } = await cardAudit(
+      site(
+        {
+          [`GET ${WELL_KNOWN_CARD_URL}`]: () => json({ name: 'example', mcp_endpoint: DECLARED_ENDPOINT }),
+          [`GET ${DECLARED_CARD_URL}`]: () => cardTyped(declaredCard),
+        },
+        false,
+      ),
+    );
+    expect({ status: row.status, advisory: row.advisory, evidence: row.evidence }).toEqual({
+      status: 'pass',
+      advisory: undefined,
+      evidence: `${DECLARED_CARD_URL} -> 200`,
+    });
+    expect(scorecard.mcp_discovery.filter((item) => item.document === 'server-card')).toEqual([]);
+  });
+
+  test("a published card that does not parse gives way to the followed endpoint's card", async () => {
+    const row = await cardRow(
+      site(
+        {
+          [`GET ${CATALOG_URL}`]: () =>
+            json({ specVersion: '1.0', entries: [{ type: MCP_CARD_TYPE, url: DECLARED_CARD_URL }] }),
+          [`GET ${WELL_KNOWN_CARD_URL}`]: () => bodyTyped('{"name": "example",', 'application/json'),
+          [`GET ${DECLARED_CARD_URL}`]: () => cardTyped(declaredCard),
+        },
+        false,
+      ),
+    );
+    expect({ status: row.status, evidence: row.evidence }).toEqual({
+      status: 'pass',
+      evidence: `${DECLARED_CARD_URL} -> 200`,
+    });
+  });
+
+  test("a card the slice read for an endpoint the audited site's own endpoint superseded is not the card of record", async () => {
+    const row = await cardRow(
+      site(
+        {
+          [`GET ${WELL_KNOWN_CARD_URL}`]: () => json({ name: 'example', mcp_endpoint: DECLARED_ENDPOINT }),
+          [`GET ${DECLARED_CARD_URL}`]: () => cardTyped(declaredCard),
+        },
+        true,
+      ),
+    );
+    expect({ status: row.status, advisory: row.advisory, evidence: row.evidence }).toEqual({
+      status: 'pass',
+      advisory: 'superseded',
+      evidence: `${WELL_KNOWN_CARD_URL} -> 200`,
+    });
+  });
+
+  test('a SEP-2127 card without remotes at <endpoint>/server-card is the card of record and passes', async () => {
+    const { remotes: _remotes, ...remoteless } = SEP_2127_CARD;
+    const row = await cardRow(site({ [`GET ${SUFFIX_URL}`]: () => cardTyped(remoteless) }, true));
+    expect({ status: row.status, evidence: row.evidence }).toEqual({
+      status: 'pass',
+      evidence: `${SUFFIX_URL} -> 200`,
+    });
+  });
+
+  test('a published card that answers 200 with a JSON type but does not parse reads broken', async () => {
+    for (const body of ['{"name": "example",', '[1, 2]']) {
+      const row = await cardRow(
+        site({ [`GET ${WELL_KNOWN_CARD_URL}`]: () => bodyTyped(body, 'application/json') }, true),
+      );
+      expect({ body, status: row.status, evidence: row.evidence }).toEqual({
+        body,
+        status: 'broken',
+        evidence: `${WELL_KNOWN_CARD_URL} -> 200 (the card is not a JSON object)`,
+      });
+    }
+  });
+
+  test('a published card cut at the read cap reads broken and says so', async () => {
+    const oversize = JSON.stringify({ ...SEP_2127_CARD, padding: 'x'.repeat(DOCUMENT_CAP) });
+    const row = await cardRow(
+      site({ [`GET ${WELL_KNOWN_CARD_URL}`]: () => bodyTyped(oversize, 'application/json') }, true),
+    );
+    expect({ status: row.status, evidence: row.evidence }).toEqual({
+      status: 'broken',
+      evidence: `${WELL_KNOWN_CARD_URL} -> 200 (the card was cut at the 256 KiB read cap)`,
+    });
+  });
+
+  test('an HTML page answering 200 at the well-known path, or an unparseable answer at the guessed suffix, reads absent', async () => {
+    const htmlPage = await cardRow(
+      site({ [`GET ${WELL_KNOWN_CARD_URL}`]: () => bodyTyped('<html><body>app</body></html>', 'text/html') }, true),
+    );
+    const suffixGuess = await cardRow(
+      site({ [`GET ${SUFFIX_URL}`]: () => bodyTyped('{"name": "example",', 'application/json') }, true),
+    );
+    expect([htmlPage.status, suffixGuess.status]).toEqual(['absent', 'absent']);
+  });
+
+  test('a stray JSON object at one well-known path does not displace a SEP-1649 card at another', async () => {
+    const row = await cardRow(
+      site(
+        {
+          [`GET ${STRAY_WELL_KNOWN_URL}`]: () => json({ hello: 'world' }),
+          [`GET ${WELL_KNOWN_CARD_URL}`]: () => json({ name: 'example', mcp_endpoint: DECLARED_ENDPOINT }),
+        },
+        true,
+      ),
+    );
+    expect({ status: row.status, advisory: row.advisory, evidence: row.evidence }).toEqual({
+      status: 'pass',
+      advisory: 'superseded',
+      evidence: `${WELL_KNOWN_CARD_URL} -> 200`,
+    });
+  });
 
   test('a retained SEP-2127 card with every required field passes, with no advisory', async () => {
     const row = await cardRow(

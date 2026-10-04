@@ -80,9 +80,10 @@ function cardNamesEndpoint(card: JsonObject | null, cardUrl: string, endpoint: s
 
 const cardRead = { maxBodyBytes: DOCUMENT_MAX_BODY_BYTES, accept: MCP_SERVER_CARD_TYPE };
 
-async function readsAsCardNaming(source: ArtifactSource, url: string, endpoint: string): Promise<boolean> {
+/** The card read at `url` when it names `endpoint`, else null. */
+async function cardNaming(source: ArtifactSource, url: string, endpoint: string): Promise<ProbeResponse | null> {
   const response = await source.get(url, cardRead);
-  return response.status === 200 && cardNamesEndpoint(parseJsonObject(response), url, endpoint);
+  return response.status === 200 && cardNamesEndpoint(parseJsonObject(response), url, endpoint) ? response : null;
 }
 
 async function hostCatalogNames(source: ArtifactSource, endpoint: string, catalogPath: string): Promise<boolean> {
@@ -96,7 +97,7 @@ async function hostCatalogNames(source: ArtifactSource, endpoint: string, catalo
       const cardUrl = resolveUrl(catalogUrl, entry.url);
       if (!sameHost(cardUrl, endpoint)) {
         source.decline(cardUrl, 'catalog card on another host');
-      } else if (await readsAsCardNaming(source, cardUrl, endpoint)) {
+      } else if ((await cardNaming(source, cardUrl, endpoint)) !== null) {
         return true;
       }
     }
@@ -227,10 +228,12 @@ export function httpsOnly(source: ArtifactSource): ArtifactSource {
   };
 }
 
-/** The artifact that admitted an endpoint, and the metadata when metadata is what did. */
+/** The artifact that admitted an endpoint, and the metadata or card when one of those is what did. */
 export interface Admission {
   by: AdmittedBy;
   metadata: MetadataMatch | null;
+  /** The card at <endpoint> + card suffix, when it is what admitted the endpoint. */
+  card?: { url: string; response: ProbeResponse };
 }
 
 /**
@@ -244,9 +247,9 @@ export async function admittingArtifact(
   challenge?: string,
 ): Promise<Admission | null> {
   const reading = httpsOnly(source);
-  if (await readsAsCardNaming(reading, cardSuffixUrl(endpoint, cfg.card_suffix), endpoint)) {
-    return { by: 'card', metadata: null };
-  }
+  const cardUrl = cardSuffixUrl(endpoint, cfg.card_suffix);
+  const card = await cardNaming(reading, cardUrl, endpoint);
+  if (card !== null) return { by: 'card', metadata: null, card: { url: cardUrl, response: card } };
   if (await hostCatalogNames(reading, endpoint, cfg.ai_catalog)) return { by: 'ai-catalog', metadata: null };
   const metadata = await resolveProtectedResourceMetadata(endpoint, reading, { challenge });
   return metadata === null ? null : { by: 'metadata', metadata };

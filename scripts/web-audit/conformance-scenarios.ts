@@ -208,6 +208,12 @@ const SEP_2127_CARD_WITHOUT_NAME = {
   description: SEP_2127_CARD.description,
   remotes: SEP_2127_CARD.remotes,
 };
+const SEP_2127_CARD_WITHOUT_REMOTES = {
+  $schema: SEP_2127_CARD.$schema,
+  name: SEP_2127_CARD.name,
+  version: SEP_2127_CARD.version,
+  description: SEP_2127_CARD.description,
+};
 const cardDocument = (card: unknown): ExchangeResponse => res(200, { 'content-type': MCP_CARD_TYPE }, JSON.stringify(card));
 const aiCatalog = (...entries: unknown[]): ExchangeResponse => json({ specVersion: '1.0', entries });
 const cardEntry = (fields: Record<string, unknown>) => ({
@@ -1141,6 +1147,21 @@ export const SCENARIOS: Record<string, Scenario> = {
     ['mcp-initialize'],
     [...baseline(), get(CARD_SUFFIX_PATH, cardDocument(SEP_2127_CARD)), ...legacyOnlyMcp()],
   ),
+  'discovery-suffix-card-no-remotes': scenario(
+    'no catalog and no well-known card: initialize finds the endpoint, and the card at /mcp/server-card carries the SEP-2127 $schema and every required field but no remotes, which the extension schema allows: it is the card of record and passes the card check',
+    ['mcp-server-card'],
+    [...baseline(), get(CARD_SUFFIX_PATH, cardDocument(SEP_2127_CARD_WITHOUT_REMOTES)), ...legacyOnlyMcp()],
+  ),
+  'mcp-server-card-unparseable': scenario(
+    'the well-known card answers 200 as application/json with a body that does not parse: the card is published, so the card check reads broken rather than absent',
+    ['mcp-server-card'],
+    [...baseline(), get(CARD_PATH, res(200, { 'content-type': 'application/json' }, '{"name": "example",')), ...legacyOnlyMcp()],
+  ),
+  'mcp-server-card-html-200': scenario(
+    'the well-known card path answers 200 with the HTML app shell, a soft 404: no card is published, so the card check reads absent',
+    ['mcp-server-card'],
+    [...baseline(), get(CARD_PATH, html(rootHtml())), ...legacyOnlyMcp()],
+  ),
   'mcp-server-card-missing-field': scenario(
     'an AI catalog names a SEP-2127 card that omits the required name: its remote is still the endpoint, and the card check reads broken naming the missing field',
     ['mcp-server-card'],
@@ -1180,6 +1201,16 @@ export const SCENARIOS: Record<string, Scenario> = {
     [
       ...baseline(),
       declaringCard(DECLARED_ENDPOINT),
+      selfNamingCard(DECLARED_ENDPOINT),
+      ...legacyOnlyMcp({ endpoint: DECLARED_ENDPOINT, cors: 'full' }),
+    ],
+  ),
+  'follow-catalog-card-document': scenario(
+    'the AI catalog names, by URL, the SEP-2127 card at `<endpoint>/server-card` on another host, and no well-known card exists: the follow slice reads that card, its remote is the endpoint of record, and the card passes the card check there',
+    ['mcp-server-card', 'mcp-initialize'],
+    [
+      ...baseline(),
+      get('/.well-known/ai-catalog.json', aiCatalog(cardEntry({ url: `${DECLARED_ENDPOINT}/server-card` }))),
       selfNamingCard(DECLARED_ENDPOINT),
       ...legacyOnlyMcp({ endpoint: DECLARED_ENDPOINT, cors: 'full' }),
     ],

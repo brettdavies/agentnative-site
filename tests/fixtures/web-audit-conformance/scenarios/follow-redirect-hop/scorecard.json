@@ -10,7 +10,6 @@
     },
     {
       "source": "/.well-known/mcp/server-card.json",
-      "document": "server-card",
       "status": 200,
       "shape": "sep-1649",
       "endpoint": "https://mcp.example.net/mcp",
@@ -611,14 +610,13 @@
       "tier": "recommended",
       "principle": "P8",
       "status": "pass",
-      "advisory": "superseded",
-      "evidence": "https://example.com/.well-known/mcp/server-card.json -> 200",
+      "evidence": "https://mcp.example.org/mcp/server-card -> 200",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-card-legacy-aliases",

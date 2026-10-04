@@ -1,14 +1,16 @@
-// `server-card` handler: scores the server card discovery kept as the card
-// of record, with no request of its own. A SEP-1649-shaped card passes with
-// the superseded advisory, and so does one that names its server in
-// `serverInfo`, a SEP-1649 field SEP-2127 does not have, with no endpoint
-// field for discovery to read; any other card is held to SEP-2127 and passes
-// when it carries every field the extension schema requires, at its top
-// level and in each `remotes[]` item, with the JSON type the schema gives.
-// The field lists arrive in `with`, read from the vendored schema at build.
+// `server-card` handler: scores the card of record discovery and the follow
+// slice kept, with no request of its own. A card that answered but does not
+// parse reads broken. A SEP-1649-shaped card passes with the superseded
+// advisory, and so does one that names its server in `serverInfo`, a
+// SEP-1649 field SEP-2127 does not have, with no endpoint field for
+// discovery to read; any other card is held to SEP-2127 and passes when it
+// carries every field the extension schema requires, at its top level and
+// in each `remotes[]` item, with the JSON type the schema gives. The field
+// lists arrive in `with`, read from the vendored schema at build.
 
 import { type CardShape, cardShape, isJsonObject, type JsonObject, parseJsonObject } from '../discovery-documents';
 import type { WebCheck } from '../registry';
+import { DOCUMENT_MAX_BODY_BYTES } from '../ssrf';
 import type { EvidenceItem, HandlerContext, ProbeOutcome } from './types';
 
 type JsonType = 'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array' | 'null';
@@ -84,7 +86,11 @@ export async function runServerCard(check: WebCheck, ctx: HandlerContext): Promi
   const shape = scoredShape(card, doc.shape ?? cardShape(card));
   const item: EvidenceItem = { url: doc.url, status: doc.response.status, retained: w.retained, shape };
   if (card === null) {
-    return { status: 'broken', evidence: [{ ...item, ok: false, why: ['the card is not a JSON object'] }] };
+    const why = doc.response.truncated
+      ? `the card was cut at the ${DOCUMENT_MAX_BODY_BYTES / 1024} KiB read cap`
+      : 'the card is not a JSON object';
+    const cut = doc.response.truncated ? { truncated: true } : {};
+    return { status: 'broken', evidence: [{ ...item, ...cut, ok: false, why: [why] }] };
   }
   if (shape === 'sep-1649') {
     return { status: 'pass', advisory: 'superseded', evidence: [{ ...item, ok: true, why: [] }] };
