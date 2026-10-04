@@ -1,25 +1,59 @@
-// MCP endpoint discovery. Probes well-known cards first (extracting
-// mcp_endpoint / url / transport.endpoint), then POSTs legacy
-// `initialize` to the common paths and takes the first that returns a
-// serverInfo; when that pass finds nothing, a modern header-routed
-// `tools/list` pass over the same paths takes the first `tools` result,
-// so a modern-only server is still discoverable. Evidence records which
-// probe found the endpoint. All egress flows through the SSRF guard.
+// MCP endpoint discovery on the audited origin, SEP-2127 first.
 //
-// The card's endpoint is attacker-controlled, so it is restricted to the
-// audited origin the same way scoped-llms restricts llms.txt hrefs: an
-// off-origin declaration is recorded and dropped, never probed. Each pass
-// probes its candidates concurrently under one shared slice, and every
-// slice is bounded by both the per-audit deadline and the discovery
-// budget, so the three passes together cannot outrun the audit budget
-// even against a target that never answers.
+// Two phases. The document reads come first: one concurrent round of the
+// SEP-1649 well-known cards, the AI catalog, and the API catalog, then the
+// catalog's first MCP server-card entries: an inline card is read in place,
+// a card URL on the audited origin is fetched, and a card URL anywhere else
+// is returned as a declaration and never requested here. A card's endpoint
+// on the audited origin, catalog cards first, is the endpoint. Without one,
+// the endpoint probing that follows sends legacy `initialize` and modern
+// `tools/list` POSTs to the common paths together under one timeout, and a
+// legacy answer wins (discovery-posts.ts). With no answer, a common path
+// that drew a 401 is the endpoint when RFC 9728 metadata on the audited
+// host names it, which is how an endpoint that requires sign-in is found
+// (mcp-auth.ts). The split lets the engine follow the declarations the
+// documents name while the POSTs are in flight.
+//
+// A card's endpoint is attacker-controlled, so one off the audited origin,
+// or one written as a URL template, is recorded as a declaration and never
+// probed from discovery, the same way scoped-llms restricts llms.txt hrefs.
+//
+// The card of record is the first card that parses in SEP-2127 order: a
+// catalog card, then the card at <endpoint> + card_suffix when it has a
+// card's shape, then a SEP-1649 well-known card. It, the AI catalog, and
+// the API catalog are kept for later checks, each read under
+// DOCUMENT_MAX_BODY_BYTES. Every pass is bounded by both the per-audit
+// deadline and the discovery budget, so the passes together cannot outrun
+// the audit budget even against a target that never answers.
 
-import { parseJsonRpc } from './assert';
-import { legacyInitializeBody, legacyProbeHeaders, modernProbeBody, modernProbeHeaders } from './handlers/mcp';
-import { remainingDeadlineMs, resolveUrl } from './handlers/shared';
+import type { RetainedDocumentKey } from '../../shared/web-audit-documents';
+import { API_CATALOG_PATH, type CatalogAnchor, catalogAnchors } from './api-catalog';
+import type { ProbeResponse } from './assert';
+import {
+  aiCatalogShape,
+  apiCatalogShape,
+  type CardRead,
+  cardHasAuthField,
+  cardItem,
+  cardShape,
+  cardSuffixUrl,
+  catalogCardEntries,
+  documentItem,
+  MCP_SERVER_CARD_TYPE,
+  type McpDeclaration,
+  parseJsonObject,
+  preferredCard,
+  type RetainedDocument,
+  readCard,
+  sameOrigin,
+} from './discovery-documents';
+import { probeCommonPaths } from './discovery-posts';
+import { phaseBudget, resolveUrl } from './handlers/shared';
 import type { EvidenceItem } from './handlers/types';
+import { directArtifactSource, type SignInChallenge, signInEndpoint } from './mcp-auth';
+import type { MetadataMatch } from './reciprocity';
 import type { WebAuditDiscoveryConfig } from './registry';
-import { type GuardedFetchOptions, guardedFetch } from './ssrf';
+import { DOCUMENT_MAX_BODY_BYTES, type GuardedFetchOptions, guardedFetch } from './ssrf';
 
 export interface DiscoveryOptions {
   timeoutMs: number;
@@ -32,7 +66,32 @@ export interface DiscoveryOptions {
 
 export interface DiscoveryResult {
   endpoint: string | null;
+  /** The RFC 9728 metadata that made a common path answering 401 the endpoint; null otherwise. */
+  endpointMetadata: MetadataMatch | null;
+  /** The 401 that common path answered; null when the endpoint was found another way. */
+  endpointChallenge: SignInChallenge | null;
   evidence: EvidenceItem[];
+  /** In SEP-2127 order: the catalog's entries, the suffix card, then the well-known cards. */
+  declarations: McpDeclaration[];
+  /** Where common paths redirected their POSTs off the audited origin, in probe order. */
+  redirected: McpDeclaration[];
+  documents: ReadonlyMap<RetainedDocumentKey, RetainedDocument>;
+  /** The API catalog's anchors, in linkset order. */
+  apiAnchors: CatalogAnchor[];
+}
+
+/** Discovery after its document reads, before any POST. */
+export interface DiscoveryDocuments {
+  /** What the documents declare so far, in SEP-2127 order; a suffix card read later can add more. */
+  declarations: McpDeclaration[];
+  /** An endpoint a card names on the audited origin, which no POST can displace. */
+  cardEndpoint: string | null;
+  /** The API catalog's anchors, in linkset order. */
+  apiAnchors: CatalogAnchor[];
+  /** The HTTP status of every document read; null where the request got no answer. */
+  statuses: Array<number | null>;
+  /** The common-path POSTs and the suffix-card read that finish discovery. */
+  probeEndpoint(): Promise<DiscoveryResult>;
 }
 
 // Hard wall-clock cap on the whole discovery phase. Discovery is a
@@ -43,12 +102,17 @@ export interface DiscoveryResult {
 // per-audit deadline before the first real check runs.
 const DISCOVERY_BUDGET_MS = 12_000;
 
-function sameOrigin(candidate: string, base: string): boolean {
-  try {
-    return new URL(candidate).origin === new URL(base).origin;
-  } catch {
-    return false;
-  }
+// The extension's discovery flow asks for a card by its media type.
+const CARD_REQUEST_HEADERS = { accept: MCP_SERVER_CARD_TYPE };
+
+type CatalogSlot =
+  | { index: number; read: CardRead }
+  | { index: number; declaration: McpDeclaration }
+  | { index: number };
+
+function pathOf(url: string): string {
+  const u = new URL(url);
+  return `${u.pathname}${u.search}`;
 }
 
 export async function discoverMcpEndpoint(
@@ -56,106 +120,221 @@ export async function discoverMcpEndpoint(
   cfg: WebAuditDiscoveryConfig,
   opts: DiscoveryOptions,
 ): Promise<DiscoveryResult> {
-  const evidence: EvidenceItem[] = [];
-  const now = opts.now ?? Date.now;
-  const deadlineAt = Math.min(opts.deadlineAt ?? Number.POSITIVE_INFINITY, now() + DISCOVERY_BUDGET_MS);
-  /** This pass's slice of the remaining discovery budget; null once spent. */
-  const passBudget = (): number | null => {
-    const slice = Math.min(opts.timeoutMs, remainingDeadlineMs(deadlineAt, now()));
-    return slice > 0 ? slice : null;
+  return (await readDiscoveryDocuments(base, cfg, opts)).probeEndpoint();
+}
+
+export async function readDiscoveryDocuments(
+  base: string,
+  cfg: WebAuditDiscoveryConfig,
+  opts: DiscoveryOptions,
+): Promise<DiscoveryDocuments> {
+  const budget = phaseBudget(DISCOVERY_BUDGET_MS, opts.timeoutMs, {
+    deadlineAt: opts.deadlineAt,
+    now: opts.now ?? Date.now,
+  });
+  const passBudget = budget.slice;
+  const readDocument = (url: string, timeoutMs: number, headers?: Record<string, string>) =>
+    guardedFetch(url, headers === undefined ? {} : { headers }, {
+      ...opts.fetchOptions,
+      timeoutMs,
+      maxBodyBytes: DOCUMENT_MAX_BODY_BYTES,
+    });
+
+  let wellKnown: CardRead[] = [];
+  const documentItems: EvidenceItem[] = [];
+  const documentResponses: ProbeResponse[] = [];
+  const catalogSlots: CatalogSlot[] = [];
+  let postItems: EvidenceItem[] = [];
+  let postEndpoint: string | null = null;
+  let postRedirected: McpDeclaration[] = [];
+  let postMetadata: MetadataMatch | null = null;
+  let postChallenge: SignInChallenge | null = null;
+  let suffix: CardRead | null = null;
+  let deadlineHit = false;
+  let apiAnchors: CatalogAnchor[] = [];
+  const documents = new Map<RetainedDocumentKey, RetainedDocument>();
+
+  const catalogReads = (): CardRead[] => catalogSlots.flatMap((slot) => ('read' in slot ? [slot.read] : []));
+  const cardWinner = (): CardRead | null =>
+    catalogReads().find((r) => r.endpoint !== null) ?? wellKnown.find((r) => r.endpoint !== null) ?? null;
+
+  const finish = (): DiscoveryResult => {
+    const endpoint = cardWinner()?.endpoint ?? postEndpoint;
+    // The suffix URL is a guess the site never published, and an MCP
+    // handler can answer it with any JSON object, a JSON-RPC error included.
+    const suffixCard = suffix?.shape === 'sep-2127' || suffix?.shape === 'sep-1649' ? suffix : null;
+    const record = preferredCard(catalogReads()) ?? suffixCard ?? preferredCard(wellKnown);
+    if (record !== null) {
+      documents.set('server-card', { url: record.url, response: record.response, shape: cardShape(record.card) });
+    }
+    // SEP-2127 cards carry no auth field, so the declaration comes from
+    // whichever card of either generation names the discovered endpoint.
+    const authCard =
+      endpoint === null
+        ? null
+        : ([...catalogReads(), ...(suffix !== null ? [suffix] : []), ...wellKnown].find(
+            (r) => r.endpoint === endpoint && r.card !== null && cardHasAuthField(r.card),
+          ) ?? null);
+    const item = (read: CardRead) => cardItem(read, read === record, read === authCard);
+    const catalogItem = (slot: CatalogSlot): EvidenceItem => {
+      if ('read' in slot) return item(slot.read);
+      if ('declaration' in slot) {
+        return {
+          source: slot.declaration.source,
+          card_url: slot.declaration.url,
+          blocked: 'off-origin card declaration',
+        };
+      }
+      return { source: `${cfg.ai_catalog}#/entries/${slot.index}`, note: 'catalog entry names no card url or data' };
+    };
+    const evidence: EvidenceItem[] = [
+      ...wellKnown.map(item),
+      ...documentItems,
+      ...catalogSlots.map(catalogItem),
+      ...postItems,
+      ...(suffix !== null ? [item(suffix)] : []),
+      ...(deadlineHit ? [{ note: 'per-audit deadline exceeded during discovery' }] : []),
+    ];
+    // The audited site serves its own endpoint, so where its other paths
+    // redirect can never become the endpoint of record.
+    const redirected =
+      endpoint === null
+        ? postRedirected
+        : postRedirected.map((d): McpDeclaration => ({ ...d, not_followed: 'beyond-endpoint-of-record' }));
+    const foundByPost = endpoint !== null && endpoint === postEndpoint;
+    return {
+      endpoint,
+      endpointMetadata: foundByPost ? postMetadata : null,
+      endpointChallenge: foundByPost ? postChallenge : null,
+      evidence,
+      declarations: declared(),
+      redirected,
+      documents,
+      apiAnchors,
+    };
+  };
+  const declared = (): McpDeclaration[] => {
+    const ofRead = (read: CardRead) => [read.declaration, ...read.others];
+    return [
+      ...catalogSlots.flatMap((slot) =>
+        'read' in slot ? ofRead(slot.read) : 'declaration' in slot ? [slot.declaration] : [],
+      ),
+      ...(suffix !== null ? ofRead(suffix) : []),
+      ...wellKnown.flatMap(ofRead),
+    ].filter((d): d is McpDeclaration => d !== null);
   };
   const exhausted = (): DiscoveryResult => {
-    evidence.push({ note: 'per-audit deadline exceeded during discovery' });
-    return { endpoint: null, evidence };
+    deadlineHit = true;
+    return finish();
   };
-  /** Probe every candidate in one concurrent pass; results stay in path order. */
-  const probeAll = (urls: string[], init: Parameters<typeof guardedFetch>[1], timeoutMs: number) =>
-    Promise.all(urls.map((url) => guardedFetch(url, init, { ...opts.fetchOptions, timeoutMs })));
+  const documentsRead = (probeEndpoint: () => Promise<DiscoveryResult>): DiscoveryDocuments => ({
+    declarations: declared(),
+    cardEndpoint: cardWinner()?.endpoint ?? null,
+    apiAnchors,
+    statuses: [
+      ...wellKnown.map((read) => read.response.status),
+      ...documentResponses.map((response) => response.status),
+      ...catalogReads()
+        .filter((read) => !read.inline)
+        .map((read) => read.response.status),
+    ],
+    probeEndpoint,
+  });
+  const spent = () => documentsRead(async () => exhausted());
 
-  // Pass 1: well-known cards. All candidates fetch concurrently; the first
-  // (in configured order) that yields a same-origin endpoint wins.
-  {
-    const urls = cfg.well_known.map((wk) => resolveUrl(base, wk)).filter((u) => u.length > 0);
-    const timeoutMs = passBudget();
-    if (timeoutMs === null) return exhausted();
-    const responses = await probeAll(urls, {}, timeoutMs);
-    for (const [i, resp] of responses.entries()) {
-      const wk = cfg.well_known[i];
-      if (resp.status !== 200) continue;
-      const card = parseJsonRpc(resp) ?? {};
-      const transport = card.transport as { endpoint?: string } | undefined;
-      const ep = (card.mcp_endpoint as string) || (card.url as string) || transport?.endpoint;
-      if (ep) {
-        const resolved = resolveUrl(base, ep);
-        if (!sameOrigin(resolved, base)) {
-          evidence.push({ source: wk, endpoint: resolved, blocked: 'off-origin endpoint declaration' });
-          continue;
-        }
-        const item: EvidenceItem = { source: wk, endpoint: resolved };
-        // Surface the card's auth declaration for the mcp-auth antecedent.
-        if (card.authentication !== undefined || card.auth !== undefined) item.authentication = true;
-        evidence.push(item);
-        return { endpoint: resolved, evidence };
-      }
-      evidence.push({ source: wk, note: 'card present, no endpoint field' });
+  // Document reads: the SEP-1649 cards, the AI catalog, the API catalog.
+  const wellKnownTargets = cfg.well_known
+    .map((path) => ({ path, url: resolveUrl(base, path) }))
+    .filter((t) => t.url.length > 0);
+  const catalogUrl = resolveUrl(base, cfg.ai_catalog);
+  const apiCatalogUrl = resolveUrl(base, API_CATALOG_PATH);
+  const documentPass = passBudget();
+  if (documentPass === null) return spent();
+  const [cardResponses, catalogResp, apiCatalogResp] = await Promise.all([
+    Promise.all(wellKnownTargets.map((t) => readDocument(t.url, documentPass))),
+    readDocument(catalogUrl, documentPass),
+    readDocument(apiCatalogUrl, documentPass),
+  ]);
+  wellKnown = wellKnownTargets.map((t, i) => readCard(t.path, t.url, cardResponses[i], false, base));
+  const catalog = catalogResp.status === 200 ? parseJsonObject(catalogResp) : null;
+  documentResponses.push(catalogResp, apiCatalogResp);
+  const apiCatalog = { url: apiCatalogUrl, response: apiCatalogResp };
+  documents.set('ai-catalog', { url: catalogUrl, response: catalogResp });
+  documents.set('api-catalog', apiCatalog);
+  apiAnchors = catalogAnchors(apiCatalog);
+  documentItems.push(
+    documentItem(
+      cfg.ai_catalog,
+      'ai-catalog',
+      catalogResp,
+      catalogResp.status === 200 ? aiCatalogShape(catalog) : null,
+    ),
+    documentItem(
+      API_CATALOG_PATH,
+      'api-catalog',
+      apiCatalogResp,
+      apiCatalogResp.status === 200 ? apiCatalogShape(parseJsonObject(apiCatalogResp)) : null,
+    ),
+  );
+
+  // The catalog's card entries: inline in place, same-origin URLs fetched.
+  const entries = (catalog === null ? [] : catalogCardEntries(catalog)).map((entry) => {
+    const url = 'url' in entry ? resolveUrl(catalogUrl, entry.url) : '';
+    return { entry, url: url === '' ? null : url };
+  });
+  const fetchesCard = entries.some(({ url }) => url !== null && sameOrigin(url, base));
+  const cardPass = fetchesCard ? passBudget() : 0;
+  if (cardPass === null) return spent();
+  const catalogSlot = async ({ entry, url }: (typeof entries)[number]): Promise<CatalogSlot> => {
+    const pointer = `#/entries/${entry.index}`;
+    if ('data' in entry) {
+      const response = { ...catalogResp, body: JSON.stringify(entry.data) };
+      const read = readCard(`${cfg.ai_catalog}${pointer}/data`, `${catalogUrl}${pointer}/data`, response, true, base);
+      return { index: entry.index, read };
     }
-  }
-
-  // Pass 2: legacy initialize on the common paths, concurrently.
-  {
-    const legacyInit = {
-      method: 'POST',
-      headers: legacyProbeHeaders(),
-      body: legacyInitializeBody(cfg.protocol_version),
-    };
-    const paths = cfg.common_paths.filter((p) => resolveUrl(base, p).length > 0);
-    const timeoutMs = passBudget();
-    if (timeoutMs === null) return exhausted();
-    const responses = await probeAll(
-      paths.map((p) => resolveUrl(base, p)),
-      legacyInit,
-      timeoutMs,
-    );
-    for (const [i, resp] of responses.entries()) {
-      const p = paths[i];
-      const url = resolveUrl(base, p);
-      const rpc = parseJsonRpc(resp);
-      const result = rpc?.result as { serverInfo?: unknown } | undefined;
-      if (rpc && result && typeof result === 'object' && result.serverInfo) {
-        evidence.push({ source: p, endpoint: url, probed: 'initialize' });
-        return { endpoint: url, evidence };
-      }
-      evidence.push({ source: p, status: resp.status, probed: 'initialize (no serverInfo)' });
+    if (url === null) return { index: entry.index };
+    if (!sameOrigin(url, base)) {
+      return { index: entry.index, declaration: { kind: 'card-document', url, source: `${cfg.ai_catalog}${pointer}` } };
     }
-  }
+    const response = await readDocument(url, cardPass, CARD_REQUEST_HEADERS);
+    return { index: entry.index, read: readCard(pathOf(url), url, response, false, base) };
+  };
+  catalogSlots.push(...(await Promise.all(entries.map(catalogSlot))));
 
-  // Pass 3: modern header-routed tools/list on the same paths, concurrently.
-  {
-    const modernInit = {
-      method: 'POST',
-      headers: modernProbeHeaders('tools/list'),
-      body: modernProbeBody('tools/list'),
-    };
-    const paths = cfg.common_paths.filter((p) => resolveUrl(base, p).length > 0);
-    const timeoutMs = passBudget();
-    if (timeoutMs === null) return exhausted();
-    const responses = await probeAll(
-      paths.map((p) => resolveUrl(base, p)),
-      modernInit,
-      timeoutMs,
-    );
-    for (const [i, resp] of responses.entries()) {
-      const p = paths[i];
-      const url = resolveUrl(base, p);
-      const rpc = parseJsonRpc(resp);
-      const result = rpc?.result as { tools?: unknown } | undefined;
-      if (result && Array.isArray(result.tools)) {
-        evidence.push({ source: p, endpoint: url, probed: 'modern-tools-list' });
-        return { endpoint: url, evidence };
+  return documentsRead(async () => {
+    // POST probing, only when no card named an endpoint on the audited origin.
+    const candidates = cfg.common_paths
+      .map((path) => ({ path, url: resolveUrl(base, path) }))
+      .filter((c) => c.url.length > 0);
+    if (cardWinner() === null && candidates.length > 0) {
+      const postPass = passBudget();
+      if (postPass === null) return exhausted();
+      const probed = await probeCommonPaths(candidates, cfg.protocol_version, postPass, opts.fetchOptions);
+      postItems = probed.items;
+      postEndpoint = probed.endpoint;
+      postRedirected = probed.redirected;
+      const signIn = await signInEndpoint(probed.challenged, directArtifactSource(passBudget, opts.fetchOptions));
+      if (signIn !== null) {
+        postEndpoint = signIn.path.url;
+        postMetadata = signIn.metadata;
+        postChallenge = signIn.challenge;
+        postItems.push({
+          source: signIn.path.path,
+          endpoint: signIn.path.url,
+          probed: `${signIn.path.probed} (auth required)`,
+          resource_metadata: signIn.metadata.url,
+        });
       }
-      evidence.push({ source: p, status: resp.status, probed: 'modern-tools-list (no tools)' });
     }
-  }
 
-  return { endpoint: null, evidence };
+    // With no catalog card, the endpoint's own card outranks a SEP-1649 card.
+    const endpoint = cardWinner()?.endpoint ?? postEndpoint;
+    if (endpoint !== null && preferredCard(catalogReads()) === null) {
+      const suffixPass = passBudget();
+      if (suffixPass === null) return exhausted();
+      const url = cardSuffixUrl(endpoint, cfg.card_suffix);
+      suffix = readCard(pathOf(url), url, await readDocument(url, suffixPass, CARD_REQUEST_HEADERS), false, base);
+    }
+    return finish();
+  });
 }

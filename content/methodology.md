@@ -248,8 +248,11 @@ toward the score, while the presence of the bundle file itself is a project-laye
 ## Web audits: scoring a website and its MCP server
 
 The [web audit](/audit?lane=web) applies the same eight principles to a different surface: a website and the MCP server
-it publishes. It runs entirely as network probes from the Worker, with no binary to install and nothing crawled. There
-are four probe types:
+it publishes. It runs entirely as network probes from the Worker, with no binary to install and nothing crawled. anc
+sends no plaintext request: an http URL, declared or linked, and any redirect to http, is never requested. A document
+that answers only with a redirect to http, and an API declared only over http, read `absent`, so a surface served over
+plaintext alone earns no more than a missing one, and a site whose root is http or redirects to http is unreachable: the
+audit ends without a score, and any score already stored stands. There are four probe types:
 
 - **HTTP** — requests a path (or the first of several candidate paths) and asserts on status, content type, headers, or
   a body pattern. Covers `llms.txt`, OpenAPI, JSON Schemas, root-HTML affordances (meta description, `<link rel>`,
@@ -263,13 +266,70 @@ are four probe types:
   misconfigured CORS fails.
 - **DNS-over-HTTPS** — SVCB lookups for DNS-AID records under the `_agents` namespace.
 
-The audit first discovers the MCP endpoint from the site's well-known cards, then falls back to probing common paths
-with `initialize`, then with a modern header-routed `tools/list`, so a modern-only server is still discovered. MCP-shape
-checks apply only when an endpoint is found; on a site without one they are marked `n_a` and excluded from the score.
-The headline score is credit-weighted over the MUST and SHOULD checks that apply, with MAY checks informational, the
-same model the CLI score uses. Each check maps onto one of P1 through P8, so a web scorecard is isomorphic with a CLI
-scorecard and renders through the same presentation. Web results carry no badge; they live at a shareable
-[`/web/<domain>`](/web) page. The [web scorecard JSON schema](/web-scorecard-schema) documents the shape.
+The audit first discovers the MCP endpoint from declared cards. One concurrent round reads the SEP-1649 well-known
+server cards, the AI catalog (`/.well-known/ai-catalog.json`), and the API catalog (`/.well-known/api-catalog`). The
+catalog's first MCP server-card entries (type `application/mcp-server-card+json`, at most four) are read next: an inline
+card in place, and a card URL on the audited origin by fetch. A card URL on another origin is recorded and never
+requested. An endpoint on the audited origin named by a card, catalog cards first, is the endpoint. A card endpoint on
+another origin, or written as a URL template, is recorded and never probed. With no such endpoint, a legacy `initialize`
+and a modern header-routed `tools/list` go to the common paths together, and a legacy answer wins, so a modern-only
+server is still discovered. MCP-shape checks apply only when an endpoint is found; on a site without one they are marked
+`n_a` and excluded from the relative score.
+
+Each check maps onto one of P1 through P8, so a web scorecard is isomorphic with a CLI scorecard and renders through the
+same presentation. Web results carry no badge; they live at a shareable [`/web/<domain>`](/web) page. The
+[web scorecard JSON schema](/web-scorecard-schema) documents the shape.
+
+### Relative and global scores
+
+A web audit produces two scores from the same per-check outcomes. Each covers what an agent at the audit's vantage can
+verify: anc.dev audits from the public internet and presents no credential, and every scorecard records its
+[vantage](/web-scorecard-schema#vantage).
+
+- **Relative** (the headline, `score_pct`) is earned points over the maximum for this site's applicable checks, so a
+  site perfect for its type approaches 100. `n_a`, `skip`, and `error` rows are excluded from it. The
+  [web leaderboard](/web) ranks by it.
+- **Global** (the secondary "global-ready" number) is earned points over the most a single site could earn: every check
+  in the registry outside a group of alternatives, plus each alternative the site presents, or the largest when it
+  presents none. A check that does not apply to a site still counts in the global denominator and earns nothing,
+  whatever its `n_a` reason, and so does a `skip` or `error` row: a site without MCP sees what adding MCP is worth. The
+  web leaderboard breaks ties between equal relative scores by it.
+
+A check the audit could not reach, because sign-in blocked it or a declared host is private or unreachable, reads `n_a`
+with that reason. It earns nothing, is excluded from relative, and stays in the global denominator, so a site less
+reachable than an otherwise equal one scores lower globally while relative still reports how it does on what the audit
+could check. A check that reached the server and got a definitive answer scores on that answer.
+
+Alternatives are site designs no single site can satisfy at once; a limit on what the audit could reach never forms or
+joins one. MCP access is the only group. An endpoint presents the protected design when a token-less handshake draws a
+401 that RFC 9728 protected-resource metadata on the endpoint's own host backs, or, when neither handshake drew a 401 or
+a JSON-RPC result, when the request that found the endpoint drew one. The three sign-in checks count only for a site
+that presents the protected design or a site with no MCP endpoint. A check that needs a session presents the open design
+whenever the audit evaluates it; the open design owns no checks, and an endpoint can present both.
+
+Sign-in blocks a check on either design, and the check reads `n_a` with reason `auth-required`. On an endpoint that
+presents the protected design, sign-in blocks every check that needs a session unless the endpoint answered a token-less
+handshake with a JSON-RPC result. On either design, sign-in blocks a check whose JSON-RPC request draws a 401 the
+endpoint's metadata backs (the sign-in check that asks for that refusal passes on it instead), so an endpoint that
+serves a handshake without a token and asks for sign-in on its other requests never reads as broken. A lane the server
+refuses without asking for sign-in reads as it does on an open server, because a token would not change that answer;
+only a resources check on that lane stays blocked while a handshake that sign-in blocked could have advertised
+resources. A protected server's global on a public audit tops out near 68, because the session and handshake rows its
+sign-in blocks stay in its denominator. A local run that presents a credential evaluates them.
+
+Each check carries a tier weight: 5 for MUST, 3 for SHOULD, 1 for MAY. At every tier, MAY included, a pass earns the
+full weight, a surface that works while violating a spec detail (`noncompliant`) earns 0.25 × weight, and a present but
+broken surface costs 0.75 × weight, because it misleads agents. Which of the two a defect is depends on what an agent at
+the audit's vantage gets: sign-in metadata that lists one usable authorization server beside an `http` one is
+`noncompliant`, because the agent still signs in, while a list with no server the agent can use is `broken`, because it
+leaves the agent nowhere to sign in. An absent MUST or SHOULD earns nothing; an absent MAY reads `n_a`. Both scores
+floor at 0, and global never exceeds 100. These weights and outcomes are the web audit's own: the CLI score weights
+every tier equally and grades a miss as `warn` or `fail`. The
+[scoring reference](/web-scorecard-schema#the-two-score-model) carries the full credit table.
+
+Whenever the check universe grows, global scores read lower until a site re-audits under the wider universe. Seeded
+scorecards reflow automatically on the deploy that ships a registry change; other cached results re-audit on their next
+stale access and age out of the display within 30 days, so board movement settles inside that window.
 
 ### Era lanes and CORS posture
 
@@ -277,27 +337,30 @@ Two rules shape how MCP results score:
 
 - The modern MCP era (protocol revision `2026-07-28`) scores as its own lane alongside the legacy checks: a required
   header-routed `tools/list` check and a recommended `server/discover` check. A dual-stack server earns both lanes; a
-  single-era server reads `absent` on the lane it lacks rather than `broken`, so it is never penalized for an era it
-  never claimed. `server/discover` decides the modern lane, because it is the only method a legacy server cannot answer:
-  a refusal saying the method is not served here reads `absent` on that check and leaves every other modern check `n_a`,
-  excluded from both scores because no probe ever reached it, while a malformed result or a server error stays `broken`.
-  A `-32000` refusal counts as that signal only at a status able to carry one; delivered with a 5xx or a rate-limit
-  status it reports load rather than an era, and stays `broken`. On the legacy lane, an era-shaped refusal (a
-  well-formed `-32601` or `-32022`) reads `absent` on the checks that name a method the lane could be missing, unless
-  the lane's own handshake advertised the capability it is refusing, which contradicts the handshake and stays `broken`.
-  The error-code conformance checks ask about a request the lane has already proven it accepts, so no era softening
-  reaches them. How a wrong answer scores turns on whether an agent can still use the surface: a well-formed refusal
-  carrying a code the taxonomy does not name, or a correct refusal missing a required payload field, reads
-  `noncompliant` and earns partial credit, because the caller learns the call failed and can move on. A result where a
-  refusal was required, an envelope with no numeric code, a malformed body, and a server error all read `broken`,
-  because each leaves the caller believing something untrue. The same split governs the unknown-method check on either
-  lane.
+  single-era server reads `absent` on the lane it lacks rather than `broken`, so it earns no credit for that lane and
+  takes no broken-surface penalty for an era it never claimed. `server/discover` decides the modern lane, because it is
+  the only method a legacy server cannot answer: a refusal saying the method is not served here reads `absent` on that
+  check and on every other applicable modern check, which scores as an absence without a request of its own
+  (`unprobed`), while a malformed result or a server error stays `broken`.
+  A `-32000` refusal counts as that signal only at a status able to carry one; delivered with a 5xx it reports load
+  rather than an era, and stays `broken`. A target asking to be retried reports load too: an HTTP `408` or `429` answer
+  to any probe of the MCP endpoint (the JSON-RPC checks, the GET fast-fail check, and the CORS pair) reads `error`, like
+  a JSON-RPC `-32099` rate-limit refusal, whatever body it carries. On `server/discover` it leaves the modern lane
+  undecided, so the other modern checks probe on their own answers rather than read `absent`. On the legacy lane, an
+  era-shaped refusal (a well-formed `-32601` or `-32022`) reads `absent` on the checks that name a method the lane could
+  be missing, unless the lane's own handshake advertised the capability it is refusing, which contradicts the handshake
+  and stays `broken`. The error-code conformance checks ask about a request the lane has already proven it accepts, so
+  no era softening reaches them. How a wrong answer scores turns on whether an agent can still use the surface: a
+  well-formed refusal carrying a code the taxonomy does not name, or a correct refusal missing a required payload field,
+  reads `noncompliant` and earns partial credit, because the caller learns the call failed and can move on. A result
+  where a refusal was required, an envelope with no numeric code, a malformed body, and a server error all read
+  `broken`, because each leaves the caller believing something untrue. The same split governs the unknown-method check
+  on either lane.
 - The two CORS checks are posture-aware: a consistent no-CORS posture on both the preflight and the actual POST is a
-  deliberate choice and reads `n_a` (excluded from the score); only partial or misconfigured CORS is penalized.
-
-Whenever the check universe grows, global scores read lower until a site re-audits under the wider universe. Seeded
-scorecards reflow automatically on the deploy that ships a registry change; other cached results re-audit on their next
-stale access and age out of the display within 30 days, so board movement settles inside that window.
+  deliberate choice and reads `n_a`, excluded from the relative score and kept in the global denominator like every
+  `n_a` row; only partial or misconfigured CORS is penalized. A probe answered HTTP `408` or `429` is never read as a
+  posture: the check whose own probe drew that answer reads `error`, and so does the other unless its own probe carries
+  `Access-Control-Allow-Origin`, which settles it alone.
 
 ## Re-running the same audits locally
 

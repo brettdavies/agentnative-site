@@ -4,7 +4,12 @@
 // the SSRF guard (src/worker/audit-web/ssrf.ts); no handler calls fetch
 // directly.
 
+import type { RetainedDocumentKey } from '../../../shared/web-audit-documents';
+import type { NaReason } from '../../../shared/web-audit-findings';
+import type { ApiTargets } from '../api-targets';
 import type { ProbeResponse } from '../assert';
+import type { RetainedDocument } from '../discovery-documents';
+import type { SignInChallenge } from '../mcp-auth';
 import type { GuardedFetchOptions } from '../ssrf';
 
 /**
@@ -24,17 +29,6 @@ export type ProbeStatus = 'pass' | 'noncompliant' | 'broken' | 'absent' | 'na' |
 export type EvidenceItem = Record<string, unknown>;
 
 /**
- * Why a row is n_a: `antecedent-unmet` = the check does not apply to
- * this site (declared type or runtime antecedent); `optional-absent` =
- * it applies, is a MAY, and simply is not implemented;
- * `posture-consistent` = the probed surfaces show a deliberate,
- * consistent opt-out (the CORS pair with Allow-Origin on neither
- * surface). A handler with nothing to probe (no discovered MCP endpoint)
- * emits n_a with no reason.
- */
-export type NaReason = 'antecedent-unmet' | 'optional-absent' | 'posture-consistent';
-
-/**
  * Whether the target serves the modern MCP era, read from the wave-1
  * `server/discover` probe: `present` when it answered with a JSON-RPC
  * result, `unevidenced` when it answered any other way, and `unknown`
@@ -49,6 +43,22 @@ export interface McpLaneEvidence {
   legacyAdvertised: readonly string[];
   /** Capability groups the modern `server/discover` result advertised. */
   modernAdvertised: readonly string[];
+}
+
+/**
+ * The MCP endpoint of record requires sign-in: a wire probe drew a 401 and
+ * RFC 9728 metadata on the endpoint's own host names that endpoint as its
+ * protected resource.
+ */
+export interface McpAuthRequired {
+  endpoint: string;
+  /** The 401's WWW-Authenticate value; null when the 401 carried none. */
+  challenge: string | null;
+  /** The handshake lane whose probe drew the 401, which the token-less refusal row asks on. */
+  lane: 'legacy' | 'modern';
+  /** Where the metadata naming the endpoint was read. */
+  metadataUrl: string;
+  metadata: Record<string, unknown>;
 }
 
 export interface ProbeOutcome {
@@ -66,6 +76,12 @@ export interface ProbeOutcome {
    */
   unprobed?: true;
   /**
+   * The answer carried a JSON-RPC `result`, which is what shows a handshake
+   * served a request. Engine-internal: the row's evidence is what reaches
+   * the scorecard.
+   */
+  jsonRpcResult?: true;
+  /**
    * When true, the handler exhausted the remaining per-audit budget mid-probe.
    * The engine treats the run as incomplete and the route must not cache it.
    */
@@ -79,6 +95,11 @@ export interface HandlerContext {
   host: string;
   /** Discovered MCP endpoint absolute URL, or null. */
   mcpEndpoint: string | null;
+  /**
+   * The endpoint is on a declared host, pinned when reciprocity admitted
+   * it, so no probe of it follows a redirect somewhere nothing confirmed.
+   */
+  mcpEndpointFollowed?: boolean;
   protocolVersion: string;
   /** Default per-request timeout in ms; a check's `with.timeout` (seconds) overrides. */
   defaultTimeoutMs: number;
@@ -102,6 +123,17 @@ export interface HandlerContext {
    * issuing a second fetch of the antecedent source.
    */
   retainedBodies?: ReadonlyMap<string, string>;
+  /** Documents discovery read and kept; a `retained-document` check scores one with no request. */
+  retainedDocuments?: ReadonlyMap<RetainedDocumentKey, RetainedDocument>;
+  /**
+   * Where the API rows evaluate when the API catalog lists API anchors;
+   * null or absent when it lists none and they evaluate the audited origin.
+   */
+  apiTargets?: ApiTargets | null;
+  /** The OpenAPI descriptions the wave-1 row retained, by declared URL, for the hygiene probes' URL. */
+  apiDescriptionBodies?: ReadonlyMap<string, string>;
+  /** The GET each API anchor host receives, by URL, which both hygiene rows read. */
+  apiHostProbes?: Map<string, Promise<ProbeResponse>>;
   /**
    * Session id from wave-1 MCP initialize (`Mcp-Session-Id`), or null when
    * the server is stateless. Wave-2 MCP probes send it when present.
@@ -114,4 +146,12 @@ export interface HandlerContext {
    * advertisement.
    */
   mcpLanes?: McpLaneEvidence;
+  /** Set once the endpoint is known to require sign-in, so a 401 from it reads as that rather than as a defect. */
+  mcpAuth?: McpAuthRequired | null;
+  /**
+   * Set when wave 1 did not settle that the endpoint requires sign-in:
+   * whether a 401 a later row drew is backed by the endpoint's RFC 9728
+   * metadata, which then reads as sign-in the same way.
+   */
+  mcpSignIn?: (answer: SignInChallenge) => Promise<boolean>;
 }

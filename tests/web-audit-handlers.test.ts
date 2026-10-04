@@ -4,22 +4,29 @@
 // fetch is the only network path).
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import type { RetainedDocumentKey } from '../src/shared/web-audit-documents';
+import type { RetainedDocument } from '../src/worker/audit-web/discovery-documents';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
-import { deriveApiProbeUrl, runApiHygiene } from '../src/worker/audit-web/handlers/api-hygiene';
+import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
+import { runApiHygiene } from '../src/worker/audit-web/handlers/api-hygiene';
+import { deriveApiProbeUrl } from '../src/worker/audit-web/handlers/api-probe-url';
 import { runAuthMd } from '../src/worker/audit-web/handlers/auth-md';
 import { runContentWithoutJs } from '../src/worker/audit-web/handlers/content-without-js';
 import { runCorsPreflight } from '../src/worker/audit-web/handlers/cors-preflight';
 import { runDnsDoh } from '../src/worker/audit-web/handlers/dns-doh';
-import { runHttp } from '../src/worker/audit-web/handlers/http';
+import { runHttp, runRetainedDocument } from '../src/worker/audit-web/handlers/http';
 import { runLlmsTxtQuality } from '../src/worker/audit-web/handlers/llms-txt-quality';
 import { runMarkdownFrontmatter } from '../src/worker/audit-web/handlers/markdown-frontmatter';
 import {
   CONFORMANCE_OPS,
+  ENFORCEMENT_OPS,
+  ERA_OPS,
   MODERN_LANE_DEPENDENT_OPS,
   modernProbeBody,
   NEGOTIATION_OPS,
   runMcp,
 } from '../src/worker/audit-web/handlers/mcp';
+import { runScopedLlms } from '../src/worker/audit-web/handlers/scoped-llms';
 import type { HandlerContext, McpLaneEvidence } from '../src/worker/audit-web/handlers/types';
 import { runWebMcp } from '../src/worker/audit-web/handlers/webmcp';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
@@ -30,6 +37,7 @@ import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 import { captureLogs } from './helpers/log-capture';
 import { isModernProbe, MODERN_PROTOCOL } from './helpers/mcp-modern';
 import { resetMcpTestState } from './helpers/mcp-rpc';
+import { stubFetch } from './helpers/stub-fetch';
 
 function ctx(overrides: Partial<HandlerContext> & { fetchImpl: typeof fetch }): HandlerContext {
   return {
@@ -41,13 +49,6 @@ function ctx(overrides: Partial<HandlerContext> & { fetchImpl: typeof fetch }): 
     fetchOptions: { fetchImpl: overrides.fetchImpl },
     ...overrides,
   };
-}
-
-function stubFetch(handler: (url: string, init?: RequestInit) => Response): typeof fetch {
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-    return handler(url, init);
-  }) as typeof fetch;
 }
 
 function check(partial: Partial<WebCheck>): WebCheck {
@@ -79,6 +80,10 @@ const json = (body: object, status = 200) =>
 const rpcError = (code: number, status = 200, data?: Record<string, unknown>) =>
   json({ jsonrpc: '2.0', id: 1, error: { code, message: 'nope', ...(data !== undefined ? { data } : {}) } }, status);
 const toolsResult = () => json({ jsonrpc: '2.0', id: 1, result: { tools: [{ name: 'a', inputSchema: {} }] } });
+const RETRY_SHAPED: ReadonlyArray<readonly [number, string]> = [
+  [408, 'Request Timeout'],
+  [429, 'Too Many Requests'],
+];
 
 describe('runHttp', () => {
   test('passes on a 200 /llms.txt with url + status evidence', async () => {
@@ -236,6 +241,29 @@ describe('runHttp', () => {
     expect(outcome.status).toBe('broken');
   });
 
+  test('mcp-get-fast-fail: an HTTP 408 or 429 answer is an operational error, not a fast answer', async () => {
+    for (const [status, reason] of RETRY_SHAPED) {
+      const fetchImpl = stubFetch(() => new Response('slow down', { status, headers: { 'retry-after': '30' } }));
+      const outcome = await runHttp(
+        check({ with: { path: '{mcp_endpoint}', method: 'GET', timeout: 8, expect: { status_below: 500 } } }),
+        ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+      );
+      expect(`${status}:${outcome.status}`).toBe(`${status}:error`);
+      expect(outcome.evidence[0].why).toEqual([`the target answered HTTP ${status} ${reason}; not scored`]);
+    }
+  });
+
+  test('a 408 or 429 on a document off the MCP endpoint keeps its own classification', async () => {
+    for (const [status] of RETRY_SHAPED) {
+      const fetchImpl = stubFetch(() => new Response('slow down', { status }));
+      const outcome = await runHttp(
+        check({ with: { path: '/llms.txt', expect: { status: [200] } } }),
+        ctx({ fetchImpl }),
+      );
+      expect(`${status}:${outcome.status}`).toBe(`${status}:broken`);
+    }
+  });
+
   test('substitutes {mcp_endpoint} in the path', async () => {
     const seen: string[] = [];
     const fetchImpl = stubFetch((url) => {
@@ -260,6 +288,165 @@ describe('runHttp', () => {
       ctx({ fetchImpl }),
     );
     expect(outcome.status).toBe('pass');
+  });
+});
+
+describe('runRetainedDocument', () => {
+  const noRequest = stubFetch(() => {
+    throw new Error('a retained-document check must not send a request');
+  });
+  const apiCatalogCheck = check({
+    id: 'api-catalog',
+    eval: 'retained-document',
+    with: { retained: 'api-catalog', expect: { status: [200], body_regex: 'linkset' } },
+  });
+  const kept = (status: number, body: string) =>
+    new Map<RetainedDocumentKey, RetainedDocument>([
+      [
+        'api-catalog',
+        {
+          url: 'https://example.com/.well-known/api-catalog',
+          response: { status, headers: { 'content-type': 'application/linkset+json' }, body, error: null },
+        },
+      ],
+    ]);
+
+  test('scores the document discovery kept, with no request of its own', async () => {
+    const outcome = await runRetainedDocument(
+      apiCatalogCheck,
+      ctx({ fetchImpl: noRequest, retainedDocuments: kept(200, '{"linkset":[]}') }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.evidence[0]).toMatchObject({
+      url: 'https://example.com/.well-known/api-catalog',
+      status: 200,
+      ok: true,
+      retained: 'api-catalog',
+    });
+  });
+
+  test('a kept 404 is absent, as the same response fetched live would be', async () => {
+    const outcome = await runRetainedDocument(
+      apiCatalogCheck,
+      ctx({ fetchImpl: noRequest, retainedDocuments: kept(404, 'not found') }),
+    );
+    expect(outcome.status).toBe('absent');
+  });
+
+  test('a document discovery did not keep is absent', async () => {
+    const outcome = await runRetainedDocument(
+      apiCatalogCheck,
+      ctx({ fetchImpl: noRequest, retainedDocuments: new Map() }),
+    );
+    expect(outcome.status).toBe('absent');
+  });
+});
+
+describe('a document that redirects to http reads absent', () => {
+  const WHY = 'redirects to http; anc sends no plaintext request';
+  // Every https URL redirects to its http twin, which would answer.
+  const towardHttp = (sent: string[]) =>
+    stubFetch((url) => {
+      sent.push(url);
+      return url.startsWith('https:')
+        ? new Response(null, { status: 301, headers: { location: url.replace('https:', 'http:') } })
+        : new Response('# Served over plaintext\n\n- [a](/docs/a)\n', { status: 200 });
+    });
+  const plaintext = (sent: string[]) => sent.filter((url) => url.startsWith('http:'));
+
+  test('runHttp', async () => {
+    const sent: string[] = [];
+    const outcome = await runHttp(
+      check({ id: 'llms-txt', with: { path: '/llms.txt', expect: { status: [200], body_regex: '^#' } } }),
+      ctx({ fetchImpl: towardHttp(sent) }),
+    );
+    expect(plaintext(sent)).toEqual([]);
+    expect(outcome.status).toBe('absent');
+    expect(outcome.evidence[0]).toMatchObject({
+      url: 'https://example.com/llms.txt',
+      status: 301,
+      ok: false,
+      why: [WHY],
+      error: null,
+    });
+  });
+
+  test('runRetainedDocument', async () => {
+    const outcome = await runRetainedDocument(
+      check({
+        id: 'api-catalog',
+        eval: 'retained-document',
+        with: { retained: 'api-catalog', expect: { status: [200], body_regex: 'linkset' } },
+      }),
+      ctx({
+        fetchImpl: stubFetch(() => {
+          throw new Error('a retained-document check must not send a request');
+        }),
+        retainedDocuments: new Map<RetainedDocumentKey, RetainedDocument>([
+          [
+            'api-catalog',
+            {
+              url: 'https://example.com/.well-known/api-catalog',
+              response: {
+                status: 301,
+                headers: { location: 'http://example.com/.well-known/api-catalog' },
+                body: '',
+                error: 'redirect refused: 301 to http://example.com/.well-known/api-catalog: not https',
+                refused: 'insecure-scheme',
+              },
+            },
+          ],
+        ]),
+      }),
+    );
+    expect(outcome.status).toBe('absent');
+    expect(outcome.evidence[0]).toMatchObject({ status: 301, ok: false, why: [WHY], retained: 'api-catalog' });
+  });
+
+  test('runAuthMd', async () => {
+    const sent: string[] = [];
+    const outcome = await runAuthMd(
+      check({ id: 'auth-md', handler: 'auth-md', with: { path_any: ['/.well-known/auth.md', '/auth.md'] } }),
+      ctx({ fetchImpl: towardHttp(sent) }),
+    );
+    expect(plaintext(sent)).toEqual([]);
+    expect(outcome).toEqual({
+      status: 'absent',
+      evidence: [
+        { url: 'https://example.com/.well-known/auth.md', status: 301, ok: false, why: [WHY] },
+        { url: 'https://example.com/auth.md', status: 301, ok: false, why: [WHY] },
+      ],
+    });
+  });
+
+  test('runMarkdownFrontmatter', async () => {
+    const sent: string[] = [];
+    const outcome = await runMarkdownFrontmatter(
+      check({
+        id: 'markdown-frontmatter',
+        handler: 'markdown-frontmatter',
+        with: { path: '/', headers: { Accept: 'text/markdown' } },
+      }),
+      ctx({ fetchImpl: towardHttp(sent) }),
+    );
+    expect(plaintext(sent)).toEqual([]);
+    expect(outcome).toEqual({
+      status: 'absent',
+      evidence: [{ url: 'https://example.com/', status: 301, ok: false, why: [WHY] }],
+    });
+  });
+
+  test('runScopedLlms', async () => {
+    const sent: string[] = [];
+    const outcome = await runScopedLlms(
+      check({ id: 'llms-txt-scoped', handler: 'scoped-llms', eval: 'scoped-discovery', with: { file: 'llms.txt' } }),
+      ctx({ fetchImpl: towardHttp(sent), scopedDirs: ['/docs'] }),
+    );
+    expect(plaintext(sent)).toEqual([]);
+    expect(outcome).toEqual({
+      status: 'absent',
+      evidence: [{ url: 'https://example.com/docs/llms.txt', status: 301, ok: false, why: [WHY] }],
+    });
   });
 });
 
@@ -404,6 +591,53 @@ describe('runCorsPreflight posture pair', () => {
     const pre = await classify('preflight', postDown);
     expect(pre.status).toBe('error');
     expect(pre.na_reason).toBeUndefined();
+  });
+
+  const busy =
+    (status: number, headers: Record<string, string> = {}) =>
+    () =>
+      new Response('slow down', { status, headers: { 'retry-after': '30', ...headers } });
+  const ACAO_ONLY = { 'access-control-allow-origin': '*' };
+
+  test('a probe answered HTTP 408 or 429 leaves its own row unscored, whatever headers ride it', async () => {
+    for (const [status, reason] of RETRY_SHAPED) {
+      const why = [`the target answered HTTP ${status} ${reason}; not scored`];
+      for (const preflight of [busy(status), busy(status, ACAO_ONLY)]) {
+        const pre = await classify('preflight', pairFetch(preflight, postAcao()));
+        expect(`${status}:${pre.status}`).toBe(`${status}:error`);
+        expect(pre.evidence[0].why).toEqual(why);
+      }
+      for (const post of [busy(status), busy(status, ACAO_ONLY)]) {
+        const act = await classify('actual', pairFetch(preflightAcao(), post));
+        expect(`${status}:${act.status}`).toBe(`${status}:error`);
+        expect(act.evidence[0].why).toEqual(why);
+      }
+    }
+  });
+
+  test('a busy sibling leaves a row its own Allow-Origin settles, and unscores one that needs the sibling', async () => {
+    for (const [status, reason] of RETRY_SHAPED) {
+      expect((await classify('preflight', pairFetch(preflightAcao(), busy(status)))).status).toBe('pass');
+      expect((await classify('preflight', pairFetch(preflightAcao(500), busy(status)))).status).toBe('broken');
+      expect((await classify('actual', pairFetch(busy(status), postAcao()))).status).toBe('pass');
+
+      // Without Allow-Origin of its own, the row turns on the sibling's
+      // headers, and a busy answer's headers describe the load, not the posture.
+      for (const sibling of [busy(status), busy(status, ACAO_ONLY)]) {
+        const pre = await classify('preflight', pairFetch(preflightBare(), sibling));
+        expect(`${status}:${pre.status}`).toBe(`${status}:error`);
+        expect(pre.na_reason).toBeUndefined();
+        expect(pre.evidence[0].why).toEqual([
+          `the POST probe answered HTTP ${status} ${reason}, so the no-CORS posture cannot be confirmed`,
+        ]);
+        const act = await classify('actual', pairFetch(sibling, postBare()));
+        expect(`${status}:${act.status}`).toBe(`${status}:error`);
+        expect(act.na_reason).toBeUndefined();
+        expect(act.evidence[0].why).toEqual([
+          `the preflight probe answered HTTP ${status} ${reason}, so the no-CORS posture cannot be confirmed`,
+        ]);
+      }
+    }
   });
 
   test('one run issues exactly the OPTIONS preflight and the Origin-bearing POST', async () => {
@@ -967,12 +1201,19 @@ describe('runMcp era-lane classification', () => {
       ['500', () => rpcError(-32000, 500)],
       ['502', () => rpcError(-32000, 502)],
       ['503', () => rpcError(-32000, 503)],
-      ['429', () => rpcError(-32000, 429)],
-      ['408', () => rpcError(-32000, 408)],
     ];
     for (const [label, response] of notEraSignals) {
       const outcome = await run({ op: 'server-discover' }, stubFetch(response));
       expect(`-32000 at ${label}:${outcome.status}`).toBe(`-32000 at ${label}:broken`);
+    }
+    // A target asking to be retried is busy, which is neither an era nor
+    // a defect, so the row leaves scoring the way a -32099 refusal does.
+    for (const status of [408, 429]) {
+      const outcome = await run(
+        { op: 'server-discover' },
+        stubFetch(() => rpcError(-32000, status)),
+      );
+      expect(`-32000 at ${status}:${outcome.status}`).toBe(`-32000 at ${status}:error`);
     }
     for (const status of [200, 400, 401, 415]) {
       const outcome = await run(
@@ -1357,6 +1598,44 @@ describe('runMcp error-code conformance', () => {
     }
   });
 
+  test('an HTTP 408 or 429 answer is an operational error on every op, whatever body rides it', async () => {
+    const ops: Array<Record<string, unknown>> = [...ERA_OPS, ...CONFORMANCE_OPS].map((op) =>
+      op === 'error' ? { op, method: 'nonexistent/method', expect_code: -32601 } : { op },
+    );
+    const bodies: Array<[string, (status: number) => Response]> = [
+      ['no body', (status) => new Response(null, { status })],
+      ['plain text', (status) => new Response('slow down', { status, headers: { 'retry-after': '30' } })],
+      ['framework JSON', (status) => json({ error: 'rate_limited' }, status)],
+      ['-32000 envelope', (status) => rpcError(-32000, status)],
+      ['-32601 envelope', (status) => rpcError(-32601, status)],
+    ];
+    // The token-less refusal row reads a busy answer the same way: a 429
+    // says nothing about whether the request would have been refused.
+    const busyOps = [...ops, ...ENFORCEMENT_OPS.map((op) => ({ op }))];
+    for (const status of [408, 429]) {
+      for (const [label, body] of bodies) {
+        for (const w of busyOps) {
+          const outcome = await run(
+            w,
+            stubFetch(() => body(status)),
+            'sess-1',
+          );
+          const row = `${String(w.op)} at ${status} with ${label}`;
+          expect(`${row}:${outcome.status}`).toBe(`${row}:error`);
+          expect(`${row}:${(outcome.evidence[0].why as string[] | undefined)?.[0]}`).toContain(`HTTP ${status}`);
+        }
+      }
+    }
+    // A 5xx is a server that tried and failed, so it keeps the penalty.
+    for (const w of ops) {
+      const outcome = await run(
+        w,
+        stubFetch(() => new Response('unavailable', { status: 503 })),
+      );
+      expect(`${String(w.op)} at 503:${outcome.status}`).toBe(`${String(w.op)} at 503:broken`);
+    }
+  });
+
   test('a bare non-200 without an envelope is broken outside the typed-HTTP arm', async () => {
     for (const op of CONFORMANCE_OPS) {
       // The two rows that read a bare status as an answer in its own right:
@@ -1635,7 +1914,13 @@ describe('mcp-resources antecedent resolves era-neutrally (engine)', () => {
 
   const registry: WebAuditRegistry = {
     version: 1,
-    mcp_discovery: { well_known: ['/.well-known/mcp.json'], common_paths: ['/mcp'], protocol_version: '2025-06-18' },
+    mcp_discovery: {
+      ai_catalog: '/.well-known/ai-catalog.json',
+      card_suffix: '/server-card',
+      well_known: ['/.well-known/mcp.json'],
+      common_paths: ['/mcp'],
+      protocol_version: '2025-06-18',
+    },
     category_order: ['mcp'],
     categories: { mcp: 'MCP' },
     checks: [
@@ -1711,6 +1996,7 @@ describe('mcp-resources antecedent resolves era-neutrally (engine)', () => {
       url: BASE,
       registry,
       fetchOptions: { fetchImpl },
+      domainBudget: ALWAYS_ADMIT_BUDGET,
     }) as AsyncGenerator<AuditEvent>) {
       if (event.type === 'result') rows.push(event.result);
     }
@@ -1763,7 +2049,13 @@ describe('era lanes resolved across a whole audit (engine)', () => {
 
   const registry: WebAuditRegistry = {
     version: 1,
-    mcp_discovery: { well_known: ['/.well-known/mcp.json'], common_paths: ['/mcp'], protocol_version: '2025-06-18' },
+    mcp_discovery: {
+      ai_catalog: '/.well-known/ai-catalog.json',
+      card_suffix: '/server-card',
+      well_known: ['/.well-known/mcp.json'],
+      common_paths: ['/mcp'],
+      protocol_version: '2025-06-18',
+    },
     category_order: ['mcp'],
     categories: { mcp: 'MCP' },
     checks: (
@@ -1859,6 +2151,7 @@ describe('era lanes resolved across a whole audit (engine)', () => {
       url: BASE,
       registry,
       fetchOptions: { fetchImpl },
+      domainBudget: ALWAYS_ADMIT_BUDGET,
     }) as AsyncGenerator<AuditEvent>) {
       if (event.type === 'result') rows.push(event.result);
     }
@@ -1896,30 +2189,62 @@ describe('era lanes resolved across a whole audit (engine)', () => {
     expect(rows.find((r) => r.id === 'mcp-unknown-tool')?.status).toBe('pass');
   });
 
-  test('a dual-stack server keeps every modern row live', async () => {
-    const dual = site((headers, body) => {
-      if (headers.get('mcp-protocol-version') === MODERN_PROTOCOL) {
-        if (headers.get('mcp-method') === 'server/discover') {
-          return json({
-            jsonrpc: '2.0',
-            id: 1,
-            result: {
-              supportedVersions: [MODERN_PROTOCOL],
-              capabilities: { tools: {} },
-              _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'dual', version: '1.0' } },
-            },
-          });
-        }
-        const meta = (JSON.parse(body).params?._meta ?? {}) as Record<string, unknown>;
-        if (!('io.modelcontextprotocol/clientCapabilities' in meta)) return rpcError(-32602, 400);
-        return toolsResult();
+  const dualStackAnswer = (headers: Headers, body: string): Response => {
+    if (headers.get('mcp-protocol-version') === MODERN_PROTOCOL) {
+      if (headers.get('mcp-method') === 'server/discover') {
+        return json({
+          jsonrpc: '2.0',
+          id: 1,
+          result: {
+            supportedVersions: [MODERN_PROTOCOL],
+            capabilities: { tools: {} },
+            _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'dual', version: '1.0' } },
+          },
+        });
       }
-      return legacyResult(legacyMethod(body), { tools: {} });
-    });
-    const rows = await auditRows(dual);
+      const meta = (JSON.parse(body).params?._meta ?? {}) as Record<string, unknown>;
+      if (!('io.modelcontextprotocol/clientCapabilities' in meta)) return rpcError(-32602, 400);
+      return toolsResult();
+    }
+    return legacyResult(legacyMethod(body), { tools: {} });
+  };
+
+  test('a dual-stack server keeps every modern row live', async () => {
+    const rows = await auditRows(site(dualStackAnswer));
     expect(rows.find((r) => r.id === 'mcp-server-discover')?.status).toBe('pass');
     expect(rows.find((r) => r.id === 'mcp-modern-tools-list')?.status).toBe('pass');
     expect(rows.find((r) => r.id === 'mcp-modern-clientcaps')?.status).toBe('pass');
+  });
+
+  test('a handshake answered HTTP 408 or 429 settles every row the way an unanswered one does', async () => {
+    const isHandshake = (headers: Headers, body: string): boolean =>
+      headers.get('mcp-method') === 'server/discover' || legacyMethod(body) === 'initialize';
+    const settled = (rows: EngineResult[]): string[] =>
+      rows.map((r) => `${r.id}:${r.status}${r.unprobed === true ? '/unprobed' : ''}`).sort();
+    const unanswered = settled(
+      await auditRows(
+        site((headers, body) => {
+          if (isHandshake(headers, body)) throw new TypeError('connection reset');
+          return dualStackAnswer(headers, body);
+        }),
+      ),
+    );
+    // The modern lane is left unknown, so its rows probe on their own
+    // answers instead of reading the busy discovery probe as an absence.
+    expect(unanswered).toContain('mcp-modern-tools-list:pass');
+    for (const status of [408, 429]) {
+      const busy = site((headers, body) =>
+        isHandshake(headers, body)
+          ? new Response('slow down', { status, headers: { 'retry-after': '30' } })
+          : dualStackAnswer(headers, body),
+      );
+      const rows = await auditRows(busy);
+      expect(`${status}: ${settled(rows).join(', ')}`).toBe(`${status}: ${unanswered.join(', ')}`);
+      // The published line names the busy answer, not a missing serverInfo.
+      expect(rows.find((r) => r.id === 'mcp-initialize')?.evidence).toContain(
+        `${status} (the target answered HTTP ${status}`,
+      );
+    }
   });
 
   test('a legacy lane advertising resources is broken, not absent, when it refuses the read', async () => {
@@ -2694,7 +3019,13 @@ describe('evidence lines name the fact that decided the verdict', () => {
   function registryOf(checks: WebCheck[]): WebAuditRegistry {
     return {
       version: 1,
-      mcp_discovery: { well_known: [], common_paths: [], protocol_version: '2025-06-18' },
+      mcp_discovery: {
+        ai_catalog: '/.well-known/ai-catalog.json',
+        card_suffix: '/server-card',
+        well_known: [],
+        common_paths: [],
+        protocol_version: '2025-06-18',
+      },
       category_order: ['mcp'],
       categories: { mcp: 'MCP' },
       checks,
@@ -2707,6 +3038,7 @@ describe('evidence lines name the fact that decided the verdict', () => {
       url: BASE,
       registry: registryOf(checks),
       fetchOptions: { fetchImpl },
+      domainBudget: ALWAYS_ADMIT_BUDGET,
     }) as AsyncGenerator<AuditEvent>) {
       if (event.type === 'result') rows.push(event.result);
     }
@@ -2801,12 +3133,19 @@ describe('mcp-card-legacy-aliases (MAY, one correct redirect is enough)', () => 
       url: BASE,
       registry: {
         version: 1,
-        mcp_discovery: { well_known: [], common_paths: [], protocol_version: '2025-06-18' },
+        mcp_discovery: {
+          ai_catalog: '/.well-known/ai-catalog.json',
+          card_suffix: '/server-card',
+          well_known: [],
+          common_paths: [],
+          protocol_version: '2025-06-18',
+        },
         category_order: ['mcp'],
         categories: { mcp: 'MCP' },
         checks: [aliasCheck],
       },
       fetchOptions: { fetchImpl },
+      domainBudget: ALWAYS_ADMIT_BUDGET,
     }) as AsyncGenerator<AuditEvent>) {
       if (event.type === 'result') rows.push(event.result);
     }

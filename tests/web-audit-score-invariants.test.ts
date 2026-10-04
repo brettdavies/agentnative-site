@@ -32,8 +32,10 @@ import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import { attachInlineRemediation } from '../src/worker/audit-web/display';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
+import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
 import {
   CONFORMANCE_OPS,
+  ENFORCEMENT_OPS,
   ERA_OPS,
   LEGACY_CONFORMANCE_OPS,
   MODERN_LANE_DEPENDENT_OPS,
@@ -51,7 +53,6 @@ const BASE = 'https://example.com/';
 const registry = normalizeWebAuditRegistry(
   yaml.load(await readFile(REGISTRY_PATH, 'utf8')) as object,
 ) as unknown as WebAuditRegistry;
-const universeMax = universeMaxOf(registry.checks);
 
 const json = (body: object, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -280,10 +281,11 @@ function auditOf(label: string, fetchImpl: typeof fetch): Promise<Audit> {
       url: BASE,
       registry,
       fetchOptions: { fetchImpl },
+      domainBudget: ALWAYS_ADMIT_BUDGET,
     }) as AsyncGenerator<AuditEvent>) {
       if (event.type === 'result') rows.push(event.result);
     }
-    return { score: scoreWebAudit(rows, universeMax), rows };
+    return { score: scoreWebAudit(rows, universeMaxOf(registry, rows)), rows };
   })();
   audits.set(label, run);
   return run;
@@ -336,6 +338,9 @@ const SHAPES: Record<string, typeof fetch> = {
   // Operational conditions on the discovery probe.
   'server/discover answers -32000 at HTTP 500': dualStack(withDiscover(modernConforming, () => rpcError(-32000, 500))),
   'server/discover answers -32000 at HTTP 429': dualStack(withDiscover(modernConforming, () => rpcError(-32000, 429))),
+  'server/discover answers a bare 429': dualStack(
+    withDiscover(modernConforming, () => new Response('slow down', { status: 429, headers: { 'retry-after': '30' } })),
+  ),
   'server/discover answers a bare 500': dualStack(
     withDiscover(modernConforming, () => new Response('boom', { status: 500 })),
   ),
@@ -509,12 +514,25 @@ describe('showing an imperfect lane beats hiding it', () => {
 });
 
 describe('an operational condition on the discriminator is not an era verdict', () => {
-  test('-32000 at a server-error or rate-limit status scores as a broken discovery probe', async () => {
-    for (const label of ['server/discover answers -32000 at HTTP 500', 'server/discover answers -32000 at HTTP 429']) {
+  test('-32000 at a server-error status scores as a broken discovery probe', async () => {
+    const label = 'server/discover answers -32000 at HTTP 500';
+    expect(statusOf(await scoreFor(label), 'mcp-server-discover')).toBe('broken');
+    await expectSameScore(label, 'server/discover answers a bare 500');
+  });
+
+  test('a rate-limited discovery probe is unscored and leaves the modern rows to their own answers', async () => {
+    // A busy server is neither broken nor missing a lane, so it must
+    // outscore one that failed, and the body riding the 429 cannot matter.
+    for (const label of ['server/discover answers -32000 at HTTP 429', 'server/discover answers a bare 429']) {
       const audit = await scoreFor(label);
-      expect(`${label}:${statusOf(audit, 'mcp-server-discover')}`).toBe(`${label}:broken`);
-      await expectSameScore(label, 'server/discover answers a bare 500');
+      expect(`${label}:${statusOf(audit, 'mcp-server-discover')}`).toBe(`${label}:error`);
+      const row = audit.rows.find((r) => r.id === 'mcp-modern-tools-list');
+      expect(`${label}:${String(row?.status)}/${String(row?.unprobed)}`).toBe(`${label}:pass/undefined`);
+      const failed = await scoreFor('server/discover answers a bare 500');
+      expect(audit.score.relative).toBeGreaterThan(failed.score.relative);
+      expect(audit.score.global).toBeGreaterThan(failed.score.global);
     }
+    await expectSameScore('server/discover answers -32000 at HTTP 429', 'server/discover answers a bare 429');
   });
 
   test('-32000 at a status that can carry an era signal still reads as an absent lane', async () => {
@@ -538,6 +556,10 @@ describe('an operational condition on the discriminator is not an era verdict', 
 });
 
 describe('the scorer prices the four scored statuses in one order, for every check', () => {
+  // The synthetic rows below name no check, so they present no alternative
+  // and every one of them scores against the same universe.
+  const universeMax = universeMaxOf(registry, []);
+
   test('pass beats noncompliant beats absent beats broken', async () => {
     // The whole model in one assertion, on synthetic rows so it reads as
     // the scorer's rule rather than an MCP-handler behavior. Every
@@ -546,9 +568,11 @@ describe('the scorer prices the four scored statuses in one order, for every che
     const at = (status: 'pass' | 'noncompliant' | 'absent' | 'broken') =>
       scoreWebAudit([{ keyword: 'should', status }, ...filler], universeMax);
     const order = ['pass', 'noncompliant', 'absent', 'broken'] as const;
+    // Global is earned over one registry-wide constant, so its rounding can
+    // tie two adjacent statuses; the strict order is asserted on earned.
     const descending = order
       .slice(1)
-      .every((status, i) => at(order[i]).earned > at(status).earned && at(order[i]).global > at(status).global);
+      .every((status, i) => at(order[i]).earned > at(status).earned && at(order[i]).global >= at(status).global);
     expect(`pass > noncompliant > absent > broken: ${descending}`).toBe('pass > noncompliant > absent > broken: true');
   });
 
@@ -657,11 +681,12 @@ describe('honouring the request Accept never scores below ignoring it', () => {
 });
 
 describe('row families are declared once and cover the registry', () => {
-  const declared = [...ERA_OPS, ...CONFORMANCE_OPS];
+  const declared = [...ERA_OPS, ...CONFORMANCE_OPS, ...ENFORCEMENT_OPS];
 
-  test('the two families partition every declared op', () => {
+  test('the three families partition every declared op', () => {
     expect(new Set(declared).size).toBe(declared.length);
     expect([...ERA_OPS].filter((op) => CONFORMANCE_OPS.includes(op)).join(',')).toBe('');
+    expect([...ENFORCEMENT_OPS].sort().join(',')).toBe('unauthenticated-tools-list');
   });
 
   test('every MCP op the registry uses is declared, and every declared op is used', () => {

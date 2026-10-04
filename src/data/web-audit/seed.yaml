@@ -89,6 +89,10 @@ entries:
     url: https://docs.stripe.com/
     name: Stripe Docs
     description: Stripe's API and product documentation.
+  - domain: stripe.dev
+    url: https://stripe.dev/
+    name: Stripe Developers
+    description: Stripe's developer blog, whose MCP server and API live on other Stripe hosts it declares.
   - domain: anthropic.com
     url: https://anthropic.com/
     name: Anthropic

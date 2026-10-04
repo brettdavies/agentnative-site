@@ -54,9 +54,24 @@ export function freshnessHtml(state: FreshnessState): string {
   return `Scored ${timeEl(state.scoredAt)}. ${refresh} ${escHtml(FRESHNESS_QUALIFIER)}`;
 }
 
-export function freshnessMarkdown(state: FreshnessState): string {
-  if (state.state === 'unknown') return FRESHNESS_UNKNOWN;
+/**
+ * The registry a score was computed under, from the scorecard's recorded
+ * fingerprint prefix; a scorecard that recorded none reads as unknown, never
+ * as the current registry.
+ */
+export function registrySentence(fingerprint: string | null): string {
+  return fingerprint === null ? 'Registry version not recorded.' : `Scored against registry ${fingerprint}.`;
+}
+
+/**
+ * The markdown twin's freshness line, which also names the registry. The
+ * HTML page keeps the registry out of its freshness sentence and closes the
+ * checks with it instead.
+ */
+export function freshnessMarkdown(state: FreshnessState, fingerprint: string | null): string {
+  const registry = registrySentence(fingerprint);
+  if (state.state === 'unknown') return `${FRESHNESS_UNKNOWN} ${registry}`;
   const refresh =
     state.state === 'future' ? `Refresh available after ${state.refreshAfter}.` : 'Refresh available now.';
-  return `Scored ${state.scoredAt}. ${refresh} ${FRESHNESS_QUALIFIER}`;
+  return `Scored ${state.scoredAt}. ${refresh} ${FRESHNESS_QUALIFIER} ${registry}`;
 }

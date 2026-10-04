@@ -6,7 +6,12 @@
 // init script. Asserts the stashed click, the tokenless probe and the Start
 // gesture, streamed rows and the ?v= forward, the 2 s floor on hits, the
 // bounce, the verification wait state, the inline collision that survives a
-// reload, and that the page never loads the WebMCP script.
+// reload, the website result that saved nothing rendering in place with Run
+// again repeating the opt-out, the entry form's opt-out reaching the POST,
+// a later followed submit superseding a kept opted-out result, a reload mid
+// opt-out run keeping the opt-out on the probe and on Start, a website run's
+// waiting line, its endpoint's declarer, and each streamed row's host and
+// result line, and that the page never loads the WebMCP script.
 
 import { expect, type Page, test } from '@playwright/test';
 
@@ -77,20 +82,103 @@ async function mockScore(page: Page, answers: Answer[]): Promise<Array<Record<st
 
 // What an entry page's click leaves behind: the token record and the lane
 // the visitor had selected. Seeded once, so a reload finds the stash spent.
-async function seedStash(page: Page, target: string, lane: 'cli' | 'web'): Promise<void> {
+async function seedStash(page: Page, target: string, lane: 'cli' | 'web', follow = true): Promise<void> {
   await page.addInitScript(
-    ([t, l]) => {
+    ([t, l, f]) => {
       if (location.pathname !== '/scoring' || sessionStorage.getItem('e2e-seeded')) return;
       sessionStorage.setItem('e2e-seeded', '1');
       const ts = Date.now();
       sessionStorage.setItem(
         `audit-stash:${t}`,
-        JSON.stringify({ token: 'stashed-token', listing: null, entered_lane: l, refresh: false, ts }),
+        JSON.stringify({ token: 'stashed-token', listing: null, follow: f, entered_lane: l, refresh: false, ts }),
       );
       sessionStorage.setItem(`audit-lane:${t}`, JSON.stringify({ lane: l, ts }));
     },
-    [target, lane],
+    [target, lane, follow] as const,
   );
+}
+
+const NOT_SAVED = 'Not saved: declared hosts were not followed for this run.';
+
+// What the endpoint streams for a website run that did not follow the hosts
+// the site declares: rows, then a complete line with no URLs and the body.
+function transientRun(target: string): Answer {
+  return stream([
+    { type: 'accepted', lane: 'web', target, started_at: AT },
+    { type: 'discovery', mcp_endpoint: null },
+    { type: 'check', id: 'robots-txt', principle: 'P7', keyword: 'should', status: 'pass', evidence: null },
+    envelope({
+      type: 'complete',
+      kind: 'web',
+      tier: 'live',
+      target,
+      scorecard_url: null,
+      markdown_url: null,
+      json_url: null,
+      freshness: { cached: false, scored_at: AT, refresh_after: null },
+      summary_html: `<article class="e2e-transient"><span data-web-audit-transient>${NOT_SAVED}</span></article>`,
+    }),
+  ]);
+}
+
+// A saved website result the endpoint answers a followed request with.
+function webHit(target: string): Answer {
+  return json(
+    200,
+    envelope({
+      kind: 'web',
+      tier: 'cache',
+      target,
+      scorecard_url: `/score/${target}`,
+      markdown_url: `/score/${target}/md`,
+      json_url: `/score/${target}/json`,
+      freshness: { cached: true, scored_at: AT, refresh_after: null },
+    }),
+  );
+}
+
+// The entry form's submit of a website target, following declared hosts or not.
+async function submitWebsite(page: Page, target: string, follow: boolean): Promise<void> {
+  await page.goto('/audit');
+  await page.locator('label[for="s-web"]').click();
+  await page.fill('[data-audit-target]', target);
+  await page.locator('[data-audit-follow]').setChecked(follow);
+  await page.click('[data-audit-submit]');
+  await page.waitForURL(`**/scoring?target=${target}`);
+}
+
+type StreamHooks = { __e2eSend: (line: unknown) => void };
+
+// page.route() answers with a whole body at once, so a run's waiting state
+// never shows. This stands in for the endpoint with a stream the test feeds
+// one line at a time; the page cancels it once a terminal line arrives.
+async function controlledStream(page: Page): Promise<{
+  /** Resolves once the page has asked for its run. */
+  opened: () => Promise<unknown>;
+  send: (line: unknown) => Promise<void>;
+}> {
+  await page.addInitScript(() => {
+    type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    const win = window as unknown as { fetch: Fetch };
+    const original = win.fetch.bind(window);
+    win.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (!url.includes('/api/score')) return original(input, init);
+      const encoder = new TextEncoder();
+      const hooks = window as unknown as StreamHooks;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          hooks.__e2eSend = (line) => controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
+        },
+      });
+      return new Response(body, { status: 200, headers: { 'content-type': 'application/x-ndjson' } });
+    };
+  });
+  return {
+    opened: () =>
+      page.waitForFunction(() => typeof (window as unknown as Partial<StreamHooks>).__e2eSend === 'function'),
+    send: (line) => page.evaluate((l) => (window as unknown as StreamHooks).__e2eSend(l), line),
+  };
 }
 
 test.describe('/scoring progress page', () => {
@@ -260,6 +348,228 @@ test.describe('/scoring progress page', () => {
     await page.goto('/scoring?target=rg');
     await expect(page.locator('.e2e-cached-inline')).toBeVisible();
     await expect(page).toHaveURL(/\/scoring\?target=rg$/);
+  });
+
+  test('a website run that saved nothing renders in place, never navigates, and Run again repeats the opt-out', async ({
+    page,
+  }) => {
+    await mockTurnstile(page);
+    const posts = await mockScore(page, [transientRun('stripe.dev')]);
+    await seedStash(page, 'stripe.dev', 'web', false);
+    await page.goto('/scoring?target=stripe.dev');
+    await expect(page.locator('.e2e-transient')).toContainText(NOT_SAVED);
+    await expect(page.locator('[data-scoring-subline]')).toHaveText('This result was not saved.');
+    await expect(page).toHaveURL(/\/scoring\?target=stripe\.dev$/);
+    expect(posts[0]).toEqual({ target: 'stripe.dev', turnstile_token: 'stashed-token', follow_declarations: false });
+    const start = page.locator('[data-scoring-start]');
+    await expect(start).toHaveText('Run again');
+    await start.click();
+    await expect.poll(() => posts.length).toBe(2);
+    expect(posts[1]).toEqual({ target: 'stripe.dev', turnstile_token: 'fake-token', follow_declarations: false });
+    await expect(page.locator('.e2e-transient')).toBeVisible();
+    // A same-tab reload restores the result and keeps the opt-out for the next Run again.
+    await page.reload();
+    await expect(page.locator('.e2e-transient')).toBeVisible();
+    expect(posts).toHaveLength(2);
+    await page.locator('[data-scoring-start]').click();
+    await expect.poll(() => posts.length).toBe(3);
+    expect(posts[2]).toMatchObject({ follow_declarations: false });
+    await expect(page).toHaveURL(/\/scoring\?target=stripe\.dev$/);
+  });
+
+  test('unticking follow on the form disables the listing box with its note, and the opt-out posts with no listing', async ({
+    page,
+  }) => {
+    await mockTurnstile(page);
+    const posts = await mockScore(page, [transientRun('stripe.dev')]);
+    await page.goto('/audit');
+    await page.locator('label[for="s-web"]').click();
+    await page.fill('[data-audit-target]', 'stripe.dev');
+    const follow = page.locator('[data-audit-follow]');
+    const listing = page.locator('[data-audit-listing]');
+    const note = page.locator('[data-audit-listing-note]');
+    await expect(follow).toBeChecked();
+    await expect(follow).toHaveAttribute('aria-describedby', /-follow-help$/);
+    await expect(listing).toBeEnabled();
+    await expect(note).toBeHidden();
+    await follow.uncheck();
+    await expect(listing).toBeDisabled();
+    await expect(note).toBeVisible();
+    await expect(note).toHaveText('Results without declared hosts are not saved or listed.');
+    const noteId = await note.getAttribute('id');
+    await expect(listing).toHaveAttribute('aria-describedby', noteId ?? '');
+    await follow.check();
+    await expect(listing).toBeEnabled();
+    await expect(note).toBeHidden();
+    await expect(listing).not.toHaveAttribute('aria-describedby', /.+/);
+    await follow.uncheck();
+    await page.click('[data-audit-submit]');
+    await page.waitForURL('**/scoring?target=stripe.dev');
+    await expect(page.locator('.e2e-transient')).toBeVisible();
+    expect(posts[0]).toEqual({ target: 'stripe.dev', turnstile_token: 'fake-token', follow_declarations: false });
+  });
+
+  test('an opted-out result kept in the tab does not answer a later followed submit of the same site', async ({
+    page,
+  }) => {
+    await mockTurnstile(page);
+    const posts = await mockScore(page, [transientRun('stripe.dev'), webHit('stripe.dev')]);
+    await submitWebsite(page, 'stripe.dev', false);
+    await expect(page.locator('.e2e-transient')).toBeVisible();
+    await submitWebsite(page, 'stripe.dev', true);
+    await expect(page.locator('.e2e-transient')).toHaveCount(0);
+    await expect.poll(() => posts.length).toBe(2);
+    expect(posts[1]).toMatchObject({ target: 'stripe.dev', turnstile_token: 'fake-token' });
+    expect(posts[1]).not.toHaveProperty('follow_declarations');
+    await page.waitForURL('**/score/stripe.dev');
+  });
+
+  test('a reload mid opt-out run keeps the opt-out: the probe and Start both send follow_declarations false', async ({
+    page,
+  }) => {
+    await mockTurnstile(page);
+    const posts: Array<Record<string, unknown>> = [];
+    let release: () => void = () => {};
+    const running = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // The server's answer to a tokenless opted-out probe, then the run Start begins.
+    const later = [
+      json(403, { error: { code: 'turnstile_failed', message: 'Verification failed.', cta: 'Start the audit.' } }),
+      transientRun('stripe.dev'),
+    ];
+    await page.route('**/api/score', async (route) => {
+      const n = posts.push(route.request().postDataJSON() as Record<string, unknown>);
+      if (n === 1) {
+        // The first run is still going when the visitor reloads; the reload cancels this request.
+        await running;
+        await route.fulfill(transientRun('stripe.dev')).catch(() => {});
+        return;
+      }
+      await route.fulfill(later[Math.min(n - 2, later.length - 1)]);
+    });
+    await submitWebsite(page, 'stripe.dev', false);
+    await expect.poll(() => posts.length).toBe(1);
+    expect(posts[0]).toMatchObject({ follow_declarations: false });
+    await page.reload();
+    release();
+    await expect.poll(() => posts.length).toBe(2);
+    expect(posts[1]).toEqual({ target: 'stripe.dev', follow_declarations: false });
+    const start = page.locator('[data-scoring-start]');
+    await expect(start).toHaveText('Start');
+    await start.click();
+    await expect.poll(() => posts.length).toBe(3);
+    expect(posts[2]).toEqual({ target: 'stripe.dev', turnstile_token: 'fake-token', follow_declarations: false });
+    await expect(page.locator('.e2e-transient')).toBeVisible();
+  });
+
+  test('a website run reads the hosts a site declares while it waits, then names each row where its evidence came from', async ({
+    page,
+  }) => {
+    await mockTurnstile(page);
+    await seedStash(page, 'stripe.dev', 'web');
+    const stream = await controlledStream(page);
+    await page.goto('/scoring?target=stripe.dev');
+    await expect(page.locator('[data-scoring-subline]')).toContainText(
+      'Usually under 30 seconds; longer when the site declares other hosts.',
+    );
+    await stream.opened();
+    const status = page.locator('[data-scoring-status]');
+    await stream.send({ type: 'accepted', lane: 'web', target: 'stripe.dev', started_at: AT });
+    await expect(status).toHaveText('Reading stripe.dev and any hosts it declares…');
+    await stream.send({ type: 'discovery', mcp_endpoint: 'https://mcp.stripe.com/' });
+    await expect(status).toContainText(
+      'MCP endpoint found at https://mcp.stripe.com/, declared by stripe.dev. Checks:',
+    );
+    const check = (id: string, fields: Record<string, unknown>) => ({
+      type: 'check',
+      id,
+      principle: 'P2',
+      keyword: 'should',
+      status: 'n_a',
+      evidence: null,
+      ...fields,
+    });
+    await stream.send(check('mcp-initialize', { na_reason: 'auth-required', host: 'mcp.stripe.com', evidence: '401' }));
+    await stream.send(
+      check('json-errors', { status: 'pass', host: 'api.stripe.com', evidence: '404 with a JSON body' }),
+    );
+    await stream.send(check('mcp-card', { na_reason: 'reciprocity-refused', host: 'mcp.example.net' }));
+    await stream.send(check('robots-txt', { status: 'pass' }));
+    const unanswered = { status: 'n_a', na_reason: 'declared-host-unreachable' };
+    await stream.send(
+      check('openapi', {
+        ...unanswered,
+        evidence: 'https://api.stripe.com/openapi.json',
+        hosts: [
+          { host: 'api.stripe.com', ...unanswered },
+          { host: 'files.stripe.com', ...unanswered },
+        ],
+      }),
+    );
+    const row = (id: string) => page.locator('.scoring__row', { has: page.locator(`.scoring__id:text-is("${id}")`) });
+    // Before the run completes, each row already reads the line its saved page shows.
+    await expect(row('mcp-initialize').locator('.pscore__evidence')).toHaveText(
+      'Not evaluated: mcp.stripe.com requires sign-in (401)',
+    );
+    await expect(row('mcp-card').locator('.pscore__evidence')).toHaveText(
+      'Not evaluated: mcp.example.net did not confirm this endpoint',
+    );
+    await expect(row('json-errors').locator('.pscore__evidence')).toHaveText('Verified (404 with a JSON body)');
+    await expect(row('mcp-initialize')).toHaveAttribute('data-host', 'mcp.stripe.com');
+    await expect(row('robots-txt')).toHaveAttribute('data-host', 'stripe.dev');
+    // Only a host that is neither the target nor the endpoint is named in the title.
+    await expect(row('json-errors').locator('.scoring__host')).toHaveText('evaluated at api.stripe.com');
+    // A row the audit could not run names its host in its line, not as where it was evaluated.
+    await expect(row('mcp-card').locator('.scoring__host')).toHaveCount(0);
+    await expect(row('mcp-card')).toHaveAttribute('data-host', 'mcp.example.net');
+    await expect(row('mcp-initialize').locator('.scoring__host')).toHaveCount(0);
+    await expect(row('robots-txt').locator('.scoring__host')).toHaveCount(0);
+    // A row over several hosts names the first and each one's outcome, and records them all, as its saved row does.
+    await expect(row('openapi').locator('.pscore__evidence')).toHaveText(
+      'Not evaluated: api.stripe.com did not answer (https://api.stripe.com/openapi.json); api.stripe.com: n/a, files.stripe.com: n/a',
+    );
+    await expect(row('openapi')).toHaveAttribute('data-host', 'api.stripe.com files.stripe.com');
+    await expect(row('openapi').locator('.scoring__host')).toHaveCount(0);
+    await stream.send(
+      envelope({
+        type: 'complete',
+        kind: 'web',
+        tier: 'live',
+        target: 'stripe.dev',
+        scorecard_url: null,
+        markdown_url: null,
+        json_url: null,
+        freshness: { cached: false, scored_at: AT, refresh_after: null },
+        summary_html: '<article class="e2e-done">done</article>',
+      }),
+    );
+    await expect(page.locator('.e2e-done')).toBeVisible();
+  });
+
+  test('a website endpoint on the target itself is named without a declarer', async ({ page }) => {
+    await mockTurnstile(page);
+    await seedStash(page, 'anc.dev', 'web');
+    const stream = await controlledStream(page);
+    await page.goto('/scoring?target=anc.dev');
+    await stream.opened();
+    await stream.send({ type: 'accepted', lane: 'web', target: 'anc.dev', started_at: AT });
+    await expect(page.locator('[data-scoring-status]')).toHaveText('Reading anc.dev and any hosts it declares…');
+    await stream.send({ type: 'discovery', mcp_endpoint: 'https://anc.dev/mcp' });
+    await expect(page.locator('[data-scoring-status]')).toContainText(
+      'MCP endpoint found at https://anc.dev/mcp. Checks:',
+    );
+    await expect(page.locator('[data-scoring-status]')).not.toContainText('declared by');
+  });
+
+  test('a website run that does not follow declared hosts reads only the target while it waits', async ({ page }) => {
+    await mockTurnstile(page);
+    await seedStash(page, 'example.com', 'web', false);
+    const stream = await controlledStream(page);
+    await page.goto('/scoring?target=example.com');
+    await stream.opened();
+    await stream.send({ type: 'accepted', lane: 'web', target: 'example.com', started_at: AT });
+    await expect(page.locator('[data-scoring-status]')).toHaveText('Reading example.com…');
   });
 
   test('the page never loads the WebMCP script', async ({ page }) => {

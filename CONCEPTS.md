@@ -173,7 +173,8 @@ non-passing rows.
 
 The runtime gate deciding whether a web-audit check applies to a site. Resolved from the declared site type, MCP
 discovery, the canonical root fetch, or another check's probe result — never a fresh fetch. An unmet antecedent makes
-the check not applicable (excluded from scoring entirely), which is different from the check failing.
+the check not applicable (excluded from the relative score, still in the global denominator), which is different from
+the check failing.
 
 ### Site type
 
@@ -189,9 +190,24 @@ absent counts as not applicable, never as a miss.
 
 ### Relative score / Global score
 
-The two scores one web-audit run produces. Relative (the headline) measures the site against only the checks that apply
-to it, so a site perfect for its type approaches the maximum. Global measures the same outcomes against a maximally
-agent-ready site, so exposing and nailing more surfaces ranks higher; the web leaderboard sorts by it.
+The two scores one web-audit run produces, each covering what an agent at the audit's vantage can verify. Relative (the
+headline) measures the site against only the checks that apply to it, so a site perfect for its type approaches the
+maximum; the web leaderboard ranks by it. Global measures the same outcomes against the most a single site could earn:
+every registry check outside a group of alternatives, not-applicable ones included, plus each alternative design the
+site presents, or the largest when it presents none. A check the audit could not reach (sign-in blocked it, or a host is
+private or unreachable) earns nothing, is excluded from relative, and stays in global; a check the audit reached scores
+on the answer it got, so a lane a server refuses without asking for sign-in reads as it does on an open server.
+Alternatives are designs, never access limits: the only group is MCP access, whose sign-in checks count for a site that
+presents the protected design (a token-less handshake, or the request that found the endpoint when neither handshake
+drew a 401 or a result, drew a 401 its RFC 9728 metadata backs) or one with no MCP endpoint. Exposing and nailing more
+surfaces scores higher, and global breaks ties between equal relative scores on the board.
+
+### Vantage
+
+Where a web audit ran and whether it presented a credential, recorded on every web scorecard: public (anc.dev, the
+public internet, no credential) or local (an `anc web <target>` run on the runner's own network, optionally holding a
+credential for the audited MCP endpoint). A score covers what an agent at that vantage can verify, and the public board
+lists public-vantage scorecards only.
 
 ### Fix skill
 
@@ -237,7 +253,9 @@ conflated. One controls whether an on-demand request serves the cached result or
 separate one controls how long an unseeded entry stays visible before it ages off the board's display, even though the
 underlying cached record persists. The two are tuned independently for different jobs, and a write path that restamps
 freshness for an unrelated reason resets both at once, whether or not that is intended. Distinct from the cadence a Web
-rescore batch uses to decide which curated domains are due for re-audit, a third, separately-tuned window.
+rescore batch uses to decide which curated domains are due for re-audit, a third, separately-tuned window. A fourth
+bounds how long a saved result stands in place of a re-audit that a declared domain's spent hourly budget limited; past
+it, that re-audit replaces the result as any audit would.
 
 ### Web rescore
 
@@ -249,8 +267,10 @@ snapshots. Distinct from an on-demand audit of a single domain, which caches its
 ### Declared host
 
 A host the entry site names in one of its own machine-readable surfaces: the MCP server card's remote or transport URL,
-an api-catalog anchor, the catalog's service-desc target, or RFC 9728 protected-resource metadata. A declared host is
-evaluated for the entry site's scorecard and never receives a scorecard of its own from that audit.
+an api-catalog anchor, the catalog's service-desc target, or RFC 9728 protected-resource metadata. The target of a
+redirect to another origin, answered to a discovery POST on one of the entry site's own MCP paths, is a declared host
+too, and the POST is never re-sent there. A declared host is evaluated for the entry site's scorecard and never
+receives a scorecard of its own from that audit.
 
 ### Follow phase
 
@@ -260,9 +280,11 @@ distinct hosts and requests. Exhaustion resolves dependent rows to not-applicabl
 
 ### Reciprocity
 
-The proof required before the audit sends an MCP wire probe to a declared host off the entry origin: the target's own
-server card at the SEP-2127 location, its RFC 9728 protected-resource metadata, or an MCP-shaped answer to a GET. Every
-failure mode collapses into one outcome, reciprocity refused, so a caller cannot distinguish them.
+The proof required before the audit sends an MCP wire probe to a declared host off the entry origin: an artifact the
+endpoint's own host publishes naming that exact endpoint, either a SEP-2127 card at `<endpoint>/server-card`, an entry
+in that host's own AI catalog, or RFC 9728 protected-resource metadata whose `resource` is the endpoint. A 405, an
+`Allow` header, or a JSON-RPC envelope admits nothing, since any POST-only route answers that way. Every failure mode
+collapses into one outcome, reciprocity refused, so a caller cannot distinguish them.
 
 ### Endpoint of record
 
@@ -277,9 +299,11 @@ another host.
 
 ### Registry fingerprint
 
-The hash of the normalized web-audit registry, widened with the follow policy version and the follow kill-switch state,
-that the rescore Workflow compares against its stored value to decide whether the curated seeds must reflow. Its prefix
-is stamped on each scorecard as the registry it was scored under.
+The hash of the normalized web-audit registry, minus its site-only fields, together with the follow policy version. The
+rescore Workflow compares it, and the follow kill-switch state it records beside it, against the values it stored on its
+last run to decide whether the curated seeds must reflow. The switch stays out of the hash, so staging and production
+agree on the fingerprint. Its first 12 characters are stamped on each saved scorecard as the registry it was scored
+under.
 
 ### Watched source
 

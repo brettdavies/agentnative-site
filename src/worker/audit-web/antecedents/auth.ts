@@ -8,15 +8,20 @@ import {
   type AntecedentResolver,
   cardDeclaresAuth,
   evidenceShowsAuthChallenge,
-  sourceEvidence,
+  handshakeShowsAuthChallenge,
+  ownOriginEvidence,
   sourcePassed,
 } from './context';
 
-/** A 401 challenge observed anywhere in wave 1, or discovery card auth. */
+/**
+ * A 401 challenge observed anywhere in wave 1 on the audited origin or its
+ * MCP endpoint, or discovery card auth. A description an API anchor
+ * declares on another host speaks for that host's auth, not the site's.
+ */
 function authSignalObserved(ctx: AntecedentContext): boolean {
   if (ctx.root?.status === 401) return true;
-  if (evidenceShowsAuthChallenge(sourceEvidence(ctx, 'openapi'))) return true;
-  if (evidenceShowsAuthChallenge(sourceEvidence(ctx, 'mcp-initialize'))) return true;
+  if (evidenceShowsAuthChallenge(ownOriginEvidence(ctx, 'openapi'))) return true;
+  if (handshakeShowsAuthChallenge(ctx)) return true;
   return cardDeclaresAuth(ctx);
 }
 

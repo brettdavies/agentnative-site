@@ -103,9 +103,11 @@ git checkout -B release/<YYYY-MM-DD>-<slug> origin/main
 
 # 2. Overlay dev's entire tracked tree onto the main base. `checkout -- .` writes dev's
 #    paths but does not delete files that exist on main and are absent on dev, so remove
-#    those next (the 'D' rows are main-only files dev deleted).
+#    those next (the 'D' rows are main-only files dev deleted or moved). `--no-renames`
+#    lists a moved file as a deletion; rename detection would report it as an R row,
+#    and the stale copy left behind would ship to main.
 git checkout origin/dev -- .
-git diff --name-status origin/main origin/dev | grep '^D'
+git diff --no-renames --name-status origin/main origin/dev | grep '^D'
 trash <each main-only file listed above>
 
 # 3. Withhold any feature `dev` carries that this release must not ship. Each one
@@ -146,7 +148,9 @@ git diff --cached --name-only origin/main | grep -E "$GUARDED" \
 #       docs/TODOS.md and docs/designs/ reached an open release with a green guard-docs.
 #       Every docs/ entry and every added markdown file needs a reason to ship, or it
 #       needs registering in the workflow's extra_paths and removing from the branch.
-git diff --cached --diff-filter=A --name-only origin/main | grep -E '(^docs/|\.md$)' | grep -Ev "$GUARDED" || echo "(none unguarded)"
+#       `--no-renames` lists a doc moved from one main carries as added; rename detection
+#       would report it as R, and the A filter would drop it.
+git diff --cached --no-renames --diff-filter=A --name-only origin/main | grep -E '(^docs/|\.md$)' | grep -Ev "$GUARDED" || echo "(none unguarded)"
 
 # 6. Commit the overlay as one commit sitting directly on top of main.
 git commit
@@ -209,7 +213,9 @@ from deleting a tool that has not run yet. The script is the record of what is h
 rather than re-derived by hand at each cut, and it is deliberately brittle: an exact
 match that no longer matches is a hard error, because a silently skipped edit ships the feature. After applying, it
 greps the tree for every marker the feature owns and fails on any survivor, which catches a miss whichever edit caused
-it. `--check` reports without writing and exits non-zero while anything is still pending.
+it. It also fails when a removal takes a `describe` or `test` the feature does not own, so an edit that matches too much
+cannot strip unrelated tests from `main`. `--check` runs the same removals in memory, reports without writing, and exits
+non-zero while anything is still pending.
 
 | Feature        | Script                                      | Held back because                                                        |
 | -------------- | ------------------------------------------- | ------------------------------------------------------------------------ |
@@ -246,7 +252,9 @@ git diff origin/main..HEAD --name-only \
   && echo "LEAKED: reset and redo" || echo "(clean)"
 
 # D: what this release ADDS to main (see step 5 above for why).
-git diff origin/main..HEAD --diff-filter=A --name-only | grep -E '(^docs/|\.md$)' | grep -Ev "$GUARDED" || echo "(none unguarded)"
+# `--no-renames` lists a doc moved from one main carries as added; rename detection
+# would report it as R, and the A filter would drop it.
+git diff --no-renames origin/main..HEAD --diff-filter=A --name-only | grep -E '(^docs/|\.md$)' | grep -Ev "$GUARDED" || echo "(none unguarded)"
 
 # Patch-id cherry check (noisy in squash-merge workflow; triage per-line).
 git cherry HEAD origin/dev | grep '^+' || echo "(none)"

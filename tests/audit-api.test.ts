@@ -1,12 +1,58 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
+import type { AuditEvent } from '../src/shared/audit-events';
+import { streamedResultLine, streamedRowHost } from '../src/shared/scoring-copy';
 import { isAuditApiPath } from '../src/worker/audit/api';
-import { keyFor as webKeyFor } from '../src/worker/audit-web/cache';
+import { WEB_AUDIT_STALE_AFTER_MS, keyFor as webKeyFor } from '../src/worker/audit-web/cache';
+import { rowHostsOf } from '../src/worker/audit-web/provenance';
+import { registryFingerprintPrefix, type WebAuditRegistry } from '../src/worker/audit-web/registry';
 import { keyFor as cliKeyFor } from '../src/worker/score/cache';
 import { _resetIndexCache } from '../src/worker/score/core';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
-import { CLI_RECORD, call, errorOf, makeEnv, ndjson, newTracker, post, WEB_RECORD } from './helpers/audit-api-env';
+import {
+  CLI_RECORD,
+  call,
+  errorOf,
+  makeCtx,
+  makeEnv,
+  ndjson,
+  newTracker,
+  post,
+  WEB_RECORD,
+  webRegistryJson,
+} from './helpers/audit-api-env';
+import { budgetKeyPrefix, memoryRateLimit } from './helpers/domain-budget-fakes';
+import {
+  aiCatalog,
+  cardDocument,
+  cardEntry,
+  html,
+  type Route,
+  redirect,
+  requestsTo,
+  router,
+  type Seen,
+  sep2127Card,
+  siteDeclaring,
+} from './helpers/follow-fixtures';
 import { captureLogs } from './helpers/log-capture';
+
+// A context whose purge RPC records every tag batch the run queued.
+function purgeCtx(): ReturnType<typeof makeCtx> & { purged: string[][] } {
+  const purged: string[][] = [];
+  const ctx = makeCtx();
+  return Object.assign(ctx, {
+    purged,
+    exports: {
+      Cached: {
+        async purgeHitMinTags(tags: string[]) {
+          purged.push(tags);
+          return { success: true, errors: [] };
+        },
+      },
+    },
+  });
+}
 
 beforeEach(() => {
   _resetIndexCache();
@@ -673,5 +719,567 @@ describe('POST /api/score: review pins', () => {
     );
     const unavailableBody = (await unavailable.res.json()) as { error: { details?: string } };
     expect(unavailableBody.error.details).toBeUndefined();
+  });
+});
+
+describe('POST /api/score: the follow kill switch', () => {
+  type Stored = {
+    scorecard: { follow_declarations?: boolean; declared_hosts?: Array<{ outcome: string; reason?: string }> };
+  };
+
+  async function storedRecord(env: ReturnType<typeof makeEnv>, url: string): Promise<Stored> {
+    const object = await env.SCORE_CACHE.get(await webKeyFor(url, SPEC_VERSION));
+    if (!object) throw new Error(`nothing stored for ${url}`);
+    return (await object.json()) as Stored;
+  }
+
+  test('with the switch off or absent, a followed request stores follow_declarations false and an empty trail', async () => {
+    for (const followSwitch of [undefined, 'false', 'TRUE']) {
+      const env = makeEnv(followSwitch === undefined ? {} : { followSwitch });
+      const { res, ctx } = await call(post({ target: 'anc.dev', turnstile_token: 'x' }), env);
+      expect(res.status).toBe(200);
+      await Promise.all(ctx._promises);
+      const stored = await storedRecord(env, 'https://anc.dev/');
+      expect({ followSwitch, follow: stored.scorecard.follow_declarations }).toEqual({ followSwitch, follow: false });
+      expect(stored.scorecard.declared_hosts).toEqual([]);
+    }
+    const on = makeEnv({ followSwitch: 'true' });
+    const { ctx } = await call(post({ target: 'anc.dev', turnstile_token: 'x' }), on);
+    await Promise.all(ctx._promises);
+    expect((await storedRecord(on, 'https://anc.dev/')).scorecard.follow_declarations).toBe(true);
+  });
+
+  test('with the switch off, a host the site declares receives no request', async () => {
+    const endpoint = 'https://mcp.example.net/mcp';
+    const run = async (followSwitch: string) => {
+      const seen: Seen[] = [];
+      const env = makeEnv({ followSwitch, deps: { probeFetch: router(siteDeclaring(endpoint), seen) } });
+      const { res, ctx } = await call(post({ target: 'example.com', turnstile_token: 'x' }), env);
+      expect(res.status).toBe(200);
+      await Promise.all(ctx._promises);
+      const stored = await storedRecord(env, 'https://example.com/');
+      return { requests: requestsTo(seen, 'mcp.example.net').length, trail: stored.scorecard.declared_hosts ?? [] };
+    };
+    const off = await run('false');
+    expect(off.requests).toBe(0);
+    expect(off.trail.length).toBeGreaterThan(0);
+    expect(off.trail.every((entry) => entry.reason === 'follow-disabled')).toBe(true);
+    // Control: with the switch on, the same site's declared host is reached.
+    expect((await run('true')).requests).toBeGreaterThan(0);
+  });
+});
+
+describe('POST /api/score: streamed checks name their host and reason', () => {
+  test('a check on a host that did not confirm its endpoint streams both, and the line the saved result shows', async () => {
+    const env = makeEnv({
+      followSwitch: 'true',
+      deps: { probeFetch: router(siteDeclaring('https://mcp.example.net/mcp'), []) },
+    });
+    const { res, ctx } = await call(
+      post({ target: 'example.com', turnstile_token: 'x' }, { accept: 'application/x-ndjson' }),
+      env,
+    );
+    const lines = (await ndjson(res)) as AuditEvent[];
+    await Promise.all(ctx._promises);
+    const refused = lines.filter(
+      (l): l is Extract<AuditEvent, { type: 'check' }> => l.type === 'check' && l.na_reason === 'reciprocity-refused',
+    );
+    expect(refused.length).toBeGreaterThan(0);
+    expect([...new Set(refused.map((c) => c.host))]).toEqual(['mcp.example.net']);
+    const complete = lines.at(-1) as Extract<AuditEvent, { type: 'complete' }>;
+    const saved = (complete.scorecard as { results: Array<{ id: string; result: string }> }).results;
+    for (const check of refused) {
+      expect({ id: check.id, line: streamedResultLine(check, 'example.com') }).toEqual({
+        id: check.id,
+        line: saved.find((r) => r.id === check.id)?.result ?? null,
+      });
+    }
+    expect(streamedResultLine(refused[0], 'example.com')).toStartWith(
+      'Not evaluated: mcp.example.net did not confirm this endpoint',
+    );
+  });
+
+  test('a check over two API hosts that did not answer streams both, the line the saved result shows, and its hosts', async () => {
+    const description = (host: string) => `https://${host}/openapi.json`;
+    const anchors = ['api.example.net', 'files.example.net'].map((host) => ({
+      anchor: `https://${host}/`,
+      'service-desc': [{ href: description(host), type: 'application/openapi+json' }],
+    }));
+    const down = () => {
+      throw new Error('connection refused');
+    };
+    const routes = {
+      'GET https://example.com/': () => html(),
+      'GET https://example.com/.well-known/api-catalog': () =>
+        new Response(JSON.stringify({ linkset: anchors }), { headers: { 'content-type': 'application/linkset+json' } }),
+      [`GET ${description('api.example.net')}`]: down,
+      [`GET ${description('files.example.net')}`]: down,
+    };
+    const env = makeEnv({ followSwitch: 'true', deps: { probeFetch: router(routes, []) } });
+    const { res, ctx } = await call(
+      post({ target: 'example.com', turnstile_token: 'x' }, { accept: 'application/x-ndjson' }),
+      env,
+    );
+    const lines = (await ndjson(res)) as AuditEvent[];
+    await Promise.all(ctx._promises);
+    const complete = lines.at(-1) as Extract<AuditEvent, { type: 'complete' }>;
+    type SavedRow = { id: string; result: string; hosts?: Array<{ host: string }> };
+    const saved = (complete.scorecard as { results: SavedRow[] }).results;
+    const overTwo = saved.filter((r) => (r.hosts?.length ?? 0) > 1);
+    const checks = lines.filter(
+      (l): l is Extract<AuditEvent, { type: 'check' }> => l.type === 'check' && overTwo.some((r) => r.id === l.id),
+    );
+    expect(checks.map((c) => c.id)).toContain('openapi');
+    for (const check of checks) {
+      const row = overTwo.find((r) => r.id === check.id);
+      expect({ id: check.id, line: streamedResultLine(check, 'example.com') }).toEqual({
+        id: check.id,
+        line: row?.result ?? null,
+      });
+      expect({ id: check.id, host: streamedRowHost(check, 'example.com') }).toEqual({
+        id: check.id,
+        host: rowHostsOf(row ?? {}, 'example.com').join(' '),
+      });
+    }
+    const openapi = checks.find((c) => c.id === 'openapi');
+    expect(openapi === undefined ? null : streamedResultLine(openapi, 'example.com')).toBe(
+      'Not evaluated: api.example.net did not answer (https://api.example.net/openapi.json); api.example.net: n/a, files.example.net: n/a',
+    );
+  });
+});
+
+describe('POST /api/score: the declared-domain budget', () => {
+  const endpoint = 'https://mcp.example.net/mcp';
+
+  async function followed(overrides: Parameters<typeof makeEnv>[0] = {}) {
+    const seen: Seen[] = [];
+    const env = makeEnv({
+      followSwitch: 'true',
+      deps: { probeFetch: router(siteDeclaring(endpoint), seen) },
+      ...overrides,
+    });
+    const { res, ctx } = await call(post({ target: 'example.com', turnstile_token: 'x' }), env);
+    expect(res.status).toBe(200);
+    await Promise.all(ctx._promises);
+    const object = await env.SCORE_CACHE.get(await webKeyFor('https://example.com/', SPEC_VERSION));
+    const stored = (await object?.json()) as { scorecard: { declared_hosts?: Array<Record<string, unknown>> } };
+    const prefix = await budgetKeyPrefix('example.net');
+    const units = [...env._kv.entries()].filter(([key]) => key.startsWith(prefix)).map(([, value]) => value);
+    return { trail: stored.scorecard.declared_hosts ?? [], sent: requestsTo(seen, 'mcp.example.net').length, units };
+  }
+
+  test("a followed audit reserves one unit of the declared domain's hour before reaching it", async () => {
+    const { units, sent } = await followed();
+    expect(units).toEqual(['1']);
+    expect(sent).toBeGreaterThan(0);
+  });
+
+  test('a declared domain whose hour is spent is budget-exceeded and receives nothing', async () => {
+    const prefix = await budgetKeyPrefix('example.net');
+    const hour = Math.floor(Date.now() / 3_600_000);
+    // The next hour too, so a run that crosses the hour boundary still finds it spent.
+    const kvSeed = { [`${prefix}${hour}`]: '9999', [`${prefix}${hour + 1}`]: '9999' };
+    const { trail, sent } = await followed({ kvSeed });
+    expect(trail[0]).toMatchObject({ outcome: 'budget-exceeded', cause: 'domain-budget' });
+    expect(sent).toBe(0);
+  });
+});
+
+describe("POST /api/score: a run a declared domain's spent hourly budget limited", () => {
+  const ENDPOINT = 'https://mcp.example.net/mcp';
+  const KEY = () => webKeyFor('https://example.com/', SPEC_VERSION);
+
+  // A declared domain's hour and the next one spent, so a run that crosses the hour still finds it spent.
+  async function spentBudget(domain = 'example.net'): Promise<Record<string, string>> {
+    const prefix = await budgetKeyPrefix(domain);
+    const hour = Math.floor(Date.now() / 3_600_000);
+    return { [`${prefix}${hour}`]: '9999', [`${prefix}${hour + 1}`]: '9999' };
+  }
+
+  // The endpoint env over a site declaring ENDPOINT, every R2 write recorded.
+  async function declaringEnv(opts: { prior?: unknown; kvSeed?: Record<string, string>; probe?: typeof fetch } = {}) {
+    const env = makeEnv({
+      followSwitch: 'true',
+      kvSeed: opts.kvSeed,
+      cacheContent: opts.prior === undefined ? {} : { [await KEY()]: opts.prior },
+      deps: { probeFetch: opts.probe ?? router(siteDeclaring(ENDPOINT), []) },
+    });
+    const puts: string[] = [];
+    const bucket = env.SCORE_CACHE;
+    const put = bucket.put.bind(bucket);
+    bucket.put = ((key: string, ...rest: Parameters<R2Bucket['put']> extends [string, ...infer R] ? R : never) => {
+      puts.push(key);
+      return put(key, ...rest);
+    }) as R2Bucket['put'];
+    return Object.assign(env, { puts });
+  }
+
+  async function audit(env: ReturnType<typeof makeEnv>, body: Record<string, unknown> = {}, ctx = makeCtx()) {
+    const { res } = await call(post({ target: 'example.com', turnstile_token: 'x', ...body }), env, ctx);
+    expect(res.status).toBe(200);
+    await Promise.all(ctx._promises);
+    return (await res.json()) as Record<string, unknown> & {
+      scorecard: { follow_declarations?: boolean; declared_hosts?: Array<Record<string, unknown>> };
+    };
+  }
+
+  async function stored(env: ReturnType<typeof makeEnv>) {
+    const object = await env.SCORE_CACHE.get(await KEY());
+    return (await object?.json()) as { scored_at: string; scorecard: { declared_hosts?: unknown[] } } | undefined;
+  }
+
+  // The stored object's bytes, to show a run left it untouched.
+  async function storedText(env: ReturnType<typeof makeEnv>): Promise<string | undefined> {
+    return (await env.SCORE_CACHE.get(await KEY()))?.text();
+  }
+
+  const prior = () => ({ ...WEB_RECORD('example.com'), scored_at: new Date(Date.now() - 600_000).toISOString() });
+
+  test('returns the fresh result in place, keeps the saved scorecard, and writes nothing', async () => {
+    const saved = prior();
+    const env = await declaringEnv({ prior: saved, kvSeed: await spentBudget() });
+    const body = await audit(env);
+    expect(body).toMatchObject({ kind: 'web', tier: 'live', scorecard_url: null, markdown_url: null, json_url: null });
+    expect(body.scorecard.follow_declarations).toBe(true);
+    expect(body.scorecard.declared_hosts?.[0]).toMatchObject({ outcome: 'budget-exceeded', cause: 'domain-budget' });
+    const summary = String(body.summary_html);
+    expect(summary).toContain("Not saved: example.net reached anc's hourly probe limit;");
+    expect(summary).toContain('<a href="/score/example.com">the saved scorecard from');
+    expect(summary).toMatch(/Try again after <time datetime="[^"]+">\d{2}:00 UTC<\/time>\./);
+    expect(env.puts).toEqual([]);
+    expect(await storedText(env)).toBe(JSON.stringify(saved));
+  });
+
+  test('a redirect hop whose domain spent its hour is the domain the trail and the reason line name', async () => {
+    const hop = 'https://mcp.capped.example/mcp';
+    const probe = router({ ...siteDeclaring(ENDPOINT), [`GET ${ENDPOINT}`]: () => redirect(hop) }, []);
+    const env = await declaringEnv({ prior: prior(), kvSeed: await spentBudget('capped.example'), probe });
+    const body = await audit(env);
+    expect(body.scorecard.declared_hosts?.[0]).toMatchObject({ final_url: hop, cause: 'domain-budget' });
+    expect(String(body.summary_html)).toContain("Not saved: capped.example reached anc's hourly probe limit;");
+    expect(env.puts).toEqual([]);
+  });
+
+  test('a saved scorecard the store cannot read is kept: the run returns in place and writes nothing', async () => {
+    const env = await declaringEnv({ prior: prior(), kvSeed: await spentBudget() });
+    const key = await KEY();
+    const bucket = env.SCORE_CACHE;
+    const get = bucket.get.bind(bucket);
+    bucket.get = ((k: string, ...rest: Parameters<R2Bucket['get']> extends [string, ...infer R] ? R : never) =>
+      k === key
+        ? Promise.reject(new Error('We encountered an internal error. Please try again.'))
+        : get(k, ...rest)) as R2Bucket['get'];
+    const body = await audit(env);
+    expect(body.scorecard_url).toBeNull();
+    expect(String(body.summary_html)).toContain('<a href="/score/example.com">the saved scorecard</a> is unchanged.');
+    expect(env.puts).toEqual([]);
+  });
+
+  describe('a refused endpoint that decided which endpoint the rows describe', () => {
+    const SPENT = 'https://mcp.spent.example/mcp';
+    const ROOM = 'https://mcp.room.example/mcp';
+
+    // A site whose ai-catalog declares `endpoints` in that order, run with spent.example's hour spent.
+    async function held(endpoints: string[], routes: Record<string, Route> = {}) {
+      const saved = prior();
+      const probe = router(
+        {
+          'GET https://example.com/': () => html(),
+          'GET https://example.com/.well-known/ai-catalog.json': () =>
+            aiCatalog(...endpoints.map((url) => cardEntry({ data: sep2127Card(url) }))),
+          ...routes,
+        },
+        [],
+      );
+      const env = await declaringEnv({ prior: saved, kvSeed: await spentBudget('spent.example'), probe });
+      const body = await audit(env);
+      return {
+        scorecard_url: body.scorecard_url,
+        endpoint: (body.scorecard as { mcp_endpoint?: unknown }).mcp_endpoint,
+        puts: env.puts,
+        kept: (await storedText(env)) === JSON.stringify(saved),
+      };
+    }
+
+    test('behind an endpoint that did not confirm, the run keeps the saved scorecard', async () => {
+      expect(await held([ROOM, SPENT])).toEqual({ scorecard_url: null, endpoint: null, puts: [], kept: true });
+    });
+
+    test('in front of an endpoint admitted in its place, the run keeps the saved scorecard', async () => {
+      expect(await held([SPENT, ROOM], { [`GET ${ROOM}/server-card`]: () => cardDocument(sep2127Card(ROOM)) })).toEqual(
+        { scorecard_url: null, endpoint: ROOM, puts: [], kept: true },
+      );
+    });
+  });
+
+  test('a saved scorecard stands for a day: one 23 hours old is kept, one 25 hours old is replaced', async () => {
+    const run = async (hoursAgo: number) => {
+      const saved = { ...prior(), scored_at: new Date(Date.now() - hoursAgo * 3_600_000).toISOString() };
+      const env = await declaringEnv({ prior: saved, kvSeed: await spentBudget() });
+      const body = await audit(env);
+      return {
+        scorecard_url: body.scorecard_url,
+        puts: env.puts,
+        kept: (await storedText(env)) === JSON.stringify(saved),
+      };
+    };
+    expect({ 23: await run(23), 25: await run(25) }).toEqual({
+      23: { scorecard_url: null, puts: [], kept: true },
+      25: { scorecard_url: 'https://anc.dev/score/example.com', puts: [await KEY()], kept: false },
+    });
+  });
+
+  describe('a listing change the held run resolved', () => {
+    const listed = () => ({ ...prior(), scorecard: { ...prior().scorecard, public_listing: true } });
+
+    test('is written onto the saved scorecard, which keeps its rows and scored_at, and purges the board', async () => {
+      const saved = listed();
+      const env = await declaringEnv({ prior: saved, kvSeed: await spentBudget() });
+      const ctx = purgeCtx();
+      const body = await audit(env, { public_listing: false }, ctx);
+      expect(body).toMatchObject({ scorecard_url: null, scorecard: { public_listing: false } });
+      expect(JSON.parse((await storedText(env)) ?? 'null')).toEqual({
+        ...saved,
+        scorecard: { ...saved.scorecard, public_listing: false },
+      });
+      expect(ctx.purged).toEqual([['web']]);
+    });
+
+    test('that the store refuses to write leaves the envelope reporting the listing still stored', async () => {
+      const saved = listed();
+      const env = await declaringEnv({ prior: saved, kvSeed: await spentBudget() });
+      env.SCORE_CACHE.put = (async () => {
+        throw new Error('r2 unavailable');
+      }) as R2Bucket['put'];
+      const body = await audit(env, { public_listing: false });
+      expect(body).toMatchObject({ scorecard_url: null, scorecard: { public_listing: true } });
+      expect(await storedText(env)).toBe(JSON.stringify(saved));
+    });
+  });
+
+  test('a refusal the burst floor or a budget layer error decided says to try again in a minute', async () => {
+    const prefix = await budgetKeyPrefix('example.net');
+    const reasonLine = async (refuse: (env: ReturnType<typeof makeEnv>) => void) => {
+      const env = await declaringEnv({ prior: prior() });
+      refuse(env);
+      const body = await audit(env);
+      expect(env.puts).toEqual([]);
+      return String(body.summary_html);
+    };
+    const burstFloor = await reasonLine((env) => {
+      Object.assign(env, { WEB_AUDIT_DOMAIN_LIMITER: memoryRateLimit(0) });
+    });
+    const layerError = await reasonLine((env) => {
+      const kv = env.SCORE_KV as KVNamespace;
+      const get = kv.get.bind(kv);
+      kv.get = ((key: string) =>
+        key.startsWith(prefix) ? Promise.reject(new Error('KV GET failed')) : get(key)) as KVNamespace['get'];
+    });
+    for (const line of [burstFloor, layerError]) {
+      expect(line).toContain("Not saved: example.net reached anc's probe limit;");
+      expect(line).toContain('is unchanged. Try again in a minute.');
+      expect(line).not.toContain('Try again after');
+    }
+  });
+
+  test('a run whose declared host the follow slice ran out of time for saves as any audit', async () => {
+    const saved = prior();
+    const probe = router(
+      {
+        ...siteDeclaring(ENDPOINT),
+        [`GET ${ENDPOINT}`]: () => {
+          setSystemTime(new Date(Date.now() + 7_000));
+          return new Response('not found', { status: 404 });
+        },
+      },
+      [],
+    );
+    const env = await declaringEnv({ prior: saved, probe });
+    try {
+      const body = await audit(env);
+      expect(body.scorecard_url).toBe('https://anc.dev/score/example.com');
+      expect(body.scorecard.declared_hosts?.[0]).toMatchObject({ outcome: 'budget-exceeded', cause: 'slice' });
+    } finally {
+      setSystemTime();
+    }
+    expect(env.puts).toEqual([await KEY()]);
+    expect((await stored(env))?.scorecard.declared_hosts?.[0]).toMatchObject({ cause: 'slice' });
+  });
+
+  test('a first audit saves as any audit: served inside the reuse window, audited again after it', async () => {
+    const env = await declaringEnv({ kvSeed: await spentBudget() });
+    try {
+      const first = await audit(env);
+      expect(first).toMatchObject({ tier: 'live', scorecard_url: 'https://anc.dev/score/example.com' });
+      const saved = await stored(env);
+      expect(saved?.scorecard.declared_hosts?.[0]).toMatchObject({
+        outcome: 'budget-exceeded',
+        cause: 'domain-budget',
+      });
+
+      setSystemTime(new Date(Date.now() + 30_000));
+      expect(await audit(env)).toMatchObject({ tier: 'cache', scorecard_url: 'https://anc.dev/score/example.com' });
+
+      const savedText = await storedText(env);
+      setSystemTime(new Date(Date.parse(saved?.scored_at ?? '') + WEB_AUDIT_STALE_AFTER_MS + 1_000));
+      const again = await audit(env);
+      expect(again).toMatchObject({ tier: 'live', scorecard_url: null });
+      expect(await storedText(env)).toBe(savedText);
+    } finally {
+      setSystemTime();
+    }
+  });
+});
+
+describe('POST /api/score: the registry a saved website audit ran under', () => {
+  test('the saved scorecard carries the prefix of the registry the audit loaded', async () => {
+    const env = makeEnv();
+    const { res, ctx } = await call(post({ target: 'example.com', turnstile_token: 'x' }), env);
+    expect(res.status).toBe(200);
+    await Promise.all(ctx._promises);
+    const object = await env.SCORE_CACHE.get(await webKeyFor('https://example.com/', SPEC_VERSION));
+    const stored = (await object?.json()) as { scorecard: { registry_fingerprint?: string } };
+    const registry = JSON.parse(await webRegistryJson()) as WebAuditRegistry;
+    expect(stored.scorecard.registry_fingerprint).toBe(await registryFingerprintPrefix(registry));
+  });
+});
+
+describe('POST /api/score: a run that does not follow declared hosts', () => {
+  const NOT_SAVED = 'Not saved: declared hosts were not followed for this run.';
+
+  type Watched = ReturnType<typeof makeEnv> & { puts: string[] };
+
+  // The endpoint env with every R2 write recorded.
+  function watchedEnv(overrides: Parameters<typeof makeEnv>[0] = {}): Watched {
+    const env = makeEnv(overrides);
+    const puts: string[] = [];
+    const bucket = env.SCORE_CACHE;
+    const put = bucket.put.bind(bucket);
+    bucket.put = ((key: string, ...rest: Parameters<R2Bucket['put']> extends [string, ...infer R] ? R : never) => {
+      puts.push(key);
+      return put(key, ...rest);
+    }) as R2Bucket['put'];
+    return Object.assign(env, { puts });
+  }
+
+  const fresh = () => ({
+    ...WEB_RECORD('anc.dev'),
+    scorecard: { ...WEB_RECORD('anc.dev').scorecard, public_listing: true },
+  });
+
+  test('the parser rejects a non-boolean follow_declarations with a 400 naming the field', async () => {
+    for (const value of ['false', 0, null]) {
+      const { res } = await call(
+        post({ target: 'anc.dev', turnstile_token: 'x', follow_declarations: value }),
+        makeEnv(),
+      );
+      expect(res.status).toBe(400);
+      const error = await errorOf(res);
+      expect(error.code).toBe('invalid_follow_declarations');
+      expect(error.message).toContain('follow_declarations');
+    }
+  });
+
+  test('a fresh stored scorecard does not answer it: the run audits, returns no URLs, and writes nothing', async () => {
+    const env = watchedEnv({ cacheContent: { [await webKeyFor('https://anc.dev/', SPEC_VERSION)]: fresh() } });
+    const ctx = purgeCtx();
+    const { res } = await call(post({ target: 'anc.dev', turnstile_token: 'x', follow_declarations: false }), env, ctx);
+    expect(res.status).toBe(200);
+    await Promise.all(ctx._promises);
+    const body = (await res.json()) as Record<string, unknown> & { scorecard: Record<string, unknown> };
+    expect(body).toMatchObject({ kind: 'web', tier: 'live', scorecard_url: null, markdown_url: null, json_url: null });
+    expect(body.scorecard.follow_declarations).toBe(false);
+    expect(body.scorecard.public_listing).toBe(true);
+    expect(String(body.summary_html)).toContain(NOT_SAVED);
+    expect(env.puts).toEqual([]);
+    expect(ctx.purged).toEqual([]);
+  });
+
+  test('with audits disabled it gets the disabled error, never the stored followed scorecard', async () => {
+    const stale = { ...fresh(), scored_at: new Date(Date.now() - 600_000).toISOString() };
+    for (const record of [fresh(), stale]) {
+      const env = makeEnv({
+        webKill: true,
+        cacheContent: { [await webKeyFor('https://anc.dev/', SPEC_VERSION)]: record },
+      });
+      const { res } = await call(post({ target: 'anc.dev', turnstile_token: 'x', follow_declarations: false }), env);
+      expect(res.status).toBe(503);
+      expect((await errorOf(res)).code).toBe('web_audit_disabled');
+    }
+  });
+
+  test('with no turnstile_token it gets the tokenless answer and spends nothing: no siteverify, no limiter, no engine', async () => {
+    const tracker = newTracker();
+    const { res } = await call(post({ target: 'anc.dev', follow_declarations: false }), makeEnv({ tracker }));
+    expect(res.status).toBe(403);
+    expect(await errorOf(res)).toMatchObject({ code: 'turnstile_failed', cta: 'Start the audit from the page.' });
+    expect(tracker).toMatchObject({ siteverifyCalls: 0, limiterCalls: [], probeCalls: [] });
+  });
+
+  test('a request admission refuses gets that refusal and runs no engine', async () => {
+    const bucket = Math.floor(Date.now() / 3_600_000);
+    const refusals: Array<{ overrides: Parameters<typeof makeEnv>[0]; status: number; code: string }> = [
+      { overrides: { limiter: false }, status: 429, code: 'rate_limited' },
+      { overrides: { ipLimiter: false }, status: 429, code: 'rate_limited' },
+      { overrides: { kvSeed: { [`audit:web:203.0.113.9:${bucket}`]: '30' } }, status: 429, code: 'rate_limited' },
+      { overrides: { turnstile: 'reject' }, status: 403, code: 'turnstile_failed' },
+      { overrides: { turnstile: 'transport' }, status: 503, code: 'turnstile_unavailable' },
+    ];
+    for (const refusal of refusals) {
+      const tracker = newTracker();
+      const { res } = await call(
+        post({ target: 'anc.dev', turnstile_token: 'x', follow_declarations: false }),
+        makeEnv({ tracker, ...refusal.overrides }),
+      );
+      const body = (await res.json()) as { error?: { code: string } };
+      expect({ status: res.status, code: body.error?.code, probes: tracker.probeCalls }).toEqual({
+        status: refusal.status,
+        code: refusal.code,
+        probes: [],
+      });
+    }
+  });
+
+  test('it streams its rows and ends on a complete line with no URLs, marking no in-flight flag', async () => {
+    const env = watchedEnv();
+    const ctx = purgeCtx();
+    const { res } = await call(
+      post({ target: 'anc.dev', turnstile_token: 'x', follow_declarations: false }, { accept: 'application/x-ndjson' }),
+      env,
+      ctx,
+    );
+    const lines = await ndjson(res);
+    await Promise.all(ctx._promises);
+    expect(lines[0]).toMatchObject({ type: 'accepted', lane: 'web', target: 'anc.dev' });
+    expect(lines.some((l) => l.type === 'check')).toBe(true);
+    expect(lines.at(-1)).toMatchObject({ type: 'complete', scorecard_url: null, markdown_url: null, json_url: null });
+    expect(String(lines.at(-1)?.summary_html)).toContain(NOT_SAVED);
+    expect([...env._kv.keys()].filter((key) => key.startsWith('inflight:'))).toEqual([]);
+    expect(env.puts).toEqual([]);
+    expect(ctx.purged).toEqual([]);
+  });
+
+  test('a public_listing that differs from the stored choice is rejected; the stored choice runs', async () => {
+    const key = await webKeyFor('https://anc.dev/', SPEC_VERSION);
+    const listed = makeEnv({ cacheContent: { [key]: fresh() } });
+    const refused = await call(
+      post({ target: 'anc.dev', turnstile_token: 'x', follow_declarations: false, public_listing: false }),
+      listed,
+    );
+    expect(refused.res.status).toBe(400);
+    expect((await errorOf(refused.res)).code).toBe('listing_requires_follow');
+    const same = await call(
+      post({ target: 'anc.dev', turnstile_token: 'x', follow_declarations: false, public_listing: true }),
+      listed,
+    );
+    expect(same.res.status).toBe(200);
+    await Promise.all(same.ctx._promises);
+    // No stored record: the standing choice is unlisted, so asking to list is a change.
+    const first = await call(
+      post({ target: 'anc.dev', turnstile_token: 'x', follow_declarations: false, public_listing: true }),
+      makeEnv(),
+    );
+    expect(first.res.status).toBe(400);
+    expect((await errorOf(first.res)).code).toBe('listing_requires_follow');
   });
 });

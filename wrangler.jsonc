@@ -193,6 +193,18 @@
       "name": "WEB_AUDIT_LIMITER_IP",
       "namespace_id": "1011",
       "simple": { "limit": 30, "period": 60 }
+    },
+    // WEB_AUDIT_DOMAIN_LIMITER — keyed on sha256(registrable domain) by the
+    // web audit's follow slice (src/worker/audit-web/domain-budget.ts): about
+    // 10 audits per 60s may reach one declared domain from each Cloudflare
+    // location, because the binding's counters are local to the location the
+    // Worker runs in and eventually consistent. It is the burst floor under
+    // the KV-backed hourly window on that same domain, which concurrent
+    // audits can each read before any of them writes.
+    {
+      "name": "WEB_AUDIT_DOMAIN_LIMITER",
+      "namespace_id": "1013",
+      "simple": { "limit": 10, "period": 60 }
     }
   ],
   // SCORE_KV — operator-flippable `scoring_disabled` kill switch. Flip
@@ -251,12 +263,17 @@
   // declaration, not a behavior change. Flip it with a committed edit through
   // a PR, or transiently with `wrangler deploy --var`; never `secret put`.
   // Procedure and hazards: docs/runbooks/mcp-operator.md § Kill switches.
+  //
+  // WEB_AUDIT_FOLLOW_ENABLED is a production secret too (env.staging.vars
+  // binds it "true"), so it never appears in this block; the guard is
+  // tests/wrangler-config.test.ts.
   "vars": {
     "TURNSTILE_SITEKEY": "0x4AAAAAADQFMBoVm56-OPuQ",
     "MCP_LEGACY_ENABLED": "true"
   },
   // Production (top-level): anc.dev + www.anc.dev custom domains, no
-  // .workers.dev URL. Deployed via `wrangler deploy` (no --env flag) on
+  // .workers.dev URL. www.anc.dev is bound only so the Worker can redirect it
+  // to anc.dev (src/worker/canonical-host.ts). Deployed via `wrangler deploy` (no --env flag) on
   // push to main. Cloudflare auto-provisions SSL cert + DNS CNAME for
   // each custom domain (both bindings live in the same anc.dev zone).
   // Wrangler owns these bindings; never attach via the CF dashboard.
@@ -400,6 +417,11 @@
           "name": "WEB_AUDIT_LIMITER_IP",
           "namespace_id": "1012",
           "simple": { "limit": 30, "period": 60 }
+        },
+        {
+          "name": "WEB_AUDIT_DOMAIN_LIMITER",
+          "namespace_id": "1014",
+          "simple": { "limit": 10, "period": 60 }
         }
       ],
       "kv_namespaces": [
@@ -453,6 +475,13 @@
         "TURNSTILE_SITEKEY": "1x00000000000000000000AA",
         "MCP_CACHE_BYPASS_ALLOWED": "true",
         "WEB_AUDIT_ENABLED": "true",
+        // WEB_AUDIT_FOLLOW_ENABLED lets the web audit follow the hosts a
+        // site declares (its MCP server, its API host). Bound "true" here;
+        // production carries it as a `wrangler secret put` value (no --env
+        // flag) and no top-level var, so it flips without a deploy. Absent
+        // reads as off: audits still run and are scored without the
+        // declared hosts.
+        "WEB_AUDIT_FOLLOW_ENABLED": "true",
         "MCP_LEGACY_ENABLED": "true",
         // Verbose web-audit logging (per-check + discovery-evidence lines
         // in Workers Logs) is always on for staging. Production stays at

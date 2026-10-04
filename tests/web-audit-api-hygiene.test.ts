@@ -3,7 +3,9 @@
 
 import { describe, expect, test } from 'bun:test';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
+import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
+import { stubFetch } from './helpers/stub-fetch';
 
 function makeCheck(partial: Partial<WebCheck> & { id: string }): WebCheck {
   return {
@@ -92,7 +94,13 @@ const CHECKS: WebCheck[] = [
 function registryOf(checks: WebCheck[]): WebAuditRegistry {
   return {
     version: 1,
-    mcp_discovery: { well_known: ['/.well-known/mcp.json'], common_paths: ['/mcp'], protocol_version: '2025-06-18' },
+    mcp_discovery: {
+      ai_catalog: '/.well-known/ai-catalog.json',
+      card_suffix: '/server-card',
+      well_known: ['/.well-known/mcp.json'],
+      common_paths: ['/mcp'],
+      protocol_version: '2025-06-18',
+    },
     category_order: ['api', 'mcp', 'agent-discovery-auth'],
     categories: { api: 'API', mcp: 'MCP', 'agent-discovery-auth': 'Agent discovery & auth' },
     checks,
@@ -107,13 +115,6 @@ async function collect(gen: AsyncGenerator<AuditEvent>): Promise<AuditEvent[]> {
 
 function resultsOf(events: AuditEvent[]) {
   return events.flatMap((e) => (e.type === 'result' ? [e.result] : []));
-}
-
-function siteFetch(handler: (url: string, init?: RequestInit) => Response): typeof fetch {
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-    return handler(url, init);
-  }) as typeof fetch;
 }
 
 function mcpInitialize(capabilities: Record<string, unknown> = {}): Response {
@@ -140,7 +141,7 @@ function resourcesList(resources: Array<{ uri: string }>): Response {
 
 describe('API hygiene + MCP resources + ARD', () => {
   test('no api-surface leaves JSON-errors and rate-limit n_a', async () => {
-    const fetchImpl = siteFetch((url) => {
+    const fetchImpl = stubFetch((url) => {
       if (url.endsWith('/openapi.json')) return new Response('nope', { status: 404 });
       return new Response('<html><body>no api</body></html>', {
         status: 200,
@@ -149,7 +150,12 @@ describe('API hygiene + MCP resources + ARD', () => {
     });
     const rows = resultsOf(
       await collect(
-        runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+        runWebAudit({
+          url: 'https://example.com/',
+          registry: registryOf(CHECKS),
+          fetchOptions: { fetchImpl },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
+        }),
       ),
     );
     expect(rows.find((r) => r.id === 'json-errors')?.status).toBe('n_a');
@@ -158,7 +164,7 @@ describe('API hygiene + MCP resources + ARD', () => {
   });
 
   test('API present with an HTML error body misses json-errors', async () => {
-    const fetchImpl = siteFetch((url, init) => {
+    const fetchImpl = stubFetch((url, init) => {
       if (url.endsWith('/mcp') && init?.method === 'POST') return mcpInitialize();
       if (url.endsWith('/openapi.json')) {
         return new Response(OPENAPI_SPEC, { status: 200, headers: { 'content-type': 'application/json' } });
@@ -170,7 +176,12 @@ describe('API hygiene + MCP resources + ARD', () => {
     });
     const rows = resultsOf(
       await collect(
-        runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+        runWebAudit({
+          url: 'https://example.com/',
+          registry: registryOf(CHECKS),
+          fetchOptions: { fetchImpl },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
+        }),
       ),
     );
     expect(rows.find((r) => r.id === 'openapi')?.status).toBe('pass');
@@ -179,7 +190,7 @@ describe('API hygiene + MCP resources + ARD', () => {
   });
 
   test('API present with rate-limit headers passes rate-limit-headers', async () => {
-    const fetchImpl = siteFetch((url, init) => {
+    const fetchImpl = stubFetch((url, init) => {
       if (url.endsWith('/mcp') && init?.method === 'POST') return mcpInitialize();
       if (url.endsWith('/openapi.json')) {
         return new Response(OPENAPI_SPEC, { status: 200, headers: { 'content-type': 'application/json' } });
@@ -194,7 +205,12 @@ describe('API hygiene + MCP resources + ARD', () => {
     });
     const rows = resultsOf(
       await collect(
-        runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+        runWebAudit({
+          url: 'https://example.com/',
+          registry: registryOf(CHECKS),
+          fetchOptions: { fetchImpl },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
+        }),
       ),
     );
     expect(rows.find((r) => r.id === 'json-errors')?.status).toBe('pass');
@@ -202,7 +218,7 @@ describe('API hygiene + MCP resources + ARD', () => {
   });
 
   test('capabilities omit resources → resources check n_a', async () => {
-    const fetchImpl = siteFetch((url, init) => {
+    const fetchImpl = stubFetch((url, init) => {
       if (url.endsWith('/mcp') && init?.method === 'POST') {
         const body = JSON.parse(String(init.body));
         if (body.method === 'initialize') return mcpInitialize({ tools: {} });
@@ -212,7 +228,12 @@ describe('API hygiene + MCP resources + ARD', () => {
     });
     const rows = resultsOf(
       await collect(
-        runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+        runWebAudit({
+          url: 'https://example.com/',
+          registry: registryOf(CHECKS),
+          fetchOptions: { fetchImpl },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
+        }),
       ),
     );
     expect(rows.find((r) => r.id === 'mcp-resources-list')?.status).toBe('n_a');
@@ -220,7 +241,7 @@ describe('API hygiene + MCP resources + ARD', () => {
   });
 
   test('capabilities.resources set with an empty list is broken', async () => {
-    const fetchImpl = siteFetch((url, init) => {
+    const fetchImpl = stubFetch((url, init) => {
       if (url.endsWith('/mcp') && init?.method === 'POST') {
         const body = JSON.parse(String(init.body));
         if (body.method === 'initialize') return mcpInitialize({ resources: {} });
@@ -230,7 +251,12 @@ describe('API hygiene + MCP resources + ARD', () => {
     });
     const rows = resultsOf(
       await collect(
-        runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+        runWebAudit({
+          url: 'https://example.com/',
+          registry: registryOf(CHECKS),
+          fetchOptions: { fetchImpl },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
+        }),
       ),
     );
     expect(rows.find((r) => r.id === 'mcp-resources-list')?.status).toBe('broken');
@@ -238,7 +264,7 @@ describe('API hygiene + MCP resources + ARD', () => {
 
   test('resources-list follows initialize session id and initialized notification', async () => {
     const methods: string[] = [];
-    const fetchImpl = siteFetch((url, init) => {
+    const fetchImpl = stubFetch((url, init) => {
       if (url.endsWith('/mcp') && init?.method === 'POST') {
         const body = JSON.parse(String(init.body));
         methods.push(body.method);
@@ -279,7 +305,12 @@ describe('API hygiene + MCP resources + ARD', () => {
     });
     const rows = resultsOf(
       await collect(
-        runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+        runWebAudit({
+          url: 'https://example.com/',
+          registry: registryOf(CHECKS),
+          fetchOptions: { fetchImpl },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
+        }),
       ),
     );
     expect(methods).toContain('notifications/initialized');
@@ -288,13 +319,18 @@ describe('API hygiene + MCP resources + ARD', () => {
   });
 
   test('missing ai-catalog is optional-absent n_a', async () => {
-    const fetchImpl = siteFetch((url) => {
+    const fetchImpl = stubFetch((url) => {
       if (url.endsWith('/ai-catalog.json')) return new Response('gone', { status: 404 });
       return new Response('<html></html>', { status: 200, headers: { 'content-type': 'text/html' } });
     });
     const rows = resultsOf(
       await collect(
-        runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+        runWebAudit({
+          url: 'https://example.com/',
+          registry: registryOf(CHECKS),
+          fetchOptions: { fetchImpl },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
+        }),
       ),
     );
     const row = rows.find((r) => r.id === 'ai-catalog');

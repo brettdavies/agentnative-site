@@ -1,14 +1,103 @@
 // Selection over web-audit findings, shared by the Worker's remediation
 // eligibility, the result page's prompt-assembly widget, and the WebMCP
-// result tools. Pure data logic on plain records: this module is
+// result tools, plus the `n_a` reason vocabulary and the result-line
+// phrase for each reason. Pure data logic on plain records: this module is
 // typechecked under both tsconfig.client.json (no Workers types) and
 // tsconfig.worker.json (no DOM lib), so it can name neither environment.
 // Callers map their own surface (a DOM row, a scorecard row) onto
 // `FindingRow` and read the selection back.
 
-/** Scorecard schema 0.4 statuses, in documented order. */
+/** Web scorecard statuses, in documented order. */
 export const FINDING_STATUSES = ['pass', 'noncompliant', 'broken', 'absent', 'n_a', 'skip', 'error'] as const;
 export type FindingStatus = (typeof FINDING_STATUSES)[number];
+
+/**
+ * Why a row is `n_a`, a closed set agents branch on. `antecedent-unmet`:
+ * the check does not apply to this site (declared type or runtime
+ * antecedent). `optional-absent`: it applies, is a MAY, and is not
+ * implemented. `posture-consistent`: the probed surfaces show a
+ * deliberate, consistent opt-out (the CORS pair with Allow-Origin on
+ * neither surface). The other six name a declared host the audit did not
+ * evaluate: following was off, the host did not confirm the endpoint, it
+ * did not answer, it is a private or IP address the auditor never
+ * contacts, its hourly probe limit was reached, or it requires sign-in. A
+ * handler with nothing to probe emits `n_a` with no reason.
+ */
+export const NA_REASONS = [
+  'antecedent-unmet',
+  'optional-absent',
+  'posture-consistent',
+  'follow-disabled',
+  'reciprocity-refused',
+  'declared-host-unreachable',
+  'declared-host-blocked',
+  'declared-host-budget-exceeded',
+  'auth-required',
+] as const;
+export type NaReason = (typeof NA_REASONS)[number];
+
+const NA_REASON_PHRASES: Record<NaReason, (host: string) => string> = {
+  'antecedent-unmet': () => 'Not applicable',
+  'optional-absent': () => 'Not implemented, optional',
+  'posture-consistent': () => 'Deliberate posture, not scored',
+  'follow-disabled': () => 'Not evaluated: declared hosts were not followed for this audit',
+  'reciprocity-refused': (host) => `Not evaluated: ${host} did not confirm this endpoint`,
+  'declared-host-unreachable': (host) => `Not evaluated: ${host} did not answer`,
+  'declared-host-blocked': (host) => `Not evaluated: ${host} is a private or IP address`,
+  'declared-host-budget-exceeded': (host) => `Not evaluated: anc's hourly probe limit for ${host} was reached`,
+  'auth-required': (host) => `Not evaluated: ${host} requires sign-in`,
+};
+
+/**
+ * The words an `n_a` row's result line leads with for its reason. `host`
+ * is the row's host; the reasons that name no host ignore it.
+ */
+export function naReasonPhrase(reason: NaReason, host: string): string {
+  return NA_REASON_PHRASES[reason](host);
+}
+
+const NOT_EVALUATED = 'Not evaluated: ';
+
+/**
+ * The reasons a check was not run because the audit could not reach what it
+ * probes from where it ran. Every other `n_a` reason says the check does
+ * not apply, or applies and is optional.
+ */
+export const NOT_RUN_REASONS: readonly NaReason[] = [
+  'follow-disabled',
+  'reciprocity-refused',
+  'declared-host-unreachable',
+  'declared-host-blocked',
+  'declared-host-budget-exceeded',
+  'auth-required',
+];
+
+export function isNotRunReason(reason: unknown): reason is NaReason {
+  return (NOT_RUN_REASONS as readonly unknown[]).includes(reason);
+}
+
+/** A not-run reason's phrase without its "Not evaluated: " lead, for a line that counts the rows it covers. */
+export function notRunWhy(reason: NaReason, host: string): string {
+  return naReasonPhrase(reason, host).replace(NOT_EVALUATED, '');
+}
+
+/**
+ * Whether only a check that applied to the site can carry the reason. The
+ * global score reads it to tell which alternatives a site presents from its
+ * stored rows alone. `auth-required` is false although a check that applied
+ * can carry it: the antecedent gate also stamps it on checks that never did.
+ */
+export const NA_REASON_ONLY_WHEN_APPLICABLE: Readonly<Record<NaReason, boolean>> = {
+  'antecedent-unmet': false,
+  'optional-absent': true,
+  'posture-consistent': true,
+  'follow-disabled': false,
+  'reciprocity-refused': false,
+  'declared-host-unreachable': false,
+  'declared-host-blocked': false,
+  'declared-host-budget-exceeded': false,
+  'auth-required': false,
+};
 
 /** RFC-2119 normative keywords carried per check. */
 export const FINDING_KEYWORDS = ['must', 'should', 'may'] as const;
@@ -37,6 +126,8 @@ export type FindingRow = {
    * reader see one finding rather than two versions of it.
    */
   result: string | null;
+  /** The host or hosts the row's evidence came from, space-separated, as the page renders them. */
+  host: string | null;
   prompt: string | null;
   /** Rendered document order, the last ordering tie-break. */
   order: number;

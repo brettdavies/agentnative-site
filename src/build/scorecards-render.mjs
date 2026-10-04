@@ -85,7 +85,7 @@ export function buildLeaderboardBody(leaderboard, methodology) {
 <div class="board-head">
   <div>
     <p data-s="cli">Curated CLIs, ranked by credit-weighted agent-readiness.</p>
-    <p data-s="web">Public sites, ranked by global agent-readiness.</p>
+    <p data-s="web">Public sites, ranked by agent-readiness on the checks that apply to each.</p>
     <p class="leaderboard-hero__meta" data-s="cli">${leaderboard.length} audited tools in the corpus.</p>
   </div>
   <div class="board-controls">

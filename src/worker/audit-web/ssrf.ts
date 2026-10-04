@@ -11,6 +11,10 @@
 //     metadata hostnames (localhost, *.internal),
 //   - follows redirects manually with a hop cap, re-validating each
 //     Location target through the same canonicalization + range check,
+//   - can keep the hops on the request's own origin, so a probe's method
+//     and body never reach a host its caller did not name,
+//   - sends no plaintext request: an http request URL is never sent, and
+//     a redirect to http is not taken but answered as the redirect itself,
 //   - wraps the whole chain in one AbortController deadline.
 //
 // DNS-rebinding residual: Workers cannot pre-resolve a hostname and pin
@@ -24,7 +28,11 @@
 import { AUDIT_USER_AGENT } from '../../shared/user-agents';
 import type { ProbeResponse } from './assert';
 
-export type UrlValidation = { ok: true; url: URL } | { ok: false; reason: string };
+/**
+ * A refusal names what was refused: the URL itself, when it does not parse
+ * or its scheme is not http(s), or the host it names.
+ */
+export type UrlValidation = { ok: true; url: URL } | { ok: false; reason: string; refused: 'url' | 'host' };
 
 export type GuardedFetchInit = {
   method?: string;
@@ -48,6 +56,19 @@ export type GuardedFetchOptions = {
    * needs to see the 301, which following would erase.
    */
   followRedirects?: boolean;
+  /**
+   * When true, a redirect answer is a failure naming its target and no hop
+   * is taken: a URL pinned by proof of control must not hand the auditor to
+   * a location nothing confirmed.
+   */
+  refuseRedirects?: boolean;
+  /**
+   * When set, only redirect hops that keep the scheme, host, and port are
+   * taken, and the method and body are never re-sent to another origin.
+   * `'return'` hands a redirect to another origin back as-is (status +
+   * Location); `'refuse'` makes it a failure naming its target.
+   */
+  crossOriginRedirects?: 'return' | 'refuse';
   /** Injection point for tests; production uses global fetch. */
   fetchImpl?: typeof fetch;
 };
@@ -69,7 +90,15 @@ function hasHeader(headers: Record<string, string> | undefined, name: string): b
   const wanted = name.toLowerCase();
   return Object.keys(headers).some((k) => k.toLowerCase() === wanted);
 }
-const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+export const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
+
+// Cloudflare answers on the origin's behalf with these when the origin
+// never spoke: 52x for connection and timeout failures, 530 when the host
+// does not resolve. A Worker's fetch returns them rather than throwing, and
+// they carry the auditor's edge, not the target.
+export function isEdgeErrorStatus(status: number | null): boolean {
+  return status !== null && (status === 530 || (status >= 520 && status <= 527));
+}
 
 // Blocked IPv4 ranges as [base, prefixBits]. The metadata IP
 // 169.254.169.254 sits inside 169.254.0.0/16.
@@ -202,7 +231,8 @@ function blockedIpv6Reason(bytes: Uint8Array): string | null {
 
 /** Returns a block reason for the hostname, or null when it may be fetched. */
 export function blockedHostReason(rawHostname: string): string | null {
-  const hostname = rawHostname.toLowerCase().replace(/\.$/, '');
+  // WHATWG URL keeps trailing dots as written: `localhost..` is localhost.
+  const hostname = rawHostname.toLowerCase().replace(/\.+$/, '');
   if (hostname.length === 0) return 'empty hostname';
   if (hostname === 'localhost' || hostname.endsWith('.localhost')) return 'localhost is not a public host';
   if (hostname === 'metadata.google.internal' || hostname.endsWith('.internal')) {
@@ -229,20 +259,35 @@ export function validatePublicUrl(raw: string): UrlValidation {
   try {
     url = new URL(raw);
   } catch {
-    return { ok: false, reason: `unparseable url: ${raw}` };
+    return { ok: false, reason: `unparseable url: ${raw}`, refused: 'url' };
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    return { ok: false, reason: `scheme ${url.protocol} is not http(s)` };
+    return { ok: false, reason: `scheme ${url.protocol} is not http(s)`, refused: 'url' };
   }
   const reason = blockedHostReason(url.hostname);
-  if (reason) return { ok: false, reason: `blocked: ${reason}` };
+  if (reason) return { ok: false, reason: `blocked: ${reason}`, refused: 'host' };
   return { ok: true, url };
+}
+
+export function isHttpsUrl(raw: string): boolean {
+  try {
+    return new URL(raw).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/** The answer for a URL that is never requested because it is not https. */
+export function notHttps(): ProbeResponse {
+  return { status: null, headers: {}, body: '', error: 'not requested: not https', refused: 'insecure-scheme' };
 }
 
 /**
  * Fetch through the SSRF guard. Never throws; failures come back as
  * `{ status: null, error }` mirroring the extracted fetch contract so
- * `assertHttp` can evaluate them uniformly.
+ * `assertHttp` can evaluate them uniformly. A redirect to http comes back
+ * as the redirect that named it, with `error` and `refused` set, so a
+ * caller can tell a target that answered from one that never did.
  */
 export async function guardedFetch(
   rawUrl: string,
@@ -272,6 +317,8 @@ export async function guardedFetch(
   try {
     let current = validatePublicUrl(rawUrl);
     if (!current.ok) return fail(current.reason.startsWith('blocked') ? current.reason : `blocked: ${current.reason}`);
+    if (current.url.protocol !== 'https:') return { ...notHttps(), elapsed_ms: Date.now() - started };
+    const origin = current.url.origin;
 
     for (let hop = 0; hop <= maxRedirects; hop++) {
       let response: Response;
@@ -288,44 +335,62 @@ export async function guardedFetch(
       }
 
       const location = response.headers.get('location');
-      if (opts.followRedirects !== false && REDIRECT_STATUSES.has(response.status) && location) {
+      const redirect = REDIRECT_STATUSES.has(response.status) && location ? location : null;
+      if (redirect !== null && opts.refuseRedirects === true) {
+        return fail(`redirect refused: ${response.status} to ${redirect}`);
+      }
+      if (redirect !== null && opts.followRedirects !== false) {
         let next: URL;
         try {
-          next = new URL(location, current.url);
+          next = new URL(redirect, current.url);
         } catch {
-          return fail(`blocked: unparseable redirect target ${location}`);
+          return fail(`blocked: unparseable redirect target ${redirect}`);
         }
-        const validated = validatePublicUrl(next.toString());
-        if (!validated.ok) {
-          return fail(
-            validated.reason.startsWith('blocked')
-              ? `${validated.reason} (redirect hop ${hop + 1})`
-              : `blocked: ${validated.reason} (redirect hop ${hop + 1})`,
-          );
+        const offOrigin = opts.crossOriginRedirects !== undefined && next.origin !== origin;
+        if (offOrigin && opts.crossOriginRedirects === 'refuse') {
+          return fail(`redirect refused: ${response.status} to ${redirect}`);
         }
-        if (hop === maxRedirects) {
-          return fail(`redirect limit exceeded (${maxRedirects} hops)`);
+        if (!offOrigin) {
+          const validated = validatePublicUrl(next.toString());
+          if (!validated.ok) {
+            return fail(
+              validated.reason.startsWith('blocked')
+                ? `${validated.reason} (redirect hop ${hop + 1})`
+                : `blocked: ${validated.reason} (redirect hop ${hop + 1})`,
+            );
+          }
+          if (validated.url.protocol !== 'https:') {
+            return {
+              status: response.status,
+              headers: lowercased(response.headers),
+              body: '',
+              error: `redirect refused: ${response.status} to ${redirect}: not https`,
+              refused: 'insecure-scheme',
+              elapsed_ms: Date.now() - started,
+            };
+          }
+          if (hop === maxRedirects) {
+            return fail(`redirect limit exceeded (${maxRedirects} hops)`);
+          }
+          current = validated;
+          continue;
         }
-        current = validated;
-        continue;
       }
 
-      const headers: Record<string, string> = {};
-      response.headers.forEach((value, name) => {
-        headers[name.toLowerCase()] = value;
-      });
-      let body = '';
+      const headers = lowercased(response.headers);
+      let read: BodyRead;
       try {
-        body = await readBody(response, opts.maxBodyBytes);
+        read = await readBody(response, opts.maxBodyBytes);
       } catch (err) {
         return fail(errMsg(err));
       }
       return {
         status: response.status,
         headers,
-        body,
+        body: read.body,
         error: null,
         elapsed_ms: Date.now() - started,
+        ...(read.truncated ? { truncated: true as const } : {}),
       };
     }
     return fail(`redirect limit exceeded (${maxRedirects} hops)`);
@@ -338,8 +403,24 @@ export async function guardedFetch(
 export const STATUS_ONLY_BODY_BYTES = 0;
 /** Cap for probes that inspect a short body (JSON errors, twin text). */
 export const AUDIT_PROBE_MAX_BODY_BYTES = 64 * 1024;
+/** Cap for a discovery document the audit keeps: a server card, the AI catalog, the API catalog. */
+export const DOCUMENT_MAX_BODY_BYTES = 256 * 1024;
+/** Cap for an RFC 9728 protected-resource metadata document. */
+export const METADATA_MAX_BODY_BYTES = 64 * 1024;
+/** Cap for an OpenAPI description the API catalog declares. */
+export const OPENAPI_MAX_BODY_BYTES = 512 * 1024;
 
-async function readBody(response: Response, maxBodyBytes: number | undefined): Promise<string> {
+type BodyRead = { body: string; truncated: boolean };
+
+function lowercased(source: Headers): Record<string, string> {
+  const headers: Record<string, string> = {};
+  source.forEach((value, name) => {
+    headers[name.toLowerCase()] = value;
+  });
+  return headers;
+}
+
+async function readBody(response: Response, maxBodyBytes: number | undefined): Promise<BodyRead> {
   if (maxBodyBytes === 0) {
     if (response.body) {
       try {
@@ -348,27 +429,30 @@ async function readBody(response: Response, maxBodyBytes: number | undefined): P
         // Already locked or closed.
       }
     }
-    return '';
+    return { body: '', truncated: false };
   }
   if (maxBodyBytes === undefined) {
-    return await response.text();
+    return { body: await response.text(), truncated: false };
   }
   const reader = response.body?.getReader();
-  if (!reader) return '';
+  if (!reader) return { body: '', truncated: false };
   const chunks: Uint8Array[] = [];
   let received = 0;
+  let truncated = false;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     if (!value) continue;
     const remaining = maxBodyBytes - received;
     if (remaining <= 0) {
+      truncated = true;
       await reader.cancel();
       break;
     }
     if (value.byteLength > remaining) {
       chunks.push(value.slice(0, remaining));
       received = maxBodyBytes;
+      truncated = true;
       await reader.cancel();
       break;
     }
@@ -383,7 +467,7 @@ async function readBody(response: Response, maxBodyBytes: number | undefined): P
     out.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return new TextDecoder().decode(out);
+  return { body: new TextDecoder().decode(out), truncated };
 }
 
 function errMsg(err: unknown): string {

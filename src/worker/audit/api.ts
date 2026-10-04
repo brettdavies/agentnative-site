@@ -5,7 +5,8 @@
 //
 //   method + Content-Type ... a non-POST is 405; a non-JSON body is 415
 //   parse .................... { target | input, turnstile_token?, site_type?,
-//                                public_listing?, refresh? }; ?fromCache=false
+//                                public_listing?, follow_declarations?,
+//                                refresh? }; ?fromCache=false
 //   classify ................. the shared classifier; a rejection is a 400
 //   lane validation .......... cli: the worker validator
 //                              web: the https origin + the SSRF gate, before
@@ -15,7 +16,10 @@
 //                                   never serves from cache)
 //                              web: cache (a fresh hit serves; a stale hit
 //                                   or a listing change falls through); the
-//                                   operator hatch is CLI-only
+//                                   operator hatch is CLI-only; a request
+//                                   that opts out of following declared
+//                                   hosts skips this tier, the in-flight
+//                                   read, the claim, and every write
 //   in flight ................ the KV flag names the input's running job: a
 //                              stream reader and a tokened JSON reader attach
 //                              to it and receive its log, then its live
@@ -72,9 +76,11 @@ import {
   meterWebAuditFlip,
   patchWebListing,
   prepareWebTarget,
+  readStandingListing,
   readWebTier,
   runWebAuditStream,
   type WebCoreEnv,
+  type WebTarget,
   webEnvelope,
 } from '../audit-web/core';
 import { flushHitMinPurge, runWithHitMinPurge } from '../audit-web/hit-min-purge';
@@ -139,6 +145,7 @@ type ParsedBody = {
   token: string | null;
   siteType: WebSiteType | null;
   publicListing: boolean | undefined;
+  followDeclarations: boolean;
   refresh: boolean;
 };
 
@@ -188,11 +195,15 @@ async function parseBody(request: Request): Promise<ParsedBody | ParseFailure> {
   if (body.public_listing !== undefined && typeof body.public_listing !== 'boolean') {
     return { status: 400, ...auditErrorFor('invalid_public_listing', { cta: 'Send true or false.' }) };
   }
+  if (body.follow_declarations !== undefined && typeof body.follow_declarations !== 'boolean') {
+    return { status: 400, ...auditErrorFor('invalid_follow_declarations', { cta: 'Send true or false.' }) };
+  }
   return {
     target,
     token: typeof body.turnstile_token === 'string' && body.turnstile_token ? body.turnstile_token : null,
     siteType: (body.site_type as WebSiteType | undefined) ?? null,
     publicListing: body.public_listing as boolean | undefined,
+    followDeclarations: body.follow_declarations !== false,
     refresh: body.refresh === true,
   };
 }
@@ -443,6 +454,7 @@ async function handleWeb(
     return errorResponse(400, auditErrorFor('invalid_target', { cta: CTA_INPUT, details: prepared.reason }));
   }
   const target = prepared.target;
+  if (!parsed.followDeclarations) return handleTransientWeb(common, classified.target, target);
   const tier = await readWebTier(env, target, parsed.publicListing);
 
   if (tier.kind === 'serve') {
@@ -516,11 +528,52 @@ async function handleWeb(
     target,
     siteType: parsed.siteType,
     listing,
+    followDeclarations: true,
     origin,
     probeFetch: common.deps.probeFetch,
     surface: 'stream',
   });
   return relay(common, { lane: 'web', target: classified.target, events, flags, job: writer }, cookie);
+}
+
+// A run that does not follow declared hosts is never saved, so it stands
+// outside single-flight both ways: it is never answered from a stored
+// followed scorecard, it neither joins a run in flight nor marks one a
+// followed request could join, and with audits disabled it gets the
+// disabled error rather than the stored result. It writes nothing, so it may
+// not change the listing either; it carries the stored choice.
+async function handleTransientWeb(common: Common, input: string, target: WebTarget): Promise<Response> {
+  const { env, row, parsed, origin } = common;
+  const listing = await readStandingListing(env, target);
+  if (parsed.publicListing !== undefined && parsed.publicListing !== listing) {
+    row.outcome = 'error_listing_requires_follow';
+    return errorResponse(
+      400,
+      auditErrorFor('listing_requires_follow', { cta: 'Omit public_listing, or keep follow_declarations on.' }),
+    );
+  }
+  if (!parsed.token) {
+    row.outcome = 'tokenless';
+    return tokenlessResponse();
+  }
+  const admission = await admit(common, 'web', target.host);
+  if (!admission.ok) return admissionResponse(admission, row);
+  const cookie = cookieHeader(admission);
+  common.admitted = true;
+  row.tier = 'live';
+  // The run's flags own no keys: no reader can find it, and it clears none.
+  const flags = new InFlightFlags(env, 'web', new Date().toISOString(), null, false);
+  const events = runWebAuditStream({
+    env,
+    target,
+    siteType: parsed.siteType,
+    listing,
+    followDeclarations: false,
+    origin,
+    probeFetch: common.deps.probeFetch,
+    surface: 'stream',
+  });
+  return relay(common, { lane: 'web', target: input, events, flags, job: null }, cookie);
 }
 
 // ---------------------------------------------------------------------------

@@ -7,7 +7,7 @@
 
 import type { WebCheck } from '../registry';
 import { guardedFetch } from '../ssrf';
-import { resolveUrl, timeoutMsFor } from './shared';
+import { redirectsToHttp, redirectsToHttpItem, resolveUrl, timeoutMsFor } from './shared';
 import type { HandlerContext, ProbeOutcome, ProbeStatus } from './types';
 
 const MARKDOWNISH_CT = /markdown|text\/plain/i;
@@ -24,6 +24,11 @@ export async function runAuthMd(check: WebCheck, ctx: HandlerContext): Promise<P
     const url = resolveUrl(ctx.base, rawPath);
     if (!url) continue;
     const resp = await guardedFetch(url, {}, { ...ctx.fetchOptions, timeoutMs });
+    if (redirectsToHttp(resp)) {
+      evidence.push(redirectsToHttpItem(url, resp.status));
+      misses.push('absent');
+      continue;
+    }
     if (resp.error !== null) {
       evidence.push({ url, status: null, error: resp.error });
       misses.push('error');

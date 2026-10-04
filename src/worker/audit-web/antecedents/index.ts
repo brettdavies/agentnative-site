@@ -1,7 +1,7 @@
 // Antecedent resolution for the web audit.
 //
 // A check is scored only when its antecedent holds; otherwise it is n_a
-// (excluded from both scores). Antecedents resolve from the declared site
+// (excluded from the relative score). Antecedents resolve from the declared site
 // type, from MCP discovery, from the single canonical root fetch, or from
 // another check's wave-1 probe result, never from a fresh fetch, which is
 // what keeps the subrequest budget bounded. Each token's logic lives in a

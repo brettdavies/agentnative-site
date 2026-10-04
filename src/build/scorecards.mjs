@@ -22,13 +22,17 @@ const TOOL_NAME_RE = /^[a-z0-9-]+$/;
 // and assumes their presence; 0.6 adds the 7-status taxonomy (opt_out / n_a)
 // and per-row results, both of which render additively over the 0.5 path;
 // 0.7 renames the per-row `check_id` field to `audit_id` (renderer ignores
-// either; the rename is invisible to rendering). The set is intentionally
-// plural across the migration window: the published anc v0.5.0 emits 0.7
-// scorecards via docker/score, while pre-rescore artifacts may still sit at
-// 0.5 or 0.6 until they are regenerated. Drop older versions once the full
-// rescore corpus stabilizes. Adding a version here without a corpus able to
-// satisfy it still fails the build at load.
-export const SUPPORTED_SCHEMA_VERSIONS = new Set(['0.5', '0.6', '0.7']);
+// either; the rename is invisible to rendering). 0.8 adds the per-row
+// `using_domain_verbs` / `domain_match_count` pair and the `low` confidence
+// value; 0.9 adds an optional per-row `config_hint`. All three are additive
+// and the renderer reads none of them (the JSON representation passes the
+// scorecard through whole), so 0.8 and 0.9 render through the 0.7 path. The
+// set is intentionally plural across the migration window: the published anc
+// v0.5.0 emits 0.7 scorecards via docker/score, while pre-rescore artifacts
+// may still sit at 0.5 or 0.6 until they are regenerated. Drop older versions
+// once the full rescore corpus stabilizes. Adding a version here without a
+// corpus able to satisfy it still fails the build at load.
+export const SUPPORTED_SCHEMA_VERSIONS = new Set(['0.5', '0.6', '0.7', '0.8', '0.9']);
 
 // Mirrors `ExceptionCategory::to_kebab_str()` in
 // agentnative/src/principles/registry.rs (CLI v0.1.3). Adding a new variant

@@ -4,8 +4,11 @@
 // web-audit-antecedents-<group> files; this asserts the gating end to end.
 
 import { describe, expect, test } from 'bun:test';
-import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
+import { WAVE1_CHECK_IDS } from '../src/worker/audit-web/antecedents';
+import { type AuditEvent, antecedentGate, runWebAudit } from '../src/worker/audit-web/engine';
+import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
+import { stubFetch } from './helpers/stub-fetch';
 
 function makeCheck(partial: Partial<WebCheck> & { id: string }): WebCheck {
   return {
@@ -27,7 +30,13 @@ function makeCheck(partial: Partial<WebCheck> & { id: string }): WebCheck {
 function registryOf(checks: WebCheck[]): WebAuditRegistry {
   return {
     version: 1,
-    mcp_discovery: { well_known: ['/.well-known/mcp.json'], common_paths: ['/mcp'], protocol_version: '2025-06-18' },
+    mcp_discovery: {
+      ai_catalog: '/.well-known/ai-catalog.json',
+      card_suffix: '/server-card',
+      well_known: ['/.well-known/mcp.json'],
+      common_paths: ['/mcp'],
+      protocol_version: '2025-06-18',
+    },
     category_order: ['discoverability', 'content-for-agents', 'bot-crawl-policy', 'api', 'mcp', 'agent-discovery-auth'],
     categories: {
       discoverability: 'Discoverability',
@@ -49,13 +58,6 @@ async function collect(gen: AsyncGenerator<AuditEvent>): Promise<AuditEvent[]> {
 
 function resultsOf(events: AuditEvent[]) {
   return events.flatMap((e) => (e.type === 'result' ? [e.result] : []));
-}
-
-function stubFetch(handler: (url: string, init?: RequestInit) => Response): typeof fetch {
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-    return handler(url, init);
-  }) as typeof fetch;
 }
 
 describe('runWebAudit two-wave evaluation', () => {
@@ -145,7 +147,12 @@ describe('runWebAudit two-wave evaluation', () => {
   test('a dependent check sees its antecedent resolved from the wave-1 result, not a second fetch', async () => {
     const { fetchImpl, seen } = siteFetch();
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const rows = resultsOf(events);
     expect(rows.find((r) => r.id === 'robots')?.status).toBe('pass');
@@ -158,7 +165,12 @@ describe('runWebAudit two-wave evaluation', () => {
   test('robots-ai-rules is n_a (antecedent-unmet) without a robots.txt and probes nothing', async () => {
     const { fetchImpl, seen } = siteFetch({ '/robots.txt': new Response('nope', { status: 404 }) });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const rows = resultsOf(events);
     const gated = rows.find((r) => r.id === 'robots-ai-rules');
@@ -170,7 +182,12 @@ describe('runWebAudit two-wave evaluation', () => {
   test('the root-HTML checks and link-headers reuse the single canonical root fetch', async () => {
     const { fetchImpl, seen } = siteFetch();
     await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     // Exactly one plain GET / : the canonical root fetch. (Discovery
     // never fetches /; content-negotiating checks carry their own headers.)
@@ -183,7 +200,12 @@ describe('runWebAudit two-wave evaluation', () => {
       '/llms-full.txt': new Response('no', { status: 404 }),
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const row = resultsOf(events).find((r) => r.id === 'llms-full-txt');
     expect(row?.status).toBe('n_a');
@@ -193,7 +215,12 @@ describe('runWebAudit two-wave evaluation', () => {
   test('llms-full-txt is n_a (antecedent-unmet) on a non-docs site', async () => {
     const { fetchImpl } = siteFetch();
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const row = resultsOf(events).find((r) => r.id === 'llms-full-txt');
     expect(row?.status).toBe('n_a');
@@ -203,7 +230,12 @@ describe('runWebAudit two-wave evaluation', () => {
   test('oauth-protected-resource is n_a with no MCP endpoint', async () => {
     const { fetchImpl } = siteFetch();
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const row = resultsOf(events).find((r) => r.id === 'oauth-protected-resource');
     expect(row?.status).toBe('n_a');
@@ -230,7 +262,13 @@ describe('runWebAudit two-wave evaluation', () => {
       }),
     });
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry, siteType: 'content', fetchOptions: { fetchImpl } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry,
+        siteType: 'content',
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const row = resultsOf(events).find((r) => r.id === 'openapi');
     expect(row?.status).toBe('n_a');
@@ -276,7 +314,12 @@ describe('runWebAudit markdown-frontmatter gating', () => {
 
   async function frontmatterRow(twin: string | null) {
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: REGISTRY, fetchOptions: { fetchImpl: twinSite(twin) } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: REGISTRY,
+        fetchOptions: { fetchImpl: twinSite(twin) },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     return resultsOf(events).find((r) => r.id === 'markdown-frontmatter');
   }
@@ -347,7 +390,12 @@ describe('runWebAudit handler na_reason pass-through', () => {
 
   test("the CORS pair's posture n_a carries na_reason posture-consistent on the result rows", async () => {
     const events = await collect(
-      runWebAudit({ url: 'https://example.com/', registry: CORS_REGISTRY, fetchOptions: { fetchImpl: noCorsSite } }),
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: CORS_REGISTRY,
+        fetchOptions: { fetchImpl: noCorsSite },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
     );
     const rows = resultsOf(events);
     for (const id of ['mcp-cors-preflight', 'mcp-cors-actual']) {
@@ -355,5 +403,62 @@ describe('runWebAudit handler na_reason pass-through', () => {
       expect(row?.status).toBe('n_a');
       expect(row?.na_reason).toBe('posture-consistent');
     }
+  });
+});
+
+describe('the antecedent gate stamps the reason a resolution carries', () => {
+  const check = makeCheck({ id: 'mcp-tools-list', category: 'mcp', antecedent: 'mcp-present' });
+
+  test('a resolution carrying a reason settles the row n_a with that reason', () => {
+    expect(antecedentGate(check, { outcome: 'n_a', reason: 'auth-required' })).toMatchObject({
+      id: 'mcp-tools-list',
+      status: 'n_a',
+      na_reason: 'auth-required',
+    });
+  });
+
+  test('a resolution carrying no reason still stamps antecedent-unmet', () => {
+    expect(antecedentGate(check, 'n_a')).toMatchObject({ status: 'n_a', na_reason: 'antecedent-unmet' });
+    expect(antecedentGate(check, 'apply')).toBeNull();
+  });
+});
+
+describe('runWebAudit retained documents', () => {
+  test('the api-catalog row scores the catalog discovery read, its only request, outside wave 1', async () => {
+    let catalogReads = 0;
+    const fetchImpl = stubFetch((url) => {
+      if (url === 'https://example.com/.well-known/api-catalog') {
+        catalogReads += 1;
+        return new Response('{"linkset":[]}', { headers: { 'content-type': 'application/linkset+json' } });
+      }
+      if (url === 'https://example.com/')
+        return new Response('<html></html>', { headers: { 'content-type': 'text/html' } });
+      return new Response('not found', { status: 404 });
+    });
+    const apiCatalog = makeCheck({
+      id: 'api-catalog',
+      category: 'api',
+      tier: 'optional',
+      keyword: 'may',
+      site_types: ['api'],
+      antecedent: 'api-surface',
+      eval: 'retained-document',
+      with: { retained: 'api-catalog', expect: { status: [200], body_regex: 'linkset' } },
+    });
+    const events = await collect(
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf([apiCatalog]),
+        siteType: 'api',
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
+    );
+    expect(WAVE1_CHECK_IDS.has('api-catalog')).toBe(false);
+    expect(catalogReads).toBe(1);
+    expect(resultsOf(events).find((r) => r.id === 'api-catalog')).toMatchObject({
+      status: 'pass',
+      evidence: 'https://example.com/.well-known/api-catalog -> 200',
+    });
   });
 });

@@ -236,9 +236,9 @@ describe('classifyGatewayRequest — format-class table', () => {
     expect(browser.headers.get('accept')).toBe('text/html');
   });
 
-  test('www.anc.dev coalesces to anc.dev; staging hosts are left alone', () => {
-    const www = classifyGatewayRequest(req('https://www.anc.dev/about', 'text/html', UA.browser));
-    expect(new URL(www.url).hostname).toBe('anc.dev');
+  test('the gateway leaves the request host alone', () => {
+    const apex = classifyGatewayRequest(req('https://anc.dev/about', 'text/html', UA.browser));
+    expect(new URL(apex.url).hostname).toBe('anc.dev');
     const staging = classifyGatewayRequest(
       req('https://agentnative-site-staging.example.workers.dev/about', 'text/html', UA.browser),
     );

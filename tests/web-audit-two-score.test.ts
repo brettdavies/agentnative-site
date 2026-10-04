@@ -8,6 +8,7 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { NA_REASONS } from '../src/shared/web-audit-findings';
 import {
   categoryRollups,
   DEFAULT_BROKEN_FACTOR,
@@ -25,24 +26,36 @@ const PY_TOOL = join(REPO_ROOT, 'scripts', 'scoring', 'score_model.py');
 
 type TierOutcome = [keyof ScoreWeights, 'pass' | 'noncompliant' | 'broken' | 'absent' | 'n_a'];
 
-interface ParityFixture {
-  weights: ScoreWeights;
-  broken_factor: number;
-  noncompliant_credit: number;
+interface ParityCase {
+  name: string;
   universe_tiers: Array<keyof ScoreWeights>;
   rows: TierOutcome[];
   expected: { relative: number; global: number };
+}
+
+interface ParityFixture {
+  scoring_input: string[];
+  weights: ScoreWeights;
+  broken_factor: number;
+  noncompliant_credit: number;
+  cases: ParityCase[];
 }
 
 function rowsToResults(rows: TierOutcome[]): Array<Pick<EngineResult, 'keyword' | 'status'>> {
   return rows.map(([keyword, status]) => ({ keyword, status }));
 }
 
+/** The universe of a registry holding one ungated check per tier listed, with no alternatives. */
+function tierUniverse(tiers: ReadonlyArray<keyof ScoreWeights>, weights?: ScoreWeights): number {
+  const checks = tiers.map((keyword, i) => ({ id: `u${i}`, keyword, antecedent: 'none' as const }));
+  return universeMaxOf({ checks }, [], { weights });
+}
+
 /** A registry-shaped universe: 5 MUST, 15 SHOULD, 16 MAY at default weights. */
-const UNIVERSE_MAX = universeMaxOf([
-  ...Array.from({ length: 5 }, () => ({ keyword: 'must' as const })),
-  ...Array.from({ length: 15 }, () => ({ keyword: 'should' as const })),
-  ...Array.from({ length: 16 }, () => ({ keyword: 'may' as const })),
+const UNIVERSE_MAX = tierUniverse([
+  ...Array.from({ length: 5 }, () => 'must' as const),
+  ...Array.from({ length: 15 }, () => 'should' as const),
+  ...Array.from({ length: 16 }, () => 'may' as const),
 ]);
 
 function bucketRows(buckets: Partial<Record<string, number>>): Array<Pick<EngineResult, 'keyword' | 'status'>> {
@@ -146,18 +159,48 @@ describe('scoreWebAudit', () => {
 
 describe('score_model.py parity (shared fixture)', () => {
   const fixture = JSON.parse(readFileSync(FIXTURE_PATH, 'utf8')) as ParityFixture;
+  const config = {
+    weights: fixture.weights,
+    brokenFactor: fixture.broken_factor,
+    noncompliantCredit: fixture.noncompliant_credit,
+  };
+  const expected = Object.fromEntries(fixture.cases.map((c) => [c.name, c.expected]));
+
+  test('the fixture holds a case that earns more than its universe', () => {
+    const capped = fixture.cases.filter((c) => {
+      const score = scoreWebAudit(rowsToResults(c.rows), tierUniverse(c.universe_tiers, fixture.weights), config);
+      return score.earned > tierUniverse(c.universe_tiers, fixture.weights);
+    });
+    expect(capped.map((c) => c.expected.global)).toEqual([100]);
+  });
 
   test('the engine scorer reproduces the committed expected scores', () => {
-    const universeMax = universeMaxOf(
-      fixture.universe_tiers.map((keyword) => ({ keyword })),
-      { weights: fixture.weights },
+    const scores = Object.fromEntries(
+      fixture.cases.map((c) => {
+        const score = scoreWebAudit(rowsToResults(c.rows), tierUniverse(c.universe_tiers, fixture.weights), config);
+        return [c.name, { relative: score.relative, global: score.global }];
+      }),
     );
-    const score = scoreWebAudit(rowsToResults(fixture.rows), universeMax, {
-      weights: fixture.weights,
-      brokenFactor: fixture.broken_factor,
-      noncompliantCredit: fixture.noncompliant_credit,
-    });
-    expect({ relative: score.relative, global: score.global }).toEqual(fixture.expected);
+    expect(scores).toEqual(expected);
+  });
+
+  // Provenance and n_a reasons ride on every row, so they must never reach
+  // a score; the Python model checks the same declared input list.
+  test('the engine scorer reads only the declared scoring input: hosts and n_a reasons never move a score', () => {
+    expect(fixture.scoring_input).toEqual(['keyword', 'status']);
+    for (const c of fixture.cases) {
+      const universeMax = tierUniverse(c.universe_tiers, fixture.weights);
+      const decorated = c.rows.map(([keyword, status], i) => ({
+        keyword,
+        status,
+        hosts: [{ host: `h${i}.example` }, { host: 'api.example' }],
+        host: `h${i}.example`,
+        ...(status === 'n_a' ? { na_reason: NA_REASONS[i % NA_REASONS.length] } : {}),
+      }));
+      const score = scoreWebAudit(decorated, universeMax, config);
+      expect(score).toEqual(scoreWebAudit(rowsToResults(c.rows), universeMax, config));
+      expect({ name: c.name, relative: score.relative, global: score.global }).toEqual({ name: c.name, ...c.expected });
+    }
   });
 
   // The dev tool is guarded from main (guard-main-docs extra_paths), so
@@ -167,8 +210,11 @@ describe('score_model.py parity (shared fixture)', () => {
     if (!existsSync(PY_TOOL)) return;
     const proc = Bun.spawnSync(['python3', '-B', PY_TOOL, '--fixture', FIXTURE_PATH]);
     expect(proc.exitCode).toBe(0);
-    const out = JSON.parse(proc.stdout.toString()) as { relative: number; global: number };
-    expect({ relative: out.relative, global: out.global }).toEqual(fixture.expected);
+    const out = JSON.parse(proc.stdout.toString()) as Record<string, { relative: number; global: number }>;
+    const scores = Object.fromEntries(
+      Object.entries(out).map(([name, score]) => [name, { relative: score.relative, global: score.global }]),
+    );
+    expect(scores).toEqual(expected);
   });
 });
 
@@ -203,7 +249,7 @@ describe('categoryRollups', () => {
   });
 });
 
-describe('buildWebScorecard (schema 0.4)', () => {
+describe('buildWebScorecard (schema 0.5)', () => {
   function engineRow(partial: Partial<EngineResult>): EngineResult {
     return {
       id: 'llms-txt',
@@ -251,7 +297,7 @@ describe('buildWebScorecard (schema 0.4)', () => {
 
   test('carries score_pct (RELATIVE), the score pair, and no badge', () => {
     expect(scorecard.schema_version).toBe(WEB_SCHEMA_VERSION);
-    expect(WEB_SCHEMA_VERSION).toBe('0.4');
+    expect(WEB_SCHEMA_VERSION).toBe('0.5');
     expect(typeof scorecard.score_pct).toBe('number');
     expect(scorecard.score_pct).toBe(scorecard.score.relative);
     expect(typeof scorecard.score.global).toBe('number');
@@ -269,6 +315,53 @@ describe('buildWebScorecard (schema 0.4)', () => {
       { id: 'discoverability', name: 'Discoverability', passed: 0, counted: 0 },
       { id: 'content-for-agents', name: 'Content for agents', passed: 1, counted: 2 },
     ]);
+  });
+
+  test('a row carries the distinct hosts its evidence was requested from, and host only when there is one', () => {
+    const built = buildWebScorecard(
+      [
+        engineRow({
+          id: 'one-host',
+          raw_evidence: [{ url: 'https://example.com/llms.txt' }, { url: 'https://example.com/llms-full.txt' }],
+        }),
+        engineRow({
+          id: 'two-hosts',
+          raw_evidence: [
+            { url: 'https://api.example.com/v1/nope' },
+            { url: 'https://example.com/openapi.json' },
+            { url: 'https://api.example.com/v1/also-nope' },
+          ],
+        }),
+        engineRow({
+          id: 'no-request',
+          status: 'n_a',
+          na_reason: 'antecedent-unmet',
+          raw_evidence: [{ why: ['no API surface detected'] }],
+        }),
+        engineRow({
+          id: 'guard-refused',
+          raw_evidence: [
+            { url: 'http://10.0.0.5/docs', blocked: 'blocked: ipv4 10.0.0.5 is in blocked range 10.0.0.0/8' },
+            { url: 'https://example.com/docs' },
+          ],
+        }),
+      ],
+      {
+        targetUrl: 'https://example.com/',
+        domain: 'example.com',
+        mcpEndpoint: null,
+        discoveryEvidence: [],
+        specVersion: '0.5.0',
+        registry,
+      },
+    );
+    const row = (id: string) => built.results.find((r) => r.id === id) ?? {};
+    expect(row('one-host')).toMatchObject({ hosts: [{ host: 'example.com' }], host: 'example.com' });
+    expect(row('two-hosts')).toMatchObject({ hosts: [{ host: 'api.example.com' }, { host: 'example.com' }] });
+    expect('host' in row('two-hosts')).toBe(false);
+    expect(row('no-request')).toMatchObject({ hosts: [] });
+    expect('host' in row('no-request')).toBe(false);
+    expect(row('guard-refused')).toMatchObject({ hosts: [{ host: 'example.com' }], host: 'example.com' });
   });
 
   test('rows carry category + hidden principle + na_reason where set', () => {

@@ -20,8 +20,10 @@
 # Disaster recovery: if the CF account is restored from backup or the
 # Access app is deleted, re-running this script reconstructs the staging
 # auth surface from 1Password-resident credentials. The 1Password item
-# `Cloudflare API Token - Access Setup (agentnative-site)` is the only
-# operator-side prerequisite.
+# `2lajtfjgpv522box3ed5lhyzay` (CF Token - Access Setup (streamsgrp)) is the
+# only operator-side prerequisite. That token carries Access: Apps and
+# Policies Read + Write but NOT Access: Service Tokens Write, so step 2
+# cannot create or rotate a service token with it.
 #
 # Inputs (env vars; defaults below):
 #
@@ -30,12 +32,14 @@
 #   APP_DOMAIN            Protected URL (default: agentnative-site-staging.brettdavies.workers.dev)
 #   APP_SESSION           session_duration (default: 2160h, 90 days)
 #   IDENTITY_EMAIL        Email allowed by the identity policy (default: davies.brett@gmail.com)
-#   SERVICE_TOKEN_NAME    Service token name (default: agentnative-site-staging-cli)
+#   SERVICE_TOKEN_NAME    Service token name (default: "Staging CLI (agentnative-site)")
 #   SERVICE_TOKEN_DURATION CF duration string (default: 8760h, 1 year — the CF max non-forever)
-#   OP_ITEM_API_TOKEN     1Password title for the setup API token
-#                         (default: "Cloudflare API Token - Access Setup (agentnative-site)")
-#   OP_ITEM_SERVICE_TOKEN 1Password title for the service token credentials
-#                         (default: "Cloudflare Access Service Token - agentnative-site-staging")
+#   OP_ITEM_API_TOKEN     1Password item UUID for the setup API token
+#                         (default: 2lajtfjgpv522box3ed5lhyzay, CF Token - Access Setup (streamsgrp))
+#   OP_ITEM_SERVICE_TOKEN 1Password item UUID for the service token credentials
+#                         (default: iuutxdlnh3ujmylvzmuflraeia, CF Service Token - Staging CLI (agentnative-site))
+#   OP_TITLE_SERVICE_TOKEN 1Password title for a service token item step 2 creates
+#                         (default: "CF Service Token - Staging CLI (agentnative-site)")
 #
 # Dependencies: curl, jaq (preferred) or jq, op CLI via the
 # ~/.claude/skills/1password/scripts/ helpers.
@@ -51,10 +55,13 @@ APP_NAME="${APP_NAME:-agentnative-site staging}"
 APP_DOMAIN="${APP_DOMAIN:-agentnative-site-staging.brettdavies.workers.dev}"
 APP_SESSION="${APP_SESSION:-2160h}"
 IDENTITY_EMAIL="${IDENTITY_EMAIL:-davies.brett@gmail.com}"
-SERVICE_TOKEN_NAME="${SERVICE_TOKEN_NAME:-agentnative-site-staging-cli}"
+SERVICE_TOKEN_NAME="${SERVICE_TOKEN_NAME:-Staging CLI (agentnative-site)}"
 SERVICE_TOKEN_DURATION="${SERVICE_TOKEN_DURATION:-8760h}"
-OP_ITEM_API_TOKEN="${OP_ITEM_API_TOKEN:-Cloudflare API Token - Access Setup (agentnative-site)}"
-OP_ITEM_SERVICE_TOKEN="${OP_ITEM_SERVICE_TOKEN:-Cloudflare Access Service Token - agentnative-site-staging}"
+# CF Token - Access Setup (streamsgrp); lacks Access: Service Tokens Write
+OP_ITEM_API_TOKEN="${OP_ITEM_API_TOKEN:-2lajtfjgpv522box3ed5lhyzay}"
+# CF Service Token - Staging CLI (agentnative-site)
+OP_ITEM_SERVICE_TOKEN="${OP_ITEM_SERVICE_TOKEN:-iuutxdlnh3ujmylvzmuflraeia}"
+OP_TITLE_SERVICE_TOKEN="${OP_TITLE_SERVICE_TOKEN:-CF Service Token - Staging CLI (agentnative-site)}"
 
 OP_READ="${OP_READ:-$HOME/.claude/skills/1password/scripts/read_field.sh}"
 OP_CREATE="${OP_CREATE:-$HOME/.claude/skills/1password/scripts/create_item.sh}"
@@ -197,8 +204,8 @@ else
 
   printf '  ingesting to 1Password (value never echoed) ...\n'
   notes="CF Access service token for the $APP_NAME Worker at $APP_DOMAIN. Auth via HTTP headers CF-Access-Client-Id and CF-Access-Client-Secret. Created $(date -u +%Y-%m-%d) by scripts/cf-access-bootstrap.sh; expires $expires_at. Rotate via the CF dashboard or POST to /access/service_tokens/$SVC_TOKEN_ID/rotate."
-  "$OP_CREATE" \
-    --title "$OP_ITEM_SERVICE_TOKEN" \
+  created_item="$("$OP_CREATE" \
+    --title "$OP_TITLE_SERVICE_TOKEN" \
     --tags "cloudflare,access,service-token,agentnative-site,staging" \
     --notes "$notes" \
     --hostname "$APP_DOMAIN" \
@@ -206,7 +213,8 @@ else
     --field "expires=$expires_ts" \
     --field "type=Service Token" \
     --field "client_id=$("$JQ_BIN" -r '.result.client_id' "$resp_dir/resp.json")" \
-    --field "client_secret[concealed]=$("$JQ_BIN" -r '.result.client_secret' "$resp_dir/resp.json")" >/dev/null
+    --field "client_secret[concealed]=$("$JQ_BIN" -r '.result.client_secret' "$resp_dir/resp.json")")"
+  OP_ITEM_SERVICE_TOKEN="$("$JQ_BIN" -r '.id' <<<"$created_item")"
 
   shred -uz "$resp_dir/resp.json" && rmdir "$resp_dir"
   row "status" "CREATED + ingested"

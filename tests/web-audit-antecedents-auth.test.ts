@@ -16,4 +16,19 @@ describe('resolveAntecedent: auth', () => {
     expect(resolveAntecedent('auth-present', openapi401)).toBe('apply');
     expect(resolveAntecedent('auth-present', ctx())).toBe('n_a');
   });
+
+  test('auth-present does not hold on a 401 from an OpenAPI description off the audited origin', () => {
+    const offOrigin = { url: 'https://specs.example.org/openapi.json', status: 401, off_origin: true };
+    expect(
+      resolveAntecedent('auth-present', ctx({ sources: new Map([['openapi', outcome('broken', [offOrigin])]]) })),
+    ).toBe('n_a');
+  });
+
+  test('auth-present holds on a challenge to server/discover when initialize was refused without one', () => {
+    const sources = new Map([
+      ['mcp-initialize', outcome('absent', [{ url: 'https://x.dev/mcp', status: 200, error_code: -32022 }])],
+      ['mcp-server-discover', outcome('na', [{ url: 'https://x.dev/mcp', status: 401, www_authenticate: 'Bearer' }])],
+    ]);
+    expect(resolveAntecedent('auth-present', ctx({ mcpEndpoint: 'https://x.dev/mcp', sources }))).toBe('apply');
+  });
 });

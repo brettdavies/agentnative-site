@@ -21,6 +21,8 @@
 
 import type { AuditEnvelope } from './audit-envelope';
 import { type Lane, REJECTION_MESSAGES } from './audit-routes';
+import type { NaReason } from './web-audit-findings';
+import type { HostOutcome } from './web-audit-result-line';
 
 export type AuditErrorCode =
   // Input the classifier or the lane validator refused.
@@ -38,6 +40,8 @@ export type AuditErrorCode =
   | 'invalid_body'
   | 'invalid_site_type'
   | 'invalid_public_listing'
+  | 'invalid_follow_declarations'
+  | 'listing_requires_follow'
   // Admission: bot defense, limiters, kill switches, bindings.
   | 'turnstile_failed'
   | 'turnstile_unavailable'
@@ -91,6 +95,9 @@ export const AUDIT_ERROR_MESSAGES: Readonly<Record<AuditErrorCode, string>> = {
   invalid_body: 'The request body must be a JSON object with a target.',
   invalid_site_type: 'That site type is not recognized.',
   invalid_public_listing: 'public_listing must be true or false.',
+  invalid_follow_declarations: 'follow_declarations must be true or false.',
+  listing_requires_follow:
+    'A run that does not follow declared hosts is not saved, so it cannot change the public listing.',
   turnstile_failed: 'Verification failed. Please try again.',
   turnstile_unavailable: 'Verification is briefly unavailable.',
   rate_limited: 'Too many requests.',
@@ -188,7 +195,19 @@ export type AuditEvent =
   | { type: 'accepted'; lane: Lane; target: string; started_at: string }
   | { type: 'phase'; phase: CliPhase; at: string }
   | { type: 'discovery'; mcp_endpoint: string | null }
-  | { type: 'check'; id: string; principle: string; keyword: string; status: string; evidence: string | null }
+  | {
+      type: 'check';
+      id: string;
+      principle: string;
+      keyword: string;
+      status: string;
+      evidence: string | null;
+      /** The host the check's evidence came from, when it came from exactly one. */
+      host?: string;
+      /** Each host the check's evidence came from, with its own outcome, when there were several. */
+      hosts?: HostOutcome[];
+      na_reason?: NaReason;
+    }
   | { type: 'heartbeat'; at: string }
   | ({ type: 'complete' } & AuditEnvelope)
   | { type: 'incomplete'; scorecard: unknown; reason?: string }

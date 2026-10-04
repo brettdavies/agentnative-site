@@ -1,12 +1,17 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { AuditEvent } from '../src/shared/audit-events';
 import { ndjsonValues } from '../src/shared/ndjson';
 import type { AuditJob } from '../src/worker/audit/job';
+import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
+import type { McpEnv } from '../src/worker/mcp/server';
 import { _resetIndexCache } from '../src/worker/score/core';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
 import { ANC_VERSION } from '../src/worker/spec-version.gen';
 import { call, makeEnv, ndjson, newTracker, post, probeFetchFor } from './helpers/audit-api-env';
-import { fakeJobNamespace } from './helpers/audit-job-state';
+import { countClaims, fakeJobNamespace } from './helpers/audit-job-state';
+import { captureLogs } from './helpers/log-capture';
+import { getJsonToolContent, mcpInitialize, mcpRpc, resetMcpTestState } from './helpers/mcp-rpc';
+import { stubFetch } from './helpers/stub-fetch';
 
 // A second reader of an input already in flight attaches to the running
 // audit's job instead of starting a second run: it receives the job's log,
@@ -313,5 +318,191 @@ describe('POST /api/score: attach to a run in flight', () => {
     await settle(ctx);
     expect(shape(lines)).toEqual(['accepted', 'error']);
     expect((lines[1] as { error: { code: string } }).error.code).toBe('incomplete_response_contract');
+  });
+});
+
+describe('audit_website hosts its own run under single-flight', () => {
+  const SITE = 'example.com';
+  const ROOT = `https://${SITE}/`;
+  const CATALOG = { generated_at: AT, spec_version: '0.0.0', registry: [], principles: [], spec_sections: [] };
+
+  beforeEach(() => {
+    resetMcpTestState();
+    resetWebAuditRegistryCacheForTests();
+  });
+  afterEach(() => resetMcpTestState());
+
+  // One env both surfaces read: the endpoint's bindings plus the MCP
+  // switch and the catalog the MCP dispatcher loads first.
+  function sharedEnv(probeFetch: typeof fetch): ReturnType<typeof makeEnv> & McpEnv {
+    const env = makeEnv({ deps: { probeFetch } });
+    const assets = env.ASSETS;
+    return Object.assign(env, {
+      MCP_ENABLED: 'true',
+      ASSETS: {
+        async fetch(req: Request | string): Promise<Response> {
+          const path = new URL(typeof req === 'string' ? req : req.url).pathname;
+          if (path === '/_internal/mcp-catalog.json') return new Response(JSON.stringify(CATALOG), { status: 200 });
+          return assets.fetch(req as Request);
+        },
+      } as Fetcher,
+    });
+  }
+
+  async function auditWebsite(env: McpEnv, ip: string): Promise<Line> {
+    await mcpInitialize(env);
+    const { body } = await mcpRpc(
+      env,
+      { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'audit_website', arguments: { url: SITE } } },
+      { 'cf-connecting-ip': ip },
+    );
+    return getJsonToolContent(body) as Line;
+  }
+
+  // Every probe waits for the release, so the first run is still in flight
+  // when the later callers arrive.
+  function gatedProbes() {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reached: () => void = () => {};
+    const firstProbe = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const fetchImpl = stubFetch(async (url) => {
+      reached();
+      await gate;
+      return url === ROOT
+        ? new Response('<html><body><h1>hi</h1></body></html>', { status: 200 })
+        : new Response('', { status: 404 });
+    });
+    return { fetchImpl, release, firstProbe };
+  }
+
+  test('a transact request and a second audit_website call that arrive mid-run attach to it, and the site is audited once', async () => {
+    const probes = gatedProbes();
+    const env = sharedEnv(probes.fetchImpl);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = probes.fetchImpl;
+    const logs = captureLogs();
+    try {
+      const initiating = auditWebsite(env, '203.0.113.9');
+      await probes.firstProbe;
+      expect(JSON.parse(env._kv.get(`inflight:web:${SITE}`) ?? '{}')).toMatchObject({ job: `web:${SITE}` });
+      const transact = await call(post({ target: SITE, turnstile_token: 'x' }, STREAM), env);
+      const attached = lineReader(transact.res);
+      await attached.until((l) => l.type === 'accepted');
+      const second = auditWebsite(env, '203.0.113.10');
+      probes.release();
+      const [first, again] = await Promise.all([initiating, second]);
+      const streamed = await attached.rest();
+      await settle(transact.ctx);
+      // One web-audit.run line per engine run: the site was audited once.
+      expect(logs.records.filter((r) => r.record.scope === 'web-audit.run')).toHaveLength(1);
+      expect(first).toMatchObject({
+        audited: true,
+        source: 'fresh-audit',
+        scorecard_url: `https://anc.dev/score/${SITE}`,
+      });
+      expect(first.attached).toBeUndefined();
+      expect(again).toMatchObject({ audited: true, attached: true, scorecard_url: first.scorecard_url });
+      expect(streamed[0]).toMatchObject({ type: 'accepted', lane: 'web', target: SITE });
+      expect(streamed.at(-1)).toMatchObject({ type: 'complete', scorecard_url: first.scorecard_url });
+      expect(env._kv.get(`inflight:web:${SITE}`)).toBeUndefined();
+    } finally {
+      logs.restore();
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe('a run that does not follow declared hosts stays outside single-flight', () => {
+  const OPT_OUT = { target: 'anc.dev', turnstile_token: 'x', follow_declarations: false };
+  const FOLLOW = { target: 'anc.dev', turnstile_token: 'x' };
+  const isAccepted = (l: Line) => l.type === 'accepted';
+
+  function gatedProbe(tracker: ReturnType<typeof newTracker>) {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const probe = probeFetchFor(tracker, 'ok');
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      await gate;
+      return probe(input, init);
+    }) as typeof fetch;
+    return { fetchImpl, release };
+  }
+
+  const runs = (logs: ReturnType<typeof captureLogs>) =>
+    logs.records.filter((r) => r.record.scope === 'web-audit.run').map((r) => r.record.follow_declarations);
+
+  test('beside a followed run in flight it runs its own audit and claims no job', async () => {
+    const tracker = newTracker();
+    const gated = gatedProbe(tracker);
+    const jobs = fakeJobNamespace();
+    const claims = countClaims(jobs);
+    const env = makeEnv({ tracker, jobs, followSwitch: 'true', deps: { probeFetch: gated.fetchImpl } });
+    const logs = captureLogs();
+    try {
+      const followed = await call(post(FOLLOW, STREAM), env);
+      const initiator = lineReader(followed.res);
+      await initiator.until(isAccepted);
+      const optedOut = await call(post(OPT_OUT, STREAM), env);
+      const own = lineReader(optedOut.res);
+      await own.until(isAccepted);
+      gated.release();
+      const a = await initiator.rest();
+      const b = await own.rest();
+      await settle(followed.ctx, optedOut.ctx);
+      expect(claims).toEqual(['web:anc.dev']);
+      expect(runs(logs).sort()).toEqual([false, true]);
+      expect(a.at(-1)).toMatchObject({ type: 'complete', scorecard_url: 'https://anc.dev/score/anc.dev' });
+      expect(b.at(-1)).toMatchObject({ type: 'complete', scorecard_url: null });
+      const stored = jobs.jobs.get('web:anc.dev');
+      if (!stored) throw new Error('the followed run claimed no job');
+      const log = await ndjson(await stored.job.fetch(new Request('https://job.internal/attach')));
+      expect(log.filter((l) => l.type === 'complete')).toEqual([
+        expect.objectContaining({ scorecard_url: a.at(-1)?.scorecard_url }),
+      ]);
+    } finally {
+      logs.restore();
+    }
+  });
+
+  test('while it is in flight a followed request finds no flag and claims its own job', async () => {
+    const tracker = newTracker();
+    const gated = gatedProbe(tracker);
+    const jobs = fakeJobNamespace();
+    const claims = countClaims(jobs);
+    const env = makeEnv({ tracker, jobs, deps: { probeFetch: gated.fetchImpl } });
+    const optedOut = await call(post(OPT_OUT, STREAM), env);
+    const own = lineReader(optedOut.res);
+    await own.until(isAccepted);
+    expect([...env._kv.keys()].filter((key) => key.startsWith('inflight:'))).toEqual([]);
+    expect(claims).toEqual([]);
+    const followed = await call(post(FOLLOW, STREAM), env);
+    const initiator = lineReader(followed.res);
+    await initiator.until(isAccepted);
+    expect(claims).toEqual(['web:anc.dev']);
+    gated.release();
+    const a = await initiator.rest();
+    const b = await own.rest();
+    await settle(followed.ctx, optedOut.ctx);
+    expect(a.at(-1)).toMatchObject({ type: 'complete', scorecard_url: 'https://anc.dev/score/anc.dev' });
+    expect(b.at(-1)).toMatchObject({ type: 'complete', scorecard_url: null });
+  });
+
+  test('on its own it leaves no job and no job log', async () => {
+    const jobs = fakeJobNamespace();
+    const claims = countClaims(jobs);
+    const env = makeEnv({ jobs });
+    const { res, ctx } = await call(post(OPT_OUT, STREAM), env);
+    const lines = await ndjson(res);
+    await settle(ctx);
+    expect(lines.at(-1)).toMatchObject({ type: 'complete', scorecard_url: null });
+    expect(claims).toEqual([]);
+    expect(jobs.jobs.size).toBe(0);
   });
 });

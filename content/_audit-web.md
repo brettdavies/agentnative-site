@@ -7,8 +7,9 @@ policy. The result is a web scorecard with per-check evidence and copy-paste fix
 ## What a website audit checks
 
 The audit runs entirely as network probes: HTTP requests, a JSON-RPC handshake over streamable-HTTP, a CORS preflight,
-and DNS-over-HTTPS lookups. There is no crawler and nothing is installed. Every check carries a MUST, SHOULD, or MAY
-keyword and belongs to one of six categories:
+and DNS-over-HTTPS lookups. There is no crawler and nothing is installed. anc sends no plaintext request: an http URL,
+declared or linked, and any redirect to http, is never requested. Every check carries a MUST, SHOULD, or MAY keyword and
+belongs to one of six categories:
 
 - **Discoverability**: `robots.txt`, `sitemap.xml`, `Link` headers, `<link rel>` pointers, DNS-AID records under
   `_agents`, and an agent-friendly 404: a nonsense path MUST return HTTP 404 or 410 (a soft-200 SPA shell is broken),
@@ -32,24 +33,29 @@ keyword and belongs to one of six categories:
 - **Agent discovery and auth**: the A2A agent card, optional `/.well-known/ai-catalog.json` (ARD), agent-skills index,
   OAuth discovery metadata, and `auth.md`.
 
-A check is scored only when it applies: MCP checks need a discovered endpoint, API checks need an API surface, and a
-declared site type (`content` or `api`) scopes the rest. Anything that does not apply is `n_a` and never counts against
-the site. Two scores come out of one run: the **site score** (the headline) measures the site against the checks that
-apply to it, so a site perfect for its type approaches 100%; the **global score** measures it against a maximally
-agent-ready site, so exposing and nailing more surfaces ranks higher. A present-but-broken surface costs more than an
-absent one, because it misleads agents. A surface that works while violating a spec detail reads `noncompliant` and
-earns partial credit, so showing an imperfect capability always beats withdrawing it.
+A check counts toward the headline score only when it applies: MCP checks need a discovered endpoint, API checks need an
+API surface, and a declared site type (`content` or `api`) scopes the rest. Anything that does not apply is `n_a`. Two
+scores come out of one run: the **site score** (the headline) measures the site against the checks that apply to it, so
+a site perfect for its type approaches 100% and an `n_a` check never counts against it; the **global score** measures it
+against the most a single site could earn, with `n_a` checks still in the denominator, so a site without MCP sees what
+adding it is worth, and exposing and nailing more surfaces scores higher. The web leaderboard ranks by the site score
+and breaks ties by the global score. A present-but-broken surface costs more than an absent one, because it misleads
+agents. A surface that works while violating a spec detail reads `noncompliant` and earns partial credit, so showing an
+imperfect capability always beats withdrawing it.
 
 ## From an agent: websites
 
 An MCP client can run the audit without the form. The [anc.dev MCP server](/mcp) exposes four web tools:
 
-- `audit_website(url, site_type?, public_listing?)`: run a fresh audit; every observed non-passing row carries inline
-  remediation with a copy-paste prompt.
+- `audit_website(url, site_type?, public_listing?, follow_declarations?)`: run a fresh audit; every observed non-passing
+  row carries inline remediation with a copy-paste prompt. By default the audit also contacts the hosts the site
+  declares (its MCP server, its API host), at most 4 per audit and about 30 audits per hour per declared registrable
+  domain; `follow_declarations: false` audits only the site and returns a result that is never saved or listed.
 - `get_website_audit(url)`: read a cached scorecard without re-running.
 - `list_website_audits(view?)`: the web leaderboard, curated by default.
-- `get_web_remediation(check_id, evidence?)`: the canonical fix for any check, with a ready-to-paste prompt. Pass the
-  failing row's evidence and it is appended to the prompt as a delimited, untrusted data block.
+- `get_web_remediation(check_id, evidence?, host?)`: the canonical fix for any check, with a ready-to-paste prompt. Pass
+  the failing row's evidence and its `remediation.host` (omitted when null) and they are appended to the prompt as a
+  delimited, untrusted data block.
 
 Every response carrying a scorecard also carries `cached`, `scored_at`, and `refresh_after` beside it. A cached entry
 younger than one minute is served as-is; past `refresh_after` a repeat request tries a fresh audit instead. That is
