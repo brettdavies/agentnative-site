@@ -2104,14 +2104,10 @@ describe('provenance reaches every reader of a stored website result', () => {
   test('the MCP read carries the not-run sentences the page and the twin show', async () => {
     const { scorecard } = await read('stripe.dev', stripeShaped());
     const { md } = rendered('stripe.dev', stripeShaped());
-    expect(scorecard.access_note).toBe(
-      'Global keeps the 18 checks this audit could not run in its maximum; run `anc web stripe.dev` to evaluate them from your own network, with `ANC_WEB_TOKEN` set for the ones that need sign-in.',
-    );
+    expect(scorecard.access_note).toBe('Global keeps the 18 checks this audit could not run in its maximum.');
     expect(md).toContain(scorecard.access_note ?? 'missing');
     const corsActual = scorecard.results.find((r) => r.id === 'mcp-cors-actual');
-    expect(corsActual?.access_remedy).toBe(
-      "anc's public audit holds no sign-in for mcp.stripe.com. Run `anc web stripe.dev` with `ANC_WEB_TOKEN` set to a token for mcp.stripe.com to evaluate this check from your own network.",
-    );
+    expect(corsActual?.access_remedy).toBe("anc's public audit holds no sign-in for mcp.stripe.com.");
     expect(md).toContain(`- Note: ${corsActual?.access_remedy}`);
     expect(scorecard.results.filter((r) => r.access_remedy !== undefined)).toHaveLength(18);
   });

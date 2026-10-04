@@ -128,13 +128,13 @@ Where the audit ran and what it could present. A score covers what an agent at t
 
 | Field          | Type    | Meaning                                                                                                                         |
 | -------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `network`      | string  | `public` for an anc.dev audit, run from the public internet; `local` for an `anc web <target>` run on the runner's own network. |
+| `network`      | string  | `public` for an anc.dev audit, run from the public internet; `local` for a run on the runner's own network.                     |
 | `credentialed` | boolean | `true` when a local run presented a credential to the audited MCP endpoint; otherwise `false`.                                  |
 
-Every anc.dev audit writes `public` and `false`. A local `anc web <target>` run writes `local`, with `credentialed`
-`true` when it presented a credential. The public board lists public-vantage scorecards only, so a local or credentialed
-score is never ranked beside a public one. A scorecard stored before the field existed carries no `vantage`; every such
-scorecard anc.dev holds is its own public audit.
+Every anc.dev audit writes `public` and `false`. A local run, which no published anc release offers yet, writes `local`,
+with `credentialed` `true` when it presented a credential. The public board lists public-vantage scorecards only, so a
+local or credentialed score is never ranked beside a public one. A scorecard stored before the field existed carries no
+`vantage`; every such scorecard anc.dev holds is its own public audit.
 
 ## `declared_hosts`
 
@@ -249,7 +249,7 @@ Sign-in blocks a check on either design, and the check reads `n_a` with reason `
   a 401 is not blocked: its checks read as they do on an open server, because a token would not change that answer.
 
 A protected server's global on a public audit tops out near 68, because the session and handshake rows its sign-in
-blocks stay in its denominator; a local `anc web <target>` run that presents a credential evaluates them.
+blocks stay in its denominator; a local run that presents a credential evaluates them.
 
 Per applicable check, with per-tier difficulty weights (currently 5 for MUST, 3 for SHOULD, 1 for MAY):
 
@@ -383,8 +383,8 @@ One object per check.
 
 `auth-required`, `declared-host-blocked`, and `declared-host-unreachable` mark a check the audit could not reach from
 its vantage. Such a row, like every `n_a` row, earns nothing, is excluded from the relative score, and stays in the
-global denominator. A local `anc web <target>` run evaluates what its own network reaches and, presenting a credential,
-what sign-in blocks.
+global denominator. A local run evaluates what its own network reaches and, presenting a credential, what sign-in
+blocks.
 
 A handler with nothing to probe (no discovered MCP endpoint) emits `n_a` with no `na_reason`. The derived `result` line
 leads with the reason's own phrase, and the last six reasons begin "Not evaluated:", for example "Not evaluated:
@@ -402,9 +402,8 @@ and no remediation, because a fix prompt derived from a request the run never se
 established was needed.
 
 A row with one of the six declared-host reasons also carries `access_remedy`: why the public audit could not evaluate
-it and the `anc web <target>` command that evaluates it from the reader's own network, adding `ANC_WEB_TOKEN` for
-`auth-required`. A scorecard holding any such row carries `access_note` beside `results`: the sentence saying global
-keeps those rows in its maximum, pointing to the same command. Both are the sentences the result page shows.
+it. A scorecard holding any such row carries `access_note` beside `results`: the sentence saying global keeps those rows
+in its maximum. Both are the sentences the result page shows.
 
 ```json
 "remediation": {

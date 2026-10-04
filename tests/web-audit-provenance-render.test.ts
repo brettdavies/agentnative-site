@@ -652,13 +652,11 @@ describe('rows the audit could not run', () => {
     expect(md).not.toContain('checks not run: mcp.example.org');
   });
 
-  test('a group opens with why the public audit could not run its rows and the command that can', () => {
+  test('a group opens with why the public audit could not run its rows', () => {
     const html = page(stripeShaped());
     const group = html.slice(html.indexOf('web-check--group'), html.indexOf('<div class="web-check__group">'));
-    expect(textOf(group)).toContain(
-      "anc's public audit holds no sign-in for mcp.stripe.com. Run anc web stripe.dev with ANC_WEB_TOKEN set to a token for mcp.stripe.com to evaluate these checks from your own network.",
-    );
-    expect(group).toContain('<code>anc web stripe.dev</code>');
+    expect(textOf(group)).toContain("anc's public audit holds no sign-in for mcp.stripe.com.");
+    expect(group).not.toContain('anc web');
     const nested = html.slice(
       html.indexOf('<div class="web-check__group">'),
       html.indexOf('</div>', html.indexOf('<div class="web-check__group">')),
@@ -671,18 +669,15 @@ describe('rows the audit could not run', () => {
       row('mcp-initialize', 'n_a', { na_reason: 'reciprocity-refused', ...at('mcp.example.net') }),
     ]);
     expect(textOf(page(sc, { lanes: false }))).toContain(
-      "anc's public audit probes mcp.example.net only after mcp.example.net confirms this endpoint. Run anc web example.com to evaluate this check from your own network.",
+      "anc's public audit probes mcp.example.net only after mcp.example.net confirms this endpoint.",
     );
     expect(page(sc)).not.toContain('ANC_WEB_TOKEN');
   });
 
   test('the score note says global keeps those rows in its maximum, on the page and the twin', () => {
-    const sentence =
-      'Global keeps the 18 checks this audit could not run in its maximum; run anc web stripe.dev to evaluate them from your own network, with ANC_WEB_TOKEN set for the ones that need sign-in.';
+    const sentence = 'Global keeps the 18 checks this audit could not run in its maximum.';
     expect(textOf(page(stripeShaped()))).toContain(sentence);
-    expect(twin(stripeShaped())).toContain(
-      '\nGlobal keeps the 18 checks this audit could not run in its maximum; run `anc web stripe.dev` to evaluate them from your own network, with `ANC_WEB_TOKEN` set for the ones that need sign-in.\n',
-    );
+    expect(twin(stripeShaped())).toContain(`\n${sentence}\n`);
     const single = scorecardOf('example.com', [row('llms-txt', 'pass', at('example.com'))]);
     expect(page(single)).not.toContain('Global keeps');
   });
@@ -731,8 +726,7 @@ describe('a host carrying a backtick, which the URL parser accepts', () => {
         ],
       },
     );
-  const REMEDY =
-    "anc's public audit holds no sign-in for a\\`b.example.com. Run `anc web example.com` with `ANC_WEB_TOKEN` set to a token for a\\`b.example.com to evaluate this check from your own network.";
+  const REMEDY = "anc's public audit holds no sign-in for a\\`b.example.com.";
 
   test('the twin widens the code span around it and escapes it in prose, so no span closes early', () => {
     expect(new URL(`https://${HOST}/`).host).toBe(HOST);

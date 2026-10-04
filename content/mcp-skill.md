@@ -237,7 +237,7 @@ A read also carries where each row's evidence came from and what the audit could
   host ([results](/web-scorecard-schema#results)).
 - `hosts[]`: every host a row's evidence came from, as `{ host }`, with each one's own `status` and `na_reason` on a row
   over several hosts ([results](/web-scorecard-schema#results)).
-- `access_remedy`: on a row the public audit could not run, why, and the `anc web <domain>` command that evaluates it
+- `access_remedy`: on a row the public audit could not run, why it could not
   ([remediation](/web-scorecard-schema#remediation-on-the-mcp-surface)).
 - `access_note`: beside `results` when any row could not run, the sentence saying global keeps those rows in its maximum
   ([remediation](/web-scorecard-schema#remediation-on-the-mcp-surface)).

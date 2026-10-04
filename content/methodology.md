@@ -315,7 +315,7 @@ serves a handshake without a token and asks for sign-in on its other requests ne
 refuses without asking for sign-in reads as it does on an open server, because a token would not change that answer;
 only a resources check on that lane stays blocked while a handshake that sign-in blocked could have advertised
 resources. A protected server's global on a public audit tops out near 68, because the session and handshake rows its
-sign-in blocks stay in its denominator. A local `anc web <target>` run that presents a credential evaluates them.
+sign-in blocks stay in its denominator. A local run that presents a credential evaluates them.
 
 Each check carries a tier weight: 5 for MUST, 3 for SHOULD, 1 for MAY. At every tier, MAY included, a pass earns the
 full weight, a surface that works while violating a spec detail (`noncompliant`) earns 0.25 × weight, and a present but
