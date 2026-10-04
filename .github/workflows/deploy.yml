@@ -195,12 +195,13 @@ jobs:
       # This step checks the DEPLOYMENT: ask staging for a link and see
       # which host comes back.
       #
-      # Two surfaces, both minted at request time from the origin the
-      # request arrived on: the MCP handshake instructions and a
-      # get_scorecard result (the exact field that shipped a production
-      # link from staging). Each is asserted twice — the production host
-      # must be absent AND the staging host present, so a 503 or an empty
-      # body cannot pass by saying nothing at all.
+      # Four surfaces, all minted at request time from the origin the
+      # request arrived on: the MCP handshake instructions, a get_scorecard
+      # result (the exact field that shipped a production link from
+      # staging), the SEP-2127 server card's remote, and the AI catalog's
+      # card entry. Each is asserted twice: the production host must be
+      # absent AND the staging host present, so a 503 or an empty body
+      # cannot pass by saying nothing at all.
       - name: Smoke deployment-relative links
         shell: bash
         env:
@@ -216,6 +217,13 @@ jobs:
               -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
               -H 'Content-Type: application/json' -H 'Accept: application/json' \
               -d "$1" "$PUBLIC_BASE_URL/mcp"
+          }
+
+          discovery_get() {
+            curl -sSf --retry 5 --retry-delay 10 --retry-all-errors -m 20 \
+              -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+              -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+              "$PUBLIC_BASE_URL$1"
           }
 
           assert_self_hosted() {
@@ -267,6 +275,12 @@ jobs:
 
           card=$(mcp_call '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_scorecard","arguments":{"slug":"ripgrep"}}}')
           assert_minted_self_hosted "get_scorecard result" "$card"
+
+          server_card=$(discovery_get /mcp/server-card)
+          assert_self_hosted "SEP-2127 server card" "$server_card"
+
+          ai_catalog=$(discovery_get /.well-known/ai-catalog.json)
+          assert_self_hosted "AI catalog" "$ai_catalog"
 
   production:
     name: build + deploy production
