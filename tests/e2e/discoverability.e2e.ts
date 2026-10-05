@@ -1,7 +1,7 @@
 // Live-network e2e for discoverability surfaces against the staging
-// Worker. Opt-in suite (project: staging-mcp). Asserts the four wire
-// surfaces U6 ships (.well-known/mcp, security.txt, ai.txt, plus the
-// llms.txt Programmatic access section) AND the mcp-skill HTML + .md
+// Worker. Opt-in suite (project: staging-mcp). Asserts the wire surfaces
+// (the SEP-2127 card and the AI catalog, .well-known/mcp, security.txt,
+// ai.txt, plus the llms.txt Programmatic access section) AND the mcp-skill HTML + .md
 // twin pages U2 ships, with cross-surface drift assertions so a change
 // in any one (the JSON pointer's documentation URL, the docs page's
 // tool list, the well-known + handshake spec revision) breaks the
@@ -75,8 +75,9 @@ test.describe('staging MCP descriptor aliases', () => {
     expect(body.version).toBe('1.0');
     expect(body.protocolVersion).toBe('2026-07-28');
     expect(body.transport.type).toBe('streamable-http');
-    expect(body.documentation).toBe(`${STAGING_BASE}/mcp-skill.md`);
+    expect(body.documentation).toBe(`${STAGING_BASE}/mcp-skill.md#server-cards`);
     expect((body as { authentication?: { required: boolean } }).authentication?.required).toBe(false);
+    expect(body).not.toHaveProperty('$schema');
   });
 
   test('Accept: text/markdown on canonical path still returns application/json', async ({ request }) => {
@@ -87,6 +88,31 @@ test.describe('staging MCP descriptor aliases', () => {
     expect(res.headers()['content-type']).toContain('application/json');
     const text = await res.text();
     expect(() => JSON.parse(text)).not.toThrow();
+  });
+});
+
+// The staging deployment must hand out staging URLs: a card or catalog
+// entry naming production sends a client out of the environment it asked.
+test.describe('staging SEP-2127 server card and AI catalog', () => {
+  test('/mcp/server-card names its remote on the staging origin', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/mcp/server-card`, {
+      headers: { ...ACCESS_HEADERS, accept: 'application/mcp-server-card+json' },
+    });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('application/mcp-server-card+json');
+    const card = (await res.json()) as { $schema: string; remotes: Array<{ type: string; url: string }> };
+    expect(card.$schema).toBe('https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json');
+    expect(card.remotes).toEqual([{ type: 'streamable-http', url: `${STAGING_BASE}/mcp` }]);
+  });
+
+  test('/.well-known/ai-catalog.json points its card entry at the staging origin', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/.well-known/ai-catalog.json`, { headers: ACCESS_HEADERS });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('application/ai-catalog+json');
+    const catalog = (await res.json()) as { entries: Array<{ type: string; url: string }> };
+    expect(catalog.entries).toHaveLength(1);
+    expect(catalog.entries[0].type).toBe('application/mcp-server-card+json');
+    expect(catalog.entries[0].url).toBe(`${STAGING_BASE}/mcp/server-card`);
   });
 });
 

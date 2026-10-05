@@ -1,5 +1,6 @@
-// Era-agnostic MCP server-card surface: GET /mcp content negotiation and
-// the SEP-1649 pointer aliases. None of it depends on a JSON-RPC lane, so
+// Era-agnostic MCP server-card surface: GET /mcp content negotiation, the
+// SEP-2127 card and the AI catalog that lists it, and the SEP-1649 card with
+// its pointer aliases. None of it depends on a JSON-RPC lane, so
 // it runs against the local `wrangler dev` webServer in the default
 // chromium project rather than opt-in staging, so a card regression is
 // caught on the PR that causes it instead of on the next staging sweep.
@@ -19,6 +20,35 @@ import { expect, test } from '@playwright/test';
 // Playwright's node env; a new alias must be added in both places.
 const CANONICAL_PATH = '/.well-known/mcp/server-card.json';
 const ALIAS_PATHS = ['/.well-known/mcp', '/mcp.json', '/.well-known/mcp.json'] as const;
+
+// The SEP-2127 wire contract, written out so a change to the constants in
+// src/shared/mcp-discovery.ts reads as a change to what clients receive.
+const SERVER_CARD_PATH = '/mcp/server-card';
+const AI_CATALOG_PATH = '/.well-known/ai-catalog.json';
+const SERVER_CARD_TYPE = 'application/mcp-server-card+json';
+const SEP_2127_SCHEMA_URL = 'https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json';
+
+test.describe('MCP server card: SEP-2127 card and AI catalog', () => {
+  test('the card names its streamable-http remote on the serving origin', async ({ request, baseURL }) => {
+    const res = await request.get(SERVER_CARD_PATH, { headers: { accept: SERVER_CARD_TYPE } });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain(SERVER_CARD_TYPE);
+    expect(res.headers()['access-control-allow-origin']).toBe('*');
+    const card = (await res.json()) as { $schema?: string; remotes?: Array<{ type: string; url: string }> };
+    expect(card.$schema).toBe(SEP_2127_SCHEMA_URL);
+    expect(card.remotes).toEqual([{ type: 'streamable-http', url: `${baseURL}/mcp` }]);
+  });
+
+  test('the AI catalog lists the card at the location it is served from', async ({ request, baseURL }) => {
+    const res = await request.get(AI_CATALOG_PATH);
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('application/ai-catalog+json');
+    const catalog = (await res.json()) as { specVersion?: string; entries?: Array<{ type: string; url: string }> };
+    expect(catalog.specVersion).toBe('1.0');
+    const cards = (catalog.entries ?? []).filter((entry) => entry.type === SERVER_CARD_TYPE);
+    expect(cards.map((entry) => entry.url)).toEqual([`${baseURL}${SERVER_CARD_PATH}`]);
+  });
+});
 
 test.describe('MCP server card — pointer aliases', () => {
   test('every alias 301s to the canonical server-card path', async ({ request, baseURL }) => {
@@ -88,7 +118,8 @@ test.describe('MCP server card — canonical path', () => {
     };
     expect(body.mcp_endpoint).toBe(`${baseURL}/mcp`);
     expect(body.protocolVersion).toBe('2026-07-28');
-    expect(body.documentation).toBe(`${baseURL}/mcp-skill.md`);
+    expect(body.documentation).toBe(`${baseURL}/mcp-skill.md#server-cards`);
+    expect(body).not.toHaveProperty('$schema');
   });
 
   // The card is a public discovery surface: agents fetch it cross-origin.

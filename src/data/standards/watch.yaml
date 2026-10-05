@@ -50,20 +50,13 @@ sources:
     canonicalization: none
     pinned: "sha256:633dacfe5bcdbb3ed2f177be7dd7f9943ed2484a5fdd13bd2b742f43a14c2786"
 
-  # The `$schema` URL the extension schema requires; it resolves once the
-  # extension graduates.
+  # The `$schema` URL the extension schema requires, which anc.dev's own card
+  # carries (src/shared/mcp-discovery.ts); it resolves once the extension
+  # graduates.
   - id: mcp-server-card-schema-url-v1
     tier: proposal
     type: url-status
     url: https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json
-    canonicalization: json
-    pinned: 404
-
-  # The `$schema` URL src/build/11a-discovery-emit.mjs emits in anc.dev's card.
-  - id: mcp-server-card-schema-url-emitted
-    tier: proposal
-    type: url-status
-    url: https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json
     canonicalization: json
     pinned: 404
 
