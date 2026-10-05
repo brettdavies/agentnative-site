@@ -115,8 +115,14 @@ describe('MCP server card seed (built dist/)', () => {
     expect(parsed.authentication.documentation).toBe('https://anc.dev/auth.md');
     // The client guide's server-cards section names the SEP-2127 card that supersedes this one.
     expect(parsed.documentation).toBe('https://anc.dev/mcp-skill.md#server-cards');
-    expect(typeof parsed.serverInfo.name).toBe('string');
-    expect(typeof parsed.serverInfo.version).toBe('string');
+  });
+
+  test('names and versions the server the way the endpoint reports itself', async () => {
+    resetMcpTestState();
+    const raw = await readFile(join(DIST_DIR, '_internal', 'mcp-server-card.json'), 'utf8');
+    const card = JSON.parse(raw) as { serverInfo: { name: string; version: string } };
+    const serverInfo = (await mcpInitialize(distAssetsEnv(DIST_DIR))).result?.serverInfo;
+    expect(card.serverInfo).toEqual({ name: serverInfo?.name ?? '', version: serverInfo?.version ?? '' });
   });
 
   test('retired static pointer file is not emitted', async () => {
