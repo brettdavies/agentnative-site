@@ -95,14 +95,14 @@ flowchart LR
 
     footer[src/build/shell.mjs<br/>footer: v$&#123;SITE_SPEC_VERSION&#125;]
     badges[src/build/build.mjs:377<br/>renderBadgeSvg&#40;score, scorecard.spec_version&#41;]
-    og[scripts/og/generate.ts<br/>reads anc-v*.json's spec_version]
+    og[scripts/og/generate.ts<br/>reads content/principles/VERSION]
     diff[git diff workflow<br/>operator-only — no rendered surface]
 
     vendoredVersion --> util
     siteVersion --> util
     util -- "SITE_SPEC_VERSION" --> footer
     scorecardJsons -- "scorecard.spec_version" --> badges
-    scorecardJsons -- "anc-v*.json's spec_version" --> og
+    siteVersion -- "same file as the footer" --> og
     util -. "SPEC_VERSION (reference only)" .-> diff
 ```
 
@@ -110,7 +110,7 @@ flowchart LR
 | --------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | Footer          | `SITE_SPEC_VERSION` ← `content/principles/VERSION` | Manual, by the contributor who reconciles `content/principles/p*-*.md` after a `sync-spec.sh` run.       |
 | Per-tool badges | Each scorecard's `spec_version` field              | Automatic; bumps when the scorecard is regenerated against a newer `anc` build (via `docker/score/`).    |
-| OG card         | `anc`'s self-scorecard's `spec_version`            | Automatic on `bun run og` after `anc`'s scorecard is refreshed.                                          |
+| OG card         | `SITE_SPEC_VERSION` ← `content/principles/VERSION` | Manual: `bun run og` after the footer bump; the regenerated `public/og-image.png` is committed.          |
 | (no surface)    | `SPEC_VERSION` ← `src/data/spec/VERSION`           | Automatic; `./scripts/sync-spec.sh` overwrites whenever the spec ships a new tag. Reference / diff only. |
 
 Why three sources, not one: vendoring (we got a snapshot), scoring (anc was compiled against this spec), and site
@@ -150,13 +150,14 @@ The flows interact, but each is independently triggered:
 
 3. **Spec cuts a new tag (principles/contract)** → maintainer runs `bash scripts/sync-spec.sh` (auto-picks the latest v*
    tag from the spec remote via `gh api`) → vendored `src/data/spec/{VERSION,CHANGELOG.md,principles/p*-*.md}` updates →
-   next site build picks up the new `SPEC_VERSION` automatically (footer, OG card, badge URLs all flow from the vendored
-   `VERSION` file). For cross-repo coordination of in-flight spec work that hasn't tagged yet, pass `--ref dev` (or a
-   specific commit SHA, or set `SPEC_REF=<ref>`) — the script prints the resolved short SHA on every run so the consumer
-   PR body can record the exact pin. Site contributor reviews `git diff src/data/spec/principles/` and decides whether
-   to manually reconcile any prose changes into `content/principles/p*-*.md` (the two file shapes are intentionally
-   different; see `src/data/spec/README.md` for the workflow). Spec's `repository_dispatch:spec-release` event already
-   fires here on tag publish; a consumer-side handler that auto-PRs the resync is tracked as follow-up work.
+   next site build picks up the new `SPEC_VERSION`, which no rendered surface displays (the footer and the OG card move
+   only when `content/principles/VERSION` is bumped after reconciliation). For cross-repo coordination of in-flight spec
+   work that hasn't tagged yet, pass `--ref dev` (or a specific commit SHA, or set `SPEC_REF=<ref>`) — the script prints
+   the resolved short SHA on every run so the consumer PR body can record the exact pin. Site contributor reviews
+   `git diff src/data/spec/principles/` and decides whether to manually reconcile any prose changes into
+   `content/principles/p*-*.md` (the two file shapes are intentionally different; see `src/data/spec/README.md` for the
+   workflow). Spec's `repository_dispatch:spec-release` event already fires here on tag publish; a consumer-side handler
+   that auto-PRs the resync is tracked as follow-up work.
 
 4. **CLI cuts a new tag (binary release)** → maintainer runs `bash scripts/sync-cli-version.sh` (auto-picks the latest
    v\* tag from the cli remote via `gh api`, extracts `Cargo.toml [package].version`) → vendored `src/data/anc/VERSION`
