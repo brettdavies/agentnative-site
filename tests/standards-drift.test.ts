@@ -273,6 +273,15 @@ describe('a moved or missing source routes to the right next step', () => {
     expect(errorsOf(report)).toEqual([{ id: 'acme-registry-schema', reason: 'parse-failed', action: 'fix-manifest' }]);
   });
 
+  test('a JSON Pointer index past the end of an emptied array asks for the pointer to be fixed', async () => {
+    const routes = cleanRoutes();
+    routes[OPENAPI_URL] = () =>
+      json({ components: { schemas: { Server: { properties: { $schema: { examples: [] } } } } } });
+    const report = await checkDrift(manifest(), fakeFetch(routes));
+    expect(report.drifted).toEqual([]);
+    expect(errorsOf(report)).toEqual([{ id: 'acme-registry-schema', reason: 'parse-failed', action: 'fix-manifest' }]);
+  });
+
   test('a changed value at a JSON Pointer reports one drifted entry', async () => {
     const next = 'https://schemas.example.test/2026-03-01/server.schema.json';
     const routes = cleanRoutes();

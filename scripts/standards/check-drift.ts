@@ -249,7 +249,7 @@ function resolvePointer(doc: unknown, pointer: string): unknown {
   let node = doc;
   for (const raw of pointer.slice(1).split('/')) {
     const token = raw.replaceAll('~1', '/').replaceAll('~0', '~');
-    if (Array.isArray(node) && /^\d+$/.test(token)) node = node[Number(token)];
+    if (Array.isArray(node) && /^\d+$/.test(token) && Number(token) < node.length) node = node[Number(token)];
     else if (isRecord(node) && Object.hasOwn(node, token)) node = node[token];
     else throw new SourceCheckError('parse-failed', `document has no value at ${pointer}`, 'fix-manifest');
   }
