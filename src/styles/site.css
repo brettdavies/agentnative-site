@@ -1111,7 +1111,7 @@ main .anchor-icon {
 .spec-section {
   padding-block: var(--space-9);
 }
-.spec-section > .container > .sub {
+.spec-section > .container > [data-s] > .sub {
   color: var(--fg-secondary);
   margin: var(--space-3) 0 0;
   max-width: 60ch;
@@ -3541,7 +3541,7 @@ main .code-wrap > pre {
   margin: 0;
 }
 
-.spec-section > .container > h2 {
+.spec-section > .container > [data-s] > h2 {
   font-size: clamp(1.7rem, 1.3rem + 1.6vw, 2.3rem);
   letter-spacing: -0.025em;
   font-weight: 640;
