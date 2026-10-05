@@ -4,6 +4,10 @@
 //
 // Usage: bun scripts/standards/check-drift.ts
 //
+// GITHUB_TOKEN, when set, authenticates the api.github.com reads and is sent
+// to no other host. Unauthenticated, GitHub allows 60 requests an hour per IP,
+// which a shared CI runner address can exhaust before the poll runs.
+//
 // Exit codes:
 //   0  every source matches its pin
 //   1  at least one source drifted (report.drifted lists each with old and new)
@@ -27,7 +31,8 @@ const TIERS = ['rfc', 'spec', 'draft', 'proposal', 'convention'] as const;
 export const SOURCE_TYPES = ['github-pr', 'github-file', 'url-status', 'ietf-draft', 'json-field'] as const;
 const CANONICALIZATIONS = ['json', 'none'] as const;
 
-export const MANIFEST_PATH = join(import.meta.dir, '..', '..', 'src', 'data', 'standards', 'watch.yaml');
+export const MANIFEST_REPO_PATH = 'src/data/standards/watch.yaml';
+export const MANIFEST_PATH = join(import.meta.dir, '..', '..', MANIFEST_REPO_PATH);
 const SELF_COMMAND = 'bun scripts/standards/check-drift.ts';
 
 type Tier = (typeof TIERS)[number];
@@ -35,6 +40,10 @@ type SourceType = (typeof SOURCE_TYPES)[number];
 type Canonicalization = (typeof CANONICALIZATIONS)[number];
 
 export type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>;
+
+export interface CheckOptions {
+  githubToken?: string;
+}
 
 export interface WatchEntry {
   id: string;
@@ -46,7 +55,7 @@ export interface WatchEntry {
   pointer?: string;
 }
 
-interface DriftEntry {
+export interface DriftEntry {
   id: string;
   tier: Tier;
   type: SourceType;
@@ -250,23 +259,28 @@ function resolvePointer(doc: unknown, pointer: string): unknown {
 const GITHUB_JSON = { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' };
 const GITHUB_RAW = { accept: 'application/vnd.github.raw', 'x-github-api-version': '2022-11-28' };
 
-type Fetcher = (entry: WatchEntry, fetchImpl: FetchImpl) => Promise<unknown>;
+function githubHeaders(base: Record<string, string>, options: CheckOptions): Record<string, string> {
+  return options.githubToken ? { ...base, authorization: `Bearer ${options.githubToken}` } : base;
+}
+
+type Fetcher = (entry: WatchEntry, fetchImpl: FetchImpl, options: CheckOptions) => Promise<unknown>;
 
 const FETCHERS: Record<SourceType, Fetcher> = {
-  'github-pr': async (entry, fetchImpl) => {
+  'github-pr': async (entry, fetchImpl, options) => {
     const [, owner, repo, number] = GITHUB_PR_URL.exec(entry.url) ?? [];
     const api = `https://api.github.com/repos/${owner}/${repo}/pulls/${number}`;
-    const pr = parseJson(await okBody(fetchImpl, api, GITHUB_JSON), 'pull request');
+    const pr = parseJson(await okBody(fetchImpl, api, githubHeaders(GITHUB_JSON, options)), 'pull request');
     return {
       state: field(pr, 'state', 'pull request'),
       merged: field(pr, 'merged', 'pull request'),
       head_sha: field(field(pr, 'head', 'pull request'), 'sha', 'pull request head'),
     };
   },
-  'github-file': async (entry, fetchImpl) => {
+  'github-file': async (entry, fetchImpl, options) => {
     const [, owner, repo, ref, path] = GITHUB_BLOB_URL.exec(entry.url) ?? [];
     const api = `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${ref}`;
-    return sha256(canonicalize(await okBody(fetchImpl, api, GITHUB_RAW), entry.canonicalization));
+    const body = await okBody(fetchImpl, api, githubHeaders(GITHUB_RAW, options));
+    return sha256(canonicalize(body, entry.canonicalization));
   },
   'url-status': async (entry, fetchImpl) => {
     const res = await request(fetchImpl, entry.url, {});
@@ -288,10 +302,10 @@ const FETCHERS: Record<SourceType, Fetcher> = {
 
 type Outcome = { kind: 'match' } | { kind: 'drift'; drift: DriftEntry } | { kind: 'error'; error: SourceError };
 
-async function checkEntry(entry: WatchEntry, fetchImpl: FetchImpl): Promise<Outcome> {
+async function checkEntry(entry: WatchEntry, fetchImpl: FetchImpl, options: CheckOptions): Promise<Outcome> {
   const { id, tier, type, url } = entry;
   try {
-    const observed = await FETCHERS[type](entry, fetchImpl);
+    const observed = await FETCHERS[type](entry, fetchImpl, options);
     if (canonicalJson(observed) === canonicalJson(entry.pinned)) return { kind: 'match' };
     return { kind: 'drift', drift: { id, tier, type, url, old: entry.pinned, new: observed } };
   } catch (err) {
@@ -302,8 +316,12 @@ async function checkEntry(entry: WatchEntry, fetchImpl: FetchImpl): Promise<Outc
   }
 }
 
-export async function checkDrift(entries: WatchEntry[], fetchImpl: FetchImpl): Promise<DriftReport> {
-  const outcomes = await Promise.all(entries.map((entry) => checkEntry(entry, fetchImpl)));
+export async function checkDrift(
+  entries: WatchEntry[],
+  fetchImpl: FetchImpl,
+  options: CheckOptions = {},
+): Promise<DriftReport> {
+  const outcomes = await Promise.all(entries.map((entry) => checkEntry(entry, fetchImpl, options)));
   const drifted = outcomes.flatMap((o) => (o.kind === 'drift' ? [o.drift] : []));
   const errors = outcomes.flatMap((o) => (o.kind === 'error' ? [o.error] : []));
   return buildReport(entries.length, drifted, errors);
@@ -320,7 +338,7 @@ async function main(): Promise<number> {
     console.log(JSON.stringify(report, null, 2));
     return report.exit_code;
   }
-  const report = await checkDrift(entries, fetch);
+  const report = await checkDrift(entries, fetch, { githubToken: process.env.GITHUB_TOKEN || undefined });
   console.log(JSON.stringify(report, null, 2));
   return report.exit_code;
 }
