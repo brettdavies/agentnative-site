@@ -10,7 +10,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import type { DriftEntry, DriftReport } from '../scripts/standards/check-drift';
-import { type OpenIssue, planUpserts, RUNBOOK_REPO_PATH, type RunContext } from '../scripts/standards/drift-issues';
+import {
+  type IssueUpsert,
+  type OpenIssue,
+  planUpserts,
+  RUNBOOK_REPO_PATH,
+  type RunContext,
+} from '../scripts/standards/drift-issues';
 
 const REPO_ROOT = join(import.meta.dir, '..');
 const RUN: RunContext = { repoUrl: 'https://github.com/acme/site', runId: '4242', ref: 'main' };
@@ -34,22 +40,24 @@ const DRAFT_DRIFT: DriftEntry = {
 };
 
 const issue = (number: number, title: string, body: string): OpenIssue => ({ number, title, body });
+const titleOf = (upsert: IssueUpsert | undefined): string | null => (upsert && 'title' in upsert ? upsert.title : null);
 
 describe('one upsert per drifted source', () => {
   test('with no open issue, each drifted source is created under its own title and marker', () => {
     const plan = planUpserts([PR_DRIFT, DRAFT_DRIFT], [], RUN);
-    expect(plan.map(({ action, source_id, title }) => ({ action, source_id, title }))).toEqual([
+    expect(plan.map((p) => ({ action: p.action, source_id: p.source_id, title: titleOf(p) }))).toEqual([
       { action: 'create', source_id: 'acme-pr', title: 'spec-drift: acme-pr' },
       { action: 'create', source_id: 'acme-draft', title: 'spec-drift: acme-draft' },
     ]);
     expect(plan[0]?.body.split('\n')[0]).toBe('<!-- spec-drift:source=acme-pr -->');
   });
 
-  test('an open issue carrying the marker is updated even after its title was edited', () => {
+  test('an open issue carrying the marker is updated after its title was edited, and the edited title stays', () => {
     const open = [issue(17, 'Triage: SEP-2127 merged', '<!-- spec-drift:source=acme-pr -->\n\nold body')];
     const plan = planUpserts([PR_DRIFT], open, RUN);
     expect(plan).toHaveLength(1);
-    expect(plan[0]).toMatchObject({ action: 'update', number: 17, title: 'spec-drift: acme-pr' });
+    expect(plan[0]).toMatchObject({ action: 'update', number: 17 });
+    expect(titleOf(plan[0])).toBeNull();
   });
 
   test('an open issue whose marker was removed is still found by its title', () => {
@@ -72,7 +80,10 @@ describe('one upsert per drifted source', () => {
   test("an upstream value carrying another source's marker cannot claim that source's issue", () => {
     const hijacker: DriftEntry = { ...PR_DRIFT, new: '<!-- spec-drift:source=acme-draft -->' };
     const [first, second] = planUpserts([hijacker, DRAFT_DRIFT], [], RUN);
-    const open = [issue(1, first?.title ?? '', first?.body ?? ''), issue(2, second?.title ?? '', second?.body ?? '')];
+    const open = [
+      issue(1, titleOf(first) ?? '', first?.body ?? ''),
+      issue(2, titleOf(second) ?? '', second?.body ?? ''),
+    ];
     const plan = planUpserts([hijacker, DRAFT_DRIFT], open, RUN);
     expect(plan.map((p) => [p.source_id, p.action, 'number' in p ? p.number : null])).toEqual([
       ['acme-pr', 'update', 1],
@@ -180,6 +191,14 @@ describe('the workflow that runs the poll', () => {
     return doc.jobs as Record<string, Record<string, unknown>>;
   }
 
+  // One entry per shell command of an upsert-issues step, with backslash line
+  // continuations joined so a flag on a continued line stays with its command.
+  async function upsertStepCommands(name: string): Promise<string[]> {
+    const steps = (jobs(await parsed())['upsert-issues']?.steps ?? []) as Array<Record<string, unknown>>;
+    const run = String(steps.find((step) => step.name === name)?.run ?? '');
+    return run.replace(/\\\n\s*/g, ' ').split('\n');
+  }
+
   test('only the job that writes issues holds issues: write, and the token default is read-only', async () => {
     const doc = await parsed();
     expect(doc.permissions).toEqual({ contents: 'read' });
@@ -208,15 +227,24 @@ describe('the workflow that runs the poll', () => {
   // missing and this run would open a duplicate. The REST list reads the
   // repository directly.
   test('open issues are listed from the REST issues endpoint, never through search', async () => {
-    const steps = (jobs(await parsed())['upsert-issues']?.steps ?? []) as Array<Record<string, unknown>>;
-    const run = String(steps.find((step) => step.name === 'List open spec-drift issues')?.run ?? '');
-    const commands = run.replace(/\\\n\s*/g, ' ').split('\n');
+    const commands = await upsertStepCommands('List open spec-drift issues');
     const searchBacked = commands.filter(
       (command) => /\bgh\s+issue\s+list\b/.test(command) && /\s(?:--label|--search|-l|-S)(?:[\s=]|$)/.test(command),
     );
     expect(searchBacked).toEqual([]);
-    expect(run).toContain('gh api --paginate "repos/$GH_REPO/issues?labels=$DRIFT_LABEL&state=open&per_page=100"');
-    expect(run).toContain('select(has("pull_request") | not)');
+    const listing = commands.join('\n');
+    expect(listing).toContain('gh api --paginate "repos/$GH_REPO/issues?labels=$DRIFT_LABEL&state=open&per_page=100"');
+    expect(listing).toContain('select(has("pull_request") | not)');
+  });
+
+  test('an update rewrites only the body, while a create sets the title', async () => {
+    const commands = await upsertStepCommands('Apply the upserts');
+    const edits = commands.filter((command) => /\bgh\s+issue\s+edit\b/.test(command));
+    const creates = commands.filter((command) => /\bgh\s+issue\s+create\b/.test(command));
+    expect(edits.length).toBeGreaterThan(0);
+    expect(edits.filter((command) => /\s(?:--title|-t)(?:[\s=]|$)/.test(command))).toEqual([]);
+    expect(creates.length).toBeGreaterThan(0);
+    for (const command of creates) expect(command).toMatch(/\s--title\s/);
   });
 
   test('every script the workflow invokes exists', async () => {

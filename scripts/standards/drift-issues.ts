@@ -38,11 +38,14 @@ export interface RunContext {
 
 interface Upsert {
   source_id: string;
-  title: string;
   body: string;
 }
 
-export type IssueUpsert = (Upsert & { action: 'create' }) | (Upsert & { action: 'update'; number: number });
+// An update carries no title: the title is set once at creation, and a
+// triage edit to it survives later runs.
+export type IssueUpsert =
+  | (Upsert & { action: 'create'; title: string })
+  | (Upsert & { action: 'update'; number: number });
 
 function issueTitle(id: string): string {
   return `spec-drift: ${id}`;
@@ -82,8 +85,8 @@ function renderBody(drift: DriftEntry, run: RunContext): string {
     fenced(drift.new),
     '',
     "Review the upstream change, then re-pin by copying the observed value into the entry's `pinned` field. Keep this " +
-      "issue open until the re-pin reaches `main`, because scheduled runs read `main`'s manifest. The title and this " +
-      `body belong to the poll and are rewritten on every drifted run; discuss in comments. Procedure: the ` +
+      "issue open until the re-pin reaches `main`, because scheduled runs read `main`'s manifest. This body belongs " +
+      `to the poll and is rewritten on every drifted run; discuss in comments. Procedure: the ` +
       `[spec-drift poll runbook](${onMain(RUNBOOK_REPO_PATH)}).`,
     '',
     `Last observed by [run ${run.runId}](${run.repoUrl}/actions/runs/${run.runId}) on \`${run.ref}\`.`,
@@ -115,7 +118,7 @@ export function planUpserts(
     );
     if (!existing) return { action: 'create', source_id: drift.id, title, body };
     claimed.add(existing.number);
-    return { action: 'update', source_id: drift.id, number: existing.number, title, body };
+    return { action: 'update', source_id: drift.id, number: existing.number, body };
   });
 }
 

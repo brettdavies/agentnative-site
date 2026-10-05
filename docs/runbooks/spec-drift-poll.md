@@ -69,10 +69,11 @@ matched by a second source in the same run. The job lists open issues from the R
 directly. `gh issue list --label` or `--search` goes through the search API instead, whose index lags minutes behind and
 would hide an issue the previous run just opened.
 
-On every drifted run the job rewrites the matched issue's title and body: the source, tier, and type, the pinned and
-observed values, and a link to the run that observed it. The title and body belong to the poll; discussion goes in
-comments, which the poll never touches. The job never closes an issue. Closing one while the source still drifts from
-`main`'s pin makes the next run open a fresh issue.
+On every drifted run the job rewrites the matched issue's body: the source, tier, and type, the pinned and observed
+values, and a link to the run that observed it. The body belongs to the poll; discussion goes in comments, which the
+poll never touches. The job sets the title only when it opens the issue, so a title edited during triage stays. The job
+never closes an issue. Closing one while the source still drifts from `main`'s pin makes the next run open a fresh
+issue.
 
 ## Re-pinning after a reviewed upstream change
 

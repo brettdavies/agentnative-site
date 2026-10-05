@@ -192,15 +192,15 @@ jobs:
           for ((i = 0; i < count; i++)); do
             action=$(jq -r ".[$i].action" "$plan")
             source_id=$(jq -r ".[$i].source_id" "$plan")
-            title=$(jq -r ".[$i].title" "$plan")
             jq -r ".[$i].body" "$plan" > "$body"
             case "$action" in
               update)
                 number=$(jq -r ".[$i].number" "$plan")
-                gh issue edit "$number" --title "$title" --body-file "$body"
+                gh issue edit "$number" --body-file "$body"
                 echo "- updated #$number for \`$source_id\`" >> "$GITHUB_STEP_SUMMARY"
                 ;;
               create)
+                title=$(jq -r ".[$i].title" "$plan")
                 url=$(gh issue create --title "$title" --label "$DRIFT_LABEL" --body-file "$body")
                 echo "- opened $url for \`$source_id\`" >> "$GITHUB_STEP_SUMMARY"
                 ;;
