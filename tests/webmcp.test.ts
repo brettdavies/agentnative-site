@@ -7,6 +7,7 @@ import { fillTarget, openAudit, setSurface } from '../src/client/webmcp-entry';
 import { bindModelContext, getPageState, initWebMcp, toolsFor, WEBMCP_EXECUTE_MAX } from '../src/client/webmcp-lib';
 import { getAuditSummary, getFixPrompt, getFixPrompts, getWorksheet } from '../src/client/webmcp-result';
 import { AUDIT_PATH } from '../src/shared/audit-routes';
+import { MCP_DISCOVERY_DOCUMENTS } from '../src/shared/mcp-discovery';
 import {
   assembleRemediation,
   PROMPT_EVIDENCE_MAX,
@@ -28,6 +29,7 @@ const WEBMCP_SOURCES = [
   'client/webmcp-orientation.ts',
   'client/assemble-prompt.ts',
   'shared/web-audit-findings.ts',
+  'shared/mcp-discovery.ts',
 ];
 
 type Stub = {
@@ -304,6 +306,18 @@ describe('toolsFor(pathname)', () => {
   test('orientation pages keep the three URL tools only', () => {
     expect(names('/p1')).toEqual(['get_principle_url', 'get_llms_index', 'get_mcp_endpoint']);
     expect(names('/mcp')).toEqual(names('/p1'));
+  });
+
+  test('get_mcp_endpoint names every discovery document on the page origin, SEP-1649 card first', async () => {
+    const tool = toolsFor('/mcp', { origin: 'https://staging.example' }).find((t) => t.name === 'get_mcp_endpoint');
+    const answer = String(await tool?.execute({}));
+    expect(answer).toContain('MCP endpoint: https://staging.example/mcp');
+    const lines = MCP_DISCOVERY_DOCUMENTS.map((d) => `${d.label}: https://staging.example${d.path}`);
+    const positions = lines.map((line) => answer.split('\n').indexOf(line));
+    expect(positions.every((index) => index >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    expect(answer).toContain('MCP server card (SEP-2127): https://staging.example/mcp/server-card');
+    expect(answer).toContain('AI catalog: https://staging.example/.well-known/ai-catalog.json');
   });
 
   // R19: the progress page runs the audit, so it carries no in-page tools

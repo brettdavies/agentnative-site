@@ -1,3 +1,4 @@
+import { MCP_DISCOVERY_DOCUMENTS } from '../shared/mcp-discovery';
 import { capExecute, emptyObjectSchema, type WebMcpTool } from './webmcp-lib';
 
 export function orientationTools(origin: string): WebMcpTool[] {
@@ -33,12 +34,17 @@ export function orientationTools(origin: string): WebMcpTool[] {
     },
     {
       name: 'get_mcp_endpoint',
-      description: 'Return the streamable-HTTP MCP endpoint and client integration guide.',
+      description:
+        'Return the streamable-HTTP MCP endpoint, its client integration guide, its server cards, and the AI catalog that lists them.',
       inputSchema: emptyObjectSchema(),
       annotations: { readOnlyHint: true },
       execute() {
         return capExecute(
-          `MCP endpoint: ${origin}/mcp\nClient guide: ${origin}/mcp-skill.md\nServer card: ${origin}/.well-known/mcp/server-card.json`,
+          [
+            `MCP endpoint: ${origin}/mcp`,
+            `Client guide: ${origin}/mcp-skill.md`,
+            ...MCP_DISCOVERY_DOCUMENTS.map((d) => `${d.label}: ${origin}${d.path}`),
+          ].join('\n'),
         );
       },
     },

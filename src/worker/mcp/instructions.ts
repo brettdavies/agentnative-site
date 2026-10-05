@@ -18,6 +18,7 @@
 // talking to staging.
 
 import { SCORE_PREFIX } from '../../shared/audit-routes';
+import { SEP_1649_CARD_PATH } from '../../shared/mcp-discovery';
 import { FOLLOW_DISCLOSURE } from '../audit-web/follow-disclosure';
 import { siteOrigin } from './site-origin';
 
@@ -77,7 +78,7 @@ function buildInstructionsText(siteUrl: string): string {
       '(WEB_AUDIT_ENABLED), or only the following of declared hosts (WEB_AUDIT_FOLLOW_ENABLED) without a deploy; ' +
       'the fifth (MCP_LEGACY_ENABLED) surfaces as the -32022 legacy reject above.',
     FOLLOW_DISCLOSURE,
-    `Spec revision is pinned to ${SPEC_REVISION}; the /.well-known/mcp/server-card.json server card advertises the same value, and the ` +
+    `Spec revision is pinned to ${SPEC_REVISION}; the ${SEP_1649_CARD_PATH} server card advertises the same value, and the ` +
       'two are bumped in lockstep when the SDK is upgraded.',
     `Connect now at ${siteUrl}/mcp (no authentication). Full recipes remain at ${docsUrl}.`,
   ].join(' ');

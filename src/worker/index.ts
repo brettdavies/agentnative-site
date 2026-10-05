@@ -364,26 +364,27 @@ function rewriteAiCatalog(data: Record<string, unknown>, origin: string): void {
   }
 }
 
-function rewriteApiCatalogHrefs(value: unknown, href: string): void {
+function rewriteApiCatalogHrefs(value: unknown, origin: string): void {
   if (!Array.isArray(value)) return;
   for (const entry of value) {
-    if (entry && typeof entry === 'object') {
-      (entry as Record<string, unknown>).href = href;
-    }
+    if (!entry || typeof entry !== 'object') continue;
+    const link = entry as Record<string, unknown>;
+    if (typeof link.href !== 'string' || !URL.canParse(link.href)) continue;
+    const { pathname, search, hash } = new URL(link.href);
+    link.href = `${origin}${pathname}${search}${hash}`;
   }
 }
 
 function rewriteApiCatalog(data: Record<string, unknown>, origin: string): void {
   const linkset = data.linkset;
   if (!Array.isArray(linkset)) return;
-  const serverCard = `${origin}/.well-known/mcp/server-card.json`;
   for (const entry of linkset) {
     if (!entry || typeof entry !== 'object') continue;
     const link = entry as Record<string, unknown>;
     if (typeof link.anchor === 'string') link.anchor = `${origin}/mcp`;
-    rewriteApiCatalogHrefs(link['service-desc'], serverCard);
-    rewriteApiCatalogHrefs(link['service-doc'], `${origin}/mcp-skill`);
-    rewriteApiCatalogHrefs(link.status, serverCard);
+    for (const [relation, targets] of Object.entries(link)) {
+      if (relation !== 'anchor') rewriteApiCatalogHrefs(targets, origin);
+    }
   }
 }
 

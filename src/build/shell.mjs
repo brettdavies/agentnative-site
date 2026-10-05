@@ -15,6 +15,7 @@ import {
   breadcrumbTrail,
   renderBreadcrumbNav,
 } from '../shared/breadcrumb.ts';
+import { MCP_DISCOVERY_DOCUMENTS, SEP_1649_CARD_PATH } from '../shared/mcp-discovery';
 import { markdownAlternateLink } from '../shared/result-head';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
 import { loadInstallCommands } from './install-commands.mjs';
@@ -135,15 +136,19 @@ const SOURCE_REPOS = [
 // Machine entry points listed in the <noscript> fallback. An agent or
 // fetch-only crawler that never runs the client bundle still reads an
 // explicit, in-body list of the structured surfaces instead of inferring
-// them. Mirrors the rel="alternate"/rel="mcp" head links below.
+// them. Mirrors the head links below.
 const MACHINE_ENTRY_POINTS = [
   { href: '/llms.txt', note: 'LLM-friendly index' },
   { href: '/llms-full.txt', note: 'full spec corpus' },
   { href: '/mcp', note: 'Streamable-HTTP MCP endpoint' },
-  { href: '/.well-known/mcp/server-card.json', note: 'MCP server card' },
+  ...MCP_DISCOVERY_DOCUMENTS.map((d) => ({ href: d.path, note: d.label })),
   { href: '/skill.json', note: 'agent-native skill bundle' },
   { href: '/.well-known/api-catalog', note: 'RFC 9727 API catalog' },
 ];
+
+const DISCOVERY_HEAD_LINKS = MCP_DISCOVERY_DOCUMENTS.map(
+  (d) => `<link rel="${d.rel}" type="${d.type}" href="${d.path}" title="${escHtml(d.label)}" />`,
+).join('\n    ');
 
 const esc = escHtml;
 
@@ -371,9 +376,10 @@ export function emitShell({
     ${alternatesHtml}
     <link rel="alternate" type="text/markdown" href="/llms.txt" title="LLM-friendly index" />
     <link rel="alternate" type="text/markdown" href="/llms-full.txt" title="LLM-friendly full spec" />
-    <link rel="alternate" type="application/json" href="/.well-known/mcp/server-card.json" title="MCP server card" />
+    <link rel="alternate" type="application/json" href="${SEP_1649_CARD_PATH}" title="MCP server card" />
     <link rel="alternate" type="application/json" href="/skill.json" title="Agent-native skill bundle (canonical JSON)" />
-    <link rel="describedby" href="/.well-known/mcp/server-card.json" />
+    <link rel="describedby" href="${SEP_1649_CARD_PATH}" />
+    ${DISCOVERY_HEAD_LINKS}
     <link rel="mcp" href="/mcp" />
 ${isIndex || turnstileSitekey ? `    <meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />\n` : ''}
 

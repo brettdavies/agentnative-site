@@ -254,11 +254,14 @@ describe('llms.txt Programmatic access section', () => {
     expect(princIdx).toBeGreaterThan(progIdx);
   });
 
-  test('lists exactly three links pointing at the MCP surface', async () => {
+  test('links the MCP endpoint, both server cards, the AI catalog, and the client skill', async () => {
     const llms = await readFile(join(DIST_DIR, 'llms.txt'), 'utf8');
     const section = llms.slice(llms.indexOf('## Programmatic access'), llms.indexOf('## Principles'));
+    expect(section.match(/^- \[/gm)).toHaveLength(5);
     expect(section).toContain('https://anc.dev/mcp');
     expect(section).toContain('https://anc.dev/.well-known/mcp/server-card.json');
+    expect(section).toContain('(https://anc.dev/mcp/server-card)');
+    expect(section).toContain('(https://anc.dev/.well-known/ai-catalog.json)');
     expect(section).toContain('https://anc.dev/mcp-skill.md');
     expect(section).toContain('No authentication');
     expect(section).toContain('initialize');
@@ -439,10 +442,16 @@ describe('emitAgentReadiness() in isolation', () => {
       expect(stats.authMdPath).toBe(join(tmp, 'auth.md'));
 
       const catalog = JSON.parse(await readFile(stats.apiCatalogPath, 'utf8')) as {
-        linkset: Array<{ anchor: string; 'service-desc': Array<{ href: string }> }>;
+        linkset: Array<{
+          anchor: string;
+          'service-desc': Array<{ href: string }>;
+          'ai-catalog': Array<{ href: string }>;
+        }>;
       };
       expect(catalog.linkset[0].anchor).toBe('https://example.test/mcp');
       expect(catalog.linkset[0]['service-desc'][0].href).toBe('https://example.test/.well-known/mcp/server-card.json');
+      expect(catalog.linkset[0]['service-desc'][1].href).toBe('https://example.test/mcp/server-card');
+      expect(catalog.linkset[0]['ai-catalog'][0].href).toBe('https://example.test/.well-known/ai-catalog.json');
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }

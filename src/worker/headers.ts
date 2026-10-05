@@ -9,6 +9,7 @@ import {
   scoreMarkdownPath,
   splitRepresentation,
 } from '../shared/audit-routes';
+import { MCP_DISCOVERY_DOCUMENTS } from '../shared/mcp-discovery';
 import { homeTag, resultTag } from './audit-web/hit-min-tags';
 
 // Response-header policy for the agentnative-site Worker.
@@ -111,7 +112,7 @@ const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable';
 // RFC 9727 index. Targets mirror the served /.well-known/api-catalog linkset.
 const ROOT_DISCOVERY_LINKS = [
   '</.well-known/api-catalog>; rel="api-catalog"',
-  '</.well-known/mcp/server-card.json>; rel="service-desc"',
+  ...MCP_DISCOVERY_DOCUMENTS.map((d) => `<${d.path}>; rel="${d.rel}"; type="${d.type}"`),
   '</mcp-skill>; rel="service-doc"',
   '</.well-known/ai.txt>; rel="service-meta"',
 ].join(', ');

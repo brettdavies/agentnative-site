@@ -100,7 +100,12 @@ card's `websiteUrl` is the client-skill page; the SEP-1649 card's `documentation
 server-cards section; `initialize.instructions` carries the client-skill pointer plus a session-time summary. The card,
 the catalog, and the SEP-1649 card are built from seeds and origin-rewritten at serve time, so staging hands out staging
 URLs; the card's `name` (`dev.anc/anc`) and the catalog entry's `identifier` (`urn:air:anc.dev:mcp:anc`) name the
-server, not the deployment, and stay fixed.
+server, not the deployment, and stay fixed. The root `Link` header, the `<head>` of every page the shell renders, the
+`<noscript>` entry list, `/llms.txt`, the `/.well-known/api-catalog` linkset, `/auth.md`, and the WebMCP
+`get_mcp_endpoint` answer all render the three documents from one list, `MCP_DISCOVERY_DOCUMENTS` in
+`src/shared/mcp-discovery.ts`, SEP-1649 card first. Both cards carry RFC 8631 `rel="service-desc"`, since neither card
+spec defines a relation; the catalog carries `rel="ai-catalog"`, the relation the AI Catalog spec defines. A new
+discovery document goes into that list, not into each surface.
 
 **Thirteen tools, five resources.** Tools cover five surfaces:
 

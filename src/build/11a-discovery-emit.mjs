@@ -31,12 +31,14 @@ import { join } from 'node:path';
 import { AUDIT_PATH } from '../shared/audit-routes';
 import {
   AI_CATALOG_PATH,
+  MCP_DISCOVERY_DOCUMENTS,
   MCP_SERVER_CARD_PATH,
   MCP_SERVER_CARD_SCHEMA_URL,
   MCP_SERVER_CARD_SEED_PATH,
   MCP_SERVER_CARD_TYPE,
   MCP_SERVER_NAME,
   MCP_SERVER_VERSION,
+  SEP_1649_CARD_PATH,
   SEP_1649_CARD_SEED_PATH,
 } from '../shared/mcp-discovery';
 import { ANC_VERSION, canonicalBaseUrl, expiresInOneYearIso, resolveBaseUrl } from './util.mjs';
@@ -200,21 +202,30 @@ export async function emitDiscovery({ distDir, baseUrl }) {
 // Agent-readiness discovery surfaces (api-catalog, OAuth metadata, agent-skills,
 // auth.md). MCP server card seed: emitDiscovery() → _internal/mcp-server-card.json.
 
+function discoveryLinks(baseUrl) {
+  const links = {};
+  for (const { path, type, rel } of MCP_DISCOVERY_DOCUMENTS) {
+    links[rel] = [...(links[rel] ?? []), { href: `${baseUrl}${path}`, type }];
+  }
+  return links;
+}
+
 function buildApiCatalog(baseUrl) {
   // RFC 9727 link set (application/linkset+json). One anchor: the MCP
-  // endpoint, the site's agent-facing programmatic API. service-desc is the
-  // machine-readable MCP server card; service-doc is the human/agent guide;
-  // status points at the lightweight descriptor pointer.
+  // endpoint, the site's agent-facing programmatic API. Each discovery
+  // document sits under its link relation (the server cards under
+  // service-desc, the AI catalog under ai-catalog); service-doc is the
+  // human/agent guide; status points at the SEP-1649 card.
   return `${JSON.stringify(
     {
       linkset: [
         {
           anchor: `${baseUrl}/mcp`,
-          'service-desc': [{ href: `${baseUrl}/.well-known/mcp/server-card.json`, type: 'application/json' }],
+          ...discoveryLinks(baseUrl),
           'service-doc': [{ href: `${baseUrl}/mcp-skill`, type: 'text/html' }],
           status: [
             {
-              href: `${baseUrl}/.well-known/mcp/server-card.json`,
+              href: `${baseUrl}${SEP_1649_CARD_PATH}`,
               type: 'application/json',
             },
           ],
@@ -300,9 +311,7 @@ function buildAuthMd(baseUrl) {
     '## Endpoints',
     '',
     `- MCP server (streamable HTTP): \`${baseUrl}/mcp\` - JSON-RPC, MCP spec revision \`${MCP_SPEC_VERSION}\`.`,
-    `- MCP server card (SEP-2127): \`${baseUrl}${MCP_SERVER_CARD_PATH}\`.`,
-    `- AI catalog listing the server card: \`${baseUrl}${AI_CATALOG_PATH}\`.`,
-    `- MCP server card (SEP-1649, superseded): \`${baseUrl}/.well-known/mcp/server-card.json\`.`,
+    ...MCP_DISCOVERY_DOCUMENTS.map(({ label, path }) => `- ${label}: \`${baseUrl}${path}\`.`),
     `- MCP pointer aliases (301 to the SEP-1649 card): \`${baseUrl}/.well-known/mcp\`, \`${baseUrl}/mcp.json\`.`,
     `- API catalog: \`${baseUrl}/.well-known/api-catalog\`.`,
     `- OAuth protected resource: \`${baseUrl}/.well-known/oauth-protected-resource\`.`,
@@ -319,7 +328,7 @@ function buildAuthMd(baseUrl) {
     '`/.well-known/oauth-authorization-server`, `/.well-known/jwks.json`) is published for',
     'agent-readiness scanners. The `token_endpoint` (`/oauth2/token`) exists only to answer',
     'discovery probes: POSTs return a typed `public_catalog` error and issue no credentials.',
-    'The SEP-1649 server card (`/.well-known/mcp/server-card.json`) declares `authentication.required: false`',
+    `The SEP-1649 server card (\`${SEP_1649_CARD_PATH}\`) declares \`authentication.required: false\``,
     'and points here via `authentication.documentation`. OAuth PRM/AS `resource_documentation` /',
     '`service_documentation` also resolve to this file.',
     '',

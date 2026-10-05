@@ -24,12 +24,12 @@
 //      URL nobody thought to check still trips the guard.
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { buildSitemap } from '../src/build/10-sitemap.mjs';
-import { emitDiscovery } from '../src/build/11a-discovery-emit.mjs';
+import { emitAgentReadiness, emitDiscovery } from '../src/build/11a-discovery-emit.mjs';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
 import { buildLlmsIndex } from '../src/build/llms.mjs';
 import { emitShell } from '../src/build/shell.mjs';
@@ -539,6 +539,8 @@ describe('discovery documents name the origin they were served from', () => {
   beforeAll(async () => {
     seedDir = await mkdtemp(join(tmpdir(), 'site-origin-discovery-'));
     await emitDiscovery({ distDir: seedDir, baseUrl: CANONICAL_SITE_URL });
+    await writeFile(join(seedDir, 'mcp-skill.md'), '# MCP skill\n');
+    await emitAgentReadiness({ distDir: seedDir, baseUrl: CANONICAL_SITE_URL });
   });
 
   afterAll(async () => {
@@ -577,6 +579,20 @@ describe('discovery documents name the origin they were served from', () => {
     expect(status).toBe(200);
     const catalog = JSON.parse(body) as { entries: Array<{ url: string }> };
     expect(catalog.entries[0].url).toBe(`${NON_CANONICAL_ORIGIN}/mcp/server-card`);
+    expectServedOnOwnOrigin(body);
+  });
+
+  test('the API catalog links each discovery document at its own path on the serving origin', async () => {
+    const { status, body } = await serve('/.well-known/api-catalog');
+    expect(status).toBe(200);
+    const catalog = JSON.parse(body) as { linkset: Array<Record<string, Array<{ href: string }>>> };
+    expect(catalog.linkset[0]['service-desc'].map((link) => link.href)).toEqual([
+      `${NON_CANONICAL_ORIGIN}/.well-known/mcp/server-card.json`,
+      `${NON_CANONICAL_ORIGIN}/mcp/server-card`,
+    ]);
+    expect(catalog.linkset[0]['ai-catalog'].map((link) => link.href)).toEqual([
+      `${NON_CANONICAL_ORIGIN}/.well-known/ai-catalog.json`,
+    ]);
     expectServedOnOwnOrigin(body);
   });
 
