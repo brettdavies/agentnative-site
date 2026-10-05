@@ -1,4 +1,4 @@
-// Contract tests for the stylesheets that ship in dist/. Two invariants:
+// Contract tests for the stylesheets that ship in dist/. Three invariants:
 //
 //   1. Every custom property referenced without a fallback in shipped CSS
 //      is defined by some shipped stylesheet (or by the Shiki inline-style
@@ -9,6 +9,11 @@
 //   2. Every stylesheet under src/styles/ ships to dist/css/. A stylesheet
 //      dropped from the asset copy step disappears from the wire silently
 //      because the remaining CSS still renders the pages.
+//
+//   3. A shipped stylesheet restates [hidden] as display: none !important.
+//      The user-agent [hidden] rule loses to any author rule that sets
+//      display (.btn, a grid row), so without it an element the page marks
+//      hidden stays on screen.
 //
 // Fallback policy: var(--x, fallback) may reference an undefined property.
 // The fallback is the author's declared recovery value, so the reference
@@ -68,6 +73,19 @@ function definedProperties(css: string): Set<string> {
     defined.add(m[1]);
   }
   return defined;
+}
+
+// Only a rule whose selector list names bare [hidden] covers every element; a
+// component-scoped .x[hidden] covers one component, and without !important an
+// author display rule still wins.
+function hasGlobalHiddenRule(css: string): boolean {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  for (const m of stripped.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selectors = m[1].split(',').map((s) => s.trim());
+    if (!selectors.includes('[hidden]')) continue;
+    if (/(?:^|;)\s*display\s*:\s*none\s*!\s*important\s*(?:;|$)/.test(m[2].trim())) return true;
+  }
+  return false;
 }
 
 async function bareUndefinedRefs(): Promise<{ file: string; property: string }[]> {
@@ -152,5 +170,28 @@ describe('stylesheet shipping (src/styles -> dist/css)', () => {
         shipped: true,
       });
     }
+  });
+});
+
+describe('hidden attribute contract (shipped stylesheets)', () => {
+  test('a shipped stylesheet hides [hidden] with display: none !important', async () => {
+    const sheets = await distStylesheets(DIST);
+    const carriers = sheets.filter(({ css }) => hasGlobalHiddenRule(css)).map(({ file }) => file);
+    expect({ checked: sheets.map(({ file }) => file), hasGlobalHiddenRule: carriers.length > 0 }).toEqual({
+      checked: sheets.map(({ file }) => file),
+      hasGlobalHiddenRule: true,
+    });
+  });
+
+  test('self-test: the minified global rule is recognized', () => {
+    expect(hasGlobalHiddenRule('a{color:red}[hidden]{display:none!important}')).toBe(true);
+  });
+
+  test('self-test: a component-scoped [hidden] rule is not the global rule', () => {
+    expect(hasGlobalHiddenRule('.lrow[hidden]{display:none!important}')).toBe(false);
+  });
+
+  test('self-test: a global rule without !important is not enough', () => {
+    expect(hasGlobalHiddenRule('[hidden]{display:none}')).toBe(false);
   });
 });
