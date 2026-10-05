@@ -9,6 +9,7 @@
 
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { RETIRED_REDIRECTS } from '../src/shared/audit-routes';
+import { MCP_DISCOVERY_DOCUMENTS, SEP_1649_CARD_PATH } from '../src/shared/mcp-discovery';
 import { classifyGatewayRequest, detectPreference } from '../src/worker/accept';
 import { applyHeaders, isRepresentationPinned, isStagingHost, resultCacheClass } from '../src/worker/headers';
 import worker from '../src/worker/index';
@@ -365,10 +366,26 @@ describe('applyHeaders — HTML branch', () => {
     expect(res.headers.get('Link')).toBe(
       '</index.md>; rel="alternate"; type="text/markdown", ' +
         '</.well-known/api-catalog>; rel="api-catalog", ' +
-        '</.well-known/mcp/server-card.json>; rel="service-desc", ' +
+        '</.well-known/mcp/server-card.json>; rel="service-desc"; type="application/json", ' +
+        '</mcp/server-card>; rel="service-desc"; type="application/mcp-server-card+json", ' +
+        '</.well-known/ai-catalog.json>; rel="ai-catalog"; type="application/ai-catalog+json", ' +
         '</mcp-skill>; rel="service-doc", ' +
         '</.well-known/ai.txt>; rel="service-meta"',
     );
+  });
+
+  test('/ HTML: Link names every MCP discovery document with its relation and type, SEP-1649 card first', () => {
+    const res = applyHeaders(new Response('html'), {
+      request: req('https://anc.dev/'),
+      servedMarkdown: false,
+      pathname: '/',
+    });
+    const entries = (res.headers.get('Link') ?? '').split(', ');
+    const documents = MCP_DISCOVERY_DOCUMENTS.map((d) => `<${d.path}>; rel="${d.rel}"; type="${d.type}"`);
+    const positions = documents.map((entry) => entries.indexOf(entry));
+    expect(positions.every((index) => index >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    expect(documents[0]).toContain(SEP_1649_CARD_PATH);
   });
 });
 
