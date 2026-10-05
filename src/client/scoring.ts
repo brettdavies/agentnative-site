@@ -250,7 +250,10 @@ class ScoringRun {
         return false;
       case 'discovery':
         this.endpointHost = endpointHostOf(event.mcp_endpoint);
-        this.view.sayProgress(`${discoveryLine(event.mcp_endpoint, this.target)} Checks:`, this.progressText());
+        this.view.sayProgress(
+          `${discoveryLine(event.mcp_endpoint, this.target, this.follow)} Checks:`,
+          this.progressText(),
+        );
         return false;
       case 'check':
         this.checks += 1;
