@@ -78,12 +78,11 @@ interface RateStub {
 }
 
 const FIXTURE_WELL_KNOWN_MCP = JSON.stringify({
-  $schema: 'https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json',
   mcp_endpoint: 'https://anc.dev/mcp',
   version: '1.0',
   description: 'agent-native CLI standard registry: scorecards, principles, vendored spec',
-  documentation: 'https://anc.dev/mcp-skill.md',
-  serverInfo: { name: 'anc.dev agent-native CLI standard registry', version: '0.5.0' },
+  documentation: 'https://anc.dev/mcp-skill.md#server-cards',
+  serverInfo: { name: 'anc', version: '0.1.0' },
   protocolVersion: '2026-07-28',
   url: 'https://anc.dev/mcp',
   transport: { type: 'streamable-http', endpoint: 'https://anc.dev/mcp' },

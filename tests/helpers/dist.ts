@@ -21,3 +21,19 @@ export async function distStylesheets(distDir: string): Promise<{ file: string; 
     .sort();
   return Promise.all(files.map(async (file) => ({ file: relative(distDir, file), css: await readFile(file, 'utf8') })));
 }
+
+/** A Worker env whose assets are the files of a built dist/ directory. */
+export function distAssetsEnv(distDir: string): { ASSETS: Fetcher } {
+  return {
+    ASSETS: {
+      async fetch(input: Request | string): Promise<Response> {
+        const path = new URL(typeof input === 'string' ? input : input.url).pathname;
+        try {
+          return new Response(await readFile(join(distDir, path)), { status: 200 });
+        } catch {
+          return new Response('not found', { status: 404 });
+        }
+      },
+    } as unknown as Fetcher,
+  };
+}

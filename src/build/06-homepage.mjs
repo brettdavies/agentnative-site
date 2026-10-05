@@ -59,7 +59,7 @@ export const WEB_CHECKS = [
   {
     id: 'C5',
     title: 'MCP',
-    desc: 'Initialize handshake, <code>tools/list</code>, error codes, CORS, <code>.well-known</code> server card.',
+    desc: 'Initialize handshake, <code>tools/list</code>, error codes, CORS, SEP-2127 server card.',
   },
   {
     id: 'C6',
@@ -333,7 +333,9 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles,
     '',
     '## Audit a CLI tool or a website, live.',
     '',
-    'Pick CLI or Website on the homepage form or the [audit page](${AUDIT_PATH}) and enter a target. A CLI target is a tool name, an install command, or a GitHub URL: `ripgrep`, `cargo binstall ouch`, `npm install -g cowsay`, `pip install black`, `uv tool install rclone`, `github.com/cli/cli`. A website target is a domain or a URL: `anc.dev`, `modelcontextprotocol.io`. [Install `anc` locally](/install) for source and project depth.',
+    'Pick CLI or Website on the homepage form or the [audit page](' +
+      AUDIT_PATH +
+      ') and enter a target. A CLI target is a tool name, an install command, or a GitHub URL: `ripgrep`, `cargo binstall ouch`, `npm install -g cowsay`, `pip install black`, `uv tool install rclone`, `github.com/cli/cli`. A website target is a domain or a URL: `anc.dev`, `modelcontextprotocol.io`. [Install `anc` locally](/install) for source and project depth.',
     '',
     '## Principles',
     '',

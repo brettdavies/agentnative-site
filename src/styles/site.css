@@ -197,13 +197,6 @@ body:has(.scorecard-page) .crumb {
   max-width: var(--col-result);
 }
 
-/* The crumb now owns the space under the header, so the container it
- * introduces no longer opens with its own. */
-main:has(> .crumb) > .doc,
-main:has(> .crumb) > .scorecard-page {
-  padding-block-start: 0;
-}
-
 main h1 {
   font-size: clamp(1.75rem, 2.5vw + 1rem, 2.5rem);
   margin-top: 0;
@@ -229,22 +222,6 @@ main pre {
   position: relative;
   background: var(--bg-code, #f0f4f7);
   border: 1px solid var(--border, #cfd5db);
-}
-/* Positioning context for the copy button (added client-side by
- * clipboard.ts). The wrapper is non-scrolling and matches the pre's outer
- * width, so an `position: absolute` copy-button stays pinned to the right
- * edge of the visible block — it does not slide leftward when the pre is
- * horizontally scrolled to read long lines. Pre margins move onto the wrap
- * so the wrap's box equals the pre chrome (otherwise top/right insets land
- * in the margin gutter above the grey fence). */
-main .code-wrap {
-  position: relative;
-  margin-block: 1em;
-}
-main .code-wrap > pre {
-  margin: 0;
-  /* Leave room so long lines don't run under the glyph. */
-  padding-right: 2.75rem;
 }
 main :not(pre) > code {
   background: var(--bg-code, #f0f4f7);
@@ -329,9 +306,6 @@ main .anchor-icon {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 0.75rem;
-}
-.normative li > p {
-  margin: 0;
 }
 
 /* Shiki dual-theme CSS bridge (docs/DESIGN.md §4.6).
@@ -1137,13 +1111,7 @@ main .anchor-icon {
 .spec-section {
   padding-block: var(--space-9);
 }
-.spec-section > .container > h2 {
-  font-size: clamp(1.7rem, 1.3rem + 1.6vw, 2.3rem);
-  letter-spacing: -0.025em;
-  font-weight: 640;
-  margin: 0;
-}
-.spec-section > .container > .sub {
+.spec-section > .container > [data-s] > .sub {
   color: var(--fg-secondary);
   margin: var(--space-3) 0 0;
   max-width: 60ch;
@@ -1474,24 +1442,6 @@ body:has(.doc) main {
   color: var(--may);
 }
 
-/* The Definition section heading holds the lede position: the heading is
- * visually hidden (still a deep-link target and in the document outline)
- * and its paragraph reads as the lede. */
-.doc #definition {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  margin: 0;
-}
-.doc #definition + p {
-  font-size: 1.22rem;
-  color: var(--fg-secondary);
-  line-height: 1.55;
-  margin-top: var(--space-5);
-}
-
 /* Audit callout — the instrument, quietly. */
 .audit-note {
   margin-top: var(--space-6);
@@ -1552,10 +1502,7 @@ body:has(.doc) main {
   flex-direction: column;
   gap: var(--space-3);
 }
-/* The hero's own help-text margin would otherwise reach the shared form and
- * space it differently from the homepage copy of the same markup. */
-.audit-form > p,
-.audit-hero .audit-form > p {
+.audit-form > p {
   margin: 0;
 }
 .audit-form__row input {
@@ -2406,7 +2353,8 @@ main .remediation__body {
   /* Evidence quotes URLs the target serves, which can outrun a phone row. */
   overflow-wrap: anywhere;
 }
-.web-check__resources a {
+.web-check__resources a,
+.web-check__note a {
   color: var(--accent);
 }
 .web-check pre {
@@ -2757,18 +2705,6 @@ main .remediation__body {
   margin: 0;
   color: var(--fg-body, #1a2026);
 }
-/* Inline `<code>` inside the meta-list value column: keep monospace + size
- * but drop the global pill chrome (background, padding, radius, shrink-size).
- * The grid puts the value at the column edge; the pill's left padding pushes
- * the text right while leaving the background flush, so labels above
- * ("1.8.1", "2026-04-23") and the install command misalign. */
-.meta-list dd code {
-  background: transparent;
-  padding: 0;
-  border-radius: 0;
-  font-size: inherit;
-}
-
 /* Embed-snippet section — surface #1 of the badge plan. Sits between
    the detail sections and the reproduce-locally CTA. Eligible variant
    shows a copy-paste snippet + live SVG preview; below-floor variant
@@ -3455,14 +3391,6 @@ main .remediation__body {
   line-height: 1.5;
 }
 
-.live-score__status--bounce .live-score__bounce-body code {
-  font-family: var(--font-mono);
-  font-size: 0.92em;
-  background: var(--bg-code);
-  padding: 0 0.3em;
-  border-radius: 3px;
-}
-
 .live-score__status--bounce .live-score__bounce-stderr {
   margin: 0 0 0.6rem;
   max-block-size: 16rem;
@@ -3575,4 +3503,91 @@ main .remediation__body {
 
 .live-score-summary__cta-aside {
   font-size: var(--text-secondary);
+}
+
+/* ================================================================
+ * Specificity tail: rules that outrank an earlier rule ending in the same
+ * element. Each sits after every lower-specificity rule for its element so
+ * source order never runs against specificity (Biome
+ * lint/style/noDescendingSpecificity); rules that share its comment sit
+ * with it.
+ * ================================================================ */
+
+/* The crumb now owns the space under the header, so the container it
+ * introduces no longer opens with its own. */
+main:has(> .crumb) > .doc,
+main:has(> .crumb) > .scorecard-page {
+  padding-block-start: 0;
+}
+
+/* Positioning context for the copy button (added client-side by
+ * clipboard.ts). The wrapper is non-scrolling and matches the pre's outer
+ * width, so an `position: absolute` copy-button stays pinned to the right
+ * edge of the visible block — it does not slide leftward when the pre is
+ * horizontally scrolled to read long lines. Pre margins move onto the wrap
+ * so the wrap's box equals the pre chrome (otherwise top/right insets land
+ * in the margin gutter above the grey fence). */
+main .code-wrap {
+  position: relative;
+  margin-block: 1em;
+}
+main .code-wrap > pre {
+  margin: 0;
+  /* Leave room so long lines don't run under the glyph. */
+  padding-right: 2.75rem;
+}
+
+.normative li > p {
+  margin: 0;
+}
+
+.spec-section > .container > [data-s] > h2 {
+  font-size: clamp(1.7rem, 1.3rem + 1.6vw, 2.3rem);
+  letter-spacing: -0.025em;
+  font-weight: 640;
+  margin: 0;
+}
+
+/* The hero's own help-text margin would otherwise reach the shared form and
+ * space it differently from the homepage copy of the same markup. */
+.audit-hero .audit-form > p {
+  margin: 0;
+}
+
+/* The Definition section heading holds the lede position: the heading is
+ * visually hidden (still a deep-link target and in the document outline)
+ * and its paragraph reads as the lede. */
+.doc #definition {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  margin: 0;
+}
+.doc #definition + p {
+  font-size: 1.22rem;
+  color: var(--fg-secondary);
+  line-height: 1.55;
+  margin-top: var(--space-5);
+}
+
+/* Inline `<code>` inside the meta-list value column: keep monospace + size
+ * but drop the global pill chrome (background, padding, radius, shrink-size).
+ * The grid puts the value at the column edge; the pill's left padding pushes
+ * the text right while leaving the background flush, so labels above
+ * ("1.8.1", "2026-04-23") and the install command misalign. */
+.meta-list dd code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+}
+
+.live-score__status--bounce .live-score__bounce-body code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--bg-code);
+  padding: 0 0.3em;
+  border-radius: 3px;
 }

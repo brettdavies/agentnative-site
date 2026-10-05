@@ -51,6 +51,17 @@ describe('web-audit conformance corpus', () => {
     }
   });
 
+  // The port reproduces live checks; a retired id names nothing it scores.
+  test('no scenario names a retired check id, and the server card check is a subject', () => {
+    const retired = Object.keys(registry.retired ?? {});
+    expect(retired).toContain('well-known-mcp-card');
+    const naming = Object.entries(SCENARIOS)
+      .filter(([, scenario]) => scenario.covers.some((id) => retired.includes(id)))
+      .map(([name]) => name);
+    expect(naming).toEqual([]);
+    expect(Object.values(SCENARIOS).some((scenario) => scenario.covers.includes('mcp-server-card'))).toBe(true);
+  });
+
   test('the committed corpus is byte-identical to a fresh generation', async () => {
     expect(existsSync(SCENARIOS_DIR)).toBe(true);
     const generated = await generateCorpus(registry);

@@ -81,7 +81,7 @@ export class AuditJob extends DurableObject {
   /** Keep one event of the run and push it to every live reader; false when `run` is not the running one. */
   async append(run: string, event: AuditEvent): Promise<boolean> {
     const current = this.current();
-    if (!current || current.status !== 'running' || current.run !== run) return false;
+    if (current?.status !== 'running' || current.run !== run) return false;
     // Each reader's relay writes its own heartbeats.
     if (event.type === 'heartbeat') return true;
     const line = JSON.stringify(event);

@@ -9,6 +9,7 @@
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { SCORECARDS_PATH, scoreMarkdownPath } from '../shared/audit-routes';
+import { MCP_DISCOVERY_DOCUMENTS } from '../shared/mcp-discovery';
 import { buildLlmsFull, buildLlmsIndex } from './llms.mjs';
 import { buildLeaderboardMarkdown } from './scorecards-render.mjs';
 import { absolutifyMarkdownLinks } from './util.mjs';
@@ -66,13 +67,12 @@ export async function emitLlmsSurface({
     summary: introSummary,
     principles: principles.map((p) => ({ n: p.n, slug: p.slug, title: p.title })),
     subPages: subPageData.map((s) => ({ name: s.name, title: s.title })),
-    // U6 of the MCP endpoint plan: surface the MCP wire entry points
-    // ahead of the human index so agents reading llms.txt find the
-    // programmatic catalog before the prose pages. Section title
-    // matches the convention streamsgrp uses.
+    // Surface the MCP wire entry points ahead of the human index so agents
+    // reading llms.txt find the programmatic catalog before the prose pages.
+    // Section title matches the convention streamsgrp uses.
     programmaticAccess: [
       { label: 'MCP server (streamable HTTP)', path: '/mcp' },
-      { label: 'MCP server card (SEP-1649)', path: '/.well-known/mcp/server-card.json' },
+      ...MCP_DISCOVERY_DOCUMENTS.map(({ label, path }) => ({ label, path })),
       { label: 'MCP client skill', path: '/mcp-skill.md' },
     ],
     scorecardLinks: [

@@ -205,6 +205,33 @@ describe('fetch failures are reported apart from drift', () => {
   });
 });
 
+describe('GitHub API reads authenticate with a supplied token', () => {
+  async function authorizationByUrl(options?: { githubToken?: string }): Promise<Record<string, string | null>> {
+    const seen: Record<string, string | null> = {};
+    const inner = fakeFetch(cleanRoutes());
+    const recording: FetchImpl = async (url, init) => {
+      seen[url] = new Headers(init?.headers).get('authorization');
+      return inner(url, init);
+    };
+    const report = await checkDrift(manifest(), recording, options);
+    expect(report.status).toBe('clean');
+    return seen;
+  }
+
+  test('the token reaches api.github.com only, and only when supplied', async () => {
+    expect(await authorizationByUrl({ githubToken: 'test-token' })).toEqual({
+      [PR_API]: 'Bearer test-token',
+      [SCHEMA_API]: 'Bearer test-token',
+      [DOC_API]: 'Bearer test-token',
+      [SCHEMA_URL]: null,
+      [DRAFT_API]: null,
+      [OPENAPI_URL]: null,
+    });
+    const anonymous = await authorizationByUrl();
+    expect(Object.values(anonymous)).toEqual([null, null, null, null, null, null]);
+  });
+});
+
 describe('a moved or missing source routes to the right next step', () => {
   const errorsOf = (report: Awaited<ReturnType<typeof checkDrift>>) =>
     report.errors.map((e) => ({ id: 'id' in e ? e.id : null, reason: e.reason, action: e.next_step.action }));
@@ -241,6 +268,15 @@ describe('a moved or missing source routes to the right next step', () => {
   test('a JSON Pointer whose path vanished asks for the pointer to be fixed rather than pinning null', async () => {
     const routes = cleanRoutes();
     routes[OPENAPI_URL] = () => json({ openapi: '3.2.0', components: { schemas: {} } });
+    const report = await checkDrift(manifest(), fakeFetch(routes));
+    expect(report.drifted).toEqual([]);
+    expect(errorsOf(report)).toEqual([{ id: 'acme-registry-schema', reason: 'parse-failed', action: 'fix-manifest' }]);
+  });
+
+  test('a JSON Pointer index past the end of an emptied array asks for the pointer to be fixed', async () => {
+    const routes = cleanRoutes();
+    routes[OPENAPI_URL] = () =>
+      json({ components: { schemas: { Server: { properties: { $schema: { examples: [] } } } } } });
     const report = await checkDrift(manifest(), fakeFetch(routes));
     expect(report.drifted).toEqual([]);
     expect(errorsOf(report)).toEqual([{ id: 'acme-registry-schema', reason: 'parse-failed', action: 'fix-manifest' }]);

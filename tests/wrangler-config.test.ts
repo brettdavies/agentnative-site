@@ -394,11 +394,17 @@ describe('wrangler.jsonc — Workers Caching per-entrypoint map (edge HIT restor
   const config = loadWranglerConfig();
   const staging = getStagingEnv(config);
 
-  test('package.json pins wrangler ^4.124.0 so cache.enabled is a real schema key', () => {
+  test('package.json floors wrangler at 4.124.0 or later so cache.enabled is a real schema key', () => {
     const pkg = JSON.parse(readFileSync(join(import.meta.dir, '..', 'package.json'), 'utf8')) as {
       devDependencies: { wrangler: string };
     };
-    expect(pkg.devDependencies.wrangler).toBe('^4.124.0');
+    const range = pkg.devDependencies.wrangler;
+    const floor = range.match(/^\^(\d+\.\d+\.\d+)$/)?.[1];
+    expect(floor, `wrangler range ${range} must be a caret range`).toBeDefined();
+    expect(
+      Bun.semver.satisfies(floor ?? '', '>=4.124.0'),
+      `wrangler range ${range} must floor at 4.124.0 or later`,
+    ).toBe(true);
   });
 
   test('top-level pins inner cache on, default and ContainerProxy cache off, cross_version_cache unset', () => {

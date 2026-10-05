@@ -194,8 +194,18 @@ if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.+][[:alnum:].-]+)?$ ]]; then
 fi
 
 mkdir -p "$DEST_DIR"
+previous="$(cat "$DEST_FILE" 2>/dev/null || true)"
 printf '%s\n' "$version" >"$DEST_FILE"
 
 echo "wrote $version to $DEST_FILE"
 echo
 echo "next: review \`git diff\` for unexpected changes, then commit."
+if [[ "$previous" != "$version" ]]; then
+    echo
+    echo "next: advance the live-scoring image in the same PR (RELEASES.md § Sandbox image releases):"
+    echo "  1. docker/sandbox/Dockerfile: point the anc tarball URL at v$version and set its sha256 from"
+    echo "     gh release download v$version -R $cli_repo -p sha256sum.txt -O - | grep x86_64-unknown-linux-gnu.tar.gz"
+    echo "  2. bun x wrangler containers build -p -t \"anc-sandbox:<git-sha>\" docker/sandbox/"
+    echo "  3. wrangler.jsonc: move env.staging.containers[0].image to the new tag"
+    echo "  tests/sandbox-anc-version.test.ts fails until step 1 lands."
+fi

@@ -1,7 +1,7 @@
 // Live-network e2e for discoverability surfaces against the staging
-// Worker. Opt-in suite (project: staging-mcp). Asserts the four wire
-// surfaces U6 ships (.well-known/mcp, security.txt, ai.txt, plus the
-// llms.txt Programmatic access section) AND the mcp-skill HTML + .md
+// Worker. Opt-in suite (project: staging-mcp). Asserts the wire surfaces
+// (the SEP-2127 card and the AI catalog, .well-known/mcp, security.txt,
+// ai.txt, plus the llms.txt Programmatic access section) AND the mcp-skill HTML + .md
 // twin pages U2 ships, with cross-surface drift assertions so a change
 // in any one (the JSON pointer's documentation URL, the docs page's
 // tool list, the well-known + handshake spec revision) breaks the
@@ -12,6 +12,7 @@
 //     bun x playwright test --project=staging-mcp tests/e2e/discoverability.e2e.ts
 
 import { expect, test } from '@playwright/test';
+import { MCP_DISCOVERY_DOCUMENTS } from '../../src/shared/mcp-discovery';
 import { EXPECTED_TOOL_NAMES } from '../helpers/mcp-tools';
 
 const STAGING_BASE = process.env.ANC_STAGING_BASE_URL;
@@ -75,8 +76,9 @@ test.describe('staging MCP descriptor aliases', () => {
     expect(body.version).toBe('1.0');
     expect(body.protocolVersion).toBe('2026-07-28');
     expect(body.transport.type).toBe('streamable-http');
-    expect(body.documentation).toBe(`${STAGING_BASE}/mcp-skill.md`);
+    expect(body.documentation).toBe(`${STAGING_BASE}/mcp-skill.md#server-cards`);
     expect((body as { authentication?: { required: boolean } }).authentication?.required).toBe(false);
+    expect(body).not.toHaveProperty('$schema');
   });
 
   test('Accept: text/markdown on canonical path still returns application/json', async ({ request }) => {
@@ -87,6 +89,31 @@ test.describe('staging MCP descriptor aliases', () => {
     expect(res.headers()['content-type']).toContain('application/json');
     const text = await res.text();
     expect(() => JSON.parse(text)).not.toThrow();
+  });
+});
+
+// The staging deployment must hand out staging URLs: a card or catalog
+// entry naming production sends a client out of the environment it asked.
+test.describe('staging SEP-2127 server card and AI catalog', () => {
+  test('/mcp/server-card names its remote on the staging origin', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/mcp/server-card`, {
+      headers: { ...ACCESS_HEADERS, accept: 'application/mcp-server-card+json' },
+    });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('application/mcp-server-card+json');
+    const card = (await res.json()) as { $schema: string; remotes: Array<{ type: string; url: string }> };
+    expect(card.$schema).toBe('https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json');
+    expect(card.remotes).toEqual([{ type: 'streamable-http', url: `${STAGING_BASE}/mcp` }]);
+  });
+
+  test('/.well-known/ai-catalog.json points its card entry at the staging origin', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/.well-known/ai-catalog.json`, { headers: ACCESS_HEADERS });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('application/ai-catalog+json');
+    const catalog = (await res.json()) as { entries: Array<{ type: string; url: string }> };
+    expect(catalog.entries).toHaveLength(1);
+    expect(catalog.entries[0].type).toBe('application/mcp-server-card+json');
+    expect(catalog.entries[0].url).toBe(`${STAGING_BASE}/mcp/server-card`);
   });
 });
 
@@ -117,7 +144,9 @@ test.describe('staging /.well-known/ai.txt', () => {
 });
 
 test.describe('staging /llms.txt', () => {
-  test('contains the Programmatic access section with three expected links', async ({ request }) => {
+  test('contains the Programmatic access section with the endpoint, discovery documents, and skill', async ({
+    request,
+  }) => {
     const res = await request.get(`${STAGING_BASE}/llms.txt`, { headers: ACCESS_HEADERS });
     expect(res.status()).toBe(200);
     const text = await res.text();
@@ -132,6 +161,48 @@ test.describe('staging /llms.txt', () => {
     expect(text).toContain(`${STAGING_BASE}/mcp`);
     expect(text).toContain(`${STAGING_BASE}/.well-known/mcp/server-card.json`);
     expect(text).toContain(`${STAGING_BASE}/mcp-skill.md`);
+    const section = text.slice(progIdx, princIdx);
+    const positions = MCP_DISCOVERY_DOCUMENTS.map((d) => section.indexOf(`- [${d.label}](${STAGING_BASE}${d.path})`));
+    expect(positions.every((index) => index >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+  });
+});
+
+test.describe('staging discovery pointers', () => {
+  test('/ Link header names every discovery document with its relation and type', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/`, { headers: { ...ACCESS_HEADERS, accept: 'text/html' } });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('text/html');
+    const entries = (res.headers().link ?? '').split(', ');
+    const positions = MCP_DISCOVERY_DOCUMENTS.map((d) =>
+      entries.indexOf(`<${d.path}>; rel="${d.rel}"; type="${d.type}"`),
+    );
+    expect(positions.every((index) => index >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+  });
+
+  for (const page of ['/', '/mcp', '/mcp-skill/']) {
+    test(`${page} HTML head links every discovery document`, async ({ request }) => {
+      const res = await request.get(`${STAGING_BASE}${page}`, { headers: { ...ACCESS_HEADERS, accept: 'text/html' } });
+      expect(res.status()).toBe(200);
+      const html = await res.text();
+      // The build minifies entry pages and drops the void element's
+      // closing slash, so compare with the slash removed.
+      const head = html.slice(0, html.indexOf('</head>')).replaceAll(' />', '>');
+      for (const d of MCP_DISCOVERY_DOCUMENTS) {
+        expect(head).toContain(`<link rel="${d.rel}" type="${d.type}" href="${d.path}" title="${d.label}">`);
+      }
+    });
+  }
+
+  test('the /mcp markdown twin lists every discovery document, SEP-1649 card first', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/mcp`, { headers: { ...ACCESS_HEADERS, accept: 'text/markdown' } });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('text/markdown');
+    const md = await res.text();
+    const positions = MCP_DISCOVERY_DOCUMENTS.map((d) => md.indexOf(`](${STAGING_BASE}${d.path})`));
+    expect(positions.every((index) => index >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
   });
 });
 
@@ -145,6 +216,20 @@ test.describe('staging agent-readiness well-known surfaces', () => {
     };
     expect(body.linkset[0].anchor).toBe(`${STAGING_BASE}/mcp`);
     expect(body.linkset[0]['service-desc'][0].href).toBe(`${STAGING_BASE}/.well-known/mcp/server-card.json`);
+  });
+
+  test('/.well-known/api-catalog links every discovery document under its relation', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/.well-known/api-catalog`, { headers: ACCESS_HEADERS });
+    expect(res.status()).toBe(200);
+    const body = (await res.json()) as { linkset: Array<Record<string, Array<{ href: string; type?: string }>>> };
+    for (const rel of new Set(MCP_DISCOVERY_DOCUMENTS.map((d) => d.rel))) {
+      expect(body.linkset[0][rel]).toEqual(
+        MCP_DISCOVERY_DOCUMENTS.filter((d) => d.rel === rel).map((d) => ({
+          href: `${STAGING_BASE}${d.path}`,
+          type: d.type,
+        })),
+      );
+    }
   });
 
   test('/.well-known/oauth-protected-resource declares the MCP resource', async ({ request }) => {
@@ -221,6 +306,7 @@ test.describe('staging agent-readiness well-known surfaces', () => {
     expect(text).toContain('public_catalog');
     expect(text).toContain('## CORS posture');
     expect(text).toContain('/.well-known/mcp/server-card.json');
+    for (const d of MCP_DISCOVERY_DOCUMENTS) expect(text).toContain(`- ${d.label}: \`${STAGING_BASE}${d.path}\`.`);
   });
 
   test('/robots.txt carries Content-Signal directives', async ({ request }) => {

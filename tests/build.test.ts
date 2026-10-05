@@ -517,11 +517,19 @@ describe('emitShell — OG image alt text', () => {
       '/llms-full.txt',
       '/mcp',
       '/.well-known/mcp/server-card.json',
+      '/mcp/server-card',
+      '/.well-known/ai-catalog.json',
       '/skill.json',
       '/.well-known/api-catalog',
     ]) {
       expect(html).toContain(`<a href="${href}">${href}</a>`);
     }
+    const noscript = html.slice(html.indexOf('<noscript>'), html.indexOf('</noscript>'));
+    const order = ['/.well-known/mcp/server-card.json', '/mcp/server-card', '/.well-known/ai-catalog.json'].map(
+      (href) => noscript.indexOf(`<a href="${href}">`),
+    );
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
   test('footer renders v<SITE_SPEC_VERSION> from content/principles/VERSION (not a hardcoded literal)', () => {

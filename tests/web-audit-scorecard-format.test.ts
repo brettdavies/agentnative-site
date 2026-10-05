@@ -1051,7 +1051,7 @@ describe('MCP rows group into protocol lanes in registry order', () => {
     ['mcp-get-fast-fail', 'pass'],
     ['webmcp', 'pass'],
     ['mcp-cors-preflight', 'n_a'],
-    ['well-known-mcp-card', 'pass'],
+    ['mcp-server-card', 'pass'],
     ['mcp-cors-actual', 'n_a'],
     ['mcp-usage-doc', 'pass'],
     ['mcp-card-legacy-aliases', 'pass'],

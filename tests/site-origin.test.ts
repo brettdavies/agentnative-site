@@ -23,11 +23,13 @@
 //   2. Assert against the WHOLE serialized response, not one field, so a
 //      URL nobody thought to check still trips the guard.
 
-import { beforeEach, describe, expect, test } from 'bun:test';
-import { readFile } from 'node:fs/promises';
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { buildSitemap } from '../src/build/10-sitemap.mjs';
+import { emitAgentReadiness, emitDiscovery } from '../src/build/11a-discovery-emit.mjs';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
 import { buildLlmsIndex } from '../src/build/llms.mjs';
 import { emitShell } from '../src/build/shell.mjs';
@@ -37,6 +39,7 @@ import { CANONICAL_SITE_URL } from '../src/shared/site-url';
 import { handleResultRoute, type ResultEnv } from '../src/worker/audit/result';
 import { keyFor as webKeyFor } from '../src/worker/audit-web/cache';
 import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
+import worker, { type Env } from '../src/worker/index';
 import { resetWebRemediationCacheForTests } from '../src/worker/mcp/tools/web-remediation';
 import { keyFor as scoreKeyFor } from '../src/worker/score/cache';
 import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
@@ -124,29 +127,11 @@ async function projections(): Promise<{ registry: string; remediation: string }>
     const remediation = normalizeWebRemediation(
       yaml.load(await readFile(join(WEB_AUDIT_DATA, 'remediation.yaml'), 'utf8')) as object,
       checks.map((c) => c.id),
+      Object.keys(registry.retired ?? {}),
     );
     webAuditProjections = { registry: JSON.stringify(registry), remediation: JSON.stringify(remediation) };
   }
   return webAuditProjections;
-}
-
-function alwaysPassLimiter() {
-  return { limit: async () => ({ success: true }) };
-}
-
-function makeKv(): KVNamespace {
-  const store = new Map<string, string>();
-  return {
-    async get(key: string) {
-      return store.get(key) ?? null;
-    },
-    async put(key: string, value: string) {
-      store.set(key, value);
-    },
-    async delete(key: string) {
-      store.delete(key);
-    },
-  } as unknown as KVNamespace;
 }
 
 function makeR2(prefill: Record<string, unknown> = {}): R2Bucket {
@@ -519,6 +504,87 @@ describe('build output separates canonical identity from navigation', () => {
       if (previous === undefined) delete process.env.PUBLIC_BASE_URL;
       else process.env.PUBLIC_BASE_URL = previous;
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Surface 6: discovery documents served from build seeds
+// ---------------------------------------------------------------------------
+
+describe('discovery documents name the origin they were served from', () => {
+  let seedDir = '';
+
+  // The seeds carry the canonical host, as a production build writes them,
+  // so only the serve-time rewrite can put this deployment's origin in a
+  // response.
+  beforeAll(async () => {
+    seedDir = await mkdtemp(join(tmpdir(), 'site-origin-discovery-'));
+    await emitDiscovery({ distDir: seedDir, baseUrl: CANONICAL_SITE_URL });
+    await writeFile(join(seedDir, 'mcp-skill.md'), '# MCP skill\n');
+    await emitAgentReadiness({ distDir: seedDir, baseUrl: CANONICAL_SITE_URL });
+  });
+
+  afterAll(async () => {
+    await rm(seedDir, { recursive: true, force: true });
+  });
+
+  async function serve(path: string): Promise<{ status: number; body: string }> {
+    const assets = {
+      async fetch(input: Request | string): Promise<Response> {
+        const assetPath = new URL(typeof input === 'string' ? input : input.url).pathname;
+        try {
+          return new Response(await readFile(join(seedDir, assetPath)), { status: 200 });
+        } catch {
+          return new Response('not found', { status: 404 });
+        }
+      },
+    } as unknown as Fetcher;
+    const res = await worker.fetch(
+      new Request(`${NON_CANONICAL_ORIGIN}${path}`),
+      { ASSETS: assets } as Env,
+      {} as ExecutionContext,
+    );
+    return { status: res.status, body: await res.text() };
+  }
+
+  test('the SEP-2127 server card names its remote on the serving origin', async () => {
+    const { status, body } = await serve('/mcp/server-card');
+    expect(status).toBe(200);
+    const card = JSON.parse(body) as { remotes: Array<{ url: string }> };
+    expect(card.remotes[0].url).toBe(`${NON_CANONICAL_ORIGIN}/mcp`);
+    expectServedOnOwnOrigin(body);
+  });
+
+  test('the AI catalog entry points at the server card on the serving origin', async () => {
+    const { status, body } = await serve('/.well-known/ai-catalog.json');
+    expect(status).toBe(200);
+    const catalog = JSON.parse(body) as { entries: Array<{ url: string }> };
+    expect(catalog.entries[0].url).toBe(`${NON_CANONICAL_ORIGIN}/mcp/server-card`);
+    expectServedOnOwnOrigin(body);
+  });
+
+  test('the API catalog links each discovery document at its own path on the serving origin', async () => {
+    const { status, body } = await serve('/.well-known/api-catalog');
+    expect(status).toBe(200);
+    const catalog = JSON.parse(body) as { linkset: Array<Record<string, Array<{ href: string }>>> };
+    expect(catalog.linkset[0]['service-desc'].map((link) => link.href)).toEqual([
+      `${NON_CANONICAL_ORIGIN}/.well-known/mcp/server-card.json`,
+      `${NON_CANONICAL_ORIGIN}/mcp/server-card`,
+    ]);
+    expect(catalog.linkset[0]['ai-catalog'].map((link) => link.href)).toEqual([
+      `${NON_CANONICAL_ORIGIN}/.well-known/ai-catalog.json`,
+    ]);
+    expectServedOnOwnOrigin(body);
+  });
+
+  test('the SEP-1649 card keeps the fields the MCP smoke reads, on the serving origin', async () => {
+    const { status, body } = await serve('/.well-known/mcp/server-card.json');
+    expect(status).toBe(200);
+    const card = JSON.parse(body) as Record<string, unknown>;
+    expect(card.protocolVersion).toBe('2026-07-28');
+    expect(card.mcp_endpoint).toBe(`${NON_CANONICAL_ORIGIN}/mcp`);
+    expect(card).not.toHaveProperty('$schema');
+    expectServedOnOwnOrigin(body);
   });
 });
 

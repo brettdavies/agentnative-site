@@ -10,7 +10,6 @@
     },
     {
       "source": "/.well-known/mcp/server-card.json",
-      "document": "server-card",
       "status": 200,
       "shape": "sep-1649",
       "endpoint": "https://mcp.example.net/mcp",
@@ -601,8 +600,8 @@
       "host": "mcp.example.net"
     },
     {
-      "id": "well-known-mcp-card",
-      "label": "A .well-known MCP server card is published (SEP-1649)",
+      "id": "mcp-server-card",
+      "label": "An MCP server card is published",
       "category": "mcp",
       "group": "P8",
       "layer": "web",
@@ -610,13 +609,13 @@
       "tier": "recommended",
       "principle": "P8",
       "status": "pass",
-      "evidence": "https://example.com/.well-known/mcp/server-card.json -> 200",
+      "evidence": "https://mcp.example.net/mcp/server-card -> 200",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.net"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.net"
     },
     {
       "id": "mcp-card-legacy-aliases",

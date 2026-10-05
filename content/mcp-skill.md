@@ -241,6 +241,8 @@ A read also carries where each row's evidence came from and what the audit could
   ([remediation](/web-scorecard-schema#remediation-on-the-mcp-surface)).
 - `access_note`: beside `results` when any row could not run, the sentence saying global keeps those rows in its maximum
   ([remediation](/web-scorecard-schema#remediation-on-the-mcp-surface)).
+- `successor`: on a stored row whose check id is retired, the check that replaced it; the row carries no remediation,
+  and a re-audit scores the successor ([remediation](/web-scorecard-schema#remediation-on-the-mcp-surface)).
 - `follow_declarations`: whether the audit followed the hosts the site declares; absent means not recorded
   ([top-level fields](/web-scorecard-schema#top-level-fields)).
 - `declared_hosts`: the declared-hosts trail, one entry per declared host and how the audit treated it
@@ -459,14 +461,14 @@ roll. Both ceilings are pre-data placeholders sized from parity with sister depl
 For clients that need the protocol details.
 
 **Endpoint.** `POST https://anc.dev/mcp`. `GET` is also serviceable: it returns the human landing page, or a permanent
-redirect to the server card under a JSON `Accept`. Every other method returns `405 Method Not Allowed` advertising
-`Allow: GET, POST`. No authentication.
+redirect to the SEP-1649 server card under a JSON `Accept`. Every other method returns `405 Method Not Allowed`
+advertising `Allow: GET, POST`. No authentication.
 
 **Transport.** Streamable HTTP per MCP spec revision `2026-07-28`. Legacy clients send `initialize` with client
 `protocolVersion=2025-06-18`; modern clients use `MCP-Protocol-Version: 2026-07-28`, `Mcp-Method`, optional `Mcp-Name`
 (call only), and `_meta` inside JSON-RPC **params** (including `io.modelcontextprotocol/clientCapabilities` on both list
-and call). The server card's `protocolVersion` is pinned in lockstep; tests assert each literal so drift breaks the
-build.
+and call). The SEP-1649 server card's `protocolVersion` is pinned in lockstep; tests assert each literal so drift breaks
+the build.
 
 **Tool metadata.** Every `tools/list` entry carries a `title` (a short display name) alongside `description` and
 `inputSchema`, plus an `annotations` object describing the tool's posture. The eleven read tools carry `readOnlyHint:
@@ -488,7 +490,28 @@ resolve unequal preferences. Absent or `*/*` Accept → JSON. Only a request tha
 
 **Discovery siblings.**
 
-- `https://anc.dev/.well-known/mcp/server-card.json`: canonical MCP server card (SEP-1649). Pointer aliases:
-  `/.well-known/mcp`, `/mcp.json`.
+- `https://anc.dev/mcp/server-card`: the MCP server card (SEP-2127), described under [Server cards](#server-cards).
+- `https://anc.dev/.well-known/ai-catalog.json`: the AI catalog that lists the server card.
+- `https://anc.dev/.well-known/mcp/server-card.json`: the SEP-1649 server card, superseded by the SEP-2127 card. Pointer
+  aliases: `/.well-known/mcp`, `/mcp.json`.
 - `https://anc.dev/.well-known/ai.txt`: AI-training and agent-access posture plus `Programmatic-API:
   https://anc.dev/mcp`.
+
+### Server cards
+
+The card of record is the SEP-2127 server card at `https://anc.dev/mcp/server-card`, the location SEP-2127 reserves for
+an endpoint's card (the endpoint URL plus `/server-card`). It is served as `application/mcp-server-card+json` and
+carries the SEP-2127 `$schema`, the server's `name` (`dev.anc/anc`), `title`, `description`, `version`, a `websiteUrl`
+pointing at this guide, and one `streamable-http` remote, `https://anc.dev/mcp`. It describes identity and connection
+only: list the tools and resources over the protocol.
+
+The AI catalog at `https://anc.dev/.well-known/ai-catalog.json` (`application/ai-catalog+json`) lists the card in one
+entry with `type` `application/mcp-server-card+json`, `identifier` `urn:air:anc.dev:mcp:anc`, and `url`
+`https://anc.dev/mcp/server-card`. A client discovering servers on the domain reads the catalog, then the card.
+
+The SEP-1649 card at `https://anc.dev/.well-known/mcp/server-card.json` is superseded by the SEP-2127 card. It is still
+served for clients that read its `mcp_endpoint`, `protocolVersion`, `transport`, and `authentication` fields, and its
+`documentation` field points at this section.
+
+All three documents answer `GET` only and are open to cross-origin reads (`Access-Control-Allow-Origin: *`). Their URLs
+name the host that served them, so a staging deployment hands out staging URLs.

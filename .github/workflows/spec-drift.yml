@@ -1,0 +1,212 @@
+# Spec-drift poll: compares every source pinned in src/data/standards/watch.yaml
+# with its live upstream value and keeps one open `spec-drift` issue per
+# drifted source. Manifest fields, re-pinning, the forced-drift proof, and the
+# main-only rule: docs/runbooks/spec-drift-poll.md.
+#
+# Triggers:
+#   schedule           07:41 UTC daily, off the hour and clear of the 06:00,
+#                      13:00, and 13:37 scheduled workflows.
+#   workflow_dispatch  manual run. `gh workflow run spec-drift.yml --ref <branch>`
+#                      checks that branch's manifest, which is how a forced
+#                      drift is proven without touching main.
+#
+# Drift is reported through the issue, so a drifted run stays green. A source
+# that cannot be checked reds the run, after any drift found beside it has its
+# issue. No `continue-on-error` anywhere: a soft-failed step reverts the gate.
+
+name: spec-drift
+
+on:
+  schedule:
+    - cron: '41 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One group for every ref: a dispatched branch run and a scheduled main run
+# write the same issue set, and two interleaved upserts could both create.
+concurrency:
+  group: spec-drift
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  check:
+    name: check · compare watched sources with their pins
+    # Scheduled runs already execute main's copy of this file; the guard keeps
+    # any other non-dispatch trigger from reading a branch's pins.
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      drift: ${{ steps.compare.outputs.drift }}
+      report: ${{ steps.compare.outputs.report }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Cache bun install cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Compare watched sources with their pins
+        id: compare
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/spec-drift-report.json"
+          code=0
+          bun scripts/standards/check-drift.ts > "$report" || code=$?
+          jq . "$report"
+          # Bun also exits 1 on an uncaught exception, so the exit code alone
+          # cannot tell drift from a crash: the report must parse and agree.
+          reported=$(jq -er '.exit_code' "$report")
+          if [ "$reported" != "$code" ]; then
+            echo "::error::check-drift exited $code but its report carries exit_code $reported"
+            exit 1
+          fi
+          {
+            echo "status=$(jq -er '.status' "$report")"
+            echo "drift=$(jq -c '.drifted | length > 0' "$report")"
+            echo "report=$(jq -c . "$report")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload the drift report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: spec-drift-report
+          path: ${{ runner.temp }}/spec-drift-report.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Fail when a source could not be checked
+        if: steps.compare.outputs.status == 'error'
+        run: |
+          jq -r '.errors[] | "::error::\(.id // "manifest"): \(.reason), next step \(.next_step.action): \(.message | @json)"' \
+            "$RUNNER_TEMP/spec-drift-report.json"
+          exit 1
+
+  upsert-issues:
+    name: upsert · one spec-drift issue per drifted source
+    needs: check
+    # Runs after a red check too, so drift found beside an unreachable source
+    # still gets its issue while the check keeps the run red.
+    if: ${{ !cancelled() && needs.check.outputs.drift == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    # GH_TOKEN sits on the gh steps only, so the bun step that plans the
+    # upserts never holds the write token.
+    env:
+      GH_REPO: ${{ github.repository }}
+      DRIFT_LABEL: spec-drift
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Cache bun install cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Ensure the spec-drift label exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh api "repos/$GH_REPO/labels/$DRIFT_LABEL" --silent; then
+            gh label create "$DRIFT_LABEL" --color D93F0B \
+              --description "An upstream specification moved off its pin in src/data/standards/watch.yaml"
+          fi
+
+      # The REST issues list reads the repository directly. `gh issue list`
+      # with `--label` or `--search` goes through the search API, whose index
+      # lags minutes behind, so an issue the previous run just opened would be
+      # invisible and this run would open a duplicate. The REST list also
+      # returns pull requests, which carry a `pull_request` key.
+      - name: List open spec-drift issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$GH_REPO/issues?labels=$DRIFT_LABEL&state=open&per_page=100" \
+            --jq '.[] | select(has("pull_request") | not) | {number, title, body}' \
+            | jq -s . > "$RUNNER_TEMP/spec-drift-open-issues.json"
+          jq -r '"\(length) open \(env.DRIFT_LABEL) issue(s)"' "$RUNNER_TEMP/spec-drift-open-issues.json"
+
+      - name: Plan one upsert per drifted source
+        env:
+          DRIFT_REPORT: ${{ needs.check.outputs.report }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$DRIFT_REPORT" > "$RUNNER_TEMP/spec-drift-report.json"
+          bun scripts/standards/drift-issues.ts \
+            --report "$RUNNER_TEMP/spec-drift-report.json" \
+            --open-issues "$RUNNER_TEMP/spec-drift-open-issues.json" \
+            --repo-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --run-id "$GITHUB_RUN_ID" \
+            --ref "$GITHUB_REF_NAME" \
+            > "$RUNNER_TEMP/spec-drift-upserts.json"
+          jq -r '.[] | "\(.action) \(.source_id)\(if .number then " #\(.number)" else "" end)"' \
+            "$RUNNER_TEMP/spec-drift-upserts.json"
+
+      - name: Apply the upserts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          plan="$RUNNER_TEMP/spec-drift-upserts.json"
+          body="$RUNNER_TEMP/spec-drift-issue-body.md"
+          count=$(jq 'length' "$plan")
+          for ((i = 0; i < count; i++)); do
+            action=$(jq -r ".[$i].action" "$plan")
+            source_id=$(jq -r ".[$i].source_id" "$plan")
+            jq -r ".[$i].body" "$plan" > "$body"
+            case "$action" in
+              update)
+                number=$(jq -r ".[$i].number" "$plan")
+                gh issue edit "$number" --body-file "$body"
+                echo "- updated #$number for \`$source_id\`" >> "$GITHUB_STEP_SUMMARY"
+                ;;
+              create)
+                title=$(jq -r ".[$i].title" "$plan")
+                url=$(gh issue create --title "$title" --label "$DRIFT_LABEL" --body-file "$body")
+                echo "- opened $url for \`$source_id\`" >> "$GITHUB_STEP_SUMMARY"
+                ;;
+              *)
+                echo "::error::unknown upsert action '$action' for $source_id"
+                exit 1
+                ;;
+            esac
+          done

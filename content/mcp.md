@@ -5,6 +5,8 @@ agent-native CLI standard registry. MCP clients POST JSON-RPC requests here.
 
 - Wire contract and tool catalog: [/mcp-skill](/mcp-skill)
 - JSON server card (SEP-1649): [/.well-known/mcp/server-card.json](/.well-known/mcp/server-card.json). Pointer aliases: [/.well-known/mcp](/.well-known/mcp), [/mcp.json](/mcp.json). Also on `/mcp` with `Accept: application/json`.
+- JSON server card (SEP-2127): [/mcp/server-card](/mcp/server-card), served as `application/mcp-server-card+json`.
+- AI catalog listing the SEP-2127 card: [/.well-known/ai-catalog.json](/.well-known/ai-catalog.json), served as `application/ai-catalog+json`.
 - Markdown twin of this page: [/mcp.md](/mcp.md)
 - The standard itself: [the homepage](/)
 

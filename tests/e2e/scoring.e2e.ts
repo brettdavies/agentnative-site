@@ -10,8 +10,9 @@
 // again repeating the opt-out, the entry form's opt-out reaching the POST,
 // a later followed submit superseding a kept opted-out result, a reload mid
 // opt-out run keeping the opt-out on the probe and on Start, a website run's
-// waiting line, its endpoint's declarer, and each streamed row's host and
-// result line, and that the page never loads the WebMCP script.
+// waiting line, its endpoint's declarer, the no-endpoint line with and without
+// following, and each streamed row's host and result line, and that the page
+// never loads the WebMCP script.
 
 import { expect, type Page, test } from '@playwright/test';
 
@@ -570,6 +571,33 @@ test.describe('/scoring progress page', () => {
     await stream.opened();
     await stream.send({ type: 'accepted', lane: 'web', target: 'example.com', started_at: AT });
     await expect(page.locator('[data-scoring-status]')).toHaveText('Reading example.com…');
+  });
+
+  test('a run that does not follow declared hosts and finds no endpoint says those hosts went unchecked', async ({
+    page,
+  }) => {
+    await mockTurnstile(page);
+    await seedStash(page, 'stripe.dev', 'web', false);
+    const stream = await controlledStream(page);
+    await page.goto('/scoring?target=stripe.dev');
+    await stream.opened();
+    await stream.send({ type: 'accepted', lane: 'web', target: 'stripe.dev', started_at: AT });
+    await stream.send({ type: 'discovery', mcp_endpoint: null });
+    await expect(page.locator('[data-scoring-status]')).toContainText(
+      'No MCP endpoint found on stripe.dev; the hosts it declares were not checked on this run. Checks:',
+    );
+  });
+
+  test('a followed run that finds no endpoint says none was found', async ({ page }) => {
+    await mockTurnstile(page);
+    await seedStash(page, 'stripe.dev', 'web');
+    const stream = await controlledStream(page);
+    await page.goto('/scoring?target=stripe.dev');
+    await stream.opened();
+    await stream.send({ type: 'accepted', lane: 'web', target: 'stripe.dev', started_at: AT });
+    await stream.send({ type: 'discovery', mcp_endpoint: null });
+    await expect(page.locator('[data-scoring-status]')).toContainText('No MCP endpoint found. Checks:');
+    await expect(page.locator('[data-scoring-status]')).not.toContainText('not checked');
   });
 
   test('the page never loads the WebMCP script', async ({ page }) => {

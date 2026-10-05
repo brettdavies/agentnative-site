@@ -344,18 +344,24 @@ spec revision describes.
 
 ### MCP server card
 
-The machine-readable descriptor of the MCP endpoint, following the SEP-1649 server-card shape: it declares the endpoint
-URL, the protocol revision, the transport, a documentation pointer, and that authentication is not required. Canonical
-at `/.well-known/mcp/server-card.json`; the legacy alias paths permanently redirect to it, so one canonical body exists
-with no duplicates.
+The machine-readable descriptor of the MCP endpoint, following the SEP-2127 shape: a static document naming the server
+in reverse-DNS form, its title, description, and version, and its one `streamable-http` remote, the MCP endpoint. It is
+served at `<endpoint>/server-card` (`/mcp/server-card`, the location SEP-2127 reserves) as
+`application/mcp-server-card+json`, and the AI catalog at `/.well-known/ai-catalog.json` lists it, which is how a client
+finds it without guessing. It describes identity and connection only; the server's tools and resources stay subject to
+runtime listing. The card validates against the vendored extension schema. Its version matches the `serverInfo` the
+endpoint reports, and its name is that server name under the reverse-DNS namespace of the canonical host (`dev.anc/anc`
+for `serverInfo.name` `anc`). The SEP-1649 card at `/.well-known/mcp/server-card.json` is superseded by it and is still
+served, carrying the protocol revision, the transport, and the no-authentication declaration; the legacy alias paths
+permanently redirect to that path.
 
 ### Discovery surface
 
 Any machine-readable endpoint that lets an agent find and use the MCP endpoint without reading the HTML site: the MCP
-server card, the OAuth metadata, the JWKS, the RFC 9727 api-catalog, the agent-skills index, and the AI-signal lines in
-`robots.txt` / `ai.txt`. The family is served by the Worker and is the agent-facing twin of the human navigation; every
-entry points at the same MCP endpoint, so drift between them breaks discoverability. DNS-AID is the DNS-layer
-counterpart, discoverable before any HTTP fetch.
+server card and the AI catalog that lists it, the OAuth metadata, the JWKS, the RFC 9727 api-catalog, the agent-skills
+index, and the AI-signal lines in `robots.txt` / `ai.txt`. The family is served by the Worker and is the agent-facing
+twin of the human navigation; every entry points at the same MCP endpoint, so drift between them breaks discoverability.
+DNS-AID is the DNS-layer counterpart, discoverable before any HTTP fetch.
 
 ### DNS-AID
 

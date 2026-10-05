@@ -25,9 +25,17 @@ export function endpointHostOf(endpoint: string | null): string | null {
   return endpoint === null ? null : hostOf(endpoint);
 }
 
-/** Where discovery found the MCP endpoint, naming the target as its declarer when it sits on another host. */
-export function discoveryLine(endpoint: string | null, target: string): string {
-  if (endpoint === null) return 'No MCP endpoint found.';
+/**
+ * Where discovery found the MCP endpoint, naming the target as its declarer
+ * when it sits on another host. A run that did not follow declared hosts
+ * never checked them, so finding no endpoint speaks for the target alone.
+ */
+export function discoveryLine(endpoint: string | null, target: string, follow: boolean): string {
+  if (endpoint === null) {
+    return follow
+      ? 'No MCP endpoint found.'
+      : `No MCP endpoint found on ${target}; the hosts it declares were not checked on this run.`;
+  }
   const host = endpointHostOf(endpoint);
   return host === null || host === target.toLowerCase()
     ? `MCP endpoint found at ${endpoint}.`

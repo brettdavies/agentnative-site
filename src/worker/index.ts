@@ -21,6 +21,14 @@ import {
   retiredRedirectFor,
   SCORECARDS_PATH,
 } from '../shared/audit-routes';
+import {
+  AI_CATALOG_PATH,
+  AI_CATALOG_TYPE,
+  MCP_SERVER_CARD_PATH,
+  MCP_SERVER_CARD_SEED_PATH,
+  MCP_SERVER_CARD_TYPE,
+  SEP_1649_CARD_SEED_PATH,
+} from '../shared/mcp-discovery';
 import { classifyGatewayRequest, detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
 import { type AuditApiEnv, handleAuditApi, isAuditApiPath } from './audit/api';
 import type { AuditJob } from './audit/job';
@@ -241,13 +249,9 @@ function rewriteToMarkdown(url: URL): URL {
 
 const MCP_DESCRIPTOR_CACHE = 'public, max-age=300, s-maxage=86400, stale-while-revalidate=60';
 
-// Must match the seed file written by emitDiscovery() in src/build/11a-discovery-emit.mjs
-// (separate bundle, so the path cannot be a shared import).
-const MCP_DESCRIPTOR_SEED_ASSET = '/_internal/mcp-server-card.json';
-
 function rewriteMcpDescriptorUrls(data: Record<string, unknown>, origin: string): void {
   const mcp = `${origin}/mcp`;
-  const docs = `${origin}/mcp-skill.md`;
+  const docs = `${origin}/mcp-skill.md#server-cards`;
   data.mcp_endpoint = mcp;
   data.url = mcp;
   data.documentation = docs;
@@ -262,16 +266,16 @@ function rewriteMcpDescriptorUrls(data: Record<string, unknown>, origin: string)
 }
 
 /**
- * Build the MCP server-card JSON body, rewriting URL fields to the inbound
- * request's origin. Seed: dist/_internal/mcp-server-card.json.
+ * Build the SEP-1649 server-card JSON body, rewriting URL fields to the
+ * inbound request's origin. Seed: dist/_internal/mcp-server-card.json.
  *
- * Canonical (SEP-1649): GET /.well-known/mcp/server-card.json
- * The pointer aliases (/.well-known/mcp, /mcp.json, /.well-known/mcp.json)
- * and GET /mcp with Accept: application/json 301 to the canonical.
+ * Served at GET /.well-known/mcp/server-card.json. The pointer aliases
+ * (/.well-known/mcp, /mcp.json, /.well-known/mcp.json) and GET /mcp with
+ * Accept: application/json 301 to it.
  */
 async function buildMcpDescriptorJsonBody(request: Request, env: Env): Promise<string | null> {
   const seedUrl = new URL(request.url);
-  seedUrl.pathname = MCP_DESCRIPTOR_SEED_ASSET;
+  seedUrl.pathname = SEP_1649_CARD_SEED_PATH;
   const asset = await env.ASSETS.fetch(new Request(seedUrl.toString(), { method: 'GET' }));
   if (!asset.ok) return null;
   const body = await asset.text();
@@ -333,26 +337,46 @@ function rewriteOAuthAuthorizationServer(data: Record<string, unknown>, origin: 
   }
 }
 
-function rewriteApiCatalogHrefs(value: unknown, href: string): void {
+function rewriteServerCard(data: Record<string, unknown>, origin: string): void {
+  data.websiteUrl = `${origin}/mcp-skill`;
+  if (!Array.isArray(data.remotes)) return;
+  for (const remote of data.remotes) {
+    if (remote && typeof remote === 'object') {
+      (remote as Record<string, unknown>).url = `${origin}/mcp`;
+    }
+  }
+}
+
+function rewriteAiCatalog(data: Record<string, unknown>, origin: string): void {
+  if (!Array.isArray(data.entries)) return;
+  for (const entry of data.entries) {
+    if (entry && typeof entry === 'object' && (entry as Record<string, unknown>).type === MCP_SERVER_CARD_TYPE) {
+      (entry as Record<string, unknown>).url = `${origin}${MCP_SERVER_CARD_PATH}`;
+    }
+  }
+}
+
+function rewriteApiCatalogHrefs(value: unknown, origin: string): void {
   if (!Array.isArray(value)) return;
   for (const entry of value) {
-    if (entry && typeof entry === 'object') {
-      (entry as Record<string, unknown>).href = href;
-    }
+    if (!entry || typeof entry !== 'object') continue;
+    const link = entry as Record<string, unknown>;
+    if (typeof link.href !== 'string' || !URL.canParse(link.href)) continue;
+    const { pathname, search, hash } = new URL(link.href);
+    link.href = `${origin}${pathname}${search}${hash}`;
   }
 }
 
 function rewriteApiCatalog(data: Record<string, unknown>, origin: string): void {
   const linkset = data.linkset;
   if (!Array.isArray(linkset)) return;
-  const serverCard = `${origin}/.well-known/mcp/server-card.json`;
   for (const entry of linkset) {
     if (!entry || typeof entry !== 'object') continue;
     const link = entry as Record<string, unknown>;
     if (typeof link.anchor === 'string') link.anchor = `${origin}/mcp`;
-    rewriteApiCatalogHrefs(link['service-desc'], serverCard);
-    rewriteApiCatalogHrefs(link['service-doc'], `${origin}/mcp-skill`);
-    rewriteApiCatalogHrefs(link.status, serverCard);
+    for (const [relation, targets] of Object.entries(link)) {
+      if (relation !== 'anchor') rewriteApiCatalogHrefs(targets, origin);
+    }
   }
 }
 
@@ -375,12 +399,24 @@ function mcpDescriptorRedirect(request: Request): Response {
   });
 }
 
-function mcpDescriptorJsonResponse(body: string): Response {
+function mcpDescriptorJsonResponse(body: string, contentType = 'application/json; charset=utf-8'): Response {
   return new Response(body, {
     status: 200,
     headers: {
-      'content-type': 'application/json; charset=utf-8',
+      'content-type': contentType,
       'cache-control': MCP_DESCRIPTOR_CACHE,
+      ...DISCOVERY_CORS_HEADERS,
+    },
+  });
+}
+
+function discoveryCatalogResponse(body: string, contentType: string): Response {
+  return new Response(body, {
+    status: 200,
+    headers: {
+      'content-type': contentType,
+      'cache-control': MCP_DESCRIPTOR_CACHE,
+      'x-robots-tag': 'noindex',
       ...DISCOVERY_CORS_HEADERS,
     },
   });
@@ -411,6 +447,7 @@ const DISCOVERY_GET_ONLY_PATHS = new Set([
   '/.well-known/oauth-protected-resource',
   '/.well-known/oauth-authorization-server',
   '/.well-known/api-catalog',
+  AI_CATALOG_PATH,
 ]);
 
 async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -436,10 +473,11 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
     return handleWebBackfill(request, env as WebBackfillTriggerEnv, ctx);
   }
 
-  // MCP server card (SEP-1649): the canonical path serves the JSON
-  // document from dist/_internal/mcp-server-card.json, origin-rewritten
-  // at serve time; the legacy pointer aliases 301 to it (R9) so one
-  // canonical body exists with no ambiguous duplicates.
+  // SEP-1649 server card, superseded by the SEP-2127 card below: the
+  // well-known path serves the JSON document from
+  // dist/_internal/mcp-server-card.json, origin-rewritten at serve time;
+  // the pointer aliases 301 to it so one body exists with no ambiguous
+  // duplicates.
   if (pathname === MCP_DESCRIPTOR_CANONICAL_PATH && request.method !== 'OPTIONS') {
     if (request.method !== 'GET') return discoveryGetOnly405();
     const body = await buildMcpDescriptorJsonBody(request, env);
@@ -449,6 +487,16 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   if (MCP_DESCRIPTOR_ALIAS_PATHS.has(pathname) && request.method !== 'OPTIONS') {
     if (request.method !== 'GET') return discoveryGetOnly405();
     return mcpDescriptorRedirect(request);
+  }
+
+  // SEP-2127 server card at <endpoint>/server-card, the location the AI
+  // catalog lists. The /mcp branch below matches its path exactly, so the
+  // card needs a branch of its own ahead of the asset dispatch.
+  if (pathname === MCP_SERVER_CARD_PATH && request.method !== 'OPTIONS') {
+    if (request.method !== 'GET') return discoveryGetOnly405();
+    const body = await buildOriginAwareJsonBody(request, env, MCP_SERVER_CARD_SEED_PATH, rewriteServerCard);
+    if (body === null) return discoveryMetadataUnavailable();
+    return mcpDescriptorJsonResponse(body, `${MCP_SERVER_CARD_TYPE}; charset=utf-8`);
   }
 
   if (DISCOVERY_GET_ONLY_PATHS.has(pathname) && request.method !== 'GET' && request.method !== 'OPTIONS') {
@@ -512,15 +560,15 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   if (pathname === '/.well-known/api-catalog' && request.method === 'GET') {
     const body = await buildOriginAwareJsonBody(request, env, '/.well-known/api-catalog', rewriteApiCatalog);
     if (body === null) return discoveryMetadataUnavailable();
-    return new Response(body, {
-      status: 200,
-      headers: {
-        'content-type': 'application/linkset+json; charset=utf-8',
-        'cache-control': MCP_DESCRIPTOR_CACHE,
-        'x-robots-tag': 'noindex',
-        ...DISCOVERY_CORS_HEADERS,
-      },
-    });
+    return discoveryCatalogResponse(body, 'application/linkset+json; charset=utf-8');
+  }
+
+  // /.well-known/ai-catalog.json: the AI catalog, whose one entry lists the
+  // SEP-2127 card, origin-rewritten like every other discovery surface.
+  if (pathname === AI_CATALOG_PATH && request.method === 'GET') {
+    const body = await buildOriginAwareJsonBody(request, env, AI_CATALOG_PATH, rewriteAiCatalog);
+    if (body === null) return discoveryMetadataUnavailable();
+    return discoveryCatalogResponse(body, `${AI_CATALOG_TYPE}; charset=utf-8`);
   }
 
   // /mcp — streamable HTTP MCP server (POST) plus a content-negotiated

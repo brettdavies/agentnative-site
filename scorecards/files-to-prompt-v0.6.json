@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.7",
+  "schema_version": "0.9",
   "results": [
     {
       "id": "p3-must-top-level-examples",
@@ -172,7 +172,7 @@
       "group": "P6",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "no subcommands parsed from --help",
+      "evidence": "no command block found in --help output, so no subcommands were parsed",
       "confidence": "low",
       "tier": "may",
       "audit_id": "p6-standard-names"
@@ -377,7 +377,7 @@
     },
     {
       "id": "p2-must-json-errors",
-      "label": "Errors emit JSON envelope with `error`/`kind`/`message` under `--output json`",
+      "label": "Errors emit JSON envelope with discriminant + type id + message roles under `--output json`",
       "group": "P2",
       "layer": "behavioral",
       "status": "skip",
@@ -414,7 +414,7 @@
       "group": "P3",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary has no subcommands; MUST applies conditionally to CLIs that use them.",
+      "evidence": "no command block found in --help output, so no subcommands were parsed; the MUST applies conditionally to CLIs that use subcommands.",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p3-subcommand-examples"
@@ -429,6 +429,17 @@
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p3-paired-examples"
+    },
+    {
+      "id": "p3-should-unprefixed-command-list",
+      "label": "Command-list entries name the command without repeating the binary name",
+      "group": "P3",
+      "layer": "behavioral",
+      "status": "n_a",
+      "evidence": "no command block found in --help output, so no subcommands were parsed; the SHOULD applies to CLIs that list subcommands.",
+      "confidence": "medium",
+      "tier": "should",
+      "audit_id": "p3-unprefixed-command-list"
     },
     {
       "id": "p6-should-subcommand-operations",
@@ -476,12 +487,12 @@
     }
   ],
   "summary": {
-    "total": 43,
+    "total": 44,
     "pass": 13,
     "warn": 15,
     "fail": 1,
     "opt_out": 0,
-    "n_a": 0,
+    "n_a": 1,
     "skip": 14,
     "error": 0
   },
@@ -491,8 +502,8 @@
       "verified": 19
     },
     "should": {
-      "total": 21,
-      "verified": 13
+      "total": 22,
+      "verified": 14
     },
     "may": {
       "total": 10,
@@ -508,12 +519,12 @@
     "version": "files-to-prompt, version 0.6"
   },
   "anc": {
-    "version": "0.5.0"
+    "version": "0.6.0"
   },
   "run": {
     "invocation": "anc audit --command files-to-prompt --output json",
-    "started_at": "2026-06-01T17:36:36.592472375Z",
-    "duration_ms": 696,
+    "started_at": "2026-10-05T18:44:43.861329515Z",
+    "duration_ms": 637,
     "platform": {
       "os": "linux",
       "arch": "x86_64"

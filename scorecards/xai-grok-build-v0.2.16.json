@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.7",
+  "schema_version": "0.9",
   "results": [
     {
       "id": "p3-must-top-level-examples",
@@ -175,7 +175,35 @@
       "evidence": "7/20 subcommand(s) follow standard verb names. Non-standard: agent, export, import, leader, mcp, memory, models, plugin, sessions, setup, ssh, trace, worktree. MAY-tier — community-standard verbs (get/list/create/update/delete) help agents predict subcommand behavior across CLIs.",
       "confidence": "low",
       "tier": "may",
-      "audit_id": "p6-standard-names"
+      "audit_id": "p6-standard-names",
+      "config_hint": {
+        "files": [
+          {
+            "file": ".anc.toml",
+            "scope": "tool-repository"
+          },
+          {
+            "file": "~/.anc.toml",
+            "scope": "user"
+          }
+        ],
+        "domain_verbs": [
+          "agent",
+          "export",
+          "import",
+          "leader",
+          "mcp",
+          "memory",
+          "models",
+          "plugin",
+          "sessions",
+          "setup",
+          "ssh",
+          "trace",
+          "worktree"
+        ],
+        "docs": "https://github.com/brettdavies/agentnative-cli#configuration-anctoml"
+      }
     },
     {
       "id": "p8-must-bundle-install",
@@ -377,7 +405,7 @@
     },
     {
       "id": "p2-must-json-errors",
-      "label": "Errors emit JSON envelope with `error`/`kind`/`message` under `--output json`",
+      "label": "Errors emit JSON envelope with discriminant + type id + message roles under `--output json`",
       "group": "P2",
       "layer": "behavioral",
       "status": "fail",
@@ -431,6 +459,17 @@
       "audit_id": "p3-paired-examples"
     },
     {
+      "id": "p3-should-unprefixed-command-list",
+      "label": "Command-list entries name the command without repeating the binary name",
+      "group": "P3",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null,
+      "confidence": "medium",
+      "tier": "should",
+      "audit_id": "p3-unprefixed-command-list"
+    },
+    {
       "id": "p6-should-subcommand-operations",
       "label": "Operations are subcommands, not verb-shaped flags",
       "group": "P6",
@@ -476,8 +515,8 @@
     }
   ],
   "summary": {
-    "total": 43,
-    "pass": 19,
+    "total": 44,
+    "pass": 20,
     "warn": 13,
     "fail": 3,
     "opt_out": 0,
@@ -491,8 +530,8 @@
       "verified": 19
     },
     "should": {
-      "total": 21,
-      "verified": 13
+      "total": 22,
+      "verified": 14
     },
     "may": {
       "total": 10,
@@ -508,12 +547,12 @@
     "version": "grok 0.2.16 (f7c09b8d8) [stable]"
   },
   "anc": {
-    "version": "0.5.0"
+    "version": "0.6.0"
   },
   "run": {
     "invocation": "anc audit --command grok --output json",
-    "started_at": "2026-06-02T17:00:39.278829105Z",
-    "duration_ms": 838,
+    "started_at": "2026-10-05T18:54:08.229619Z",
+    "duration_ms": 7294,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -526,7 +565,7 @@
   },
   "badge": {
     "eligible": true,
-    "score_pct": 73,
+    "score_pct": 74,
     "embed_markdown": "[![agent-native](https://anc.dev/badge/grok.svg)](https://anc.dev/score/grok)",
     "scorecard_url": "https://anc.dev/score/grok",
     "badge_url": "https://anc.dev/badge/grok.svg",

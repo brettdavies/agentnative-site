@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { PROBE_UA_TOKENS } from '../shared/user-agents.ts';
 import { RETAINED_DOCUMENT_KEYS } from '../shared/web-audit-documents.ts';
+import { cardRequirements, readCardSchema, VENDORED_CARD_SCHEMA_PATH } from './web-audit-card-schema.mjs';
 
 export const KEYWORD_BY_TIER = Object.freeze({
   required: 'must',
@@ -36,7 +37,13 @@ export const WEB_AUDIT_HANDLERS = new Set([
   'llms-txt-quality',
   'api-hygiene',
   'protected-resource',
+  'server-card',
 ]);
+// The handlers that score a document discovery retained rather than issuing
+// a request: `http` asserts `expect` against it, `server-card` validates it.
+const RETAINED_DOCUMENT_HANDLERS = new Set(['http', 'server-card']);
+// Parameters the build derives for the server-card handler from the vendored schema.
+const CARD_FIELD_PARAMS = ['required', 'remote_required'];
 export const WEB_AUDIT_SITE_TYPES = new Set(['content', 'api', 'mcp', 'all']);
 export const WEB_AUDIT_ANTECEDENTS = new Set([
   'none',
@@ -93,13 +100,16 @@ const PRINCIPLE_RE = /^P[1-8]$/;
 const CHECK_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 /**
- * Validate + normalize a parsed registry document. Pure. Throws a named
- * error on any missing/invalid field so the build fails loudly.
+ * Validate + normalize a parsed registry document. Throws a named error on
+ * any missing/invalid field so the build fails loudly. A server-card check
+ * takes its required-field lists from `cardSchema`, read from the vendored
+ * schema file when omitted.
  *
  * @param {object} doc — js-yaml load of src/data/web-audit/registry.yaml
- * @returns {{ version: number, mcp_discovery: object, category_order: string[], categories: Record<string,string>, mcp_lanes: Record<string,{label: string, note: string}>, alternatives: Array<{ group: string, variants: Record<string, { antecedents: string[], presented_by: string[] }> }>, checks: Array<object> }}
+ * @param {unknown} [cardSchema] — the parsed SEP-2127 extension schema
+ * @returns {{ version: number, mcp_discovery: object, category_order: string[], categories: Record<string,string>, mcp_lanes: Record<string,{label: string, note: string}>, alternatives: Array<{ group: string, variants: Record<string, { antecedents: string[], presented_by: string[] }> }>, retired?: Record<string, { successor: string, reason: string }>, checks: Array<object> }}
  */
-export function normalizeWebAuditRegistry(doc) {
+export function normalizeWebAuditRegistry(doc, cardSchema) {
   if (!doc || typeof doc !== 'object') {
     throw new Error('web-audit registry: expected a YAML mapping at the top level');
   }
@@ -142,6 +152,12 @@ export function normalizeWebAuditRegistry(doc) {
       throw new Error(`web-audit registry: mcp_lanes entry "${lane}" needs a string label and note`);
     }
   }
+
+  let cardFields = null;
+  const cardFieldsOnce = () => {
+    cardFields ??= cardRequirements(cardSchema ?? readCardSchema());
+    return cardFields;
+  };
 
   const seen = new Set();
   const normalized = checks.map((check) => {
@@ -238,6 +254,25 @@ export function normalizeWebAuditRegistry(doc) {
         `web-audit registry: check "${id}" declares retained-document, so with.retained must name a document discovery keeps (${RETAINED_DOCUMENT_KEYS.join(', ')}), got ${JSON.stringify(check.with.retained)}`,
       );
     }
+    if (check.eval === 'retained-document' && !RETAINED_DOCUMENT_HANDLERS.has(check.handler)) {
+      throw new Error(
+        `web-audit registry: check "${id}" declares retained-document, so its handler must score a retained document (${[...RETAINED_DOCUMENT_HANDLERS].join(', ')}), got "${check.handler}"`,
+      );
+    }
+    if (
+      check.handler === 'server-card' &&
+      (check.eval !== 'retained-document' || check.with.retained !== 'server-card')
+    ) {
+      throw new Error(
+        `web-audit registry: check "${id}" uses the server-card handler, so it needs eval retained-document and with.retained "server-card"`,
+      );
+    }
+    const handAuthored = CARD_FIELD_PARAMS.find((param) => param in check.with);
+    if (check.handler === 'server-card' && handAuthored !== undefined) {
+      throw new Error(
+        `web-audit registry: check "${id}" hand-authors with.${handAuthored}, which the build reads from the vendored server card schema; remove it`,
+      );
+    }
     if (check.handler === 'cors-preflight' && !CORS_SURFACES.has(check.with.surface)) {
       throw new Error(
         `web-audit registry: check "${id}" needs with.surface "preflight" or "actual" (got ${JSON.stringify(check.with.surface)})`,
@@ -264,9 +299,11 @@ export function normalizeWebAuditRegistry(doc) {
       ...(check.category === 'mcp' ? { lane: check.lane } : {}),
       hint: check.hint,
       handler: check.handler,
-      with: expandProbeUserAgent(id, check.with),
+      with:
+        check.handler === 'server-card' ? { ...check.with, ...cardFieldsOnce() } : expandProbeUserAgent(id, check.with),
     };
   });
+  const retired = normalizeRetired(doc.retired, normalized);
 
   return {
     version: doc.version ?? 1,
@@ -281,8 +318,53 @@ export function normalizeWebAuditRegistry(doc) {
     categories,
     mcp_lanes: mcpLanes,
     alternatives: normalizeAlternatives(doc.alternatives, normalized),
+    ...(retired === null ? {} : { retired }),
     checks: normalized,
   };
+}
+
+const RETIRED_FIELDS = new Set(['successor', 'reason']);
+
+/**
+ * Validate the retired check ids against the live checks. Pure. A stored
+ * row can carry a retired id for as long as its scorecard is served, so the
+ * result page renders it under its successor; an id that is still live, or
+ * a successor that is not, would leave that row with no page to point at.
+ *
+ * @param {unknown} retired The YAML `retired` value; absent means none.
+ * @param {Array<{ id: string }>} checks The normalized checks.
+ * @returns {Record<string, { successor: string, reason: string }> | null}
+ */
+function normalizeRetired(retired, checks) {
+  if (retired === undefined) return null;
+  if (!retired || typeof retired !== 'object' || Array.isArray(retired)) {
+    throw new Error('web-audit registry: retired must be a mapping of check id to { successor, reason }');
+  }
+  const live = new Set(checks.map((check) => check.id));
+  const out = {};
+  for (const [id, entry] of Object.entries(retired)) {
+    if (!CHECK_ID_RE.test(id)) {
+      throw new Error(`web-audit registry: retired id ${JSON.stringify(id)} must match /^[a-z0-9][a-z0-9-]*$/`);
+    }
+    if (live.has(id)) throw new Error(`web-audit registry: retired id "${id}" is still a registry check`);
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`web-audit registry: retired id "${id}" must map to { successor, reason }`);
+    }
+    const unknown = Object.keys(entry).find((key) => !RETIRED_FIELDS.has(key));
+    if (unknown !== undefined) {
+      throw new Error(`web-audit registry: retired id "${id}" carries unknown field "${unknown}"`);
+    }
+    if (!live.has(entry.successor)) {
+      throw new Error(
+        `web-audit registry: retired id "${id}" names successor ${JSON.stringify(entry.successor)}, which is not a registry check`,
+      );
+    }
+    if (typeof entry.reason !== 'string' || entry.reason.length === 0) {
+      throw new Error(`web-audit registry: retired id "${id}" needs a reason`);
+    }
+    out[id] = { successor: entry.successor, reason: entry.reason };
+  }
+  return out;
 }
 
 const VARIANT_FIELDS = new Set(['antecedents', 'presented_by']);
@@ -384,12 +466,12 @@ function normalizeAlternatives(groups, checks) {
 /**
  * Load, normalize, and emit the web-audit registry projection.
  *
- * @param {{ registryPath: string, distDir: string }} opts
+ * @param {{ registryPath: string, distDir: string, cardSchemaPath?: string }} opts
  * @returns {Promise<{ checks: number }>}
  */
-export async function emitWebAuditRegistry({ registryPath, distDir }) {
+export async function emitWebAuditRegistry({ registryPath, distDir, cardSchemaPath = VENDORED_CARD_SCHEMA_PATH }) {
   const raw = await readFile(registryPath, 'utf8');
-  const normalized = normalizeWebAuditRegistry(yaml.load(raw));
+  const normalized = normalizeWebAuditRegistry(yaml.load(raw), readCardSchema(cardSchemaPath));
   await writeFile(join(distDir, '_internal', 'web-audit-registry.json'), `${JSON.stringify(normalized, null, 2)}\n`);
   return { checks: normalized.checks.length };
 }
@@ -397,16 +479,19 @@ export async function emitWebAuditRegistry({ registryPath, distDir }) {
 /**
  * Validate + normalize the remediation catalog against the set of check
  * ids. Pure. Asserts 1:1 coverage (every check has remediation, no
- * orphan remediation). Each entry carries title/goal/fix plus optional
- * resources[] doc links; the run's evidence becomes the uniform Issue
- * line at assembly time (src/worker/audit-web/remediation.ts), so no
- * entry carries an evidence template.
+ * orphan remediation). A retired check id keeps its entry too, because its
+ * fix page stays live for the stored rows that still link it. Each entry
+ * carries title/goal/fix plus optional resources[] doc links; the run's
+ * evidence becomes the uniform Issue line at assembly time
+ * (src/worker/audit-web/remediation.ts), so no entry carries an evidence
+ * template.
  *
  * @param {object} doc — js-yaml load of remediation.yaml
  * @param {string[]} checkIds — ids from the normalized registry
+ * @param {string[]} [retiredIds] — the normalized registry's retired ids
  * @returns {Record<string, { title: string, goal: string, fix: string, resources: Array<{label: string, url: string}> }>}
  */
-export function normalizeWebRemediation(doc, checkIds) {
+export function normalizeWebRemediation(doc, checkIds, retiredIds = []) {
   const remediation = doc?.remediation;
   if (!remediation || typeof remediation !== 'object') {
     throw new Error('web-audit remediation.yaml: expected a top-level "remediation" mapping');
@@ -437,9 +522,12 @@ export function normalizeWebRemediation(doc, checkIds) {
     }
     out[id] = { title: entry.title, goal: entry.goal, fix: entry.fix, resources };
   }
-  const ids = new Set(checkIds);
+  const ids = new Set([...checkIds, ...retiredIds]);
   for (const id of checkIds) {
     if (!out[id]) throw new Error(`web-audit remediation: check "${id}" has no remediation entry`);
+  }
+  for (const id of retiredIds) {
+    if (!out[id]) throw new Error(`web-audit remediation: retired check "${id}" has no remediation entry`);
   }
   for (const id of Object.keys(out)) {
     if (!ids.has(id)) throw new Error(`web-audit remediation: orphan remediation "${id}" matches no check`);
@@ -459,6 +547,7 @@ export async function emitWebRemediation({ remediationPath, registryPath, distDi
   const normalized = normalizeWebRemediation(
     doc,
     registry.checks.map((c) => c.id),
+    Object.keys(registry.retired ?? {}),
   );
   await writeFile(join(distDir, '_internal', 'web-remediation.json'), `${JSON.stringify(normalized, null, 2)}\n`);
   return { entries: Object.keys(normalized).length };

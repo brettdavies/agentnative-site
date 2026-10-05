@@ -5,7 +5,7 @@
 // directly.
 
 import type { RetainedDocumentKey } from '../../../shared/web-audit-documents';
-import type { NaReason } from '../../../shared/web-audit-findings';
+import type { NaReason, RowAdvisory } from '../../../shared/web-audit-findings';
 import type { ApiTargets } from '../api-targets';
 import type { ProbeResponse } from '../assert';
 import type { RetainedDocument } from '../discovery-documents';
@@ -75,6 +75,8 @@ export interface ProbeOutcome {
    * was needed.
    */
   unprobed?: true;
+  /** How a passing row passed, when that is worth a note; the engine passes it through to the result row. */
+  advisory?: RowAdvisory;
   /**
    * The answer carried a JSON-RPC `result`, which is what shows a handshake
    * served a request. Engine-internal: the row's evidence is what reaches
