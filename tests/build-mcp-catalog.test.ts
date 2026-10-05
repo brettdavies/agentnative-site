@@ -101,7 +101,7 @@ describe('buildMcpCatalog: shape invariants', () => {
 
   test('top-level fields present', () => {
     expect(catalog.generated_at).toBe(FIXED_TIME);
-    expect(catalog.spec_version).toBe('0.5.0');
+    expect(catalog.spec_version).toBe(SPEC_VERSION);
     expect(Array.isArray(catalog.registry)).toBe(true);
     expect(Array.isArray(catalog.principles)).toBe(true);
     expect(Array.isArray(catalog.spec_sections)).toBe(true);
