@@ -82,7 +82,7 @@ const FIXTURE_WELL_KNOWN_MCP = JSON.stringify({
   version: '1.0',
   description: 'agent-native CLI standard registry: scorecards, principles, vendored spec',
   documentation: 'https://anc.dev/mcp-skill.md#server-cards',
-  serverInfo: { name: 'anc.dev agent-native CLI standard registry', version: '0.5.0' },
+  serverInfo: { name: 'anc', version: '0.1.0' },
   protocolVersion: '2026-07-28',
   url: 'https://anc.dev/mcp',
   transport: { type: 'streamable-http', endpoint: 'https://anc.dev/mcp' },

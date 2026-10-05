@@ -41,7 +41,7 @@ import {
   SEP_1649_CARD_PATH,
   SEP_1649_CARD_SEED_PATH,
 } from '../shared/mcp-discovery';
-import { ANC_VERSION, canonicalBaseUrl, expiresInOneYearIso, resolveBaseUrl } from './util.mjs';
+import { canonicalBaseUrl, expiresInOneYearIso, resolveBaseUrl } from './util.mjs';
 
 const MCP_SPEC_VERSION = '2026-07-28';
 const MCP_CARD_VERSION = '1.0';
@@ -101,8 +101,8 @@ function buildMcpDescriptor(baseUrl) {
       description: MCP_DESCRIPTION,
       documentation: `${baseUrl}/mcp-skill.md#server-cards`,
       serverInfo: {
-        name: MCP_TITLE,
-        version: ANC_VERSION,
+        name: MCP_SERVER_NAME,
+        version: MCP_SERVER_VERSION,
       },
       protocolVersion: MCP_SPEC_VERSION,
       url: `${baseUrl}/mcp`,
