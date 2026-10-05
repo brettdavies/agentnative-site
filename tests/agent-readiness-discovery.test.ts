@@ -11,6 +11,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emitShell } from '../src/build/shell.mjs';
+import { AUDIT_PATH } from '../src/shared/audit-routes';
 import worker from '../src/worker/index';
 import { MCP_DESCRIPTOR_ALIAS_PATHS, MCP_DESCRIPTOR_CANONICAL_PATH } from '../src/worker/mcp/descriptor-paths';
 
@@ -557,6 +558,12 @@ describe('homepage MCP prose (built dist/)', () => {
     expect(md).toContain('https://anc.dev/mcp');
     expect(md).toContain('/mcp-skill');
     expect(md).toContain('streamable-HTTP');
+  });
+
+  test('index.md twin links the audit page by its path, with no unexpanded placeholder', async () => {
+    const md = await readFile(join(DIST_DIR, 'index.md'), 'utf8');
+    expect(md).toMatch(new RegExp(`\\[audit page\\]\\([^)]*${AUDIT_PATH}\\)`));
+    expect(md).not.toContain('${');
   });
 
   test('content/_use.md source still names the same two surfaces', async () => {
