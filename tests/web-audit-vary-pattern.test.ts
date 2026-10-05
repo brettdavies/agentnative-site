@@ -26,7 +26,7 @@ function registryVaryPattern(): string {
   if (!check) throw new Error('markdown-vary is not in the registry');
   const expect = (check.with as { expect?: { header_regex?: { name: string; pattern: string } } }).expect;
   const spec = expect?.header_regex;
-  if (!spec || spec.name !== 'vary') throw new Error('markdown-vary carries no header_regex on vary');
+  if (spec?.name !== 'vary') throw new Error('markdown-vary carries no header_regex on vary');
   return spec.pattern;
 }
 

@@ -134,25 +134,6 @@ async function projections(): Promise<{ registry: string; remediation: string }>
   return webAuditProjections;
 }
 
-function alwaysPassLimiter() {
-  return { limit: async () => ({ success: true }) };
-}
-
-function makeKv(): KVNamespace {
-  const store = new Map<string, string>();
-  return {
-    async get(key: string) {
-      return store.get(key) ?? null;
-    },
-    async put(key: string, value: string) {
-      store.set(key, value);
-    },
-    async delete(key: string) {
-      store.delete(key);
-    },
-  } as unknown as KVNamespace;
-}
-
 function makeR2(prefill: Record<string, unknown> = {}): R2Bucket {
   const store = new Map<string, string>();
   for (const [k, v] of Object.entries(prefill)) store.set(k, typeof v === 'string' ? v : JSON.stringify(v));
