@@ -349,10 +349,11 @@ in reverse-DNS form, its title, description, and version, and its one `streamabl
 served at `<endpoint>/server-card` (`/mcp/server-card`, the location SEP-2127 reserves) as
 `application/mcp-server-card+json`, and the AI catalog at `/.well-known/ai-catalog.json` lists it, which is how a client
 finds it without guessing. It describes identity and connection only; the server's tools and resources stay subject to
-runtime listing. The card validates against the vendored extension schema, and its name and version match the
-`serverInfo` the endpoint reports. The SEP-1649 card at `/.well-known/mcp/server-card.json` is superseded by it and is
-still served, carrying the protocol revision, the transport, and the no-authentication declaration; the legacy alias
-paths permanently redirect to that path.
+runtime listing. The card validates against the vendored extension schema. Its version matches the `serverInfo` the
+endpoint reports, and its name is that server name under the reverse-DNS namespace of the canonical host (`dev.anc/anc`
+for `serverInfo.name` `anc`). The SEP-1649 card at `/.well-known/mcp/server-card.json` is superseded by it and is still
+served, carrying the protocol revision, the transport, and the no-authentication declaration; the legacy alias paths
+permanently redirect to that path.
 
 ### Discovery surface
 
