@@ -13,7 +13,7 @@
 // resolver named or else 'antecedent-unmet', and a handler-stated
 // na_reason (the CORS pair's 'posture-consistent', an endpoint's
 // 'auth-required') passes through to the result row alongside the
-// handler's `unprobed` marker.
+// handler's `unprobed` marker and `advisory` note.
 //
 // The engine yields each result as it finalizes (KTD-6: streaming
 // transport is the route's concern) and a terminal `complete` event
@@ -56,6 +56,7 @@ import {
 } from './handlers/mcp';
 import { runProtectedResource } from './handlers/protected-resource';
 import { enumerateScopedDirs, runScopedLlms } from './handlers/scoped-llms';
+import { runServerCard, serverCardEvidence } from './handlers/server-card';
 import type { EvidenceItem, HandlerContext, McpAuthRequired, McpLaneEvidence, ProbeOutcome } from './handlers/types';
 import { runWebMcp } from './handlers/webmcp';
 import { directArtifactSource, settleMcpAuth, signInResolver } from './mcp-auth';
@@ -125,6 +126,7 @@ const HANDLERS: Partial<Record<WebCheck['handler'], Handler>> = {
   'llms-txt-quality': runLlmsTxtQuality,
   'api-hygiene': runApiHygiene,
   'protected-resource': runProtectedResource,
+  'server-card': runServerCard,
 };
 
 const EVAL_RULE_HANDLERS: Partial<Record<NonNullable<WebCheck['eval']>, Handler>> = {
@@ -132,6 +134,16 @@ const EVAL_RULE_HANDLERS: Partial<Record<NonNullable<WebCheck['eval']>, Handler>
   'retained-document': runRetainedDocument,
   'api-description': runApiDescription,
 };
+
+/**
+ * A check's handler. An eval rule replaces the handler's own probing, except
+ * that a retained-document check with a handler other than `http` scores the
+ * document with that handler; `http` asserts `expect` against it.
+ */
+function handlerFor(check: WebCheck): Handler | undefined {
+  if (check.eval === 'retained-document' && check.handler !== 'http') return HANDLERS[check.handler];
+  return (check.eval !== undefined ? EVAL_RULE_HANDLERS[check.eval] : undefined) ?? HANDLERS[check.handler];
+}
 
 function retainedBody(sources: ReadonlyMap<string, ProbeOutcome>, checkId: string): string {
   for (const item of sources.get(checkId)?.evidence ?? []) {
@@ -169,6 +181,8 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
   if (outcome.status === 'na') return String((first.why as string[] | undefined)?.join('; ') ?? 'not applicable');
 
   if (check.handler === 'protected-resource') return ((first.why as string[] | undefined) ?? []).join('; ');
+
+  if (check.handler === 'server-card') return serverCardEvidence(outcome);
 
   if (check.handler === 'mcp') {
     if (first.error) return `${first.url}: ${first.error}`;
@@ -279,6 +293,7 @@ function toResult(check: WebCheck, outcome: ProbeOutcome): EngineResult {
     status: probeStatusToScorecard(outcome.status),
     ...(outcome.na_reason !== undefined ? { na_reason: outcome.na_reason } : {}),
     ...(outcome.unprobed === true ? { unprobed: true as const } : {}),
+    ...(outcome.advisory !== undefined ? { advisory: outcome.advisory } : {}),
     evidence: summarizeEvidence(check, outcome),
     raw_evidence: outcome.evidence,
   };
@@ -471,8 +486,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
       return { check, outcome: null, result: skipResult(check) };
     }
     try {
-      const handler =
-        (check.eval !== undefined ? EVAL_RULE_HANDLERS[check.eval] : undefined) ?? HANDLERS[check.handler];
+      const handler = handlerFor(check);
       if (!handler) throw new Error(`no handler registered for "${check.handler}"`);
       const outcome = await handler(check, handlerCtx());
       if (outcome.incomplete || deadline - now() <= 0) incomplete = true;

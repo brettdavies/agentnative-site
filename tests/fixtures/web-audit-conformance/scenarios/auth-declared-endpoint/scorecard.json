@@ -610,8 +610,8 @@
       "host": "mcp.example.net"
     },
     {
-      "id": "well-known-mcp-card",
-      "label": "A .well-known MCP server card is published (SEP-1649)",
+      "id": "mcp-server-card",
+      "label": "An MCP server card is published",
       "category": "mcp",
       "group": "P8",
       "layer": "web",
@@ -619,6 +619,7 @@
       "tier": "recommended",
       "principle": "P8",
       "status": "pass",
+      "advisory": "superseded",
       "evidence": "https://example.com/.well-known/mcp/server-card.json -> 200",
       "hosts": [
         {

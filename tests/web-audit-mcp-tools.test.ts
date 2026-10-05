@@ -68,6 +68,7 @@ async function projections() {
     const remediation = normalizeWebRemediation(
       yaml.load(await readFile(join(DATA, 'remediation.yaml'), 'utf8')) as object,
       checks.map((c) => c.id),
+      Object.keys(registry.retired ?? {}),
     );
     assetsJson = { registry: JSON.stringify(registry), remediation: JSON.stringify(remediation) };
   }

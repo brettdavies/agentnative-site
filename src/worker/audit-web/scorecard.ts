@@ -9,7 +9,7 @@
 // surfaces). `group` mirrors `principle` for the interim shared-renderer
 // path; the category-grouped web renderer replaces that consumer.
 
-import type { NaReason } from '../../shared/web-audit-findings';
+import type { NaReason, RowAdvisory } from '../../shared/web-audit-findings';
 import type { EvidenceItem } from './handlers/types';
 import { type DeclaredHostEntry, type RowHost, rowHostFields } from './provenance';
 import type { WebAuditRegistry, WebCheckKeyword, WebCheckTier, WebSiteType } from './registry';
@@ -44,6 +44,8 @@ export interface EngineResult {
   na_reason?: NaReason;
   /** The row settled from an antecedent rather than from its own request. */
   unprobed?: true;
+  /** How a passing row passed, when that is worth a note. */
+  advisory?: RowAdvisory;
   /** Compact human-readable evidence string for the row. */
   evidence: string;
   /** Full structured evidence for the JSON / remediation templating. */
@@ -67,6 +69,8 @@ export interface WebScorecardResultRow {
    * attaches no remediation to it.
    */
   unprobed?: true;
+  /** How a passing row passed: `superseded` for a server card in the SEP-1649 shape. */
+  advisory?: RowAdvisory;
   evidence: string | null;
   /** The distinct hosts the row's evidence was requested from, in evidence order. */
   hosts: RowHost[];
@@ -179,6 +183,7 @@ export function buildWebScorecard(results: EngineResult[], meta: WebScorecardMet
       status: r.status,
       ...(r.na_reason !== undefined ? { na_reason: r.na_reason } : {}),
       ...(r.unprobed === true ? { unprobed: true as const } : {}),
+      ...(r.advisory !== undefined ? { advisory: r.advisory } : {}),
       evidence: r.evidence === '' ? null : r.evidence,
       ...rowHostFields(r.raw_evidence),
     });

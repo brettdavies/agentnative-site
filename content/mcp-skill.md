@@ -241,6 +241,8 @@ A read also carries where each row's evidence came from and what the audit could
   ([remediation](/web-scorecard-schema#remediation-on-the-mcp-surface)).
 - `access_note`: beside `results` when any row could not run, the sentence saying global keeps those rows in its maximum
   ([remediation](/web-scorecard-schema#remediation-on-the-mcp-surface)).
+- `successor`: on a stored row whose check id is retired, the check that replaced it; the row carries no remediation,
+  and a re-audit scores the successor ([remediation](/web-scorecard-schema#remediation-on-the-mcp-surface)).
 - `follow_declarations`: whether the audit followed the hosts the site declares; absent means not recorded
   ([top-level fields](/web-scorecard-schema#top-level-fields)).
 - `declared_hosts`: the declared-hosts trail, one entry per declared host and how the audit treated it

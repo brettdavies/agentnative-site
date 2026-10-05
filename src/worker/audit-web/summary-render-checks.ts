@@ -31,16 +31,21 @@ function countText(counts: { passed: number; counted: number; notRun: number }, 
 
 /**
  * A row's notes sit at the top of its body, under its label. A row inside a
- * not-run group shows neither: the group's summary names its host, and the
- * group's body states the remedy once for every row.
+ * not-run group shows neither its host nor its remedy: the group's summary
+ * names its host, and the group's body states the remedy once for every
+ * row. The advisory and retired notes are the row's own and always show; an
+ * advisory carries the fix skill link, since the row it sits on passed.
  */
 function renderCheck(row: SummaryRow, grouped: boolean): string {
+  const skillLink = { text: 'Fix skill', href: row.skillUrl };
   const resourceLinks = [
     ...row.resources.map((r) => `<a href="${escHtml(r.url)}" rel="noopener">${escHtml(r.label)}</a>`),
-    `<a href="${escHtml(row.skillUrl)}">Fix skill</a>`,
+    richHtml([skillLink]),
   ].join(' · ');
 
   let body = grouped ? '' : `${note(row.hostNote)}${note(row.remedy)}`;
+  if (row.advisoryNote !== null) body += note([...row.advisoryNote, ' ', skillLink]);
+  body += note(row.retiredNote);
   body += `      <p class="web-check__goal"><strong>Goal:</strong> ${escHtml(row.goal)}.</p>
       <p class="web-check__result"><strong>Result:</strong> ${escHtml(row.result)}</p>
 `;
@@ -56,9 +61,11 @@ function renderCheck(row: SummaryRow, grouped: boolean): string {
   // host ride here on every row, including the ones that carry no prompt, so a
   // reader never has to infer them from a conditional child that only
   // actionable rows emit.
-  const rootMeta = ` data-keyword="${escHtml(row.keyword ?? '')}" data-tier="${escHtml(row.tier ?? '')}" data-status="${escHtml(row.status)}" data-unprobed="${row.unprobed ? 'true' : 'false'}" data-host="${escHtml(row.host)}"`;
+  const rootMeta = ` data-keyword="${escHtml(row.keyword ?? '')}" data-tier="${escHtml(row.tier ?? '')}" data-status="${escHtml(row.status)}" data-unprobed="${row.unprobed ? 'true' : 'false'}" data-host="${escHtml(row.host)}"${row.retiredNote !== null ? ' data-retired="true"' : ''}`;
+  // An advisory opens its row like a failure does, so the note shows without a click.
+  const open = row.fixable || row.advisoryNote !== null;
 
-  return `    <details class="web-check web-check--${row.status}"${row.fixable ? ' open' : ''} data-id="${escHtml(row.id)}"${rootMeta}>
+  return `    <details class="web-check web-check--${row.status}"${open ? ' open' : ''} data-id="${escHtml(row.id)}"${rootMeta}>
       <summary><span class="web-check__mark" aria-hidden="true">${statusMark(row.status)}</span> <span class="web-check__label">${escHtml(row.label)}</span> ${tierChip(row.keyword)}<span class="audit__status">${escHtml(statusLabel(row.status))}</span></summary>
 ${body}    </details>
 `;

@@ -2,6 +2,8 @@
 // at dist/fix/<id>.html plus its markdown twin, generated from the registry +
 // remediation catalog (STAR: remediation.yaml is the single prose source, so
 // the skill pages and the get_web_remediation tool can never drift apart).
+// A retired check id keeps a page, which names its successor, because stored
+// rows and prompts copied from them still link it.
 //
 // Served through the standard asset-first dispatch: /fix/<id> resolves the
 // HTML, the `.md` suffix or `Accept: text/markdown` resolves the twin, and an
@@ -36,29 +38,39 @@ function oneLine(text) {
  * @param {Record<string, string>} categories — slug → display label
  * @param {string} baseUrl
  */
-function assembleSkill(check, remediation, categories, baseUrl) {
-  const category = categories[check.category] ?? check.category;
-  const keyword = KEYWORD_LABELS[check.keyword] ?? check.keyword;
-  const docsLine =
-    remediation.resources.length > 0 ? [`Docs: ${remediation.resources.map((r) => r.url).join(', ')}`] : [];
+/** The Goal, Fix, and Resources sections a page renders from one catalog entry. */
+function catalogSections(remediation) {
   const resourcesSection =
     remediation.resources.length > 0
       ? ['## Resources', '', ...remediation.resources.map((r) => `- [${r.label}](${r.url})`), '']
       : [];
+  return ['## Goal', '', `${remediation.goal}.`, '', '## Fix', '', remediation.fix.trim(), '', ...resourcesSection];
+}
+
+/** "(Category, KEYWORD)" for a check. */
+function checkLabel(check, categories) {
+  return `${categories[check.category] ?? check.category}, ${KEYWORD_LABELS[check.keyword] ?? check.keyword}`;
+}
+
+/** The Verify section: re-run the audit and read `checkId`'s row. */
+function verifySection(checkId, baseUrl) {
+  return [
+    '## Verify',
+    '',
+    `Re-run the audit at [${baseUrl}${AUDIT_PATH}](${baseUrl}${AUDIT_PATH}) or call the \`audit_website\` MCP tool; the \`${checkId}\` check should report \`pass\`.`,
+    '',
+  ];
+}
+
+function assembleSkill(check, remediation, categories, baseUrl) {
+  const docsLine =
+    remediation.resources.length > 0 ? [`Docs: ${remediation.resources.map((r) => r.url).join(', ')}`] : [];
   const prose = [
     `# Fix: ${check.title}`,
     '',
-    `> Web-audit fix skill for the \`${check.id}\` check (${category}, ${keyword}).`,
+    `> Web-audit fix skill for the \`${check.id}\` check (${checkLabel(check, categories)}).`,
     '',
-    '## Goal',
-    '',
-    `${remediation.goal}.`,
-    '',
-    '## Fix',
-    '',
-    remediation.fix.trim(),
-    '',
-    ...resourcesSection,
+    ...catalogSections(remediation),
   ];
   // These lines must stay byte-identical to assembleRemediation() in
   // src/worker/audit-web/remediation.ts assembled without evidence, because
@@ -73,13 +85,7 @@ function assembleSkill(check, remediation, categories, baseUrl) {
     `Skill: ${baseUrl}${fixPath(check.id)}`,
     ...docsLine,
   ];
-  const verify = [
-    '## Verify',
-    '',
-    `Re-run the audit at [${baseUrl}${AUDIT_PATH}](${baseUrl}${AUDIT_PATH}) or call the \`audit_website\` MCP tool; the \`${check.id}\` check should report \`pass\`.`,
-    '',
-  ];
-  return { prose, promptIntro, promptLines, verify };
+  return { prose, promptIntro, promptLines, verify: verifySection(check.id, baseUrl) };
 }
 
 /**
@@ -100,6 +106,29 @@ export function buildSkillMarkdown(check, remediation, categories, baseUrl) {
     '```',
     '',
     ...a.verify,
+  ].join('\n');
+}
+
+/**
+ * Markdown for a retired check id's page: what replaced it and why, then its
+ * catalog text. It carries no copy-paste prompt, because no audit reports a
+ * retired id, so none adds what it observed; Verify names the successor.
+ *
+ * @param {string} id — the retired check id
+ * @param {{ successor: string, reason: string }} retired — its registry entry
+ * @param {object} successor — the normalized successor check
+ * @param {{ title: string, goal: string, fix: string, resources: Array<{label: string, url: string}> }} remediation
+ * @param {Record<string, string>} categories
+ * @param {string} baseUrl
+ */
+export function buildRetiredSkillMarkdown(id, retired, successor, remediation, categories, baseUrl) {
+  return [
+    `# Fix: ${remediation.title}`,
+    '',
+    `> Retired web-audit check \`${id}\`, replaced by [\`${successor.id}\`](${baseUrl}${fixPath(successor.id)}) (${checkLabel(successor, categories)}): ${retired.reason}.`,
+    '',
+    ...catalogSections(remediation),
+    ...verifySection(successor.id, baseUrl),
   ].join('\n');
 }
 
@@ -130,9 +159,11 @@ async function buildSkillHtmlBody(check, remediation, categories, baseUrl) {
 export async function emitWebAuditSkillPages({ distDir, registryPath, remediationPath, themeInit, baseUrl }) {
   const base = resolveBaseUrl(baseUrl);
   const registry = normalizeWebAuditRegistry(yaml.load(await readFile(registryPath, 'utf8')));
+  const retired = registry.retired ?? {};
   const remediation = normalizeWebRemediation(
     yaml.load(await readFile(remediationPath, 'utf8')),
     registry.checks.map((c) => c.id),
+    Object.keys(retired),
   );
 
   const skillDir = join(distDir, 'fix');
@@ -166,6 +197,25 @@ export async function emitWebAuditSkillPages({ distDir, registryPath, remediatio
       url: `${base}${fixPath(check.id)}.md`,
       digest: createHash('sha256').update(served).digest('hex'),
     });
+  }
+  // Retired pages answer old links only, so the agent-skills index, which
+  // lists the checks an audit reports, does not carry them.
+  const checkById = new Map(registry.checks.map((check) => [check.id, check]));
+  for (const [id, entry] of Object.entries(retired)) {
+    const successor = checkById.get(entry.successor);
+    const markdown = buildRetiredSkillMarkdown(id, entry, successor, remediation[id], registry.categories, base);
+    await writeFile(join(skillDir, `${id}.md`), absolutifyMarkdownLinks(markdown, baseUrl));
+    await writeFile(
+      join(skillDir, `${id}.html`),
+      emitShell({
+        title: `Fix: ${remediation[id].title}`,
+        description: `The retired "${id}" web-audit check, replaced by ${entry.successor}.`,
+        canonicalPath: fixPath(id),
+        breadcrumb: `${successor.breadcrumb} (retired)`,
+        bodyHtml: await renderMarkdown(markdown),
+        themeInitJs: themeInit,
+      }),
+    );
   }
   return { pages };
 }

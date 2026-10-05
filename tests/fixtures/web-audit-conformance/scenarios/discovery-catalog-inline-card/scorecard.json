@@ -45,10 +45,10 @@
   "follow_declarations": true,
   "declared_hosts": [],
   "summary": {
-    "pass": 21,
+    "pass": 22,
     "noncompliant": 0,
     "broken": 1,
-    "absent": 15,
+    "absent": 14,
     "n_a": 30,
     "skip": 0,
     "error": 1
@@ -60,17 +60,17 @@
     },
     "should": {
       "total": 29,
-      "verified": 15
+      "verified": 16
     },
     "may": {
       "total": 4,
       "verified": 4
     }
   },
-  "score_pct": 62,
+  "score_pct": 64,
   "score": {
-    "relative": 62,
-    "global": 37
+    "relative": 64,
+    "global": 39
   },
   "categories": [
     {
@@ -100,7 +100,7 @@
     {
       "id": "mcp",
       "name": "MCP",
-      "passed": 12,
+      "passed": 13,
       "counted": 20
     },
     {
@@ -567,16 +567,16 @@
       "host": "example.com"
     },
     {
-      "id": "well-known-mcp-card",
-      "label": "A .well-known MCP server card is published (SEP-1649)",
+      "id": "mcp-server-card",
+      "label": "An MCP server card is published",
       "category": "mcp",
       "group": "P8",
       "layer": "web",
       "keyword": "should",
       "tier": "recommended",
       "principle": "P8",
-      "status": "absent",
-      "evidence": "https://example.com/.well-known/mcp/server-card.json -> 404 (status 404 not in [200])",
+      "status": "pass",
+      "evidence": "https://example.com/.well-known/ai-catalog.json#/entries/0/data -> 200",
       "hosts": [
         {
           "host": "example.com"

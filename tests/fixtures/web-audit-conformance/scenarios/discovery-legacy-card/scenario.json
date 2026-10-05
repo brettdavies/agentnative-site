@@ -1,7 +1,7 @@
 {
   "description": "a SEP-1649 card at the well-known path names the endpoint in transport.url; no common path is POSTed and the card suffix answers 404",
   "covers": [
-    "well-known-mcp-card",
+    "mcp-server-card",
     "mcp-initialize"
   ],
   "target": "https://example.com/",

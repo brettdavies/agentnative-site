@@ -59,7 +59,7 @@ export const WEB_CHECKS = [
   {
     id: 'C5',
     title: 'MCP',
-    desc: 'Initialize handshake, <code>tools/list</code>, error codes, CORS, <code>.well-known</code> server card.',
+    desc: 'Initialize handshake, <code>tools/list</code>, error codes, CORS, SEP-2127 server card.',
   },
   {
     id: 'C6',

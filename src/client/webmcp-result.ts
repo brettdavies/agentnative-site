@@ -74,6 +74,7 @@ function errorResult(code: string, field: string, message: string, allowed?: rea
 /** Why a selected row hands back no prompt (R6, R7). */
 function skipReason(row: FindingRow): string {
   if (row.unprobed) return 'this run did not probe the check, so it observed nothing to fix';
+  if (row.retired) return 'the check is retired, so a re-audit scores its successor instead';
   if (!isRemediable(row)) return `status ${row.status} needs no fix prompt`;
   return 'the page renders no fix prompt for this row';
 }

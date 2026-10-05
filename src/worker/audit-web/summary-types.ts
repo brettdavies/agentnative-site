@@ -34,6 +34,10 @@ export type SummaryRow = {
   recordedHosts: string[];
   /** Set when the row reached a host other than the one its category names. */
   hostNote: Rich | null;
+  /** Set when the row passed in a shape a newer one replaces; the row then renders open. */
+  advisoryNote: Rich | null;
+  /** Set when the row's check id is retired: it names the successor whose lane and fix page the row takes. */
+  retiredNote: Rich | null;
   notRun: NotRun | null;
   /** Why the public audit could not run the row, and how to run it; shown when the row is not in a group. */
   remedy: Rich | null;

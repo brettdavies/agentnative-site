@@ -31,6 +31,9 @@ function renderCheck(row: SummaryRow, lines: string[], heading: string, grouped:
   if (row.keyword && row.keyword in TIER_LABELS) lines.push(`- Tier: ${TIER_LABELS[row.keyword]}`);
   if (!grouped && row.hostNote !== null) lines.push(`- Host: ${richMarkdown([{ code: row.recordedHosts[0] }])}`);
   if (!grouped && row.remedy !== null) lines.push(`- Note: ${richMarkdown(row.remedy)}`);
+  for (const note of [row.advisoryNote, row.retiredNote]) {
+    if (note !== null) lines.push(`- Note: ${richMarkdown(note)}`);
+  }
   lines.push(`- Goal: ${row.goal}.`);
   lines.push(`- Result: ${mdInline(row.result)}`);
   if (row.fixable) lines.push(`- Fix: ${row.fix.replace(/\s*\n\s*/g, ' ')}`);

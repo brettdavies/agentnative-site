@@ -124,6 +124,7 @@ async function projections(): Promise<{ registry: string; remediation: string }>
     const remediation = normalizeWebRemediation(
       yaml.load(await readFile(join(WEB_AUDIT_DATA, 'remediation.yaml'), 'utf8')) as object,
       checks.map((c) => c.id),
+      Object.keys(registry.retired ?? {}),
     );
     webAuditProjections = { registry: JSON.stringify(registry), remediation: JSON.stringify(remediation) };
   }

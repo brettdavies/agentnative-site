@@ -18,10 +18,17 @@
 // or one written as a URL template, is recorded as a declaration and never
 // probed from discovery, the same way scoped-llms restricts llms.txt hrefs.
 //
-// The card of record is the first card that parses in SEP-2127 order: a
-// catalog card, then the card at <endpoint> + card_suffix when it has a
-// card's shape, then a SEP-1649 well-known card. It, the AI catalog, and
-// the API catalog are kept for later checks, each read under
+// The card of record is the first card in SEP-2127 order: a catalog card,
+// then the card at <endpoint> + card_suffix when it is a card of either
+// generation, then a SEP-1649 well-known card. Within one source a card
+// naming an endpoint on the audited origin comes first, else the strongest
+// that parses (discovery-documents.ts). With no card that parses, a card
+// the site published at a catalog URL or a well-known path that answered
+// with a JSON content type and does not parse is kept, so the card check
+// reads it broken; the guessed suffix URL never counts as published. For a
+// followed endpoint, the card the follow slice read for it can take the
+// place of this one (endpoint-of-record.ts). The card of record, the AI
+// catalog, and the API catalog are kept for later checks, each read under
 // DOCUMENT_MAX_BODY_BYTES. Every pass is bounded by both the per-audit
 // deadline and the discovery budget, so the passes together cannot outrun
 // the audit budget even against a target that never answers.
@@ -35,17 +42,19 @@ import {
   type CardRead,
   cardHasAuthField,
   cardItem,
-  cardShape,
   cardSuffixUrl,
   catalogCardEntries,
   documentItem,
+  isCardOfEitherGeneration,
   MCP_SERVER_CARD_TYPE,
   type McpDeclaration,
   parseJsonObject,
   preferredCard,
   type RetainedDocument,
   readCard,
+  retainedCard,
   sameOrigin,
+  unparseablePublishedCard,
 } from './discovery-documents';
 import { probeCommonPaths } from './discovery-posts';
 import { phaseBudget, resolveUrl } from './handlers/shared';
@@ -162,11 +171,13 @@ export async function readDiscoveryDocuments(
     const endpoint = cardWinner()?.endpoint ?? postEndpoint;
     // The suffix URL is a guess the site never published, and an MCP
     // handler can answer it with any JSON object, a JSON-RPC error included.
-    const suffixCard = suffix?.shape === 'sep-2127' || suffix?.shape === 'sep-1649' ? suffix : null;
-    const record = preferredCard(catalogReads()) ?? suffixCard ?? preferredCard(wellKnown);
-    if (record !== null) {
-      documents.set('server-card', { url: record.url, response: record.response, shape: cardShape(record.card) });
-    }
+    const suffixCard = suffix !== null && isCardOfEitherGeneration(suffix.card) ? suffix : null;
+    const record =
+      preferredCard(catalogReads()) ??
+      suffixCard ??
+      preferredCard(wellKnown) ??
+      unparseablePublishedCard([...catalogReads(), ...wellKnown]);
+    if (record !== null) documents.set('server-card', retainedCard(record.url, record.response));
     // SEP-2127 cards carry no auth field, so the declaration comes from
     // whichever card of either generation names the discovered endpoint.
     const authCard =

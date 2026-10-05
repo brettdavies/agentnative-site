@@ -369,8 +369,10 @@ export async function build() {
   // 11c. Web-audit registry — normalized JSON projection of the vendored
   // registry, consumed by the Worker's web-audit engine via
   // env.ASSETS.fetch. Same /_internal/ privacy posture as the MCP catalog.
+  // The server card check's required fields come from the vendored schema.
   const webAuditRegistryStats = await emitWebAuditRegistry({
     registryPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml'),
+    cardSchemaPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'server-card.schema.json'),
     distDir: DIST_DIR,
   });
 

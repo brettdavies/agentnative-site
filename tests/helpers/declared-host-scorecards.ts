@@ -21,6 +21,7 @@ export const REGISTRY = normalizeWebAuditRegistry(
 export const REMEDIATION = normalizeWebRemediation(
   yaml.load(readFileSync(join(DATA, 'remediation.yaml'), 'utf8')) as object,
   REGISTRY.checks.map((check) => check.id),
+  Object.keys(REGISTRY.retired ?? {}),
 ) as unknown as WebRemediationCatalog;
 
 type Row = Record<string, unknown> & { id: string; status: string };
@@ -74,7 +75,8 @@ function stripeMcpRows(): Row[] {
   return [
     ...laneIds('legacy').map((id) => row(id, 'n_a', SIGN_IN)),
     ...laneIds('modern').map((id) => row(id, 'n_a', SIGN_IN)),
-    row('well-known-mcp-card', 'pass', {
+    row('mcp-server-card', 'pass', {
+      advisory: 'superseded',
       evidence: 'https://stripe.dev/.well-known/mcp/server-card.json -> 200',
       ...at('stripe.dev'),
     }),
