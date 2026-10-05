@@ -21,7 +21,7 @@ import Ajv2020 from 'ajv/dist/2020';
 import addFormats from 'ajv-formats';
 import { emitAgentReadiness, emitDiscovery } from '../src/build/11a-discovery-emit.mjs';
 import { readCardSchema } from '../src/build/web-audit-card-schema.mjs';
-import type { McpEnv } from '../src/worker/mcp/server';
+import { distAssetsEnv } from './helpers/dist';
 import { mcpInitialize, resetMcpTestState } from './helpers/mcp-rpc';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..');
@@ -39,6 +39,7 @@ type ServerCard = {
   name: string;
   version: string;
   description: string;
+  websiteUrl: string;
   remotes: Array<{ type: string; url: string }>;
 };
 
@@ -56,22 +57,6 @@ function schemaErrors(card: unknown): string[] {
   const validate = ajv.getSchema('card#/$defs/ServerCard');
   if (validate === undefined) throw new Error('the vendored schema defines no ServerCard');
   return validate(card) ? [] : (validate.errors ?? []).map((e) => `${e.instancePath || '/'} ${e.message}`);
-}
-
-/** A Worker env whose assets are the built dist/ directory. */
-function distAssetsEnv(): McpEnv {
-  return {
-    ASSETS: {
-      async fetch(input: Request | string): Promise<Response> {
-        const path = new URL(typeof input === 'string' ? input : input.url).pathname;
-        try {
-          return new Response(await readFile(join(DIST_DIR, path)), { status: 200 });
-        } catch {
-          return new Response('not found', { status: 404 });
-        }
-      },
-    } as unknown as Fetcher,
-  };
 }
 
 describe('sitemap names the result surface, not the retired boards', () => {
@@ -154,7 +139,7 @@ describe('SEP-2127 server card seed (built dist/)', () => {
   test('names and versions the server the way the endpoint reports itself', async () => {
     resetMcpTestState();
     const card = await readJson<ServerCard>(SERVER_CARD_SEED);
-    const serverInfo = (await mcpInitialize(distAssetsEnv())).result?.serverInfo;
+    const serverInfo = (await mcpInitialize(distAssetsEnv(DIST_DIR))).result?.serverInfo;
     expect(card.version).toBe(serverInfo?.version ?? '');
     expect(card.name.split('/')[1]).toBe(serverInfo?.name ?? '');
   });
@@ -236,6 +221,24 @@ describe('emitDiscovery() in isolation', () => {
 
       const ai = await readFile(stats.aiPath, 'utf8');
       expect(ai).toContain('Programmatic-API: https://example.test/mcp');
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test('names the server on the canonical host while its URLs follow the build origin', async () => {
+    const tmp = join(tmpdir(), `anc-discovery-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await mkdir(tmp, { recursive: true });
+    try {
+      const stats = await emitDiscovery({ distDir: tmp, baseUrl: 'https://example.test' });
+      const card = await readJson<ServerCard>(stats.mcpServerCardSeedPath);
+      expect(card.name).toBe('dev.anc/anc');
+      expect(card.websiteUrl).toBe('https://example.test/mcp-skill');
+      expect(card.remotes[0].url).toBe('https://example.test/mcp');
+
+      const catalog = await readJson<AiCatalog>(stats.aiCatalogPath);
+      expect(catalog.entries[0].identifier).toBe('urn:air:anc.dev:mcp:anc');
+      expect(catalog.entries[0].url).toBe('https://example.test/mcp/server-card');
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }

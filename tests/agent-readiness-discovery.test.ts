@@ -365,6 +365,33 @@ describe('SEP-2127 server card and AI catalog: worker red-team', () => {
     expect(res.status).toBe(405);
     expect(res.headers.get('Allow')).toBe('GET');
   });
+
+  test('a missing AI catalog seed returns 503 instead of an unhandled exception', async () => {
+    const noSeedEnv = {
+      ASSETS: {
+        async fetch(): Promise<Response> {
+          return new Response('not found', { status: 404 });
+        },
+      } as unknown as Fetcher,
+    };
+    const res = await worker.fetch(
+      req('https://anc.dev/.well-known/ai-catalog.json'),
+      noSeedEnv,
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(503);
+    expect(await res.text()).toContain('unavailable');
+  });
+
+  test('a malformed AI catalog seed returns 503 instead of an unhandled exception', async () => {
+    const res = await worker.fetch(
+      req('https://anc.dev/.well-known/ai-catalog.json'),
+      makeEnv({ '/.well-known/ai-catalog.json': 'not json' }),
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(503);
+    expect(await res.text()).toContain('unavailable');
+  });
 });
 
 // ---------------------------------------------------------------------------
