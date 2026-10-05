@@ -31,9 +31,10 @@ The scope for v0 is decided and lives in:
 - `content/principles/VERSION`: the spec version the site's PROSE has been **reconciled to**. Exported as
   `SITE_SPEC_VERSION` from `src/build/util.mjs` and rendered in the site footer. Bumped MANUALLY by the contributor who
   reconciles `content/principles/p*-*.md` after a `sync-spec.sh` run, because bumping before reconciliation lies to
-  visitors about site currency. Always ≤ `SPEC_VERSION`; lag during the manual reconciliation window is honest. The
-  badge SVGs use a different source (each scorecard's own `spec_version` field), and the OG card uses anc's
-  self-scorecard's `spec_version`. Three sources for three different events (vendor / score / reconcile).
+  visitors about site currency. Always ≤ `SPEC_VERSION`; lag during the manual reconciliation window is honest. The OG
+  card renders the same value; regenerate `public/og-image.png` with `bun run og` after a bump. The badge SVGs use a
+  different source (each scorecard's own `spec_version` field). Three sources for three different events (vendor /
+  score / reconcile).
 - Workflow detail in [`src/data/spec/README.md`](src/data/spec/README.md); cross-repo version model at
   [`docs/solutions/best-practices/agentnative-version-model-2026-05-01.md`](docs/solutions/best-practices/agentnative-version-model-2026-05-01.md);
   governing pattern at

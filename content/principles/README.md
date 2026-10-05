@@ -50,7 +50,8 @@ That mechanically refreshes `src/data/spec/` to the latest tag — **only the ca
    IDs in the website prose, no pressure-test notes, no decision-record links unless they materially help the reader).
 3. If a new principle was added, author a new `content/principles/p<n>-*.md` here, mirroring the section structure of an
    existing principle (Definition / Why Agents Need It / Requirements / Scope / Evidence / Anti-Patterns).
-4. Bump [`content/principles/VERSION`](VERSION) to the new spec version.
+4. Bump [`content/principles/VERSION`](VERSION) to the new spec version, then run `bun run og` so
+   `public/og-image.png` shows it.
 5. Add the new slug (filename without `.md`) to `LOCKED_SLUGS` in [`src/build/build.mjs`](../../src/build/build.mjs) if
    a new principle was added — the build's locked-slug invariant fails otherwise.
 6. Update outbound cross-references that hard-code the principle count:
@@ -111,7 +112,7 @@ The site's footer reads `SITE_SPEC_VERSION` from [`VERSION`](VERSION) here — t
 prose has been reconciled to. The vendored snapshot at [`src/data/spec/VERSION`](../../src/data/spec/VERSION) is
 independent: it tracks the latest `sync-spec.sh` run and **never displays on any user-visible surface**. The lag during
 the manual reconciliation window is honest by design — the footer correctly tells visitors that the prose hasn't caught
-up yet.
+up yet. The OG card (`public/og-image.png`) renders the same value, so it is regenerated with `bun run og` after a bump.
 
 Full documentation of the three-source version model lives in
 [`src/data/spec/README.md`](../../src/data/spec/README.md). The split is enforced in
@@ -127,4 +128,5 @@ After running `sync-spec.sh`:
 - [ ] Add new slugs to `LOCKED_SLUGS` in `src/build/build.mjs`.
 - [ ] Update cross-references in `content/_intro.md`, `content/install.md`, `src/build/llms.mjs`.
 - [ ] Bump `content/principles/VERSION` to the new spec version.
+- [ ] Run `bun run og` and commit the regenerated `public/og-image.png`, which renders the same version.
 - [ ] Run `bash scripts/hooks/pre-push` and confirm build invariants pass.

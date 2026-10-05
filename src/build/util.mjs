@@ -97,7 +97,8 @@ export {
 //    the contributor who reconciles content/principles/p*-*.md after a
 //    sync-spec.sh run. Always ≤ SPEC_VERSION; lag during the manual
 //    reconciliation window is honest (footer correctly says the site hasn't
-//    caught up yet). USED BY: site footer.
+//    caught up yet). USED BY: site footer and the OG card
+//    (scripts/og/generate.ts reads the same file).
 //
 // 3. ANC_VERSION — the currently-published `anc` binary release
 //    (src/data/anc/VERSION). Updated by `./scripts/sync-cli-version.sh`,
@@ -110,8 +111,7 @@ export {
 // 4. (Per-scorecard `spec_version` field) — what `anc` was compiled against
 //    when it produced that scorecard. NOT a global constant; lives in each
 //    scorecards/<name>-v<ver>.json. USED BY: per-tool badge SVGs (passed
-//    explicitly into renderBadgeSvg) and the OG card (reads anc's own
-//    self-scorecard's spec_version).
+//    explicitly into renderBadgeSvg).
 //
 // All three files are read at module load, fail-fast on missing.
 // =====================================================================

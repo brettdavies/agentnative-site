@@ -38,6 +38,33 @@ The principle is framework-agnostic. `clap`'s `after_help` is the worked example
   `make`), or `-version` (Go's `flag` package). Any of the three is sufficient. Agents probing tool versions across many
   CLIs save token cost when they can pin against a one- or two-character flag; the long-only path forces an extra parse
   step.
+- *(Applies when: CLI uses subcommands.)* Command-list entries name the command directly (`status`, `server stop`)
+  rather than repeat the binary name on every line (`tool status`, `tool server stop`). An agent scanning the block
+  takes the command token straight from the left column instead of reconstructing it from a prefix it already knows from
+  the `Usage:` line. A hand-written list that repeats the binary name leaves every command second on its line:
+
+  ```text
+  Usage: tool [options]
+
+  Commands:
+    tool status    Show server status
+    tool start     Start the server
+    tool stop      Stop the server
+  ```
+
+  The clap-shaped list leads each entry with the command itself:
+
+  ```text
+  Usage: tool <COMMAND>
+
+  Commands:
+    status  Show server status
+    start   Start the server
+    stop    Stop the server
+  ```
+
+  The bare invocation line, which documents what the tool does with no arguments, is the one entry that legitimately
+  carries the binary name alone.
 
 **MAY:**
 
@@ -50,6 +77,8 @@ The principle is framework-agnostic. `clap`'s `after_help` is the worked example
 - `after_help` attribute on every subcommand variant.
 - Example invocations in `after_help` text that include realistic arguments, not placeholder `<foo>` tokens.
 - Both `about` (short) and `after_help` (examples) present on each subcommand.
+- The command list's left column holds bare command tokens; the binary name appears in the `Usage:` line and in
+  examples, not at the head of each command entry.
 
 ## Anti-Patterns
 
@@ -58,6 +87,8 @@ The principle is framework-agnostic. `clap`'s `after_help` is the worked example
 - A single `about` string serving as both summary and usage documentation.
 - Examples buried in a README or man page but absent from `--help` output.
 - `after_help` text that describes the flags in prose instead of demonstrating them in code.
+- A hand-written command list that prefixes every entry with the binary name, so the command token sits second on each
+  line and a scanner has to strip the prefix before it can read the command.
 
-Measured by audit IDs `p3-help`, `p3-after-help`, `p3-version`. Run `anc audit --principle 3 .` against the CLI under
-test to see each.
+Measured by audit IDs `p3-help`, `p3-after-help`, `p3-version`, `p3-unprefixed-command-list`. Run `anc audit
+--principle 3 .` against the CLI under test to see each.
