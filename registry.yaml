@@ -205,6 +205,10 @@ tools:
     creator: Herrington Darkholme
     install: brew install ast-grep
     description: Structural search and replace for code using AST patterns
+    # `sg --version` opens with a multi-line deprecation banner (`sg` is an
+    # alias of `ast-grep`) before `ast-grep 0.45.3`. Take the first
+    # SemVer-shaped token from any line.
+    version_extract: "sg --version 2>&1 | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1"
 
   - name: jq
     repo: jqlang/jq
@@ -750,6 +754,9 @@ tools:
     # Suppresses P1 non-interactive variants and P6 SIGPIPE per the
     # human-tui exception.
     audit_profile: human-tui
+    # `yazi --version` line 1 is the bare name `Yazi`; the SemVer is on the
+    # `Version:` line (e.g. `Version: 26.9.1 (Homebrew 2026-09-01)`).
+    version_extract: "yazi --version | grep -oE 'Version: [0-9]+\\.[0-9]+\\.[0-9]+' | grep -oE '[0-9.]+$'"
 
   - name: zoxide
     repo: ajeetdsouza/zoxide
