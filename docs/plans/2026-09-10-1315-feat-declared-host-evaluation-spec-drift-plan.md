@@ -594,7 +594,9 @@ The funnel's shared surfaces carry this plan's fields, and the units edit them i
   PR names every scenario whose index entry changed and why; an entry outside that unit's intentional changes blocks the
   PR. The intentional changes are: U1, U13, and U7 none (schema version and additive fields sit outside the index); U2
   MCP rows on scenarios with off-origin declarations; U3 rows on protected endpoints; U4 API rows on scenarios with
-  catalog anchors; U8 the `well-known-mcp-card` entry replaced by `mcp-server-card` with the same status.
+  catalog anchors; U8 the `well-known-mcp-card` entry replaced by `mcp-server-card` with the same status, and a site
+  whose only card sits outside `/.well-known/mcp/server-card.json` (an AI catalog entry, inline in the catalog,
+  `<endpoint>/server-card`, or the followed MCP host) moving from absent to pass.
 - KTD23. **An opted-out run stays outside single-flight and returns through the null-URL path.** For a request with
   `follow_declarations: false`, the transact endpoint skips the in-flight read, the `AuditJob` claim, and the flag
   marks, extending the explicit-listing no-attach rule so neither an opted-out nor a followed request receives the
@@ -862,7 +864,9 @@ Phase B:
 - Post-deploy: full reflow observed as in Phase A with a new prefix recorded; the production card, catalog, and legacy
   path each answer as specified; the anc.dev twin scores 100 with the card and catalog checks passing; no curated
   seed's card row changes credit from the id replacement, and no seed's relative or global score moves from the
-  pre-deploy baseline recorded for this release; the MCP sweep is green; the deploy smoke covers the two new
+  pre-deploy baseline recorded for this release except a seed whose only card sits outside
+  `/.well-known/mcp/server-card.json` moving from absent to pass on the card row (measured before the cut:
+  document360.com, huggingface.co, github.com); the MCP sweep is green; the deploy smoke covers the two new
   paths with the production host absent and the staging host present.
 - Rollback: code rollback plus manual rescore; the card path 404s until re-release.
 
