@@ -177,11 +177,21 @@ describe('the progress page names where a website run reads', () => {
   });
 
   test('an endpoint on another host is named with the target that declared it; one on the target is not', () => {
-    expect(discoveryLine('https://mcp.stripe.com/', 'stripe.dev')).toBe(
+    expect(discoveryLine('https://mcp.stripe.com/', 'stripe.dev', true)).toBe(
       'MCP endpoint found at https://mcp.stripe.com/, declared by stripe.dev.',
     );
-    expect(discoveryLine('https://anc.dev/mcp', 'anc.dev')).toBe('MCP endpoint found at https://anc.dev/mcp.');
-    expect(discoveryLine(null, 'anc.dev')).toBe('No MCP endpoint found.');
+    expect(discoveryLine('https://anc.dev/mcp', 'anc.dev', true)).toBe('MCP endpoint found at https://anc.dev/mcp.');
+    expect(discoveryLine('https://anc.dev/mcp', 'anc.dev', false)).toBe('MCP endpoint found at https://anc.dev/mcp.');
+  });
+
+  test('a followed run that finds no endpoint says none was found', () => {
+    expect(discoveryLine(null, 'stripe.dev', true)).toBe('No MCP endpoint found.');
+  });
+
+  test('a run that did not follow declared hosts and finds no endpoint says the declared hosts went unchecked', () => {
+    expect(discoveryLine(null, 'stripe.dev', false)).toBe(
+      'No MCP endpoint found on stripe.dev; the hosts it declares were not checked on this run.',
+    );
   });
 
   test('a streamed row names its host only when it is neither the target nor the endpoint, and it ran there', () => {
