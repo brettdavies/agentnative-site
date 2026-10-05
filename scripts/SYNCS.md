@@ -68,9 +68,10 @@ served for text files) before comparing or hashing, and prints a JSON report on 
 matches its pin, 1 when any source drifted (each listed with its id, tier, type, URL, and old and new values), and 2
 when a source could not be checked; drift found in the same run is still listed. Each error names its next step:
 `retry` for a network failure, a timeout, a rate limit, or a server error, and `fix-manifest` when the watched file
-answers 404 or 410 or a JSON Pointer no longer resolves, since those need the entry re-pointed rather than re-pinned. It
-runs manually. After reviewing an upstream change, re-pin by copying the report's `new` value into the entry's
-`pinned`.
+answers 404 or 410 or a JSON Pointer no longer resolves, since those need the entry re-pointed rather than re-pinned.
+`.github/workflows/spec-drift.yml` runs it daily from `main` and keeps one open `spec-drift` issue per drifted source;
+the [spec-drift poll runbook](../docs/runbooks/spec-drift-poll.md) covers the issues, re-pinning, and the forced-drift
+proof. After reviewing an upstream change, re-pin by copying the report's `new` value into the entry's `pinned`.
 
 The one watched source the site also vendors is the Server Card extension schema: the `mcp-server-card-schema` entry's
 `pinned` hash is the canonical hash of `src/data/web-audit/server-card.schema.json`, which
@@ -188,7 +189,8 @@ The flows interact, but each is independently triggered:
   Writes the resolved cli release version to `src/data/anc/VERSION`; consumed by `src/build/00-spec-version-gen.mjs` and
   re-exported as `ANC_VERSION` from `src/build/util.mjs` and `src/worker/spec-version.gen.ts`.
 - `scripts/standards/check-drift.ts`: header comment for usage, exit codes, and the canonicalization rules;
-  `src/data/standards/watch.yaml` header for the manifest fields.
+  `src/data/standards/watch.yaml` header for the manifest fields; `docs/runbooks/spec-drift-poll.md` for the scheduled
+  poll, its issues, and re-pinning.
 - `docker/score/README.md` + `docker/score/build.sh`: the canonical scoring pipeline. `build.sh --run` builds the image
   and runs `score-anc100.sh` inside the container, writing scorecards back to the host via bind mount. The container is
   the single source of truth for scoring; host-side `regen-scorecards.sh` is deprecated.
