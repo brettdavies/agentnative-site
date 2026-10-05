@@ -2807,7 +2807,7 @@ describe('runMarkdownFrontmatter', () => {
   test('a twin opening with a terminated frontmatter block passes', async () => {
     const fetchImpl = stubFetch((url, init) => {
       expect(url).toBe('https://example.com/');
-      expect((init?.headers as Record<string, string>).Accept).toBe('text/markdown');
+      expect((init?.headers as Record<string, string> | undefined)?.Accept).toBe('text/markdown');
       return md('---\ntitle: X\ndescription: Y\nurl: https://z/\n---\n\n# H\n');
     });
     const outcome = await runMarkdownFrontmatter(fmCheck, ctx({ fetchImpl }));
