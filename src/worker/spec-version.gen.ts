@@ -13,5 +13,5 @@
 
 export const SPEC_VERSION = '0.6.0';
 export const SITE_SPEC_VERSION = '0.5.0';
-export const ANC_VERSION = '0.5.0';
+export const ANC_VERSION = '0.6.0';
 export const AUDITOR_URL = 'https://anc.dev/score';
