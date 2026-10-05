@@ -11,8 +11,9 @@
 #   surface   Establish surface: commits + diff vs the last tag, breaking markers. SKIPs while the
 #             repo has no tags. Not env-dependent.
 #   coord     Cross-repo coordination — vendored spec VERSION, skill manifest version, Dockerfile
-#             release URL + sha, and (when docker is available) the staging container pin's baked
-#             anc binary vocabulary vs the Worker's invocation site. Not env-dependent.
+#             anc release URL + tarball sha, and (when docker is available) the anc each wrangler.jsonc
+#             container pin bakes (production and staging) vs the Dockerfile's, plus the staging pin's
+#             anc vocabulary vs the Worker's invocation site. Not env-dependent.
 #   build     bun run build + scorecard corpus integrity + badge SVGs + markdown twins. Local only.
 #   do-smoke  Live-scoring DO smoke against the --env target.
 #               - staging: hits agentnative-site-staging through CF Access (reads the service
@@ -91,7 +92,7 @@ STAGING_URL="$DEFAULT_STAGING_URL"
 LOCAL_URL="$DEFAULT_LOCAL_URL"
 
 usage() {
-  sed -n '2,48p' "$0" | sed 's/^# \?//'
+  sed -n '2,49p' "$0" | sed 's/^# \?//'
   exit 2
 }
 
@@ -226,6 +227,16 @@ gate_surface() {
 
 # Gate: coord (cross-repo coordination) -------------------------------------
 
+# Prints the anc version an image bakes. Returns 2 when the image is neither
+# local nor pullable, 1 when its anc does not answer --version.
+baked_anc_version() {
+  local out
+  docker image inspect "$1" >/dev/null 2>&1 || docker pull "$1" >/dev/null 2>&1 || return 2
+  out=$(docker run --rm --entrypoint /usr/local/bin/anc "$1" --version 2>/dev/null) || return 1
+  [[ "$out" =~ ^anc[[:space:]]+([^[:space:]]+) ]] || return 1
+  printf '%s\n' "${BASH_REMATCH[1]}"
+}
+
 gate_coord() {
   header "Cross-repo coordination"
   require_bin jq
@@ -268,14 +279,22 @@ gate_coord() {
     gate_skip "skill.json upstream version check" "gh not on PATH"
   fi
 
-  # Dockerfile release URL + sha verification.
-  local url sha
+  # Dockerfile release URL + sha verification. The sha is the one on the first
+  # sha256sum -c line after the anc tarball URL; the file's first digest is
+  # the base image's.
+  local url sha docker_anc_v
   url=$(grep -oE 'https://github.com/[^ ]*agentnative-x86_64-unknown-linux-gnu.tar.gz' \
     "$REPO_ROOT/docker/sandbox/Dockerfile" 2>/dev/null | head -1 || true)
-  sha=$(grep -oE '[a-f0-9]{64}' "$REPO_ROOT/docker/sandbox/Dockerfile" 2>/dev/null | head -1 || true)
+  sha=$(sed -n '/agentnative-x86_64-unknown-linux-gnu\.tar\.gz/,/sha256sum -c/p' \
+    "$REPO_ROOT/docker/sandbox/Dockerfile" 2>/dev/null | grep 'sha256sum -c' \
+    | grep -oE '[a-f0-9]{64}' | head -1 || true)
+  docker_anc_v=""
+  if [[ "$url" =~ /download/v([^/]+)/ ]]; then
+    docker_anc_v="${BASH_REMATCH[1]}"
+  fi
   if [[ -n "$url" && -n "$sha" ]]; then
     if curl -fsSL -I "$url" >/dev/null 2>&1; then
-      gate_pass "Dockerfile anc release URL resolves; sha=${sha:0:12}... (full sha verification on rebuild)"
+      gate_pass "Dockerfile anc v$docker_anc_v release URL resolves; tarball sha=${sha:0:12}... (full sha verification on rebuild)"
     else
       gate_fail "Dockerfile anc release URL" "HEAD request failed against $url"
     fi
@@ -283,16 +302,64 @@ gate_coord() {
     gate_skip "Dockerfile anc release URL + sha" "could not parse from docker/sandbox/Dockerfile"
   fi
 
-  # Staging container pin: baked anc binary vocabulary vs Worker invocation site.
-  if have_bin docker && have_bin jq; then
-    local staging_pin worker_cmd
-    staging_pin=$(jq -r '.env.staging.containers[0].image // empty' "$REPO_ROOT/wrangler.jsonc" 2>/dev/null \
-      | grep -v null || true)
-    if [[ -z "$staging_pin" ]]; then
-      # jsonc may have comments — fall back to grep
-      staging_pin=$(grep -oE '"image": "[^"]+"' "$REPO_ROOT/wrangler.jsonc" 2>/dev/null \
-        | head -1 | sed -E 's/.*"image": "([^"]+)"/\1/' || true)
+  # Container pins, parsed as JSONC (comments and trailing commas stripped).
+  local pins prod_pin staging_pin
+  pins=$(WRANGLER_JSONC="$REPO_ROOT/wrangler.jsonc" bun -e '
+    const raw = await Bun.file(process.env.WRANGLER_JSONC).text();
+    const config = JSON.parse(
+      raw
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|[^:])\/\/.*$/gm, (_, keep) => keep)
+        .replace(/,(\s*[}\]])/g, (_, close) => close),
+    );
+    console.log(config.containers?.[0]?.image ?? "");
+    console.log(config.env?.staging?.containers?.[0]?.image ?? "");
+  ' 2>/dev/null || true)
+  prod_pin=$(sed -n 1p <<<"$pins")
+  staging_pin=$(sed -n 2p <<<"$pins")
+
+  # The anc each pinned image bakes vs the Dockerfile's. Staging advances with
+  # the Dockerfile; production advances in the release's promotion commit.
+  if [[ -z "$prod_pin" || -z "$staging_pin" ]]; then
+    gate_fail "wrangler.jsonc container pins" \
+      "could not read containers[0].image and env.staging.containers[0].image (production=$prod_pin staging=$staging_pin)"
+  elif ! have_bin docker; then
+    gate_skip "container pins baked anc version" "docker not on PATH"
+  elif [[ -z "$docker_anc_v" ]]; then
+    gate_skip "container pins baked anc version" "could not parse the anc version from docker/sandbox/Dockerfile"
+  else
+    local staging_fix prod_fix i baked rc
+    local -a labels pinned fixes
+    staging_fix="the staging pin was not advanced after the Dockerfile bump: build the image and move env.staging.containers[0].image (RELEASES.md § Image bump)"
+    prod_fix="the release's promotion commit is missing: set containers[0].image to the staging pin (RELEASES.md § Promotion)"
+    if [[ "$prod_pin" == "$staging_pin" ]]; then
+      labels=("production and staging pin")
+      pinned=("$staging_pin")
+      fixes=("$staging_fix")
+    else
+      labels=("staging pin" "production pin")
+      pinned=("$staging_pin" "$prod_pin")
+      fixes=("$staging_fix" "$prod_fix")
     fi
+    for i in "${!pinned[@]}"; do
+      rc=0
+      baked=$(baked_anc_version "${pinned[i]}") || rc=$?
+      if [[ $rc -eq 2 ]]; then
+        gate_skip "${labels[i]} baked anc version" "docker pull failed for ${pinned[i]##*/} (registry auth?)"
+      elif [[ $rc -ne 0 ]]; then
+        gate_fail "${labels[i]} baked anc version" "anc --version did not answer in ${pinned[i]##*/}"
+      elif [[ "$baked" == "$docker_anc_v" ]]; then
+        gate_pass "${labels[i]} ${pinned[i]##*/} bakes anc $baked, matching docker/sandbox/Dockerfile"
+      else
+        gate_fail "${labels[i]} ${pinned[i]##*/} bakes anc $baked but docker/sandbox/Dockerfile installs $docker_anc_v" \
+          "${fixes[i]}"
+      fi
+    done
+  fi
+
+  # Staging container pin: baked anc binary vocabulary vs Worker invocation site.
+  if have_bin docker; then
+    local worker_cmd
     worker_cmd=$(grep -oE 'anc (audit|check)' "$REPO_ROOT/src/worker/score/sandbox-exec.ts" 2>/dev/null \
       | head -1 | awk '{print $2}' || true)
     if [[ -n "$staging_pin" && -n "$worker_cmd" ]]; then

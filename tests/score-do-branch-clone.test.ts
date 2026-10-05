@@ -204,13 +204,15 @@ describe('buildGitCloneCommand — red team', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildAncAuditSourceCmd — source-path anc invocation', () => {
-  test('emits `anc audit <path> --output json`', () => {
-    expect(buildAncAuditSourceCmd(CLI_SPEC, undefined)).toBe("anc audit '/tmp/anc-clone-target' --output json");
+  test('emits `anc audit <path> --source --output json`', () => {
+    expect(buildAncAuditSourceCmd(CLI_SPEC, undefined)).toBe(
+      "anc audit '/tmp/anc-clone-target' --source --output json",
+    );
   });
 
   test('appends `--audit-profile <profile>` when audit_profile present', () => {
     expect(buildAncAuditSourceCmd(CLI_SPEC, 'cli-tool')).toBe(
-      "anc audit '/tmp/anc-clone-target' --output json --audit-profile 'cli-tool'",
+      "anc audit '/tmp/anc-clone-target' --source --output json --audit-profile 'cli-tool'",
     );
   });
 
