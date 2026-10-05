@@ -183,6 +183,22 @@ describe('the workflow that runs the poll', () => {
     expect(upsert?.if).toBe("${{ !cancelled() && needs.check.outputs.drift == 'true' }}");
   });
 
+  // gh sends `issue list --label` and `--search` to GitHub's search API, whose
+  // index lags behind writes: an issue the previous run just opened would be
+  // missing and this run would open a duplicate. The REST list reads the
+  // repository directly.
+  test('open issues are listed from the REST issues endpoint, never through search', async () => {
+    const steps = (jobs(await parsed())['upsert-issues']?.steps ?? []) as Array<Record<string, unknown>>;
+    const run = String(steps.find((step) => step.name === 'List open spec-drift issues')?.run ?? '');
+    const commands = run.replace(/\\\n\s*/g, ' ').split('\n');
+    const searchBacked = commands.filter(
+      (command) => /\bgh\s+issue\s+list\b/.test(command) && /\s(?:--label|--search|-l|-S)(?:[\s=]|$)/.test(command),
+    );
+    expect(searchBacked).toEqual([]);
+    expect(run).toContain('gh api --paginate "repos/$GH_REPO/issues?labels=$DRIFT_LABEL&state=open&per_page=100"');
+    expect(run).toContain('select(has("pull_request") | not)');
+  });
+
   test('every script the workflow invokes exists', async () => {
     const scripts = [...(await text()).matchAll(/bun (scripts\/\S+\.ts)/g)].map((m) => m[1] ?? '');
     expect([...new Set(scripts)].sort()).toEqual([

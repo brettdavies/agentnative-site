@@ -150,16 +150,19 @@ jobs:
               --description "An upstream specification moved off its pin in src/data/standards/watch.yaml"
           fi
 
-      # The list endpoint, not `--search`: the search index lags minutes
-      # behind, so an issue the previous run just opened would be invisible
-      # and this run would open a duplicate.
+      # The REST issues list reads the repository directly. `gh issue list`
+      # with `--label` or `--search` goes through the search API, whose index
+      # lags minutes behind, so an issue the previous run just opened would be
+      # invisible and this run would open a duplicate. The REST list also
+      # returns pull requests, which carry a `pull_request` key.
       - name: List open spec-drift issues
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh issue list --label "$DRIFT_LABEL" --state open --limit 1000 --json number,title,body \
-            > "$RUNNER_TEMP/spec-drift-open-issues.json"
+          gh api --paginate "repos/$GH_REPO/issues?labels=$DRIFT_LABEL&state=open&per_page=100" \
+            --jq '.[] | select(has("pull_request") | not) | {number, title, body}' \
+            | jq -s . > "$RUNNER_TEMP/spec-drift-open-issues.json"
           jq -r '"\(length) open \(env.DRIFT_LABEL) issue(s)"' "$RUNNER_TEMP/spec-drift-open-issues.json"
 
       - name: Plan one upsert per drifted source

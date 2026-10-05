@@ -8,10 +8,11 @@
 //     --open-issues <issues.json> --repo-url <https://github.com/owner/repo> \
 //     --run-id <id> --ref <ref>
 //
-// `--open-issues` is `gh issue list --label spec-drift --state open --json
-// number,title,body`. An open issue belongs to a source when its body carries
-// the source's marker or its title is the source's title, so a hand-edited
-// title or a stripped marker alone does not fork a duplicate.
+// `--open-issues` is a JSON array of `{number, title, body}`, one per open
+// `spec-drift` issue, read from the REST issues list. An open issue belongs to
+// a source when its body carries the source's marker or its title is the
+// source's title, so a hand-edited title or a stripped marker alone does not
+// fork a duplicate.
 //
 // Exit codes: 0 plan printed; 2 an input is missing or malformed (a
 // structured error on stderr, nothing on stdout).
@@ -140,7 +141,7 @@ function parseDrifted(doc: unknown): DriftEntry[] {
 }
 
 function parseOpenIssues(doc: unknown): OpenIssue[] {
-  if (!Array.isArray(doc)) throw new InputError('open issues must be the JSON array `gh issue list --json` prints');
+  if (!Array.isArray(doc)) throw new InputError('open issues must be a JSON array of {number, title, body} objects');
   return doc.map((raw: unknown, index): OpenIssue => {
     if (!isRecord(raw) || typeof raw.number !== 'number' || typeof raw.title !== 'string') {
       throw new InputError(`open issue [${index}] lacks a numeric number and a string title`);

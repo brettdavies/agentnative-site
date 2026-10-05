@@ -62,8 +62,10 @@ never cancel each other, so two runs cannot both decide an issue is missing.
 Each drifted source owns one open issue labeled `spec-drift` (the job creates the label when it is missing). The title
 is `spec-drift: <id>` and the body's first line is the marker `<!-- spec-drift:source=<id> -->`. An open issue belongs
 to a source when its body carries the marker or its title matches, so editing one of the two does not fork a duplicate;
-when two open issues match, the oldest wins. The job lists open issues through the list endpoint rather than search,
-because the search index lags minutes behind and would hide an issue the previous run just opened.
+when two open issues match, the oldest wins. The job lists open issues from the REST issues endpoint
+(`repos/<owner>/<repo>/issues?labels=spec-drift&state=open`, pull requests dropped), which reads the repository
+directly. `gh issue list --label` or `--search` goes through the search API instead, whose index lags minutes behind and
+would hide an issue the previous run just opened.
 
 On every drifted run the job rewrites the matched issue's title and body: the source, tier, and type, the pinned and
 observed values, and a link to the run that observed it. The title and body belong to the poll; discussion goes in
@@ -103,8 +105,13 @@ scheduled run.
 Proves the issue path end to end: one run opens one issue, a second run updates it, and no duplicate appears. Run it
 after the workflow first reaches `main`, and again after any change to the upsert job or the issue title or marker.
 
-1. Confirm no open issue exists for the source you will force:
-   `gh issue list --label spec-drift --state open --json number,title`.
+1. Confirm no open issue exists for the source you will force, reading the same REST endpoint the job reads:
+
+   ```bash
+   gh api --paginate "repos/{owner}/{repo}/issues?labels=spec-drift&state=open&per_page=100" \
+     --jq '.[] | select(has("pull_request") | not) | "#\(.number) \(.title)"'
+   ```
+
 2. Cut a throwaway branch from `main` and pin a deliberately wrong value. A draft revision is the simplest:
 
    ```bash
@@ -119,7 +126,9 @@ after the workflow first reaches `main`, and again after any change to the upser
 4. Observe one new issue titled `spec-drift: ietf-content-signals`, pinned `"99"`, observed the live revision, last
    observed on `chore/spec-drift-forced-proof`. The run summary reads `opened <url>`.
 5. Dispatch again on the same branch and wait. Observe the run summary reads `updated #<n>`, the issue's last-observed
-   run link changes, and `gh issue list --label spec-drift --state open` still lists exactly one issue for the source.
+   run link changes, and the step 1 command still lists exactly one `spec-drift: ietf-content-signals` issue. The
+   search-backed `gh issue list --label` can miss an issue opened minutes earlier, so it cannot prove there is no
+   duplicate.
 6. Restore: delete the branch (`git push origin --delete chore/spec-drift-forced-proof`, then
    `git branch -D chore/spec-drift-forced-proof`), and close the issue with a comment naming both run ids. The pin on
    `main` never changed, so the next scheduled run opens nothing for that source.
