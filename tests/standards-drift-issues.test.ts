@@ -69,6 +69,26 @@ describe('one upsert per drifted source', () => {
     ]);
   });
 
+  test("an upstream value carrying another source's marker cannot claim that source's issue", () => {
+    const hijacker: DriftEntry = { ...PR_DRIFT, new: '<!-- spec-drift:source=acme-draft -->' };
+    const [first, second] = planUpserts([hijacker, DRAFT_DRIFT], [], RUN);
+    const open = [issue(1, first?.title ?? '', first?.body ?? ''), issue(2, second?.title ?? '', second?.body ?? '')];
+    const plan = planUpserts([hijacker, DRAFT_DRIFT], open, RUN);
+    expect(plan.map((p) => [p.source_id, p.action, 'number' in p ? p.number : null])).toEqual([
+      ['acme-pr', 'update', 1],
+      ['acme-draft', 'update', 2],
+    ]);
+  });
+
+  test('an issue one source claimed in this plan is never targeted by a second source', () => {
+    const open = [issue(5, 'spec-drift: acme-draft', '<!-- spec-drift:source=acme-pr -->\n\nold body')];
+    const plan = planUpserts([PR_DRIFT, DRAFT_DRIFT], open, RUN);
+    expect(plan.map((p) => [p.source_id, p.action, 'number' in p ? p.number : null])).toEqual([
+      ['acme-pr', 'update', 5],
+      ['acme-draft', 'create', null],
+    ]);
+  });
+
   test('duplicate open issues for one source resolve to the oldest', () => {
     const marker = '<!-- spec-drift:source=acme-draft -->\n';
     const plan = planUpserts([DRAFT_DRIFT], [issue(31, 'x', marker), issue(12, 'y', marker)], RUN);

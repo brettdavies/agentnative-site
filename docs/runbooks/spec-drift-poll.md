@@ -61,8 +61,10 @@ never cancel each other, so two runs cannot both decide an issue is missing.
 
 Each drifted source owns one open issue labeled `spec-drift` (the job creates the label when it is missing). The title
 is `spec-drift: <id>` and the body's first line is the marker `<!-- spec-drift:source=<id> -->`. An open issue belongs
-to a source when its body carries the marker or its title matches, so editing one of the two does not fork a duplicate;
-when two open issues match, the oldest wins. The job lists open issues from the REST issues endpoint
+to a source when its body's first line is the marker or its title matches, so editing one of the two does not fork a
+duplicate; when two open issues match, the oldest wins. Only the first line counts because the pinned and observed
+values further down are upstream text, which can carry another source's marker. An issue matched by one source is not
+matched by a second source in the same run. The job lists open issues from the REST issues endpoint
 (`repos/<owner>/<repo>/issues?labels=spec-drift&state=open`, pull requests dropped), which reads the repository
 directly. `gh issue list --label` or `--search` goes through the search API instead, whose index lags minutes behind and
 would hide an issue the previous run just opened.

@@ -10,9 +10,9 @@
 //
 // `--open-issues` is a JSON array of `{number, title, body}`, one per open
 // `spec-drift` issue, read from the REST issues list. An open issue belongs to
-// a source when its body carries the source's marker or its title is the
-// source's title, so a hand-edited title or a stripped marker alone does not
-// fork a duplicate.
+// a source when its body's first line is the source's marker or its title is
+// the source's title, so a hand-edited title or a stripped marker alone does
+// not fork a duplicate. Each issue goes to at most one source per plan.
 //
 // Exit codes: 0 plan printed; 2 an input is missing or malformed (a
 // structured error on stderr, nothing on stdout).
@@ -48,8 +48,6 @@ function issueTitle(id: string): string {
   return `spec-drift: ${id}`;
 }
 
-// The closing ` -->` is what keeps `source=foo` from matching inside
-// `source=foo-bar`.
 function issueMarker(id: string): string {
   return `<!-- spec-drift:source=${id} -->`;
 }
@@ -92,20 +90,32 @@ function renderBody(drift: DriftEntry, run: RunContext): string {
   ].join('\n');
 }
 
+// The fenced values further down are third-party text and may hold any
+// source's marker verbatim, so only the line renderBody writes the marker on
+// can claim an issue.
+function carriesMarker(issue: OpenIssue, marker: string): boolean {
+  return (issue.body.split(/\r?\n/, 1)[0] ?? '').trim() === marker;
+}
+
 export function planUpserts(
   drifted: readonly DriftEntry[],
   open: readonly OpenIssue[],
   run: RunContext,
 ): IssueUpsert[] {
   const oldestFirst = [...open].sort((a, b) => a.number - b.number);
+  // The apply step edits issues in plan order, so two upserts naming one
+  // issue would leave only the last source's body on it.
+  const claimed = new Set<number>();
   return drifted.map((drift): IssueUpsert => {
     const title = issueTitle(drift.id);
     const marker = issueMarker(drift.id);
     const body = renderBody(drift, run);
-    const existing = oldestFirst.find((issue) => issue.body.includes(marker) || issue.title === title);
-    return existing
-      ? { action: 'update', source_id: drift.id, number: existing.number, title, body }
-      : { action: 'create', source_id: drift.id, title, body };
+    const existing = oldestFirst.find(
+      (issue) => !claimed.has(issue.number) && (carriesMarker(issue, marker) || issue.title === title),
+    );
+    if (!existing) return { action: 'create', source_id: drift.id, title, body };
+    claimed.add(existing.number);
+    return { action: 'update', source_id: drift.id, number: existing.number, title, body };
   });
 }
 
