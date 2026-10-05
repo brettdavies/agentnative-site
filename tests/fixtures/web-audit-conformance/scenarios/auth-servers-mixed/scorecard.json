@@ -607,8 +607,8 @@
       "host": "example.com"
     },
     {
-      "id": "well-known-mcp-card",
-      "label": "A .well-known MCP server card is published (SEP-1649)",
+      "id": "mcp-server-card",
+      "label": "An MCP server card is published",
       "category": "mcp",
       "group": "P8",
       "layer": "web",
@@ -616,13 +616,8 @@
       "tier": "recommended",
       "principle": "P8",
       "status": "absent",
-      "evidence": "https://example.com/.well-known/mcp/server-card.json -> 404 (status 404 not in [200])",
-      "hosts": [
-        {
-          "host": "example.com"
-        }
-      ],
-      "host": "example.com"
+      "evidence": "discovery found no server card",
+      "hosts": []
     },
     {
       "id": "mcp-card-legacy-aliases",

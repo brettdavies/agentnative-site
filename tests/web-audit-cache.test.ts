@@ -168,7 +168,7 @@ describe('cache.put / get', () => {
     await put(env, url, sampleScorecard(url), SPEC_VERSION);
     const got = await get(env, await keyFor(url, SPEC_VERSION));
     expect(got?.target_url).toBe(url);
-    expect((got?.scorecard as { badge: { score_pct: number } }).badge.score_pct).toBe(82);
+    expect((got?.scorecard as { badge: { score_pct: number } } | undefined)?.badge.score_pct).toBe(82);
   });
 
   test('put refuses a half-state (empty spec_version)', async () => {
@@ -738,7 +738,7 @@ describe('patchStoredPublicListing (scored_at-preserving dual-writer)', () => {
     await patchStoredPublicListing(env, cachedFixture(url, false), true);
 
     const got = await get(env, await keyFor(url, SPEC_VERSION));
-    expect((got?.scorecard as { public_listing: boolean }).public_listing).toBe(true);
+    expect((got?.scorecard as { public_listing: boolean } | undefined)?.public_listing).toBe(true);
     expect(got?.scored_at).toBe(PRIOR_SCORED_AT);
   });
 

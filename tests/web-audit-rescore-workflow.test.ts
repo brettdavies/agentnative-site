@@ -453,6 +453,15 @@ describe('runWebRescore', () => {
       expect(await fpOf(laned('shared', 'Any MCP server'))).toBe(base);
     });
 
+    test('the retired map changing does not reflow the corpus', async () => {
+      // A retired id names the successor a stored row renders under, read
+      // from the live registry at render time; no audit consults it.
+      const retiring = (retired: Record<string, unknown>) => ({ ...registryWith({}), retired });
+      const base = await fpOf(retiring({}));
+      expect(await fpOf(retiring({ 'old-llms': { successor: 'llms-txt', reason: 'renamed' } }))).toBe(base);
+      expect(await fpOf(registryWith({}))).toBe(base);
+    });
+
     test('anything the audit or a stored row carries still reflows', async () => {
       const base = await fpOf(registryWith({}));
       for (const [field, value] of [

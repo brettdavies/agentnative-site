@@ -104,7 +104,7 @@ function resultsOf(events: AuditEvent[]) {
 
 function scorecardOf(events: AuditEvent[]) {
   const complete = events.find((e) => e.type === 'complete');
-  if (!complete || complete.type !== 'complete') throw new Error('no complete event');
+  if (complete?.type !== 'complete') throw new Error('no complete event');
   return complete.scorecard;
 }
 

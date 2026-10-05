@@ -42,7 +42,7 @@ Sub-commands let you re-run one section in isolation:
 | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | `drift`     | Commits on `main` whose changes `dev` lacks, `.github/` parity, lockfile packages `main` resolves newer                                               | `scripts/release/drift.sh`                                                   |
 | `surface`   | Commits + diff vs the last `v*` tag, breaking markers (SKIPs while the repo has no `v*` tag)                                                          | `git log`, `git diff`                                                        |
-| `coord`     | Vendored spec / anc / principles VERSION coherence, skill.json upstream version, Dockerfile release URL + sha, staging container baked anc vocabulary | `cat`, `gh api`, `curl -I`, `docker run`                                     |
+| `coord`     | Vendored spec / anc / principles VERSIONs, skill.json upstream version, Dockerfile anc URL + sha, both pins' baked anc, staging anc vocabulary       | `cat`, `gh api`, `curl -I`, `docker run`                                     |
 | `build`     | `bun run build` exit, scorecard corpus orphans, badge SVG coverage, markdown twin coverage                                                            | `bun run build`                                                              |
 | `do-smoke`  | Live `/api/score` smoke against the `--env` target (fresh non-registry github URL)                                                                    | `curl` + `~/.claude/skills/1password` (staging mode)                         |
 | `mcp`       | Delegates to `scripts/release/mcp-smoke.sh` against the `--env` target                                                                                | `scripts/release/mcp-smoke.sh` + `~/.claude/skills/1password` (staging mode) |
@@ -121,12 +121,29 @@ until traffic exercises the affected surface.
 
 Driven by `scripts/release/preflight.sh coord`.
 
+- [ ] **Both container pins bake the Dockerfile's anc.** The gate reads `containers[0].image` (production) and
+  `env.staging.containers[0].image` (staging) from `wrangler.jsonc`, runs `anc --version` in each image (once when both
+  pins name the same image), and fails when either differs from the release in the `docker/sandbox/Dockerfile` tarball
+  URL. A staging mismatch means the staging pin was not advanced after the Dockerfile bump
+  ([`RELEASES.md` § Image bump](./RELEASES.md#image-bump-feat-pr-to-dev)); a production mismatch means the release's
+  promotion commit is missing ([`RELEASES.md` § Promotion](./RELEASES.md#promotion-release-pr-to-main)). The staging
+  pin MUST pass before the cut. Before the cut, the production pin fails whenever the Dockerfile's anc has moved past
+  the production image; it MUST pass on the release branch, after the promotion commit, at step 8 of
+  [`RELEASES.md` § Releasing dev to main](./RELEASES.md#releasing-dev-to-main). The gate skips when docker is absent or
+  an image is neither local nor pullable.
+
+  ```bash
+  bun -e 'const c = Bun.JSONC.parse(await Bun.file("wrangler.jsonc").text()); console.log(c.containers[0].image); console.log(c.env.staging.containers[0].image)'
+  grep -oE 'agentnative-cli/releases/download/v[^/]+' docker/sandbox/Dockerfile
+  docker run --rm --entrypoint /usr/local/bin/anc "<pin>" --version
+  ```
+
 - [ ] **`anc` CLI baked in the staging container matches the Worker's invocation vocabulary.** Pull the staging image
   pin from `wrangler.jsonc` (`env.staging.containers[0].image`) and confirm the baked binary supports the subcommand the
   Worker shells out to:
 
   ```bash
-  STAGING_PIN=$(jq -r '.env.staging.containers[0].image' wrangler.jsonc)
+  STAGING_PIN=$(bun -e 'console.log(Bun.JSONC.parse(await Bun.file("wrangler.jsonc").text()).env.staging.containers[0].image)')
   docker pull "$STAGING_PIN"
   docker run --rm --entrypoint /usr/local/bin/anc "$STAGING_PIN" --version
   docker run --rm --entrypoint /usr/local/bin/anc "$STAGING_PIN" --help | grep -E '^  (audit|check) '
@@ -165,11 +182,13 @@ Driven by `scripts/release/preflight.sh coord`.
   If the manifest version is BEHIND the skill repo's latest release, follow
   [`RELEASES.md` § Skill releases](./RELEASES.md#skill-releases) to land the bump before tagging this release.
 - [ ] **CLI release URL in `docker/sandbox/Dockerfile` resolves.** The Dockerfile fetches a specific anc release tarball
-  at build time. Confirm the URL is reachable and that the recorded sha256 matches:
+  at build time. Confirm the URL is reachable and that the recorded sha256 matches. The recorded sha is the one on the
+  `sha256sum -c` line after the tarball URL; the file's first digest belongs to the base image:
 
   ```bash
   URL=$(grep -oE 'https://github.com/[^ ]*agentnative-x86_64-unknown-linux-gnu.tar.gz' docker/sandbox/Dockerfile)
-  SHA=$(grep -oE "[a-f0-9]{64}" docker/sandbox/Dockerfile | head -1)
+  SHA=$(sed -n '/agentnative-x86_64-unknown-linux-gnu\.tar\.gz/,/sha256sum -c/p' docker/sandbox/Dockerfile \
+    | grep 'sha256sum -c' | grep -oE '[a-f0-9]{64}')
   curl -fsSL "$URL" -o /tmp/anc.tgz && sha256sum /tmp/anc.tgz && echo "Expected: $SHA"
   ```
 

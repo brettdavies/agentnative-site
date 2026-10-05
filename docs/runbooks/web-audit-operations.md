@@ -93,7 +93,7 @@ final step. All board surfaces (`/web`, the homepage web pane, `list_website_aud
 Three triggers start a rescore, all coalescing through a single-flight helper (a start while a batch is in flight no-ops
 onto the running instance):
 
-- **Weekly cron.** `triggers.crons` in `wrangler.jsonc` (both envs) fires `scheduled()` every Monday 06:00 UTC.
+- **Weekly cron.** `triggers.crons` in `wrangler.jsonc` (both envs) fires `scheduled()` every Sunday at 09:00 UTC.
 - **Post-deploy hook.** `deploy.yml` POSTs `/api/web-rescore` after each `wrangler deploy`, so a deploy (or a
   `SPEC_VERSION` bump, which rotates every R2 key) repopulates R2 under the current version. The step fails loudly on
   any non-2xx.

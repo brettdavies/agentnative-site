@@ -448,6 +448,18 @@ A `paths-ignore` filter on the `push` trigger skips deploy when a commit only to
 
 #### Image bump (feat PR to dev)
 
+Every anc release starts an image bump. The PR that bumps `src/data/anc/VERSION` (`scripts/sync-cli-version.sh`) also
+points the tarball URL in `docker/sandbox/Dockerfile` at the new release, sets the digest on its `sha256sum -c` line
+from the release's `sha256sum.txt`, and carries the new staging pin:
+
+```bash
+gh release download v<version> -R brettdavies/agentnative-cli -p sha256sum.txt -O - \
+  | grep x86_64-unknown-linux-gnu.tar.gz
+```
+
+`tests/sandbox-anc-version.test.ts` fails the PR gate while the Dockerfile's anc differs from `src/data/anc/VERSION`.
+`scripts/release/preflight.sh coord` fails while a pinned image bakes a different anc than the Dockerfile.
+
 ```bash
 # from a clean working tree on dev
 GIT_SHA=$(git rev-parse --short HEAD)
@@ -466,7 +478,9 @@ rollout will hit warm OLD-image instances and look identical to a real bug. Full
 
 Build the `release/*` branch per [§ Releasing dev to main](#releasing-dev-to-main), then add one promotion commit
 bumping the top-level `containers[0].image` to match `env.staging.containers[0].image`. CI on a main-targeting PR
-enforces: both pins exist in the CF managed registry AND both pins point at the same tag.
+enforces: both pins exist in the CF managed registry AND both pins point at the same tag. The promotion commit lands
+before step 8 of [§ Releasing dev to main](#releasing-dev-to-main): until it does, `scripts/release/preflight.sh coord`
+fails on the production pin whenever the production image bakes a different anc than the Dockerfile.
 
 #### Lockstep-bump shortcut
 

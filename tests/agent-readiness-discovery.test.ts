@@ -11,6 +11,8 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emitShell } from '../src/build/shell.mjs';
+import { AUDIT_PATH } from '../src/shared/audit-routes';
+import { MCP_DISCOVERY_DOCUMENTS } from '../src/shared/mcp-discovery';
 import worker from '../src/worker/index';
 import { MCP_DESCRIPTOR_ALIAS_PATHS, MCP_DESCRIPTOR_CANONICAL_PATH } from '../src/worker/mcp/descriptor-paths';
 
@@ -29,11 +31,34 @@ const FIXTURE_MCP_SEED = JSON.stringify({
   authentication: { required: false, schemes: [], documentation: 'https://anc.dev/auth.md' },
 });
 
+const FIXTURE_SERVER_CARD_SEED = JSON.stringify({
+  $schema: 'https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json',
+  name: 'dev.anc/anc',
+  version: '0.1.0',
+  description: 'fixture',
+  remotes: [{ type: 'streamable-http', url: 'https://anc.dev/mcp' }],
+});
+
+const FIXTURE_AI_CATALOG = JSON.stringify({
+  specVersion: '1.0',
+  entries: [
+    {
+      identifier: 'urn:air:anc.dev:mcp:anc',
+      type: 'application/mcp-server-card+json',
+      url: 'https://anc.dev/mcp/server-card',
+    },
+  ],
+});
+
 const FIXTURE_API_CATALOG = JSON.stringify({
   linkset: [
     {
       anchor: 'https://anc.dev/mcp',
-      'service-desc': [{ href: 'https://anc.dev/.well-known/mcp/server-card.json' }],
+      'service-desc': [
+        { href: 'https://anc.dev/.well-known/mcp/server-card.json', type: 'application/json' },
+        { href: 'https://anc.dev/mcp/server-card', type: 'application/mcp-server-card+json' },
+      ],
+      'ai-catalog': [{ href: 'https://anc.dev/.well-known/ai-catalog.json', type: 'application/ai-catalog+json' }],
       'service-doc': [{ href: 'https://anc.dev/mcp-skill' }],
     },
   ],
@@ -77,6 +102,8 @@ function req(url: string, init: RequestInit = {}): Request {
 function makeEnv(bodyByPath: Record<string, string> = {}) {
   const defaults: Record<string, string> = {
     '/_internal/mcp-server-card.json': FIXTURE_MCP_SEED,
+    '/_internal/mcp-server-card-sep2127.json': FIXTURE_SERVER_CARD_SEED,
+    '/.well-known/ai-catalog.json': FIXTURE_AI_CATALOG,
     '/.well-known/api-catalog': FIXTURE_API_CATALOG,
     '/.well-known/oauth-protected-resource': FIXTURE_OAUTH_PR,
     '/.well-known/oauth-authorization-server': FIXTURE_OAUTH_AS,
@@ -127,6 +154,78 @@ describe('agent-readiness cross-surface drift (built dist/)', () => {
   test('llms.txt Programmatic access section points at the canonical server-card path', async () => {
     const llms = await readFile(join(DIST_DIR, 'llms.txt'), 'utf8');
     expect(llms).toContain(`https://anc.dev${MCP_DESCRIPTOR_CANONICAL_PATH}`);
+  });
+
+  test('api-catalog links every discovery document under its relation, in list order', async () => {
+    const catalog = JSON.parse(await readFile(join(DIST_DIR, '.well-known', 'api-catalog'), 'utf8')) as {
+      linkset: Array<Record<string, Array<{ href: string; type?: string }>>>;
+    };
+    const context = catalog.linkset[0];
+    for (const rel of new Set(MCP_DISCOVERY_DOCUMENTS.map((d) => d.rel))) {
+      expect(context[rel]).toEqual(
+        MCP_DISCOVERY_DOCUMENTS.filter((d) => d.rel === rel).map((d) => ({
+          href: `https://anc.dev${d.path}`,
+          type: d.type,
+        })),
+      );
+    }
+    expect(context['ai-catalog']).toEqual([
+      { href: 'https://anc.dev/.well-known/ai-catalog.json', type: 'application/ai-catalog+json' },
+    ]);
+  });
+
+  test('llms.txt Programmatic access lists every discovery document, in list order', async () => {
+    const llms = await readFile(join(DIST_DIR, 'llms.txt'), 'utf8');
+    const section = llms.slice(llms.indexOf('## Programmatic access'), llms.indexOf('## Principles'));
+    const lines = MCP_DISCOVERY_DOCUMENTS.map((d) => `- [${d.label}](https://anc.dev${d.path})`);
+    const positions = lines.map((line) => section.indexOf(line));
+    expect(positions.every((index) => index >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    expect(section).toContain('- [MCP server card (SEP-2127)](https://anc.dev/mcp/server-card)');
+    expect(section).toContain('- [AI catalog](https://anc.dev/.well-known/ai-catalog.json)');
+  });
+
+  test('auth.md lists every discovery document, in list order', async () => {
+    const raw = await readFile(join(DIST_DIR, 'auth.md'), 'utf8');
+    const lines = MCP_DISCOVERY_DOCUMENTS.map((d) => `- ${d.label}: \`https://anc.dev${d.path}\`.`);
+    const positions = lines.map((line) => raw.indexOf(line));
+    expect(positions.every((index) => index >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+  });
+
+  test('the built homepage head links every discovery document', async () => {
+    const html = await readFile(join(DIST_DIR, 'index.html'), 'utf8');
+    const head = html.slice(0, html.indexOf('</head>'));
+    // The minifier drops the void element's closing slash.
+    for (const d of MCP_DISCOVERY_DOCUMENTS) {
+      expect(head).toContain(`<link rel="${d.rel}" type="${d.type}" href="${d.path}" title="${d.label}">`);
+    }
+  });
+
+  test('the MCP content pages and their markdown twins name every discovery document', async () => {
+    // A path ends where no path character follows, so /mcp/server-card is
+    // not found inside /.well-known/mcp/server-card.json.
+    const names = (text: string, path: string): boolean =>
+      new RegExp(`${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w/-]|\\.\\w)`).test(text);
+    for (const page of ['mcp', 'mcp-skill']) {
+      const source = await readFile(join(REPO_ROOT, 'content', `${page}.md`), 'utf8');
+      const twin = await readFile(join(DIST_DIR, `${page}.md`), 'utf8');
+      for (const d of MCP_DISCOVERY_DOCUMENTS) {
+        expect({ page, path: d.path, source: names(source, d.path), twin: names(twin, d.path) }).toEqual({
+          page,
+          path: d.path,
+          source: true,
+          twin: true,
+        });
+      }
+    }
+  });
+
+  test('/mcp lists the discovery documents in list order, SEP-1649 card first', async () => {
+    const source = await readFile(join(REPO_ROOT, 'content', 'mcp.md'), 'utf8');
+    const positions = MCP_DISCOVERY_DOCUMENTS.map((d) => source.indexOf(`](${d.path})`));
+    expect(positions.every((index) => index >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
   });
 
   test('shell HTML pages load /js/webmcp.js on the entry and spec surfaces', async () => {
@@ -280,6 +379,99 @@ describe('MCP descriptor aliases — 301 to the canonical (R9)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Worker: SEP-2127 server card and AI catalog
+// ---------------------------------------------------------------------------
+
+describe('SEP-2127 server card and AI catalog: worker red-team', () => {
+  test('GET /mcp/server-card serves the card media type, CORS-open and cacheable', async () => {
+    const res = await worker.fetch(req('https://anc.dev/mcp/server-card'), makeEnv(), {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('application/mcp-server-card+json; charset=utf-8');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+    expect(res.headers.get('Cache-Control') ?? '').toContain('max-age=300');
+  });
+
+  test('a markdown Accept on /mcp/server-card still gets the card', async () => {
+    const res = await worker.fetch(
+      req('https://anc.dev/mcp/server-card', { headers: { accept: 'text/markdown' } }),
+      makeEnv(),
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('application/mcp-server-card+json; charset=utf-8');
+  });
+
+  test('a non-GET on /mcp/server-card returns 405 Allow: GET', async () => {
+    const res = await worker.fetch(
+      req('https://anc.dev/mcp/server-card', { method: 'POST' }),
+      makeEnv(),
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(405);
+    expect(res.headers.get('Allow')).toBe('GET');
+  });
+
+  test('a malformed card seed returns 503 instead of an unhandled exception', async () => {
+    const res = await worker.fetch(
+      req('https://anc.dev/mcp/server-card'),
+      makeEnv({ '/_internal/mcp-server-card-sep2127.json': 'not json' }),
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(503);
+    expect(await res.text()).toContain('unavailable');
+  });
+
+  test('GET /.well-known/ai-catalog.json serves the catalog media type, CORS-open and noindex', async () => {
+    const res = await worker.fetch(
+      req('https://anc.dev/.well-known/ai-catalog.json'),
+      makeEnv(),
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('application/ai-catalog+json; charset=utf-8');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+    expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
+  });
+
+  test('a non-GET on the AI catalog returns 405 Allow: GET', async () => {
+    const res = await worker.fetch(
+      req('https://anc.dev/.well-known/ai-catalog.json', { method: 'POST' }),
+      makeEnv(),
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(405);
+    expect(res.headers.get('Allow')).toBe('GET');
+  });
+
+  test('a missing AI catalog seed returns 503 instead of an unhandled exception', async () => {
+    const noSeedEnv = {
+      ASSETS: {
+        async fetch(): Promise<Response> {
+          return new Response('not found', { status: 404 });
+        },
+      } as unknown as Fetcher,
+    };
+    const res = await worker.fetch(
+      req('https://anc.dev/.well-known/ai-catalog.json'),
+      noSeedEnv,
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(503);
+    expect(await res.text()).toContain('unavailable');
+  });
+
+  test('a malformed AI catalog seed returns 503 instead of an unhandled exception', async () => {
+    const res = await worker.fetch(
+      req('https://anc.dev/.well-known/ai-catalog.json'),
+      makeEnv({ '/.well-known/ai-catalog.json': 'not json' }),
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(503);
+    expect(await res.text()).toContain('unavailable');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Worker — api-catalog
 // ---------------------------------------------------------------------------
 
@@ -294,6 +486,25 @@ describe('/.well-known/api-catalog — worker red-team', () => {
     };
     expect(body.linkset[0].anchor).toBe('https://staging.example/mcp');
     expect(body.linkset[0]['service-desc'][0].href).toBe('https://staging.example/.well-known/mcp/server-card.json');
+  });
+
+  test('each linked document keeps its own path when the hrefs move to the inbound origin', async () => {
+    const res = await worker.fetch(
+      req('https://staging.example/.well-known/api-catalog'),
+      makeEnv(),
+      {} as ExecutionContext,
+    );
+    const body = JSON.parse(await res.text()) as {
+      linkset: Array<Record<string, Array<{ href: string; type?: string }>>>;
+    };
+    expect(body.linkset[0]['service-desc']).toEqual([
+      { href: 'https://staging.example/.well-known/mcp/server-card.json', type: 'application/json' },
+      { href: 'https://staging.example/mcp/server-card', type: 'application/mcp-server-card+json' },
+    ]);
+    expect(body.linkset[0]['ai-catalog']).toEqual([
+      { href: 'https://staging.example/.well-known/ai-catalog.json', type: 'application/ai-catalog+json' },
+    ]);
+    expect(body.linkset[0]['service-doc']).toEqual([{ href: 'https://staging.example/mcp-skill' }]);
   });
 
   test('POST does not receive the linkset+json content-type stamp (GET-only intercept)', async () => {
@@ -522,6 +733,19 @@ describe('site shell MCP discoverability (emitShell)', () => {
     expect(html).not.toMatch(/rel="describedby" href="\/\.well-known\/mcp" \/>/);
   });
 
+  test('head links every discovery document with its relation and media type, SEP-1649 card first', () => {
+    const html = sampleShellHtml();
+    const tags = [
+      '<link rel="service-desc" type="application/json" href="/.well-known/mcp/server-card.json" title="MCP server card (SEP-1649)" />',
+      '<link rel="service-desc" type="application/mcp-server-card+json" href="/mcp/server-card" title="MCP server card (SEP-2127)" />',
+      '<link rel="ai-catalog" type="application/ai-catalog+json" href="/.well-known/ai-catalog.json" title="AI catalog" />',
+    ];
+    const positions = tags.map((tag) => html.indexOf(tag));
+    expect(positions.every((index) => index >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    expect(html.indexOf('</head>')).toBeGreaterThan(positions[2] ?? Number.POSITIVE_INFINITY);
+  });
+
   test('rel=mcp advertises the streamable-HTTP endpoint', () => {
     const html = sampleShellHtml();
     expect(html).toContain('<link rel="mcp" href="/mcp" />');
@@ -557,6 +781,12 @@ describe('homepage MCP prose (built dist/)', () => {
     expect(md).toContain('https://anc.dev/mcp');
     expect(md).toContain('/mcp-skill');
     expect(md).toContain('streamable-HTTP');
+  });
+
+  test('index.md twin links the audit page by its path, with no unexpanded placeholder', async () => {
+    const md = await readFile(join(DIST_DIR, 'index.md'), 'utf8');
+    expect(md).toMatch(new RegExp(`\\[audit page\\]\\([^)]*${AUDIT_PATH}\\)`));
+    expect(md).not.toContain('${');
   });
 
   test('content/_use.md source still names the same two surfaces', async () => {

@@ -32,6 +32,12 @@
 // reciprocity-refused. Caps, budgets, and guard refusals are decided
 // before any request and record their own outcomes.
 // The trail follows declaration order, never completion order.
+//
+// The slice keeps the card it read for the endpoint it admitted (the card
+// document that named it, or the card that admitted it, at <endpoint> +
+// card suffix or listed in the host's AI catalog, whichever stands
+// higher), so the card check can score a card published on the endpoint's
+// host rather than the audited origin.
 
 import type { ApiDeclaration } from './api-catalog';
 import {
@@ -41,6 +47,9 @@ import {
   type McpDeclaration,
   otherRemotes,
   parseJsonObject,
+  type RetainedDocument,
+  retainedCard,
+  strongestCard,
 } from './discovery-documents';
 import { type ApiFollowResult, NO_API_FOLLOW, settleApiDeclarations } from './follow-api';
 import {
@@ -111,6 +120,8 @@ export interface FollowResult {
   endpoint: string | null;
   /** The RFC 9728 metadata that admitted that endpoint, when metadata is what did. */
   endpointMetadata: MetadataMatch | null;
+  /** The card the slice read for that endpoint: the card document that named it or the card that admitted it, whichever stands higher. */
+  endpointCard: RetainedDocument | null;
   /** Per declaration key: its entry, then the entries of what a followed card document declared. */
   entries: ReadonlyMap<string, TrailEntry[]>;
   /** The API catalog's trail entries and the descriptions the slice read. */
@@ -139,7 +150,7 @@ const CARD_DOCUMENT_READ: ReadOptions = {
 
 const BEYOND_ENDPOINT: Settled = { outcome: 'not-followed', reason: 'beyond-endpoint-of-record' };
 
-type CardDocumentRead = { entry: TrailEntry; named: McpDeclaration[] };
+type CardDocumentRead = { entry: TrailEntry; named: McpDeclaration[]; card?: RetainedDocument };
 
 export function openFollow(input: FollowInput): FollowSession {
   const requests = sliceRequests({
@@ -151,6 +162,8 @@ export function openFollow(input: FollowInput): FollowSession {
   const walked = new Set<string>();
   let endpoint: string | null = null;
   let endpointMetadata: MetadataMatch | null = null;
+  let namingCard: RetainedDocument | null = null;
+  let admittingCard: RetainedDocument | null = null;
   let api = NO_API_FOLLOW;
   let elapsedMs = 0;
   const timed = async (run: () => Promise<void>): Promise<void> => {
@@ -177,6 +190,7 @@ export function openFollow(input: FollowInput): FollowSession {
     return {
       entry: trailEntry(declaration, { final_url: finalUrl, outcome: 'followed' }),
       named: [primary, ...otherRemotes(card, declaration.url, fetched.url)].filter((d) => declaresHost(d, input.base)),
+      card: retainedCard(fetched.url, fetched.response),
     };
   };
 
@@ -205,6 +219,7 @@ export function openFollow(input: FollowInput): FollowSession {
     if (admitted === null) return { final_url: finalUrl, outcome: 'reciprocity-refused' };
     endpoint = pinned;
     endpointMetadata = admitted.metadata;
+    admittingCard = admitted.card === undefined ? null : retainedCard(admitted.card.url, admitted.card.response);
     return { final_url: finalUrl, outcome: 'followed', admitted_by: admitted.by };
   };
 
@@ -256,7 +271,9 @@ export function openFollow(input: FollowInput): FollowSession {
         continue;
       }
       const read = cardReads.get(key) ?? (await readInPlace(declaration));
+      const admittedBefore = endpoint !== null;
       entries.set(key, [read.entry, ...(await settleEndpoints(read.named.filter(firstSeen)))]);
+      if (!admittedBefore && endpoint !== null && read.card !== undefined) namingCard = read.card;
     }
   };
 
@@ -281,6 +298,10 @@ export function openFollow(input: FollowInput): FollowSession {
     result: () => ({
       endpoint,
       endpointMetadata,
+      endpointCard: strongestCard(
+        [namingCard, admittingCard].filter((card): card is RetainedDocument => card !== null),
+        (card) => parseJsonObject(card.response),
+      ),
       entries,
       api,
       evidence: requests.evidence,

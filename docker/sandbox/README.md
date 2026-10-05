@@ -1,7 +1,7 @@
 # Live-scoring sandbox image
 
 Debian-trixie-slim + glibc image for the live-scoring path. Carries the Cloudflare Sandbox SDK server, package managers
-(`cargo-binstall`, `pip`, `uv`, `npm`, `bun`, `go` runtime), and a pre-built `anc` binary from agentnative-cli v0.3.1.
+(`cargo-binstall`, `pip`, `uv`, `npm`, `bun`, `go` runtime), and a pre-built `anc` binary from agentnative-cli v0.6.0.
 NO COMPILERS, NO TOOLCHAINS.
 
 Plan reference:
@@ -57,7 +57,7 @@ Local smoke before pushing (optional but recommended on Dockerfile changes):
 ```sh
 # anc baked-in version check
 docker run --rm "anc-sandbox:$GIT_SHA" /usr/local/bin/anc --version
-# expect: anc 0.3.1
+# expect: anc 0.6.0
 
 # all expected pms on PATH
 docker run --rm "anc-sandbox:$GIT_SHA" sh -c \

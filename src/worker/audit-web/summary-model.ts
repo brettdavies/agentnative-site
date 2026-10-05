@@ -7,8 +7,9 @@
 // machine-readable context element were each counting the rows themselves,
 // so a change to one had no way of reaching the other.
 
-import { isNotRunReason, type NaReason } from '../../shared/web-audit-findings';
+import { isNotRunReason, type NaReason, type RowAdvisory } from '../../shared/web-audit-findings';
 import { resultLine } from '../../shared/web-audit-result-line';
+import { type RetiredIds, successorOf } from './display';
 import {
   entryHostOf,
   type RowHost,
@@ -24,6 +25,7 @@ import {
 import { scoreHostsClause } from './provenance-copy';
 import type { McpLaneSpec, WebAuditDiscoveryConfig } from './registry';
 import { assembleRemediation, isFixableStatus, type WebRemediationCatalog } from './remediation';
+import { type CardLocations, retiredNote, supersededNote } from './row-notes';
 import type { ScorecardStatus } from './scorecard';
 import {
   blockItems,
@@ -48,6 +50,7 @@ export type WebScorecardRow = {
   status: ScorecardStatus;
   na_reason?: NaReason;
   unprobed?: true;
+  advisory?: RowAdvisory;
   evidence: string | null;
   hosts?: RowHost[];
   host?: string;
@@ -56,6 +59,7 @@ export type WebScorecardRow = {
 export type WebScorecardShape = {
   spec_version?: string;
   target_url?: string;
+  mcp_endpoint?: unknown;
   tool?: { name?: string; url?: string };
   mcp_discovery?: unknown;
   follow_declarations?: unknown;
@@ -67,10 +71,11 @@ export type WebScorecardShape = {
   results?: WebScorecardRow[];
 };
 
-/** The registry fields lane grouping and the declared-hosts guidance read; a full registry satisfies it. */
+/** The registry fields lane grouping, retired rows, and the card guidance read; a full registry satisfies it. */
 export interface SummaryRegistry {
   mcp_lanes?: Record<string, McpLaneSpec>;
   mcp_discovery?: Pick<WebAuditDiscoveryConfig, 'card_suffix' | 'ai_catalog'>;
+  retired?: RetiredIds;
   checks: ReadonlyArray<{ id: string; lane?: string }>;
 }
 
@@ -103,10 +108,13 @@ function countsOf(rows: readonly WebScorecardRow[]): Record<ScorecardStatus, num
   return counts;
 }
 
-/** A row earns a fix prompt only when the run actually observed the surface. */
-function isFixable(row: WebScorecardRow): boolean {
-  return row.unprobed !== true && isFixableStatus(row.status);
+/** A row earns a fix prompt only when the run actually observed the surface and its check is still scored. */
+function isFixable(row: WebScorecardRow, retired: boolean): boolean {
+  return !retired && row.unprobed !== true && isFixableStatus(row.status);
 }
+
+/** What a row's own notes read from beyond the row: the scorecard's endpoint and the live registry. */
+type RowNoteInput = { endpoint: string | null; locations: CardLocations | null; retired: RetiredIds | undefined };
 
 function notRunOf(row: WebScorecardRow, entryHost: string): NotRun | null {
   return row.status === 'n_a' && isNotRunReason(row.na_reason)
@@ -114,14 +122,21 @@ function notRunOf(row: WebScorecardRow, entryHost: string): NotRun | null {
     : null;
 }
 
+/**
+ * A row whose check id is retired reads its successor's goal and fix page,
+ * because a re-audit scores the successor; it keeps its own label and the
+ * status its run stored.
+ */
 function summaryRow(
   row: WebScorecardRow,
   catalog: WebRemediationCatalog,
-  input: { origin: string; entryHost: string; domain: string },
+  input: { origin: string; entryHost: string; domain: string } & RowNoteInput,
 ): SummaryRow {
-  const entry = catalog[row.id];
+  const successor = successorOf(row.id, input.retired);
+  const checkId = successor ?? row.id;
+  const entry = catalog[checkId];
   const assembled = assembleRemediation(entry, {
-    checkId: row.id,
+    checkId,
     origin: input.origin,
     evidence: row.evidence,
     host: recordedHostOf(row),
@@ -134,7 +149,7 @@ function summaryRow(
     tier: row.tier,
     status: row.status,
     unprobed: row.unprobed === true,
-    fixable: isFixable(row),
+    fixable: isFixable(row, successor !== undefined),
     result: resultLine(row.status, row.evidence, row.na_reason, rowHostOf(row, input.entryHost), rowHostOutcomes(row)),
     goal: entry?.goal ?? assembled.goal,
     fix: assembled.fix,
@@ -144,6 +159,8 @@ function summaryRow(
     host: rowHostsOf(row, input.entryHost).join(' '),
     recordedHosts: recordedHostsOf(row),
     hostNote: null,
+    advisoryNote: row.advisory === 'superseded' ? supersededNote(input.endpoint, input.locations) : null,
+    retiredNote: successor === undefined ? null : retiredNote(successor),
     notRun,
     remedy: rowRemedy({ notRun }, input.domain),
   };
@@ -167,8 +184,13 @@ export function webSummaryModel(input: WebSummaryModelInput): WebSummaryModel {
   const trail = readDeclaredHosts(sc.declared_hosts);
   const trailInput = { trail, discovery: sc.mcp_discovery, domain: input.domain };
 
+  const notes: RowNoteInput = {
+    endpoint: typeof sc.mcp_endpoint === 'string' ? sc.mcp_endpoint : null,
+    locations: input.registry?.mcp_discovery ?? null,
+    retired: input.registry?.retired,
+  };
   const summaryRows = rows.map((row) =>
-    summaryRow(row, catalog, { origin: input.origin, entryHost, domain: input.domain }),
+    summaryRow(row, catalog, { origin: input.origin, entryHost, domain: input.domain, ...notes }),
   );
   const byCategory = new Map<string, SummaryRow[]>();
   rows.forEach((row, i) => {

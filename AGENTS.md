@@ -31,9 +31,10 @@ The scope for v0 is decided and lives in:
 - `content/principles/VERSION`: the spec version the site's PROSE has been **reconciled to**. Exported as
   `SITE_SPEC_VERSION` from `src/build/util.mjs` and rendered in the site footer. Bumped MANUALLY by the contributor who
   reconciles `content/principles/p*-*.md` after a `sync-spec.sh` run, because bumping before reconciliation lies to
-  visitors about site currency. Always ≤ `SPEC_VERSION`; lag during the manual reconciliation window is honest. The
-  badge SVGs use a different source (each scorecard's own `spec_version` field), and the OG card uses anc's
-  self-scorecard's `spec_version`. Three sources for three different events (vendor / score / reconcile).
+  visitors about site currency. Always ≤ `SPEC_VERSION`; lag during the manual reconciliation window is honest. The OG
+  card renders the same value; regenerate `public/og-image.png` with `bun run og` after a bump. The badge SVGs use a
+  different source (each scorecard's own `spec_version` field). Three sources for three different events (vendor /
+  score / reconcile).
 - Workflow detail in [`src/data/spec/README.md`](src/data/spec/README.md); cross-repo version model at
   [`docs/solutions/best-practices/agentnative-version-model-2026-05-01.md`](docs/solutions/best-practices/agentnative-version-model-2026-05-01.md);
   governing pattern at
@@ -69,8 +70,9 @@ anchors, and semantic HTML. Keep this framing in every decision.
   `tests/content-no-form-widgets.test.ts` and the `scripts/hooks/pre-commit` widget guard.
 - `/llms.txt`, `/llms-full.txt`: llmstxt.org convention (summary index + full concatenated spec)
 - `/mcp`: streamable HTTP Model Context Protocol server. Client skill in [`content/mcp-skill.md`](content/mcp-skill.md);
-  canonical server card at `/.well-known/mcp/server-card.json` (legacy aliases `/.well-known/mcp`, `/mcp.json`,
-  `/.well-known/mcp.json`); HTML + `.md` twin at `/mcp-skill`
+  SEP-2127 server card at `/mcp/server-card`, listed in `/.well-known/ai-catalog.json`; superseded SEP-1649 card at
+  `/.well-known/mcp/server-card.json` (legacy aliases `/.well-known/mcp`, `/mcp.json`, `/.well-known/mcp.json`); HTML +
+  `.md` twin at `/mcp-skill`
 - `/sitemap.xml`, `/robots.txt`: hygiene
 - `public/og-image.png`: 1200x630 designed social preview
 
@@ -89,11 +91,22 @@ agent-onboarding summary: enough to know what the surface is, what it costs, and
 per-lane error-code table with the producing layer and delivery for each code, the SEP-2243 header mirror, the `_meta`
 envelope, cache-hint scope, and the GET posture. Read it before changing anything on the wire or bumping the revision.
 
-**Discovery siblings.** `/.well-known/mcp/server-card.json` (SEP-1649 canonical server card; legacy aliases
-`/.well-known/mcp`, `/mcp.json`, `/.well-known/mcp.json`), `/.well-known/ai.txt` (`Programmatic-API` declaration),
-`/.well-known/security.txt` (RFC 9116 contact), `/llms.txt` (Programmatic access section). The server card's
-`documentation` field is the client-skill `.md` URL; `initialize.instructions` carries the same pointer plus a
-session-time summary.
+**Discovery siblings.** `/mcp/server-card` (SEP-2127 server card, the card of record, served as
+`application/mcp-server-card+json`), `/.well-known/ai-catalog.json` (AI catalog with one entry of type
+`application/mcp-server-card+json` pointing at that card), `/.well-known/mcp/server-card.json` (SEP-1649 card,
+superseded by the SEP-2127 card and still served with the `protocolVersion` and `mcp_endpoint` the MCP smoke reads;
+legacy aliases `/.well-known/mcp`, `/mcp.json`, `/.well-known/mcp.json`), `/.well-known/ai.txt` (`Programmatic-API`
+declaration), `/.well-known/security.txt` (RFC 9116 contact), `/llms.txt` (Programmatic access section). The SEP-2127
+card's `websiteUrl` is the client-skill page; the SEP-1649 card's `documentation` field is the client skill's
+server-cards section; `initialize.instructions` carries the client-skill pointer plus a session-time summary. The card,
+the catalog, and the SEP-1649 card are built from seeds and origin-rewritten at serve time, so staging hands out staging
+URLs; the card's `name` (`dev.anc/anc`) and the catalog entry's `identifier` (`urn:air:anc.dev:mcp:anc`) name the
+server, not the deployment, and stay fixed. The root `Link` header, the `<head>` of every page the shell renders, the
+`<noscript>` entry list, `/llms.txt`, the `/.well-known/api-catalog` linkset, `/auth.md`, and the WebMCP
+`get_mcp_endpoint` answer all render the three documents from one list, `MCP_DISCOVERY_DOCUMENTS` in
+`src/shared/mcp-discovery.ts`, SEP-1649 card first. Both cards carry RFC 8631 `rel="service-desc"`, since neither card
+spec defines a relation; the catalog carries `rel="ai-catalog"`, the relation the AI Catalog spec defines. A new
+discovery document goes into that list, not into each surface.
 
 **Thirteen tools, five resources.** Tools cover five surfaces:
 

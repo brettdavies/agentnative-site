@@ -781,11 +781,14 @@ export function buildGitCloneCommand(spec: GitCloneInstall): string | null {
   );
 }
 
-// Build the `anc audit <path>` invocation for a source-scoped score.
-// Mirrors the `--command <binary>` form's audit-profile handling.
+// Build the `anc audit <path> --source` invocation for a source-scoped score.
+// Mirrors the `--command <binary>` form's audit-profile handling. `--source`
+// keeps the audit on the clone's source: without it, anc 0.6.0 exits 2 with
+// `binary-ambiguous` on a repository that declares several binaries, and a
+// clone carries no built binary to grade anyway.
 export function buildAncAuditSourceCmd(_spec: GitCloneInstall, auditProfile: string | undefined): string {
   const path = shellQuote(CLONE_DEST);
   return auditProfile
-    ? `anc audit ${path} --output json --audit-profile ${shellQuote(auditProfile)}`
-    : `anc audit ${path} --output json`;
+    ? `anc audit ${path} --source --output json --audit-profile ${shellQuote(auditProfile)}`
+    : `anc audit ${path} --source --output json`;
 }

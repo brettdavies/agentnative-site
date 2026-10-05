@@ -95,7 +95,7 @@ describe('JSON-LD graph', () => {
   test('the emitter-supplied breadcrumb names the page instead of its slug', () => {
     const label = (path: string, breadcrumb: string) => {
       const crumbs = nodeOf(graphOf(shell({ canonicalPath: path, breadcrumb })), 'BreadcrumbList');
-      return (crumbs?.itemListElement as { name: string }[]).at(-1)?.name;
+      return (crumbs?.itemListElement as { name: string }[] | undefined)?.at(-1)?.name;
     };
     expect(label('/fix/llms-txt-scoped', 'llms.txt scoped')).toBe('llms.txt scoped');
     expect(label('/fix/oauth-discovery', 'OAuth discovery')).toBe('OAuth discovery');
@@ -112,7 +112,7 @@ describe('JSON-LD graph', () => {
       const crumbs = nodeOf(graphOf(shell({ canonicalPath: path, breadcrumb: name })), 'BreadcrumbList');
       // `/score/` has a real parent page, so the target hangs off the board
       // rather than off the home page.
-      expect({ path, trail: (crumbs?.itemListElement as { name: string }[]).map((i) => i.name) }).toEqual({
+      expect({ path, trail: (crumbs?.itemListElement as { name: string }[] | undefined)?.map((i) => i.name) }).toEqual({
         path,
         trail: ['Home', 'Leaderboard', name],
       });

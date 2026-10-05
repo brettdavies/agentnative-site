@@ -3,6 +3,8 @@
 // cached scorecard renders the current shape without a re-audit.
 
 import { describe, expect, test } from 'bun:test';
+import { findingRowsFromElements, selectAssemblePrompts } from '../src/client/assemble-prompt';
+import { getFixPrompt, getWorksheet } from '../src/client/webmcp-result';
 import {
   attachInlineRemediation,
   type DisplayRegistry,
@@ -14,6 +16,10 @@ import type { WebRemediationCatalog } from '../src/worker/audit-web/remediation'
 import { richMarkdown } from '../src/worker/audit-web/rich-text';
 import { categoryRollups } from '../src/worker/audit-web/score';
 import { buildWebScorecard } from '../src/worker/audit-web/scorecard';
+import { buildWebSummaryMarkdown } from '../src/worker/audit-web/summary-markdown';
+import { buildWebSummaryBody } from '../src/worker/audit-web/summary-render';
+import { at, REGISTRY, REMEDIATION, row, scorecardOf } from './helpers/declared-host-scorecards';
+import { parseHtml } from './helpers/html-elements';
 
 // A registry that splits the combined API/MCP surface into two categories,
 // the exact display-only change that leaves old-shape cached scorecards
@@ -518,5 +524,147 @@ describe('provenance on stored scorecards', () => {
     expect('access_note' in (attachInlineRemediation({ results: [] }, CATALOG, 'https://anc.dev') as object)).toBe(
       false,
     );
+  });
+});
+
+// A row carries two notes about its check rather than its host: a server card
+// that passed in the SEP-1649 shape, and a stored row whose check id the
+// registry retired. Both read the live registry and catalog, as every row does.
+describe('rows noted for their check: the superseded card and the retired id', () => {
+  const ORIGIN = 'https://anc.dev';
+  const FRESHNESS = { cached: true, scored_at: '2026-10-01T12:00:00.000Z', refresh_after: '2026-10-01T12:01:00.000Z' };
+  const failingRow = row('mcp-get-fast-fail', 'absent', {
+    evidence: 'https://example.com/mcp -> 404',
+    ...at('example.com'),
+  });
+  const RETIRED_ROW = {
+    id: 'well-known-mcp-card',
+    label: 'A .well-known MCP server card is published (SEP-1649)',
+    category: 'mcp',
+    group: 'P8',
+    layer: 'web',
+    keyword: 'should',
+    tier: 'recommended',
+    principle: 'P8',
+    status: 'absent',
+    evidence: 'https://example.com/.well-known/mcp/server-card.json -> 404',
+    ...at('example.com'),
+  };
+
+  function surfaces(rows: Array<Record<string, unknown> & { id: string; status: string }>) {
+    const stored = scorecardOf('example.com', rows, { mcp_endpoint: 'https://example.com/mcp' });
+    const enriched = enrichWebScorecardForDisplay(stored, { registry: REGISTRY, catalog: REMEDIATION, origin: ORIGIN });
+    const input = {
+      scorecard: enriched as never,
+      domain: 'example.com',
+      targetUrl: 'https://example.com/',
+      remediation: REMEDIATION,
+      registry: REGISTRY,
+      origin: ORIGIN,
+      freshness: FRESHNESS,
+    };
+    return {
+      enriched: enriched as { results: Array<Record<string, unknown> & { id: string }> },
+      html: buildWebSummaryBody(input),
+      md: buildWebSummaryMarkdown(input),
+    };
+  }
+
+  /** The row's own `<details>` element, from its opening tag to the next row. */
+  function rowHtml(html: string, id: string): string {
+    const start = html.lastIndexOf('<details', html.indexOf(`data-id="${id}"`));
+    return html.slice(start, html.indexOf('</details>', start));
+  }
+
+  const textOf = (html: string) =>
+    html
+      .replace(/<[^>]+>/g, '')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&amp;', '&');
+
+  test('a superseded card renders open with its caption and fix skill link, notes the twin, and stays out of the assembler', async () => {
+    const card = row('mcp-server-card', 'pass', {
+      advisory: 'superseded',
+      evidence: 'https://example.com/.well-known/mcp/server-card.json -> 200',
+      ...at('example.com'),
+    });
+    const { html, md } = surfaces([card, failingRow]);
+    const caption =
+      'Superseded shape (SEP-1649). SEP-2127 moves the card to https://example.com/mcp/server-card, listed in /.well-known/ai-catalog.json.';
+    const cardHtml = rowHtml(html, 'mcp-server-card');
+    expect(cardHtml).toStartWith('<details class="web-check web-check--pass" open data-id="mcp-server-card"');
+    const note = /<p class="web-check__note">([\s\S]*?)<\/p>/.exec(cardHtml)?.[1] ?? '';
+    expect(textOf(note)).toBe(`${caption} Fix skill`);
+    expect(note).toContain('<a href="https://anc.dev/fix/mcp-server-card">Fix skill</a>');
+    expect(cardHtml).not.toContain('web-check__prompt');
+    expect(md).toContain(
+      '- Note: Superseded shape (SEP-1649). SEP-2127 moves the card to `https://example.com/mcp/server-card`, listed in `/.well-known/ai-catalog.json`.',
+    );
+    const doc = await parseHtml(html);
+    const assembled = selectAssemblePrompts(findingRowsFromElements(doc.querySelectorAll('.web-check[data-id]')), {
+      includeShould: true,
+      includeMay: true,
+    });
+    expect(assembled).toContain('/fix/mcp-get-fast-fail');
+    expect(assembled).not.toContain('/fix/mcp-server-card');
+  });
+
+  test('a row with only a host note stays closed', () => {
+    // The category names the declared host; the card read on the audited site differs, so it carries the note.
+    const declared = row('mcp-get-fast-fail', 'pass', {
+      evidence: 'https://mcp.example.net/ -> 405',
+      ...at('mcp.example.net'),
+    });
+    const card = row('mcp-server-card', 'pass', { evidence: 'card -> 200', ...at('example.com') });
+    const cardHtml = rowHtml(surfaces([card, declared]).html, 'mcp-server-card');
+    expect(cardHtml).toStartWith('<details class="web-check web-check--pass" data-id="mcp-server-card"');
+    expect(cardHtml).toContain('<p class="web-check__note">Evaluated at <code>example.com</code></p>');
+  });
+
+  test('a stored retired-id row keeps its chip, names its successor, takes its lane and fix page, and earns no prompt', async () => {
+    const usageDoc = row('mcp-usage-doc', 'pass', {
+      evidence: 'https://example.com/llms.txt -> 200',
+      ...at('example.com'),
+    });
+    const { enriched, html, md } = surfaces([usageDoc, RETIRED_ROW, failingRow]);
+    const read = enriched.results.find((r) => r.id === 'well-known-mcp-card');
+    expect(read).toMatchObject({ status: 'absent', category: 'mcp', successor: 'mcp-server-card' });
+    expect(read && 'remediation' in read).toBe(false);
+
+    const retiredHtml = rowHtml(html, 'well-known-mcp-card');
+    expect(retiredHtml).toStartWith('<details class="web-check web-check--absent" data-id="well-known-mcp-card"');
+    expect(retiredHtml).toContain('data-retired="true"');
+    expect(retiredHtml).toContain('<span class="audit__status">MISSING</span>');
+    expect(retiredHtml).toContain(
+      '<p class="web-check__note">Retired check, replaced by mcp-server-card. Re-audit to score it.</p>',
+    );
+    expect(retiredHtml).toContain('<a href="https://anc.dev/fix/mcp-server-card">Fix skill</a>');
+    expect(retiredHtml).not.toContain('web-check__prompt');
+    // In its successor's place, not after every known row as an unknown id would land.
+    const shared = html.slice(
+      html.indexOf('data-mcp-lane="shared"'),
+      html.indexOf('data-mcp-lane="', html.indexOf('data-mcp-lane="shared"') + 1),
+    );
+    expect([...shared.matchAll(/data-id="([^"]+)"/g)].map((m) => m[1])).toEqual([
+      'mcp-get-fast-fail',
+      'well-known-mcp-card',
+      'mcp-usage-doc',
+    ]);
+
+    const doc = await parseHtml(html);
+    const rows = findingRowsFromElements(doc.querySelectorAll('.web-check[data-id]'));
+    const assembled = selectAssemblePrompts(rows, { includeShould: true, includeMay: true });
+    expect(assembled).toContain('/fix/mcp-get-fast-fail');
+    expect(assembled).not.toContain('well-known-mcp-card');
+    const worksheet = JSON.parse(getWorksheet(doc, {})) as { items: Array<{ id: string }> };
+    expect(worksheet.items.map((item) => item.id)).toEqual(['mcp-get-fast-fail']);
+    expect(JSON.parse(getFixPrompt(doc, { id: 'well-known-mcp-card' }))).toMatchObject({
+      remediable: false,
+      reason: 'the check is retired, so a re-audit scores its successor instead',
+    });
+
+    expect(md).toContain('- Note: Retired check, replaced by mcp-server-card. Re-audit to score it.');
+    expect(md).toContain('[Fix skill](https://anc.dev/fix/mcp-server-card)');
   });
 });

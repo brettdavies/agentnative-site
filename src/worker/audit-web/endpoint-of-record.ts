@@ -4,12 +4,16 @@
 // it, the declared-hosts trail in declaration order, the API catalog's
 // share of what the slice settled, and the reason the rows that need an
 // endpoint were not evaluated when a declared host is why there is none.
+// For a followed endpoint, the card the slice read for it becomes the card
+// of record when it stands higher than discovery's: a SEP-2127 card
+// outranks a SEP-1649 card, and a card of either generation outranks any
+// other JSON object, a body that does not parse, and no card at all.
 
 import { hostOf } from '../../shared/url-host';
 import type { NaReason } from '../../shared/web-audit-findings';
 import { apiDeclarations } from './api-catalog';
 import type { DiscoveryDocuments, DiscoveryResult } from './discovery';
-import type { McpDeclaration } from './discovery-documents';
+import { type McpDeclaration, outranks, type RetainedDocument } from './discovery-documents';
 import { type FollowInput, type FollowResult, type FollowStats, openFollow } from './follow';
 import type { ApiFollowResult } from './follow-api';
 import { declarationKey, declaresHost, type TrailEntry, type TrailOutcome, trailEntry } from './follow-trail';
@@ -116,6 +120,20 @@ export function endpointOfRecord(
 }
 
 /**
+ * Discovery's result with `card` as its card of record when it outranks
+ * discovery's own, whose read then no longer carries the document mark.
+ */
+function withEndpointCard(discovery: DiscoveryResult, card: RetainedDocument | null): DiscoveryResult {
+  if (card === null || !outranks(card, discovery.documents.get('server-card'))) return discovery;
+  const evidence = discovery.evidence.map((item) => {
+    if (item.document !== 'server-card') return item;
+    const { document: _document, ...unmarked } = item;
+    return unmarked;
+  });
+  return { ...discovery, evidence, documents: new Map(discovery.documents).set('server-card', card) };
+}
+
+/**
  * Discovery's POSTs and the follow slice, side by side, then where the
  * POSTs were redirected off the audited origin, on what is left of the
  * slice, then the API catalog's declarations, then the endpoint of record.
@@ -136,5 +154,10 @@ export async function settleEndpointOfRecord(
   await session.settle(discovery.redirected);
   await session.settleApi(siteAnswered && apiRowsApply ? apiDeclarations(documents.apiAnchors) : []);
   const followed = session.result();
-  return { discovery, declared: endpointOfRecord(follow.base, discovery, followed), follow: followed.stats };
+  const declared = endpointOfRecord(follow.base, discovery, followed);
+  return {
+    discovery: declared.followed ? withEndpointCard(discovery, followed.endpointCard) : discovery,
+    declared,
+    follow: followed.stats,
+  };
 }

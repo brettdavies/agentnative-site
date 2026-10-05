@@ -25,13 +25,13 @@ catastrophically later.
 - Exit codes are structured and documented. Codes 77 and 78 follow BSD `sysexits.h` (`EX_NOPERM`, `EX_CONFIG`); the
   broader sysexits range is intentionally not mandated to keep the surface small:
 
-| Code | Meaning                           |
-| ---: | --------------------------------- |
-|    0 | Success                           |
-|    1 | General command error             |
-|    2 | Usage error (bad arguments)       |
-|   77 | Authentication / permission error |
-|   78 | Configuration error               |
+  | Code | Meaning                           |
+  | ---: | --------------------------------- |
+  |    0 | Success                           |
+  |    1 | General command error             |
+  |    2 | Usage error (bad arguments)       |
+  |   77 | Authentication / permission error |
+  |   78 | Configuration error               |
 
 - When `--output json` is active, errors are emitted as JSON (to stderr) with at least `error`, `kind`, and `message`
   fields. A plain-text error in a JSON run breaks the consumer's parser on the only shape it was told to expect.

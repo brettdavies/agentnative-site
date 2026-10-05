@@ -99,6 +99,14 @@ export const NA_REASON_ONLY_WHEN_APPLICABLE: Readonly<Record<NaReason, boolean>>
   'auth-required': false,
 };
 
+/**
+ * A note a passing row carries about how it passed, a closed set agents
+ * branch on. `superseded`: the server card has the SEP-1649 shape, which
+ * earns full credit while SEP-2127 is the shape to move to.
+ */
+export const ROW_ADVISORIES = ['superseded'] as const;
+export type RowAdvisory = (typeof ROW_ADVISORIES)[number];
+
 /** RFC-2119 normative keywords carried per check. */
 export const FINDING_KEYWORDS = ['must', 'should', 'may'] as const;
 export type FindingKeyword = (typeof FINDING_KEYWORDS)[number];
@@ -120,6 +128,8 @@ export type FindingRow = {
   status: string;
   /** The run never observed the surface, so it holds nothing to fix. */
   unprobed: boolean;
+  /** The row's check id is retired: a re-audit scores its successor, so the row holds nothing to fix. */
+  retired?: true;
   /**
    * The row's rendered result line, the same sentence the page shows. It
    * carries the run's untruncated evidence, so a tool reader and a human
@@ -137,9 +147,9 @@ export function isRemediableStatus(status: string): boolean {
   return (REMEDIABLE_STATUSES as readonly string[]).includes(status);
 }
 
-/** A row earns a fix prompt only when the run actually observed it. */
-export function isRemediable(row: Pick<FindingRow, 'status' | 'unprobed'>): boolean {
-  return row.unprobed !== true && isRemediableStatus(row.status);
+/** A row earns a fix prompt only when the run actually observed it and its check is still scored. */
+export function isRemediable(row: Pick<FindingRow, 'status' | 'unprobed' | 'retired'>): boolean {
+  return row.unprobed !== true && row.retired !== true && isRemediableStatus(row.status);
 }
 
 export type FindingFilters = {

@@ -753,7 +753,7 @@ const MCP_ROW_CLASSES: Record<string, AntecedentToken> = {
   'mcp-get-fast-fail': 'mcp-present',
   'mcp-cors-preflight': 'mcp-present',
   'mcp-cors-actual': 'mcp-present',
-  'well-known-mcp-card': 'mcp-present',
+  'mcp-server-card': 'mcp-present',
   'mcp-card-legacy-aliases': 'mcp-present',
   'mcp-usage-doc': 'mcp-present',
   'mcp-server-discover': 'mcp-session',
@@ -1101,6 +1101,7 @@ describe('values the audited server chose reach every reader inert', () => {
     const remediation = normalizeWebRemediation(
       yaml.load(readFileSync(join(DATA, 'remediation.yaml'), 'utf8')) as object,
       REGISTRY.checks.map((c) => c.id),
+      Object.keys(REGISTRY.retired ?? {}),
     ) as WebRemediationCatalog;
     const cases: Array<{ value: string; status: ScorecardStatus; shown: string }> = [
       {

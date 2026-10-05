@@ -79,10 +79,10 @@
     }
   ],
   "summary": {
-    "pass": 22,
+    "pass": 23,
     "noncompliant": 0,
     "broken": 1,
-    "absent": 15,
+    "absent": 14,
     "n_a": 29,
     "skip": 0,
     "error": 1
@@ -94,17 +94,17 @@
     },
     "should": {
       "total": 31,
-      "verified": 17
+      "verified": 18
     },
     "may": {
       "total": 3,
       "verified": 3
     }
   },
-  "score_pct": 64,
+  "score_pct": 66,
   "score": {
-    "relative": 64,
-    "global": 40
+    "relative": 66,
+    "global": 42
   },
   "categories": [
     {
@@ -134,7 +134,7 @@
     {
       "id": "mcp",
       "name": "MCP",
-      "passed": 14,
+      "passed": 15,
       "counted": 22
     },
     {
@@ -599,22 +599,22 @@
       "host": "mcp.example.org"
     },
     {
-      "id": "well-known-mcp-card",
-      "label": "A .well-known MCP server card is published (SEP-1649)",
+      "id": "mcp-server-card",
+      "label": "An MCP server card is published",
       "category": "mcp",
       "group": "P8",
       "layer": "web",
       "keyword": "should",
       "tier": "recommended",
       "principle": "P8",
-      "status": "absent",
-      "evidence": "https://example.com/.well-known/mcp/server-card.json -> 404 (status 404 not in [200])",
+      "status": "pass",
+      "evidence": "https://mcp.example.org/mcp/server-card -> 200",
       "hosts": [
         {
-          "host": "example.com"
+          "host": "mcp.example.org"
         }
       ],
-      "host": "example.com"
+      "host": "mcp.example.org"
     },
     {
       "id": "mcp-card-legacy-aliases",

@@ -3,12 +3,13 @@
 // entries that name cards, and the API catalog; what a card declares; and
 // the evidence row each read leaves. No I/O in this module.
 
+import { MCP_SERVER_CARD_TYPE } from '../../shared/mcp-discovery';
 import type { RetainedDocumentKey } from '../../shared/web-audit-documents';
 import type { ProbeResponse } from './assert';
 import { resolveUrl } from './handlers/shared';
 import type { EvidenceItem } from './handlers/types';
 
-export const MCP_SERVER_CARD_TYPE = 'application/mcp-server-card+json';
+export { MCP_SERVER_CARD_TYPE };
 
 // Bounds the card reads one catalog can cause, whatever it lists.
 const MAX_CATALOG_CARDS = 4;
@@ -43,6 +44,53 @@ export function cardShape(card: JsonObject | null): CardShape {
   if (Array.isArray(card.remotes)) return 'sep-2127';
   if ('transport' in card || 'mcp_endpoint' in card || 'url' in card) return 'sep-1649';
   return 'unrecognized';
+}
+
+const STANDING = { unparseable: 0, jsonObject: 1, sep1649: 2, sep2127: 3 } as const;
+
+/**
+ * Where a card stands as the card of record, highest first: a SEP-2127
+ * card, a SEP-1649 card, any other JSON object, a body that does not parse.
+ * A card without `remotes` that carries the `$schema` marker every SEP-2127
+ * card has stands as SEP-2127, since the extension schema does not require
+ * `remotes`.
+ */
+function cardStanding(card: JsonObject | null): number {
+  switch (cardShape(card)) {
+    case 'sep-2127':
+      return STANDING.sep2127;
+    case 'sep-1649':
+      return STANDING.sep1649;
+    case 'unrecognized':
+      return typeof card?.$schema === 'string' ? STANDING.sep2127 : STANDING.jsonObject;
+    case 'unparseable':
+      return STANDING.unparseable;
+  }
+}
+
+/** A card of either generation, which an arbitrary JSON object, a JSON-RPC error included, is not. */
+export function isCardOfEitherGeneration(card: JsonObject | null): boolean {
+  return cardStanding(card) >= STANDING.sep1649;
+}
+
+/** The first of `items` whose card stands highest; null when there are none. */
+export function strongestCard<T>(items: readonly T[], cardOf: (item: T) => JsonObject | null): T | null {
+  let best: T | null = null;
+  for (const item of items) {
+    if (best === null || cardStanding(cardOf(item)) > cardStanding(cardOf(best))) best = item;
+  }
+  return best;
+}
+
+/** Whether `candidate` stands higher as the card of record than `record`; any card outranks none. */
+export function outranks(candidate: RetainedDocument, record: RetainedDocument | undefined): boolean {
+  if (record === undefined) return true;
+  return cardStanding(parseJsonObject(candidate.response)) > cardStanding(parseJsonObject(record.response));
+}
+
+/** A card read as the document a later check scores. */
+export function retainedCard(url: string, response: ProbeResponse): RetainedDocument {
+  return { url, response, shape: cardShape(parseJsonObject(response)) };
 }
 
 export function aiCatalogShape(catalog: JsonObject | null): DocumentShape {
@@ -205,9 +253,29 @@ export function readCard(
   };
 }
 
-/** The card that names an audited-origin endpoint, else the first that parses. */
+/** The card that names an audited-origin endpoint, else the strongest that parses, the first of equal standing. */
 export function preferredCard(reads: readonly CardRead[]): CardRead | null {
-  return reads.find((r) => r.endpoint !== null) ?? reads.find((r) => r.card !== null) ?? null;
+  return (
+    reads.find((r) => r.endpoint !== null) ??
+    strongestCard(
+      reads.filter((r) => r.card !== null),
+      (r) => r.card,
+    )
+  );
+}
+
+function claimsJson(response: ProbeResponse): boolean {
+  const type = (response.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
+  return type === 'application/json' || type.endsWith('+json');
+}
+
+/**
+ * The first card a site published that answered 200 with a JSON content
+ * type and does not parse, which the card check reads as broken. An HTML
+ * page answering 200 at a well-known path is a soft 404, not a card.
+ */
+export function unparseablePublishedCard(reads: readonly CardRead[]): CardRead | null {
+  return reads.find((r) => r.shape === 'unparseable' && claimsJson(r.response)) ?? null;
 }
 
 function responseFields(resp: ProbeResponse): EvidenceItem {

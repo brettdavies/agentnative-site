@@ -18,12 +18,17 @@ const GROUP_MIN = 3;
 /** Each lane-filed check's lane and its position in registry order, by check id. */
 type LanePlacement = Map<string, { lane: string; index: number }>;
 
+/** Lane-filed checks by id, and each retired id in its successor's place. */
 export function lanePlacement(registry: SummaryRegistry | undefined): LanePlacement {
   const placement: LanePlacement = new Map();
   const lanes = registry?.mcp_lanes ?? {};
   registry?.checks.forEach((check, index) => {
     if (check.lane && Object.hasOwn(lanes, check.lane)) placement.set(check.id, { lane: check.lane, index });
   });
+  for (const [id, { successor }] of Object.entries(registry?.retired ?? {})) {
+    const place = placement.get(successor);
+    if (place !== undefined) placement.set(id, place);
+  }
   return placement;
 }
 

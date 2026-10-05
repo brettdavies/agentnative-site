@@ -73,22 +73,41 @@ describe('buildSkillMarkdown', () => {
 });
 
 describe('emitWebAuditSkillPages', () => {
-  test('emits an HTML page and a markdown twin for every registry check', async () => {
+  test('emits an HTML page and a markdown twin for every registry check and every retired id', async () => {
     const { distDir, pages } = await emitToTmp();
     const raw = await readFile(REGISTRY_PATH, 'utf8');
     const registry = normalizeWebAuditRegistry(yaml.load(raw) as object);
     const checks = registry.checks as Array<{ id: string }>;
+    const retired = Object.keys(registry.retired ?? {});
+    expect(retired.length).toBeGreaterThan(0);
     expect(pages.length).toBe(checks.length);
     const emitted = await readdir(join(distDir, 'fix'));
-    expect(emitted.length).toBe(checks.length * 2);
-    for (const check of checks) {
-      expect(emitted).toContain(`${check.id}.html`);
-      expect(emitted).toContain(`${check.id}.md`);
+    expect(emitted.length).toBe((checks.length + retired.length) * 2);
+    for (const id of [...checks.map((check) => check.id), ...retired]) {
+      expect(emitted).toContain(`${id}.html`);
+      expect(emitted).toContain(`${id}.md`);
     }
     // The first emit in this file pays module cold-start plus a full-registry
     // disk write, which exceeds bun's default 5s per-test budget on slower CI
     // runners under parallel load; warm sibling emits finish well under 1s.
   }, 30_000);
+
+  // Stored rows and prompts copied from them still link a retired id's page,
+  // so it stays live and sends the reader to the check that replaced it.
+  test('a retired id gets a page naming its successor, outside the agent-skills index', async () => {
+    const { distDir, pages } = await emitToTmp();
+    const md = await readFile(join(distDir, 'fix', 'well-known-mcp-card.md'), 'utf8');
+    expect(md).toContain(
+      '> Retired web-audit check `well-known-mcp-card`, replaced by [`mcp-server-card`](https://anc.dev/fix/mcp-server-card)',
+    );
+    expect(md).toContain('the `mcp-server-card` check should report `pass`');
+    expect(md).not.toContain('## Copy-paste prompt');
+    const html = await readFile(join(distDir, 'fix', 'well-known-mcp-card.html'), 'utf8');
+    expect(html).toContain('<link rel="canonical" href="https://anc.dev/fix/well-known-mcp-card"');
+    expect(html).toContain('href="https://anc.dev/fix/mcp-server-card"');
+    expect(html).not.toContain('data-copy-text=');
+    expect(pages.map((page) => page.id)).not.toContain('well-known-mcp-card');
+  });
 
   test('a representative page serves HTML with the skill body and the twin serves markdown', async () => {
     const { distDir } = await emitToTmp();

@@ -68,6 +68,7 @@ async function projections() {
     const remediation = normalizeWebRemediation(
       yaml.load(await readFile(join(DATA, 'remediation.yaml'), 'utf8')) as object,
       checks.map((c) => c.id),
+      Object.keys(registry.retired ?? {}),
     );
     assetsJson = { registry: JSON.stringify(registry), remediation: JSON.stringify(remediation) };
   }
@@ -1670,7 +1671,7 @@ describe('audit_website with follow_declarations false', () => {
   test('returns a scorecard recording follow_declarations false with no result URLs, and writes, purges, and rebuilds nothing', async () => {
     const out = await run({ follow_declarations: false });
     expect(out.body).toMatchObject({ audited: true, scorecard_url: null, markdown_url: null, json_url: null });
-    expect((out.body?.scorecard as { follow_declarations: boolean }).follow_declarations).toBe(false);
+    expect((out.body?.scorecard as { follow_declarations: boolean } | undefined)?.follow_declarations).toBe(false);
     expect(String(out.body?.summary_html)).toContain(NOT_SAVED);
     expect(out.puts).toEqual([]);
     expect(out.purged).toEqual([]);
@@ -1755,7 +1756,7 @@ describe('audit_website with follow_declarations false', () => {
       json_url: null,
     });
     expect(out.body).not.toHaveProperty('attached');
-    expect((out.body?.scorecard as { follow_declarations: boolean }).follow_declarations).toBe(false);
+    expect((out.body?.scorecard as { follow_declarations: boolean } | undefined)?.follow_declarations).toBe(false);
     expect(out.runRecord?.follow_declarations).toBe(false);
   });
 
@@ -1783,7 +1784,7 @@ describe('audit_website with follow_declarations false', () => {
       { prefill: await seeded(new Date(Date.now() - 600_000).toISOString(), true) },
     );
     expect(out.body).toMatchObject({ audited: true, source: 'fresh-audit', scorecard_url: null });
-    expect((out.body?.scorecard as { public_listing: boolean }).public_listing).toBe(true);
+    expect((out.body?.scorecard as { public_listing: boolean } | undefined)?.public_listing).toBe(true);
     expect(out.puts).toEqual([]);
     expect(out.purged).toEqual([]);
   });
