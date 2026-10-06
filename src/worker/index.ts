@@ -32,7 +32,7 @@ import {
 import { classifyGatewayRequest, detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
 import { type AuditApiEnv, handleAuditApi, isAuditApiPath } from './audit/api';
 import type { AuditJob } from './audit/job';
-import { handleResultRoute, type ResultEnv } from './audit/result';
+import { badgeAliasRedirect, handleResultRoute, type ResultEnv } from './audit/result';
 import { handleScoringPage, type ScoringPageEnv } from './audit/scoring-page';
 import { resolveBoardEntries, type WebBoardEnv } from './audit-web/board';
 import { getAggregate, type WebAggregateEntry, type WebCacheEnv } from './audit-web/cache';
@@ -852,6 +852,12 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   if (pathname.startsWith('/_internal/')) {
     return new Response('not found', { status: 404, headers: { 'content-type': 'text/plain' } });
   }
+
+  // A curated binary slug (/badge/rg.svg) 301s to the canonical badge, the
+  // same aliasing /score/<binary> performs. Canonical and unknown slugs fall
+  // through to the asset binding, which serves or 404s them as before.
+  const badgeAlias = await badgeAliasRedirect(pathname, env as ResultEnv);
+  if (badgeAlias) return badgeAlias;
 
   const pathIsMarkdown = pathname.endsWith('.md');
   const pathIsJson = pathname.endsWith('.json');
