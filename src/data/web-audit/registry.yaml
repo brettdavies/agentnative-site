@@ -45,7 +45,12 @@
 #   weight      integer registry weight (scoring uses per-tier config weights;
 #               see src/worker/audit-web/score.ts)
 #   handler     one of the handlers above
-#   with        handler parameters
+#   with        handler parameters; for http, an expect.status (or
+#               status_below) marks the probe as a document check, so a
+#               document that answers but fails the expectation scores
+#               broken. A check that probes a directive or tag inside a
+#               document another check already establishes (a robots.txt
+#               line, a root-HTML tag) omits it, so its miss scores absent.
 #   hint        one-line remediation summary
 #
 # A server-card check's with.required and with.remote_required are not
@@ -1048,7 +1053,7 @@ checks:
     handler: http
     with:
       path: /robots.txt
-      expect: { status: [200], body_regex: "^\\s*User-agent:\\s*(\\*|GPTBot|OAI-SearchBot|ChatGPT-User|Claude|ClaudeBot|Anthropic|Google-Extended|PerplexityBot|CCBot|Bytespider)" }
+      expect: { body_regex: "^\\s*User-agent:\\s*(\\*|GPTBot|OAI-SearchBot|ChatGPT-User|Claude|ClaudeBot|Anthropic|Google-Extended|PerplexityBot|CCBot|Bytespider)" }
     hint: Add explicit User-agent rules for AI crawlers (GPTBot, ClaudeBot, Google-Extended, ...) or a wildcard policy.
 
   - id: content-signals
@@ -1063,7 +1068,7 @@ checks:
     handler: http
     with:
       path: /robots.txt
-      expect: { status: [200], body_regex: "^\\s*Content-Signal:\\s*(ai-train|search|ai-input)" }
+      expect: { body_regex: "^\\s*Content-Signal:\\s*(ai-train|search|ai-input)" }
     hint: 'Add Content-Signal directives to robots.txt: ai-train / search / ai-input = yes|no (contentsignals.org).'
 
   - id: web-bot-auth
