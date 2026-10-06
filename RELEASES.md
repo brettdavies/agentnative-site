@@ -189,9 +189,9 @@ with zero conflicts.
 **Branch naming** (mandatory): `release/<YYYY-MM-DD>-<slug>` (e.g. `release/2026-05-01-content-neg-fix`). Slug
 kebab-case, 3-6 words.
 
-When the PR merges, `deploy.yml` publishes to **production**: its `production` job gates on `github.ref ==
-'refs/heads/main'`, and the `staging` job gates on `refs/heads/dev`, so a merge here goes live on anc.dev. Auto-delete
-removes `release/<slug>` from the remote on merge. `dev` is untouched.
+When the PR merges, `deploy.yml` publishes to **production**: its `production` job gates on
+`github.ref == 'refs/heads/main'`, and the `staging` job gates on `refs/heads/dev`, so a merge here goes live on
+anc.dev. Auto-delete removes `release/<slug>` from the remote on merge. `dev` is untouched.
 
 → Rationale (why overlay, not merge; why cut from `main`):
 [`RELEASES-RATIONALE.md` § Branching model](./RELEASES-RATIONALE.md#branching-model). CHANGELOG mechanics:
@@ -210,15 +210,15 @@ Each withheld feature owns a script under `scripts/release/`, run at step 3 befo
 are themselves guarded, so they never reach `main`: a release describes what it ships, not what it held back, and a
 script that removes files `main` does not have would be dead weight there. Running them first is what keeps the strip
 from deleting a tool that has not run yet. The script is the record of what is held back, so the removal is applied
-rather than re-derived by hand at each cut, and it is deliberately brittle: an exact
-match that no longer matches is a hard error, because a silently skipped edit ships the feature. After applying, it
-greps the tree for every marker the feature owns and fails on any survivor, which catches a miss whichever edit caused
-it. It also fails when a removal takes a `describe` or `test` the feature does not own, so an edit that matches too much
-cannot strip unrelated tests from `main`. `--check` runs the same removals in memory, reports without writing, and exits
-non-zero while anything is still pending.
+rather than re-derived by hand at each cut, and it is deliberately brittle: an exact match that no longer matches is a
+hard error, because a silently skipped edit ships the feature. After applying, it greps the tree for every marker the
+feature owns and fails on any survivor, which catches a miss whichever edit caused it. It also fails when a removal
+takes a `describe` or `test` the feature does not own, so an edit that matches too much cannot strip unrelated tests
+from `main`. `--check` runs the same removals in memory, reports without writing, and exits non-zero while anything is
+still pending.
 
-| Feature        | Script                                      | Held back because                                                        |
-| -------------- | ------------------------------------------- | ------------------------------------------------------------------------ |
+| Feature        | Script                                       | Held back because                                                                                                                                                                      |
+| -------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Telemetry lake | `scripts/release/withhold-telemetry-lake.py` | The stall alert calls `notify()`, which returns `unprovisioned` while no `EMAIL` binding exists, and the privacy posture page describes telemetry the release would not be collecting. |
 
 Delete the script in the same PR that clears the blocker; from the next cut the feature ships with everything else.
@@ -227,10 +227,9 @@ guarded set: that gate is how a withholding stays visible rather than becoming i
 
 ### Exception: cherry-pick
 
-The overlay is the release construction for this repo. Cherry-picking the dev squash-commits onto the `origin/main`
-base is the exception, kept only for a release with a stated reason it cannot overlay; the per-PR changelog is not such
-a reason, since `--from-dev-prs` builds it from `dev` either way. When cherry-picking, run the triple-diff
-verification:
+The overlay is the release construction for this repo. Cherry-picking the dev squash-commits onto the `origin/main` base
+is the exception, kept only for a release with a stated reason it cannot overlay; the per-PR changelog is not such a
+reason, since `--from-dev-prs` builds it from `dev` either way. When cherry-picking, run the triple-diff verification:
 
 ```bash
 # 2. List the dev commits not yet on main.
@@ -261,9 +260,10 @@ git cherry HEAD origin/dev | grep '^+' || echo "(none)"
 ```
 
 Cherry-picks of PRs that touched guarded paths hit modify/delete or rename/delete conflicts, since those paths live on
-`dev` but are blocked from `main`: mark each unmerged guarded path deleted in the index (`git update-index --remove
-$(git diff --name-only --diff-filter=U)`), trash the orphan worktree files, and `git cherry-pick --continue --no-edit`.
-Steps 4 to 9 of the overlay recipe then apply unchanged, including the staging deploy of the release commit.
+`dev` but are blocked from `main`: mark each unmerged guarded path deleted in the index
+(`git update-index --remove $(git diff --name-only --diff-filter=U)`), trash the orphan worktree files, and
+`git cherry-pick --continue --no-edit`. Steps 4 to 9 of the overlay recipe then apply unchanged, including the staging
+deploy of the release commit.
 
 → Triple-diff false-positive triage:
 [`RELEASES-RATIONALE.md` § Triple-diff verification](./RELEASES-RATIONALE.md#triple-diff-verification).
@@ -291,9 +291,9 @@ scripts/sync-dev-after-release.sh v<version>
 ```
 
 The script checks that the tag is reachable from `origin/main` and that the GitHub Release is published. It writes the
-released version into `package.json` in place and copies `CHANGELOG.md` verbatim from `origin/main` when `main`
-carries one. It then classifies every other path `main` and `dev` disagree about, guarded paths excepted, against the
-previous `v*` tag:
+released version into `package.json` in place and copies `CHANGELOG.md` verbatim from `origin/main` when `main` carries
+one. It then classifies every other path `main` and `dev` disagree about, guarded paths excepted, against the previous
+`v*` tag:
 
 - **release-prep**: `dev`'s copy still matches the previous tag, so only the release changed it. Adopted.
 - **contested**: both branches changed it since the previous tag. Listed and left out; `--include-contested` adopts
@@ -305,12 +305,12 @@ Discovery needs a previous `v*` tag, so the first tagged release syncs `package.
 
 After committing, when the sync carried `CHANGELOG.md` and `git-cliff` is on `PATH`, the script runs
 `scripts/generate-changelog.py --dry-run --tag v<version>` and warns with the generator's own reason if the regenerated
-changelog would differ (a PR body edited after the release, or a difference in line wrapping only). The warning does
-not block the backport. The script then opens a PR against `dev` titled `chore(release): sync dev after v<version>`;
-merge it once CI is green. The postflight backport gate finds that merged PR by title:
-`scripts/release/postflight.sh --env prod --release-slug v<version> backport`.
-Never merge `main` into `dev` or push to `dev` directly: the squash-merged histories share no recent ancestry, so the
-merge conflicts on every file both sides touched, and a direct push bypasses `dev`'s required checks.
+changelog would differ (a PR body edited after the release, or a difference in line wrapping only). The warning does not
+block the backport. The script then opens a PR against `dev` titled `chore(release): sync dev after v<version>`; merge
+it once CI is green. The postflight backport gate finds that merged PR by title:
+`scripts/release/postflight.sh --env prod --release-slug v<version> backport`. Never merge `main` into `dev` or push to
+`dev` directly: the squash-merged histories share no recent ancestry, so the merge conflicts on every file both sides
+touched, and a direct push bypasses `dev`'s required checks.
 
 → Rationale:
 [`RELEASES-RATIONALE.md` § Why backport main → dev after publish](./RELEASES-RATIONALE.md#why-backport-main--dev-after-publish).
@@ -318,21 +318,21 @@ merge conflicts on every file both sides touched, and a direct push bypasses `de
 ### Releases that retire or rename a public path
 
 A path this release removes still answers from the edge until its cached copy expires, and a cached 200 or 301 is
-indistinguishable from a route that never got removed. Any release whose diff retires or renames a public path takes
-two extra steps:
+indistinguishable from a route that never got removed. Any release whose diff retires or renames a public path takes two
+extra steps:
 
 1. **Purge everything after the deploy and before postflight.** A tag purge is not enough: the retired path's cached
-   entry carries the tag of the route that used to serve it, and that route is gone. Use the zone-wide
-   purge-everything, then run `scripts/release/postflight.sh --env prod retired`, whose gate reads the raw status with
-   no retry so a stale answer fails instead of being retried away.
+   entry carries the tag of the route that used to serve it, and that route is gone. Use the zone-wide purge-everything,
+   then run `scripts/release/postflight.sh --env prod retired`, whose gate reads the raw status with no retry so a stale
+   answer fails instead of being retried away.
 2. **Purge again on rollback.** Rolling the Worker back re-exposes the old routes, and by then the edge may be holding
    the 404s this release taught it. The rollback is not complete until the zone is purged a second time.
 
 ## Rollback
 
 A bad release is rolled back at the Worker first, then repaired in git. Rollback re-points what users get; it does not
-revert history. After rolling back, land a `fix/*` or `revert` through the normal `dev` to `release/*` to `main` flow
-so `main` matches what is live. Knowing the last-good deployment id before the release goes out is a
+revert history. After rolling back, land a `fix/*` or `revert` through the normal `dev` to `release/*` to `main` flow so
+`main` matches what is live. Knowing the last-good deployment id before the release goes out is a
 [`RELEASES-POSTFLIGHT.md`](./RELEASES-POSTFLIGHT.md) gate.
 
 ```bash
@@ -469,9 +469,9 @@ bun x wrangler containers build -p -t "anc-sandbox:$GIT_SHA" docker/sandbox/
 Update **only `env.staging.containers[0].image`** in `wrangler.jsonc` with the new tag. Commit Dockerfile change +
 staging-pin update together. PR to `dev`.
 
-After the deploy completes, the staging container app rolls instances asynchronously — wait for `wrangler containers
-list` to show `STATE = ready` before running any smoke that exercises the live container path. Smokes that race the
-rollout will hit warm OLD-image instances and look identical to a real bug. Full pattern:
+After the deploy completes, the staging container app rolls instances asynchronously — wait for
+`wrangler containers list` to show `STATE = ready` before running any smoke that exercises the live container path.
+Smokes that race the rollout will hit warm OLD-image instances and look identical to a real bug. Full pattern:
 [`docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md`](./docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md).
 
 #### Promotion (release PR to main)
@@ -533,8 +533,8 @@ bun x wrangler r2 bucket catalog get anc-telemetry-lake
 bun x wrangler r2 bucket catalog get anc-telemetry-lake-staging
 ```
 
-Both buckets were created on 2026-09-02; the catalog commands additionally require the R2 Data Catalog permission on
-the API token (state: `docs/runbooks/sitewide-analytics.md` § Lake pipeline). The `tests/wrangler-config.test.ts`
+Both buckets were created on 2026-09-02; the catalog commands additionally require the R2 Data Catalog permission on the
+API token (state: `docs/runbooks/sitewide-analytics.md` § Lake pipeline). The `tests/wrangler-config.test.ts`
 drift-guard pins the exact literal catalog-enable commands above.
 
 ## Live-scoring (v3) release procedure
@@ -650,9 +650,9 @@ in the CF managed registry AND both pins point at the same tag.
 
 `.github/workflows/deploy.yml` runs a smoke step against staging after every successful staging deploy. POSTs to
 `/api/score` for the `ripgrep` slug with the CF Access service-token headers and a Turnstile test token; asserts the
-response triad (`spec_version`, `site_spec_version`, `anc_version`, `auditor_url`) plus `scorecard.kind ===
-"registry_hit"`. Fails the deploy on a missing field. No production smoke step runs until U10 promotes live scoring to
-anc.dev.
+response triad (`spec_version`, `site_spec_version`, `anc_version`, `auditor_url`) plus
+`scorecard.kind === "registry_hit"`. Fails the deploy on a missing field. No production smoke step runs until U10
+promotes live scoring to anc.dev.
 
 → Scope rationale (why the smoke covers only the registry-fast-path):
 [`RELEASES-RATIONALE.md` § Post-deploy smoke scope](./RELEASES-RATIONALE.md#post-deploy-smoke-scope).
@@ -786,8 +786,8 @@ other: `wrangler secret put` against a declared var name is rejected with Cloudf
    returns the SEP-1649 server card with `protocolVersion: "2025-06-18"`, `authentication.required: false`, and
    `transport.type: "streamable-http"`. Legacy alias `curl -s https://anc.dev/.well-known/mcp | jq` returns the same
    body. `curl -s https://anc.dev/mcp-skill.md | head -1` returns the markdown twin's first heading.
-   `/.well-known/ai.txt` carries `Programmatic-API: https://anc.dev/mcp` and `Contact:
-   mailto:97-boss-beetle@icloud.com`.
+   `/.well-known/ai.txt` carries `Programmatic-API: https://anc.dev/mcp` and
+   `Contact: mailto:97-boss-beetle@icloud.com`.
 4. **Smoke the handshake.** `tests/e2e/mcp.e2e.ts` and `tests/e2e/discoverability.e2e.ts` ship as the staging-mcp
    Playwright project, which `scripts/release/preflight.sh e2e` runs against the deployed release build alongside the
    other three live projects. Run the gate rather than the project directly; it stages CF Access and fails on a project
@@ -802,10 +802,10 @@ aliases (`/.well-known/mcp`, `/mcp.json`, `/.well-known/mcp.json`). Two fields c
   moved to a new `protocolVersion` field (`"2025-06-18"`).
 - `transport` changed from the string `"streamable-http"` to an object `{ "type": "streamable-http", "endpoint": ... }`.
 
-A client of the prior descriptor that read `version` for the spec revision, or compared `transport ===
-"streamable-http"`, must switch to `protocolVersion` and `transport.type`. The prior shape shipped to production in the
-MCP discovery release, so the consumer base is small, but the change is not backward compatible and ships without a
-compatibility shim.
+A client of the prior descriptor that read `version` for the spec revision, or compared
+`transport === "streamable-http"`, must switch to `protocolVersion` and `transport.type`. The prior shape shipped to
+production in the MCP discovery release, so the consumer base is small, but the change is not backward compatible and
+ships without a compatibility shim.
 
 ### Cost-control posture: `score_cli` never bypasses the cache
 
@@ -945,10 +945,11 @@ gh api -X PUT repos/brettdavies/agentnative-site/rulesets/<id> \
 
 ### Skill-availability probe
 
-`.github/workflows/skill-availability.yml` runs `git ls-remote --exit-code
-https://github.com/brettdavies/agentnative-skill.git HEAD` daily at 13:00 UTC and on `workflow_dispatch`. Catches
-visibility regressions (repo deletion, accidental flip back to private, branch rename). After flipping the skill repo
-public, run `gh workflow run skill-availability.yml` once to seed a green run on the schedule.
+`.github/workflows/skill-availability.yml` runs
+`git ls-remote --exit-code https://github.com/brettdavies/agentnative-skill.git HEAD` daily at 13:00 UTC and on
+`workflow_dispatch`. Catches visibility regressions (repo deletion, accidental flip back to private, branch rename).
+After flipping the skill repo public, run `gh workflow run skill-availability.yml` once to seed a green run on the
+schedule.
 
 ## Related docs
 

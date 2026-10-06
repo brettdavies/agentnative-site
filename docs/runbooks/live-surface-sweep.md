@@ -28,8 +28,8 @@ that legitimate.
 
 The smoke becomes blocking after **5 consecutive green runs** of the `production-smoke` job.
 
-- Real runs count: production deploys from a `main` push, and full runs seeded via `gh workflow run deploy.yml -f
-  environment=production`.
+- Real runs count: production deploys from a `main` push, and full runs seeded via
+  `gh workflow run deploy.yml -f environment=production`.
 - Skipped runs (any deploy run where the production job did not run) and cancelled runs count for nothing: they prove
   nothing about the gate.
 - The flip is two edits in one commit: remove `continue-on-error: true` from the `production-smoke` job in
@@ -65,8 +65,8 @@ Start from these signatures before treating a red run as a broken deploy:
 
 ### Job-level verification
 
-`continue-on-error: true` keeps the run conclusion green, so the run list, the checks rollup, and `gh run watch
---exit-status` all say nothing about the smoke. Check the job itself:
+`continue-on-error: true` keeps the run conclusion green, so the run list, the checks rollup, and
+`gh run watch --exit-status` all say nothing about the smoke. Check the job itself:
 
 ```bash
 gh run view <run-id> --json jobs --jq '.jobs[] | {name, conclusion}'

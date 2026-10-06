@@ -100,8 +100,8 @@ Approach B, sequenced: video path green, then homepage CLI polish.
 demo.
 
 **API:** Probe `document.modelContext || navigator.modelContext`. Prefer `registerTool`. `AbortSignal` on `pagehide` +
-bfcache `pageshow`. `execute` returns a `DOMString` ≤1.5k. Names ≤30, descriptions ≤500. Schemas: `additionalProperties:
-false`. Re-validate args. `untrustedContentHint` when output echoes a third-party target.
+bfcache `pageshow`. `execute` returns a `DOMString` ≤1.5k. Names ≤30, descriptions ≤500. Schemas:
+`additionalProperties: false`. Re-validate args. `untrustedContentHint` when output echoes a third-party target.
 
 **Tool × page:**
 
@@ -211,8 +211,8 @@ Supersedes sequencing notes in Next Steps where they conflict. Product premises 
 10. Skip `untrustedContentHint` (optional in the spec; same evidence as the human widget).
 11. CI: `bun:test` attach + `toolsFor` + stub `execute(doc)`. Acceptance: ChatGPT desktop or Chrome flag
     `getTools()`/`executeTool()`. No Playwright for this slice.
-12. `registerTool` first; `provideContext` only if `registerTool` is missing. Probe `document.modelContext ||
-    navigator.modelContext`. `execute` returns a `DOMString` ≤1.5k (not an MCP content array).
+12. `registerTool` first; `provideContext` only if `registerTool` is missing. Probe
+    `document.modelContext || navigator.modelContext`. `execute` returns a `DOMString` ≤1.5k (not an MCP content array).
 13. `get_worksheet`: broken rows first, then absent, then document order; suffix `… +N more`.
 14. **Pre-unit 0:** shipped in [#279](https://github.com/brettdavies/agentnative-site/pull/279) (`f635a7c` on `dev`).
     `/web-audit` emits and the Worker substitutes `turnstile-sitekey`. Tools still never call Turnstile or

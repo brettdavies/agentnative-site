@@ -38,25 +38,25 @@ so the operator sees the full picture rather than aborting on the first SKIP.
 
 Sub-commands let you re-run one section in isolation:
 
-| Sub-command | What it checks                                                                                                                                        | Source of truth                                                              |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `drift`     | Commits on `main` whose changes `dev` lacks, `.github/` parity, lockfile packages `main` resolves newer                                               | `scripts/release/drift.sh`                                                   |
-| `surface`   | Commits + diff vs the last `v*` tag, breaking markers (SKIPs while the repo has no `v*` tag)                                                          | `git log`, `git diff`                                                        |
-| `coord`     | Vendored spec / anc / principles VERSIONs, skill.json upstream version, Dockerfile anc URL + sha, both pins' baked anc, staging anc vocabulary       | `cat`, `gh api`, `curl -I`, `docker run`                                     |
-| `build`     | `bun run build` exit, scorecard corpus orphans, badge SVG coverage, markdown twin coverage                                                            | `bun run build`                                                              |
-| `do-smoke`  | Live `/api/score` smoke against the `--env` target (fresh non-registry github URL)                                                                    | `curl` + `~/.claude/skills/1password` (staging mode)                         |
-| `mcp`       | Delegates to `scripts/release/mcp-smoke.sh` against the `--env` target                                                                                | `scripts/release/mcp-smoke.sh` + `~/.claude/skills/1password` (staging mode) |
-| `dist`      | Served `skill.json` version vs source against the `--env` target; `X-Robots-Tag: noindex` only in staging mode                                          | `curl`                                                                       |
-| `e2e`       | The four live Playwright projects against the `--env` target: `staging-mcp`, `edge-hit`, `web-audit`, `web-audit-webkit`. SKIPs in local mode         | `bun x playwright test` + `~/.claude/skills/1password` (staging mode)        |
-| `mechanics` | Leak check vs `origin/main`, unguarded docs added to `main`, diff-B vs `origin/dev` filtered by the guarded set                                        | `git`, `scripts/release/guarded-paths.sh`                                    |
-| `all`       | every above sequentially, drift first                                                                                                                 |                                                                              |
+| Sub-command | What it checks                                                                                                                                 | Source of truth                                                              |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `drift`     | Commits on `main` whose changes `dev` lacks, `.github/` parity, lockfile packages `main` resolves newer                                        | `scripts/release/drift.sh`                                                   |
+| `surface`   | Commits + diff vs the last `v*` tag, breaking markers (SKIPs while the repo has no `v*` tag)                                                   | `git log`, `git diff`                                                        |
+| `coord`     | Vendored spec / anc / principles VERSIONs, skill.json upstream version, Dockerfile anc URL + sha, both pins' baked anc, staging anc vocabulary | `cat`, `gh api`, `curl -I`, `docker run`                                     |
+| `build`     | `bun run build` exit, scorecard corpus orphans, badge SVG coverage, markdown twin coverage                                                     | `bun run build`                                                              |
+| `do-smoke`  | Live `/api/score` smoke against the `--env` target (fresh non-registry github URL)                                                             | `curl` + `~/.claude/skills/1password` (staging mode)                         |
+| `mcp`       | Delegates to `scripts/release/mcp-smoke.sh` against the `--env` target                                                                         | `scripts/release/mcp-smoke.sh` + `~/.claude/skills/1password` (staging mode) |
+| `dist`      | Served `skill.json` version vs source against the `--env` target; `X-Robots-Tag: noindex` only in staging mode                                 | `curl`                                                                       |
+| `e2e`       | The four live Playwright projects against the `--env` target: `staging-mcp`, `edge-hit`, `web-audit`, `web-audit-webkit`. SKIPs in local mode  | `bun x playwright test` + `~/.claude/skills/1password` (staging mode)        |
+| `mechanics` | Leak check vs `origin/main`, unguarded docs added to `main`, diff-B vs `origin/dev` filtered by the guarded set                                | `git`, `scripts/release/guarded-paths.sh`                                    |
+| `all`       | every above sequentially, drift first                                                                                                          |                                                                              |
 
 Flags:
 
 - `--env <env>` — preflight target: `staging` (default) or `local`. Also honored as the `$ENV` env var. Drives the URL
-  and auth shape for `do-smoke`, `mcp`, and `dist`. Local mode hits `$LOCAL_URL` without auth (requires `bunx wrangler
-  dev --env staging --local` running); staging mode hits the staging Worker through CF Access (service token from
-  1Password). `coord`, `build`, and `mechanics` are not env-dependent.
+  and auth shape for `do-smoke`, `mcp`, and `dist`. Local mode hits `$LOCAL_URL` without auth (requires
+  `bunx wrangler dev --env staging --local` running); staging mode hits the staging Worker through CF Access (service
+  token from 1Password). `coord`, `build`, and `mechanics` are not env-dependent.
 - `--binary <name>` — fresh non-registry binary for do-smoke (default: `$BINARY` env var or `emoj`). The name resolves
   to a GitHub `owner/repo` the live scorer fetches: `emoj` to `sindresorhus/emoj`, `cowsay` to `piuccio/cowsay`,
   otherwise `sindresorhus/<name>`. Add a binary to the `do_fixture_repo` map in `scripts/release/preflight.sh` when its
@@ -103,15 +103,15 @@ Security PRs, hotfixes, and config edits land on `main` first. The release branc
 Dependabot raises the same fix again.
 
 - [ ] `dev` carries the previous release's own bookkeeping, the `package.json` version and the `CHANGELOG.md` section
-      (gate 0). Gate 0 fails when the previous release's bookkeeping never reached `dev`; run
-      `scripts/sync-dev-after-release.sh v<version>`, merge its PR, and rerun.
+  (gate 0). Gate 0 fails when the previous release's bookkeeping never reached `dev`; run
+  `scripts/sync-dev-after-release.sh v<version>`, merge its PR, and rerun.
 - [ ] Every commit on `main` since the last release has its changes on `dev` (gate 1 lists the ones that do not, as
-      `differs` or `missing`). Backport them by PR into `dev` first, merge, and rerun. Until the first `v*` tag exists
-      the gate anchors on the newest `release:` squash on `main`; pass `--since <sha>` to anchor elsewhere.
+  `differs` or `missing`). Backport them by PR into `dev` first, merge, and rerun. Until the first `v*` tag exists the
+  gate anchors on the newest `release:` squash on `main`; pass `--since <sha>` to anchor elsewhere.
 - [ ] `.github/` is identical on both branches (gate 2). A difference either way is a config change that only reached
-      one branch.
+  one branch.
 - [ ] No lockfile package resolves newer on `main` than on `dev` (gate 3). The gate reads this repo's `bun.lock` one
-      line per package name, strips its trailing commas before parsing, and fails when it parses zero packages.
+  line per package name, strips its trailing commas before parsing, and fails when it parses zero packages.
 - [ ] `dev`-newer packages are the routine updates this release ships; the gate counts them and does not list them.
 
 ### Cross-repo coordination
@@ -126,9 +126,9 @@ Driven by `scripts/release/preflight.sh coord`.
   pins name the same image), and fails when either differs from the release in the `docker/sandbox/Dockerfile` tarball
   URL. A staging mismatch means the staging pin was not advanced after the Dockerfile bump
   ([`RELEASES.md` § Image bump](./RELEASES.md#image-bump-feat-pr-to-dev)); a production mismatch means the release's
-  promotion commit is missing ([`RELEASES.md` § Promotion](./RELEASES.md#promotion-release-pr-to-main)). The staging
-  pin MUST pass before the cut. Before the cut, the production pin fails whenever the Dockerfile's anc has moved past
-  the production image; it MUST pass on the release branch, after the promotion commit, at step 8 of
+  promotion commit is missing ([`RELEASES.md` § Promotion](./RELEASES.md#promotion-release-pr-to-main)). The staging pin
+  MUST pass before the cut. Before the cut, the production pin fails whenever the Dockerfile's anc has moved past the
+  production image; it MUST pass on the release branch, after the promotion commit, at step 8 of
   [`RELEASES.md` § Releasing dev to main](./RELEASES.md#releasing-dev-to-main). The gate skips when docker is absent or
   an image is neither local nor pullable.
 
@@ -229,8 +229,8 @@ Driven by `scripts/release/preflight.sh build`.
   ```
 
   Empty diff is green. Any registry entry without a badge SVG is a regression.
-- [ ] **Markdown twins exist for every emitted HTML page.** Every page on the site ships a `.md` twin (`Accept:
-  text/markdown` and the URL-suffix path both resolve). After build:
+- [ ] **Markdown twins exist for every emitted HTML page.** Every page on the site ships a `.md` twin
+  (`Accept: text/markdown` and the URL-suffix path both resolve). After build:
 
   ```bash
   diff <(find dist -name '*.html' -not -path 'dist/_internal/*' | sed -E 's/\.html$//' | sort) \
@@ -314,8 +314,8 @@ Driven by `scripts/release/preflight.sh do-smoke`. The fresh-binary picker is th
 - `details: chain_resolved_install_failed: pm=<pm>` → install pipeline broke for that package manager inside the
   sandbox. Investigate the install layer.
 - `details: timeout` → DO budget exceeded. Check install or audit duration in observability.
-- HTTP 503 `sandbox_unavailable` → container app not bound. Verify the staging `containers[]` block and `wrangler
-  containers list`.
+- HTTP 503 `sandbox_unavailable` → container app not bound. Verify the staging `containers[]` block and
+  `wrangler containers list`.
 - [ ] **The result page renders the full scorecard.** Confirm the `scorecard_url` the smoke just minted renders:
 
   ```bash
@@ -351,21 +351,22 @@ bouncing, `source: "registry" | "live-cache" | "live"`).
 Preflight defaults to the **staging** target (`https://agentnative-site-staging.brettdavies.workers.dev` through CF
 Access), matching the target shape of `do-smoke` and `dist`. This catches MCP regressions on the deployed staging code
 (which mirrors what the release branch will ship to main) without a local-wrangler prerequisite or Docker dependency.
-Pass `--env local` to opt into the historical mode: hits `http://localhost:8787` (an operator-started `bunx wrangler dev
---env staging --local`) with no auth. Use local when iterating on Worker code locally; use staging for the release-gate
-run. Postflight runs the same suite against both deployed envs (see [`RELEASES-POSTFLIGHT.md`](./RELEASES-POSTFLIGHT.md)
-§ Live MCP surface): `--env staging` exercises the staging Worker through CF Access, `--env prod` exercises
-`https://anc.dev` unauthenticated. Together they catch deploy-side regressions that only surface at the edge:
-rate-limiter bindings (`MCP_LIMITER`, `MCP_AUDIT_LIMITER`), the KV-backed hourly audit ceiling, and any binding drift
-between `wrangler.jsonc` and the live Workers.
+Pass `--env local` to opt into the historical mode: hits `http://localhost:8787` (an operator-started
+`bunx wrangler dev --env staging --local`) with no auth. Use local when iterating on Worker code locally; use staging
+for the release-gate run. Postflight runs the same suite against both deployed envs (see
+[`RELEASES-POSTFLIGHT.md`](./RELEASES-POSTFLIGHT.md) § Live MCP surface): `--env staging` exercises the staging Worker
+through CF Access, `--env prod` exercises `https://anc.dev` unauthenticated. Together they catch deploy-side regressions
+that only surface at the edge: rate-limiter bindings (`MCP_LIMITER`, `MCP_AUDIT_LIMITER`), the KV-backed hourly audit
+ceiling, and any binding drift between `wrangler.jsonc` and the live Workers.
 
 Driven by `scripts/release/preflight.sh mcp` (default target=staging). In staging mode the script stages the CF Access
-service token from 1Password and delegates to `scripts/release/mcp-smoke.sh
-https://agentnative-site-staging.brettdavies.workers.dev`. In local mode (`--env local`) it skips the auth staging and
-delegates to `scripts/release/mcp-smoke.sh http://localhost:8787` after a reachability check. The same `mcp-smoke.sh` is
-invoked by `scripts/release/postflight.sh --env staging mcp` (staging Worker, CF Access service-token headers also
-auto-staged from 1Password) and by `scripts/release/postflight.sh --env prod mcp` (`anc.dev`, no auth). The only
-differences between callers are the base URL and the env-driven auth headers when targeting staging.
+service token from 1Password and delegates to
+`scripts/release/mcp-smoke.sh https://agentnative-site-staging.brettdavies.workers.dev`. In local mode (`--env local`)
+it skips the auth staging and delegates to `scripts/release/mcp-smoke.sh http://localhost:8787` after a reachability
+check. The same `mcp-smoke.sh` is invoked by `scripts/release/postflight.sh --env staging mcp` (staging Worker, CF
+Access service-token headers also auto-staged from 1Password) and by `scripts/release/postflight.sh --env prod mcp`
+(`anc.dev`, no auth). The only differences between callers are the base URL and the env-driven auth headers when
+targeting staging.
 
 The curl recipes below show the **staging** shape (with CF Access headers). For the **local** shape, drop the two
 `CF-Access-Client-*` header lines and replace the staging URL with `http://localhost:8787`.
@@ -519,11 +520,11 @@ transport as a client drives it, and the skip-Worker edge cache classes. `wrangl
 HIT, so `edge-hit` has no local equivalent and the gate SKIPs in local mode; run it in staging mode.
 
 - [ ] The release commit is deployed to staging (step 7 of the overlay recipe) and `wrangler containers list` shows
-      `STATE = ready`. Until then these gates describe `dev`, not the release.
+  `STATE = ready`. Until then these gates describe `dev`, not the release.
 - [ ] That deploy was dispatched with `--ref <release branch>`, not with `-f ref=<sha>` alone. The input selects the
-      code; the dispatch ref selects the workflow, and the default branch's `deploy.yml` running against the release's
-      build fails any post-deploy smoke the release itself changed. A green `Deploy to staging` step under a red job is
-      this: the Worker published and a stale smoke rejected it.
+  code; the dispatch ref selects the workflow, and the default branch's `deploy.yml` running against the release's build
+  fails any post-deploy smoke the release itself changed. A green `Deploy to staging` step under a red job is this: the
+  Worker published and a stale smoke rejected it.
 - [ ] `staging-mcp`, `edge-hit`, `web-audit`, and `web-audit-webkit` all pass, with a non-zero test count for each.
 
 **A zero count is a failure, not a pass.** Playwright refuses an entire project on a configuration error — a duplicate

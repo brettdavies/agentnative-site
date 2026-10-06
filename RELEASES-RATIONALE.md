@@ -33,16 +33,16 @@ shipping.
 Always cut the release branch from `origin/main` and bring `dev`'s content onto it as a forward diff, never by
 reconciling histories. The default is the whole-tree overlay (`git checkout origin/dev -- .`, then strip the guarded
 set): `main` ships `dev`'s tree minus a small, known exclusion set, so asserting that end-state directly is simpler and
-safer than hand-resolving a merge. The overlay commit carries no per-PR history, so the changelog is built from the
-PRs merged into `dev` since the previous release (`generate-changelog.py --from-dev-prs`) rather than from the
-branch's commits; the result is the same per-PR section a cherry-picked branch would yield. Cherry-picking the dev
-squash-commits is kept only as an exception for a release with a stated reason it cannot overlay, at the cost of
-guarded-path conflict handling.
+safer than hand-resolving a merge. The overlay commit carries no per-PR history, so the changelog is built from the PRs
+merged into `dev` since the previous release (`generate-changelog.py --from-dev-prs`) rather than from the branch's
+commits; the result is the same per-PR section a cherry-picked branch would yield. Cherry-picking the dev squash-commits
+is kept only as an exception for a release with a stated reason it cannot overlay, at the cost of guarded-path conflict
+handling.
 
 Either way, the release must start from a `main` that `dev` fully contains. Security PRs, hotfixes, and config edits
 land on `main` first, and both constructions take `dev`'s content for the files they touch, so anything `main` holds
-that `dev` never received is reverted by the release. `scripts/release/drift.sh` lists that set and the cut waits
-until it is empty.
+that `dev` never received is reverted by the release. `scripts/release/drift.sh` lists that set and the cut waits until
+it is empty.
 
 ### CalVer release branches
 
@@ -104,9 +104,9 @@ double-counted in any future regeneration.
 
 ### Why internal-tooling commits don't appear in `## Changelog`
 
-`chore(cliff): ...`, `chore(prose-check): ...`, and similar internal tooling commits don't appear in the PR body's `##
-Changelog`. They are not user-facing. They belong in commit history and in the Files Modified / Key Details sections of
-the PR body, not in the source-of-truth release notes.
+`chore(cliff): ...`, `chore(prose-check): ...`, and similar internal tooling commits don't appear in the PR body's
+`## Changelog`. They are not user-facing. They belong in commit history and in the Files Modified / Key Details sections
+of the PR body, not in the source-of-truth release notes.
 
 ## Triple-diff verification
 
@@ -120,21 +120,20 @@ class.
 `guard-main-docs` is what CI enforces on a PR to `main`: the reusable workflow's hardcoded base list plus this repo's
 `extra_paths`. Every hand-kept copy of that union (runbook, checklist, preflight script) drifted from it, and a copy
 that omits a guarded path reports a real leak as clean while CI turns red after the push.
-`scripts/release/guarded-paths.sh` reads `extra_paths` out of the caller workflow and adds the base list, so
-registering a path in the workflow is the only edit a new guarded path needs. The base list is the one copy that still
-needs a manual edit when the reusable changes, because it lives in another repo. Entries are globs with one rule set
-shared by the reusable and the script (`**/` any depth, `*` and `?` within a segment, trailing slash guards the
-subtree), so `**/.agent/` guards that directory wherever it appears and the two never disagree about what is guarded.
+`scripts/release/guarded-paths.sh` reads `extra_paths` out of the caller workflow and adds the base list, so registering
+a path in the workflow is the only edit a new guarded path needs. The base list is the one copy that still needs a
+manual edit when the reusable changes, because it lives in another repo. Entries are globs with one rule set shared by
+the reusable and the script (`**/` any depth, `*` and `?` within a segment, trailing slash guards the subtree), so
+`**/.agent/` guards that directory wherever it appears and the two never disagree about what is guarded.
 
 ### Why the release enumerates what it adds
 
-The leak check screens the diff against the registered set, so it says nothing about a category nobody registered. A
-new engineering directory or a stray note under `docs/` passes the local check and `guard-main-docs` alike; that is
-how `docs/TODOS.md` and `docs/designs/` reached an open release with a green guard-docs. Step D lists every `docs/`
-file and every markdown file the release adds to `main` outside the guarded set and puts them in front of a human;
-each one needs a reason to ship, or it gets registered in `extra_paths` and dropped from the branch. Root-level
-markdown is in scope because an agent-facing glossary at the repo root is exactly the kind of addition a `docs/`-only
-listing misses.
+The leak check screens the diff against the registered set, so it says nothing about a category nobody registered. A new
+engineering directory or a stray note under `docs/` passes the local check and `guard-main-docs` alike; that is how
+`docs/TODOS.md` and `docs/designs/` reached an open release with a green guard-docs. Step D lists every `docs/` file and
+every markdown file the release adds to `main` outside the guarded set and puts them in front of a human; each one needs
+a reason to ship, or it gets registered in `extra_paths` and dropped from the branch. Root-level markdown is in scope
+because an agent-facing glossary at the repo root is exactly the kind of addition a `docs/`-only listing misses.
 
 ### Why patch-id cherry-check output is noisy
 
@@ -165,11 +164,11 @@ prior squash, it's a false positive: no action. Otherwise cherry-pick the commit
 
 `scripts/generate-changelog.py` (vendored from the `github-repo-setup` skill, with the repo-local `cliff.toml`) is the
 only sanctioned way to update `CHANGELOG.md`. On the overlay-built release branch it runs as `--from-dev-prs`: the PRs
-merged into `dev` since the previous release are the entries, and each PR's body supplies its `## Changelog → ###
-Breaking changes / Added / Changed / Fixed / Documentation` subsections (with author and PR-link attribution). On a
-cherry-picked branch it runs `git-cliff` first to prepend a versioned entry from the branch's commits, then expands the
-same way. This repo's release branches carry no version in their name (`release/<YYYY-MM-DD>-<slug>`), so the tag is
-passed explicitly (`--tag v<version>`).
+merged into `dev` since the previous release are the entries, and each PR's body supplies its
+`## Changelog → ### Breaking changes / Added / Changed / Fixed / Documentation` subsections (with author and PR-link
+attribution). On a cherry-picked branch it runs `git-cliff` first to prepend a versioned entry from the branch's
+commits, then expands the same way. This repo's release branches carry no version in their name
+(`release/<YYYY-MM-DD>-<slug>`), so the tag is passed explicitly (`--tag v<version>`).
 
 If a PR's body has no `## Changelog` section at all, its title becomes a `Changed` bullet, except for `chore`, `ci`,
 `build`, `style`, and `test` PRs, which stay out unless they carry a `## Changelog` of their own. A PR that leaves its
@@ -184,14 +183,14 @@ Once the release has merged and the tag and GitHub Release exist, the release-bo
 the next release's preflight diff-B stays quiet.
 
 The backport is a PR opened by `scripts/sync-dev-after-release.sh`, never a merge of `main` into `dev` and never a
-direct push. The squash-merged branches share no recent history, so a merge conflicts on every file both sides
-touched, and a direct push to `dev` bypasses its required status checks. The script writes the released version into
+direct push. The squash-merged branches share no recent history, so a merge conflicts on every file both sides touched,
+and a direct push to `dev` bypasses its required status checks. The script writes the released version into
 `package.json`, copies `CHANGELOG.md` from `main`, and opens the PR; the postflight backport gate treats that merged PR
 as the durable signal that the backport ran.
 
 The script discovers other release-only edits rather than listing them. Release branches take edits for reasons nobody
-predicts (a doc fix, a reverted payload, a deleted config), each such edit lands against `main`'s base, and a fixed
-list misses it silently; the next release's overlay then restores `dev`'s copy over `main`'s and undoes the edit. The
+predicts (a doc fix, a reverted payload, a deleted config), each such edit lands against `main`'s base, and a fixed list
+misses it silently; the next release's overlay then restores `dev`'s copy over `main`'s and undoes the edit. The
 previous `v*` tag, the last point the two branches agreed, bounds discovery, so it cannot revert `dev`'s unreleased
 work: a path whose `dev` copy still matches that tag counts as release-prep and the script adopts it, while a path both
 branches changed counts as contested, and the script reports it and adopts it only when the operator names it
@@ -273,11 +272,11 @@ Worker code unintentionally.
 
 ### Image-retention discipline
 
-NEVER delete a tag from the CF managed registry that backed a shipped Worker version. Deletion silently breaks `wrangler
-rollback` for any version that referenced the image (per
+NEVER delete a tag from the CF managed registry that backed a shipped Worker version. Deletion silently breaks
+`wrangler rollback` for any version that referenced the image (per
 [Containers Limits](https://developers.cloudflare.com/containers/platform-details/limits/)). The 50 GB account-wide cap
-is a quarterly prune review, not a routine cleanup. When a release tag ships, record the pair `<git-tag> <-> <registry
-URI>` in the release commit body so the inventory survives.
+is a quarterly prune review, not a routine cleanup. When a release tag ships, record the pair
+`<git-tag> <-> <registry URI>` in the release commit body so the inventory survives.
 
 Retention is what makes soak-then-promote safe: while a new image is soaking on staging, the prod pin still references
 the previous release's tag, and that tag must remain in the registry for prod to keep serving.
@@ -312,8 +311,9 @@ is what the deploy workflow assumes.
 ### R2 score-cache lifecycle
 
 Plan U7 caches successful live scorecards under `scores/{binary}/{anc-version}.json` in the `SCORE_CACHE` R2 bucket. A
-7-day lifecycle rule reaps stale entries at the bucket level rather than per-write, keeping `Cache-Control: public,
-max-age=300` on every object so CDN edges don't over-cache while the R2 origin holds the long TTL.
+7-day lifecycle rule reaps stale entries at the bucket level rather than per-write, keeping
+`Cache-Control: public, max-age=300` on every object so CDN edges don't over-cache while the R2 origin holds the long
+TTL.
 
 The rule name (`scores-7day-ttl`) identifies the rule for future updates or removal. The prefix (`scores/`) scopes the
 TTL so future writes under a different prefix in the same bucket are NOT affected. If a future change adds a new prefix
@@ -412,9 +412,9 @@ JSON-RPC envelope, because the surface is off, not in-error; an agent that gets 
 a JSON-RPC handler.
 
 A cost-level emergency (audit budget overrun, container instability surfacing only on `score_cli` runs) needs the
-expensive tool off but the read tier alive. `MCP_LIVE_SCORING_ENABLED=false` returns `isError: false` with `audited:
-false` and `next_tool: get_scorecard` — the agent learns the score is unavailable and that the cached path is still
-there. Read tools (`list_tools`, `get_principle`, etc.) keep serving.
+expensive tool off but the read tier alive. `MCP_LIVE_SCORING_ENABLED=false` returns `isError: false` with
+`audited: false` and `next_tool: get_scorecard` — the agent learns the score is unavailable and that the cached path is
+still there. Read tools (`list_tools`, `get_principle`, etc.) keep serving.
 
 Collapsing the two into a single switch would force the operator to choose between losing the catalog and losing the
 audits. The split lets the cost emergency cost the operator nothing visible on the read surface.
@@ -422,10 +422,10 @@ audits. The split lets the cost emergency cost the operator nothing visible on t
 ## Wrangler env inheritance traps
 
 Wrangler's per-env config inherits some keys from the top-level and not others. Mismatched expectations on either side
-produced a real production incident on this repo (the 2026-04-30 routing-drift bug: every `wrangler deploy --env
-staging` was silently re-attaching `anc.dev` to the staging Worker because `env.staging` inherited the top-level
-`routes` array). The current `env.staging` block carries explicit overrides for every inheritable key so the inheritance
-behavior is deliberate and visible, not silent.
+produced a real production incident on this repo (the 2026-04-30 routing-drift bug: every
+`wrangler deploy --env staging` was silently re-attaching `anc.dev` to the staging Worker because `env.staging`
+inherited the top-level `routes` array). The current `env.staging` block carries explicit overrides for every
+inheritable key so the inheritance behavior is deliberate and visible, not silent.
 
 ### Inheritable keys: explicit override required
 
@@ -501,12 +501,12 @@ that didn't satisfy those gates upstream isn't unblocked by the CI pipeline bein
 
 ## Why the release branch deploys to staging
 
-Staging deploys from `dev`. A release branch is `dev`'s tree minus the guarded paths, so the two build the same
-artifact whenever the strip is inert, and a preflight run against `dev`-on-staging then does describe the release. The
-condition is the problem: it holds for docs and prose config, and it stops holding the first time a guarded path reaches
-the build. Deploying the release commit costs one workflow dispatch and removes the inference.
-The equality is worth measuring rather than assuming, and it is cheap to measure: build both trees and compare the
-emitted files. On 2026-09-15 they differed only in two build timestamps.
+Staging deploys from `dev`. A release branch is `dev`'s tree minus the guarded paths, so the two build the same artifact
+whenever the strip is inert, and a preflight run against `dev`-on-staging then does describe the release. The condition
+is the problem: it holds for docs and prose config, and it stops holding the first time a guarded path reaches the
+build. Deploying the release commit costs one workflow dispatch and removes the inference. The equality is worth
+measuring rather than assuming, and it is cheap to measure: build both trees and compare the emitted files. On
+2026-09-15 they differed only in two build timestamps.
 
 The deploy has to land before the live gates, and the container rollout has to finish before them too, because
 Cloudflare reports `wrangler deploy` success while instances are still draining. A gate that races the rollout reads a
