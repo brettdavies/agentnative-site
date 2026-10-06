@@ -24,8 +24,8 @@ editor in the Cloudflare dashboard. Both lake buckets run with the R2 Data Catal
 expiration. The setup commands live in
 [`RELEASES.md` § R2 telemetry-lake catalog](../../RELEASES.md#r2-telemetry-lake-catalog).
 
-Both buckets were created on 2026-09-02. Catalog, compaction, and snapshot expiration are not yet enabled: the `wrangler
-r2 bucket catalog` commands require the R2 Data Catalog permission on the API token, which the current
+Both buckets were created on 2026-09-02. Catalog, compaction, and snapshot expiration are not yet enabled: the
+`wrangler r2 bucket catalog` commands require the R2 Data Catalog permission on the API token, which the current
 `CLOUDFLARE_API_TOKEN` does not carry. Grant the permission in the dashboard token editor, then run the setup and verify
 commands from `RELEASES.md`.
 
@@ -108,11 +108,11 @@ keys, so query a window that holds traffic (the request recipe is in the
 Recorded against the staging Worker on 2026-09-03 over a fifteen-minute window holding page, MCP, score, and web-audit
 traffic:
 
-| Measure                                  | Before (production, 7-day window, pre-emitter) | After (staging, window with traffic) |
-| ---------------------------------------- | ---------------------------------------------- | ------------------------------------ |
-| Keys listed                              | 121                                            | 177                                  |
-| Platform keys (`$metadata`, `$workers`)  | 119                                            | 114                                  |
-| Keys from this Worker's records          | 2 (`level`, `message`)                         | 63                                   |
+| Measure                                 | Before (production, 7-day window, pre-emitter) | After (staging, window with traffic) |
+| --------------------------------------- | ---------------------------------------------- | ------------------------------------ |
+| Keys listed                             | 121                                            | 177                                  |
+| Platform keys (`$metadata`, `$workers`) | 119                                            | 114                                  |
+| Keys from this Worker's records         | 2 (`level`, `message`)                         | 63                                   |
 
 The 63 include `scope`, `event`, `tier`, `client_name`, and every `page.request` field (`path`, `format`, `status`,
 `cache_status`, `cache_age_present`, `client_class`, `agent_name`, `browser_family`, `browser_version`, `engine`,
@@ -132,8 +132,8 @@ one per request) carry the request envelope, and on both Workers the index lists
 `$workers.event.request.headers.x-forwarded-for`, `$workers.event.request.headers.user-agent`, and (on production)
 `$workers.event.request.headers.sec-ch-ua*`, together with `$workers.event.request.cf.latitude`, `.longitude`, `.city`,
 and `.postalCode`, all populated. The live layer therefore holds the client IP and raw User-Agent for seven days on
-every invocation record, outside anything this repo emits. The Logpush allowlist excludes the `Event` envelope that carries
-them, which is what keeps them out of the lake; a session key derived from the address must not be joined to an
+every invocation record, outside anything this repo emits. The Logpush allowlist excludes the `Event` envelope that
+carries them, which is what keeps them out of the lake; a session key derived from the address must not be joined to an
 invocation record by request id, because that record already holds the address it was derived to avoid.
 
 ## Credentials

@@ -83,9 +83,9 @@ issue.
    before the pin moves; that work ships in the same PR as the re-pin.
 3. Copy the issue's observed value into the entry's `pinned` field in `src/data/standards/watch.yaml`. The value is
    JSON, which is valid YAML, so it pastes as written.
-4. For `mcp-server-card-schema`, vendor the new upstream commit first with `scripts/sync-server-card-schema.sh --ref
-   <sha>` and update `PINNED_REF` in that script: `tests/standards-drift.test.ts` fails while the vendored schema and
-   the pin disagree.
+4. For `mcp-server-card-schema`, vendor the new upstream commit first with
+   `scripts/sync-server-card-schema.sh --ref <sha>` and update `PINNED_REF` in that script:
+   `tests/standards-drift.test.ts` fails while the vendored schema and the pin disagree.
 5. Confirm locally that the entry is clean: `GITHUB_TOKEN="$(gh auth token)" bun scripts/standards/check-drift.ts` exits
    0 when nothing else has moved.
 6. Open the re-pin PR to `dev` and reference the issue.

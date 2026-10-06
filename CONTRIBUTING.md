@@ -38,8 +38,8 @@ feat/* → PR to dev (squash merge)
 
 `dev` is the integration branch. `main` is what `anc.dev` serves. The site deploys via Cloudflare's `deploy.yml` on
 push-to-main; each release also carries a `v<version>` tag and a `CHANGELOG.md` section as bookkeeping (see
-[`RELEASES.md`](./RELEASES.md)). Engineering docs (`docs/plans/`, `docs/solutions/`,
-`docs/brainstorms/`, `docs/reviews/`) live on `dev` only and are blocked from `main` by `guard-main-docs.yml`.
+[`RELEASES.md`](./RELEASES.md)). Engineering docs (`docs/plans/`, `docs/solutions/`, `docs/brainstorms/`,
+`docs/reviews/`) live on `dev` only and are blocked from `main` by `guard-main-docs.yml`.
 
 ## Dev setup
 

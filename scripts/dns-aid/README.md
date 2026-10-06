@@ -1,7 +1,7 @@
 # DNS-AID for anc.dev
 
-Agent-readiness scanners probe DNS for AI Discovery (DNS-AID) via DNS-over-HTTPS.
-These records live in the **anc.dev Cloudflare zone**, not in the Worker build.
+Agent-readiness scanners probe DNS for AI Discovery (DNS-AID) via DNS-over-HTTPS. These records live in the **anc.dev
+Cloudflare zone**, not in the Worker build.
 
 ## Publish
 
@@ -13,13 +13,12 @@ CLOUDFLARE_ZONE_ID=<anc.dev-zone-id> \
 
 Records:
 
-| Name | Type | Target |
-|------|------|--------|
+| Name                     | Type | Target                          |
+| ------------------------ | ---- | ------------------------------- |
 | `_index._agents.anc.dev` | SVCB | `anc.dev` with `alpn=mcp,h2,h3` |
-| `_mcp._agents.anc.dev` | SVCB | `anc.dev` with `alpn=mcp,h2,h3` |
+| `_mcp._agents.anc.dev`   | SVCB | `anc.dev` with `alpn=mcp,h2,h3` |
 
-Enable **DNSSEC** on the zone (Cloudflare dashboard: DNS → Settings) so validating
-resolvers return authenticated data.
+Enable **DNSSEC** on the zone (Cloudflare dashboard: DNS → Settings) so validating resolvers return authenticated data.
 
 ## Verify
 

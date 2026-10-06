@@ -65,11 +65,12 @@ non-brew traffic, retired infrastructure) is much higher than the cost of measur
 ### Spike scope and measurement
 
 - R1. The spike measures three install paths for each anc100 entry: arm 1 the current production install path as it runs
-  in the live sandbox (per `src/worker/score/sandbox-exec.ts` install semantics), arm 2 `brew exec <formula> --
-  <binary>` in a spike-modified sandbox image carrying brew, arm 3 reformulating the entry as `brew install <pkg>` and
-  letting `src/worker/score/resolve-spec.ts:resolveBrewFallback()` resolve it. The harness builds on both existing
-  Docker images (`docker/sandbox/Dockerfile` for the runtime environment; `docker/score/install-tools.sh` as the
-  canonical source of registry-pinned brew formulae) with spike-specific modifications where needed.
+  in the live sandbox (per `src/worker/score/sandbox-exec.ts` install semantics), arm 2
+  `brew exec <formula> -- <binary>` in a spike-modified sandbox image carrying brew, arm 3 reformulating the entry as
+  `brew install <pkg>` and letting `src/worker/score/resolve-spec.ts:resolveBrewFallback()` resolve it. The harness
+  builds on both existing Docker images (`docker/sandbox/Dockerfile` for the runtime environment;
+  `docker/score/install-tools.sh` as the canonical source of registry-pinned brew formulae) with spike-specific
+  modifications where needed.
 - R2. Each arm measures combined install + score wall-clock and records the actual elapsed time per entry. The spike
   does NOT enforce the 60s budget (`TOTAL_TIMEOUT_MS` in `src/worker/score/sandbox-exec.ts`) — long-running audits are
   allowed to complete so the wall-clock signal isn't truncated. Analysis groups runs over 60s as `DNF` (Did Not Finish
@@ -132,8 +133,8 @@ non-brew traffic, retired infrastructure) is much higher than the cost of measur
   documenting what class of formula-install actions Bubblewrap would have prevented (filesystem writes outside Cellar,
   child-process spawning, device access) and asserting whether CF Sandbox SDK's outbound controls are an acceptable
   substitute for any downstream shape decision.
-- R13. The spike records the complete set of outbound hosts brew contacts during arms 2 (`brew exec`) and 3 (`brew
-  install` translation) — formula metadata endpoints, bottle CDN hosts, tap index hosts, and any other endpoints
+- R13. The spike records the complete set of outbound hosts brew contacts during arms 2 (`brew exec`) and 3
+  (`brew install` translation) — formula metadata endpoints, bottle CDN hosts, tap index hosts, and any other endpoints
   touched. The captured host list is the input the `INSTALL_HOSTS` map in `src/worker/score/sandbox-exec.ts` extends to
   before any shape adopts brew, so the per-PM Phase 1 egress allowlist gets a security review pre-commit rather than
   being widened reactively at implementation time.

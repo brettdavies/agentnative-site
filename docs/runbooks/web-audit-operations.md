@@ -79,8 +79,8 @@ token on the staging host sidesteps this; that is what `run.sh` does.
 
 For a real user-facing audit, use the site's audit UI (`https://anc.dev/audit`) or the `audit_website` MCP tool. A
 scripted `POST /api/score` needs a real Turnstile token, which you cannot mint from a script. To preview the
-working-tree engine against live production content, point the helper at it: `scripts/web-audit/run.sh --target
-https://anc.dev/` (a public host, so no Access token is fetched).
+working-tree engine against live production content, point the helper at it:
+`scripts/web-audit/run.sh --target https://anc.dev/` (a public host, so no Access token is fetched).
 
 ## Operating the board rescore
 
@@ -124,8 +124,8 @@ omitted, not shown as ghost rows.
 `WEB_AUDIT_FOLLOW_ENABLED` is on. While it is off, a re-audit saves each seeded scorecard as not followed:
 `follow_declarations: false`, with every row that needs a declared host `n_a` for reason `follow-disabled`. Beside the
 fingerprint, KV records the follow state the last rescore ran with (`web_rescore:follow_enabled`, `true` or `false`; any
-value but `true` reads as `false`), and a flip in either direction forces the same full reflow a registry change does.
-A flip reflows nothing until the next rescore trigger, so after flipping the switch, fire the manual trigger above to
+value but `true` reads as `false`), and a flip in either direction forces the same full reflow a registry change does. A
+flip reflows nothing until the next rescore trigger, so after flipping the switch, fire the manual trigger above to
 re-score the board under the new state at once.
 
 **Which registry a score ran under.** The fingerprint hashes the registry without its site-only fields together with
@@ -140,8 +140,8 @@ After a reflow, the recorded fingerprint starts with the prefix the seeded pages
 wrangler kv key get --binding SCORE_KV --remote web_rescore:registry_fp   # add --env staging for staging
 ```
 
-**When to fire the manual trigger.** Three events need the manual trigger above, because no hook fires the rescore
-for them:
+**When to fire the manual trigger.** Three events need the manual trigger above, because no hook fires the rescore for
+them:
 
 - **A flip of `WEB_AUDIT_FOLLOW_ENABLED`.** The flip changes the recorded follow state, and the manual run reflows every
   seed under it.
@@ -149,14 +149,14 @@ for them:
   from the release it replaces, its fingerprint differs from the one KV recorded, and the manual run reflows every seed
   under the restored registry.
 - **Domain-budget deferrals in a reflow.** A seed whose rows a declared domain's spent hourly budget left unevaluated is
-  not saved when it has a saved scorecard from the last 24 hours, or one R2 could not read: the rescore logs `scope:
-  web-rescore` with `cause: domain-budget`, skips that seed, and its saved scorecard stays on the board. A seed with no
-  saved scorecard (a new seed, or every seed after a vendored-spec bump, which changes the cache key) is saved as any
-  audit, so it is never left off the board. A saved scorecard older than 24 hours is replaced too, so a third party that
-  keeps a declared domain's hour spent cannot freeze a seed's score. Seeds that declare one domain drain its hour
-  together, so a release reflow can defer several. Fire the manual trigger after the hour turns (the next full UTC hour,
-  when every hourly budget opens a new bucket). A deferred seed keeps the scorecard it had, which records the registry
-  it was scored under before the reflow, so the next trigger re-audits it whatever its age.
+  not saved when it has a saved scorecard from the last 24 hours, or one R2 could not read: the rescore logs
+  `scope: web-rescore` with `cause: domain-budget`, skips that seed, and its saved scorecard stays on the board. A seed
+  with no saved scorecard (a new seed, or every seed after a vendored-spec bump, which changes the cache key) is saved
+  as any audit, so it is never left off the board. A saved scorecard older than 24 hours is replaced too, so a third
+  party that keeps a declared domain's hour spent cannot freeze a seed's score. Seeds that declare one domain drain its
+  hour together, so a release reflow can defer several. Fire the manual trigger after the hour turns (the next full UTC
+  hour, when every hourly budget opens a new bucket). A deferred seed keeps the scorecard it had, which records the
+  registry it was scored under before the reflow, so the next trigger re-audits it whatever its age.
 
 **Secrets.** `WEB_RESCORE_SECRET` is a `wrangler secret put` value on both Workers (`--env staging` and production) and
 lives in the GitHub environment secret `ANC_WEB_RESCORE_SECRET` for the deploy hook. Rotate by setting a new value in
@@ -201,11 +201,11 @@ The two lanes disagree on what an absent switch means, and the disagreement is d
 in KV where an absent key is the normal steady state, while the website lane's lives in `wrangler.jsonc` vars where an
 absent value means the deploy forgot it.
 
-| Switch                     | Lane | Absent means | Set to `"true"` means | Reaches                                |
-| -------------------------- | ---- | ------------ | --------------------- | -------------------------------------- |
-| `MCP_LIVE_SCORING_ENABLED` | CLI  | disabled     | enabled               | `score_cli`; the read tier stays alive  |
+| Switch                     | Lane | Absent means | Set to `"true"` means | Reaches                                     |
+| -------------------------- | ---- | ------------ | --------------------- | ------------------------------------------- |
+| `MCP_LIVE_SCORING_ENABLED` | CLI  | disabled     | enabled               | `score_cli`; the read tier stays alive      |
 | `WEB_AUDIT_ENABLED`        | web  | disabled     | enabled               | `audit_website` and the endpoint's web lane |
-| `MCP_ENABLED`              | both | disabled     | enabled               | the whole MCP surface                  |
+| `MCP_ENABLED`              | both | disabled     | enabled               | the whole MCP surface                       |
 
 A missing binding, as opposed to a missing value, fails closed on both lanes. Flipping any of them off leaves every
 cached result readable: the read tiers and the result route never consult a switch, so a disabled lane serves what it

@@ -15,12 +15,12 @@ envelope, cache-hint scope semantics, and the GET posture. It is the starting po
 Four flags gate the MCP surface and what the web audit reaches. Each name carries exactly one binding shape in every
 environment, and the flip verb follows the shape.
 
-| Flag                       | Binding shape                                       | Scope                                     | Falsy behavior                                                                                                                                                                                                                            |
-| -------------------------- | --------------------------------------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MCP_ENABLED`              | secret, both environments                           | the entire `/mcp` branch                  | `503 Service Unavailable` with `Retry-After: 3600` and a one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error. Discoverability siblings stay live.                                                    |
-| `MCP_LIVE_SCORING_ENABLED` | secret, both environments                           | only the `score_cli` tool                 | `score_cli` returns `isError: false` with `audited: false, message: "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard"`. Read tier stays alive.                                   |
-| `MCP_LEGACY_ENABLED`       | committed var `"true"`, top-level and `env.staging` | legacy `initialize` lane                  | When `'false'`, shell logs `legacy_rejected` with `error_code: -32022` and returns JSON-RPC `-32022` (`data.supported: ["2026-07-28"]`) before SDK dispatch. Modern lane unaffected.                                                      |
-| `WEB_AUDIT_FOLLOW_ENABLED` | var `"true"` on `env.staging`, secret in production | following declared hosts, every web audit | Audits keep running on the site's own origin. The stored scorecard records `follow_declarations: false`, and rows that need a declared host read `n_a` with reason `follow-disabled`. Re-audits save unfollowed; see the decision flow.   |
+| Flag                       | Binding shape                                       | Scope                                     | Falsy behavior                                                                                                                                                                                                                          |
+| -------------------------- | --------------------------------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MCP_ENABLED`              | secret, both environments                           | the entire `/mcp` branch                  | `503 Service Unavailable` with `Retry-After: 3600` and a one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error. Discoverability siblings stay live.                                                  |
+| `MCP_LIVE_SCORING_ENABLED` | secret, both environments                           | only the `score_cli` tool                 | `score_cli` returns `isError: false` with `audited: false, message: "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard"`. Read tier stays alive.                                 |
+| `MCP_LEGACY_ENABLED`       | committed var `"true"`, top-level and `env.staging` | legacy `initialize` lane                  | When `'false'`, shell logs `legacy_rejected` with `error_code: -32022` and returns JSON-RPC `-32022` (`data.supported: ["2026-07-28"]`) before SDK dispatch. Modern lane unaffected.                                                    |
+| `WEB_AUDIT_FOLLOW_ENABLED` | var `"true"` on `env.staging`, secret in production | following declared hosts, every web audit | Audits keep running on the site's own origin. The stored scorecard records `follow_declarations: false`, and rows that need a declared host read `n_a` with reason `follow-disabled`. Re-audits save unfollowed; see the decision flow. |
 
 The split is a decision, not an accident. `MCP_ENABLED` and `MCP_LIVE_SCORING_ENABLED` are secrets because incident
 response needs a flip that lands without a deploy and survives the next unrelated one, and because an unset secret reads
@@ -34,12 +34,12 @@ before the release that reads it, so an unset value reads as off. The same test 
 the top-level `vars` block.
 
 **A binding name is a var or a secret, never both.** `wrangler secret put` against a name declared in any `vars` block
-is rejected with Cloudflare API **10053** (`Binding name '<NAME>' already in use`). Never run `wrangler secret put
-MCP_LEGACY_ENABLED`, in either environment.
+is rejected with Cloudflare API **10053** (`Binding name '<NAME>' already in use`). Never run
+`wrangler secret put MCP_LEGACY_ENABLED`, in either environment.
 
 **Production commands carry no `--env` flag.** Production is the top-level `wrangler.jsonc` config and there is no
-`env.production` block, so `--env production` fails at config parse (`No environment found in configuration with name
-"production"`). Staging is `--env staging`.
+`env.production` block, so `--env production` fails at config parse
+(`No environment found in configuration with name "production"`). Staging is `--env staging`.
 
 Decision flow:
 
@@ -94,8 +94,8 @@ bun x wrangler deploy --env staging --var MCP_LEGACY_ENABLED:false  # staging
 Three hazards make this the second choice:
 
 - **It ships the local bundle.** `wrangler deploy` uploads whatever the working tree built, not what is deployed. Run it
-  only from a clean checkout of the branch that env serves (`main` for production, `dev` for staging) with a fresh `bun
-  run build`, or the override also ships unreviewed code.
+  only from a clean checkout of the branch that env serves (`main` for production, `dev` for staging) with a fresh
+  `bun run build`, or the override also ships unreviewed code.
 - **The next deploy silently reverts it.** Any later plain deploy, including a CI deploy fired by an unrelated merge,
   re-asserts the committed `"true"`, re-enabling the legacy lane with no notification.
 - **It is not zero-deploy.** The override costs a full deploy cycle, so it is not a substitute for the secret-shaped
@@ -251,9 +251,10 @@ traffic under the ceiling rather than guessing.
 
 ## Staging proof (dual-stack migration)
 
-Run after the dual-stack Worker is on staging (normally a `dev` merge deploy; a manual `bun run build && bun x wrangler
-deploy --env staging` from `feat/mcp-2026-dual-protocol` is acceptable for this proof). Requires CF Access service-token
-headers (same pair as `scripts/release/preflight.sh` / `scripts/release/postflight.sh`).
+Run after the dual-stack Worker is on staging (normally a `dev` merge deploy; a manual
+`bun run build && bun x wrangler deploy --env staging` from `feat/mcp-2026-dual-protocol` is acceptable for this proof).
+Requires CF Access service-token headers (same pair as `scripts/release/preflight.sh` /
+`scripts/release/postflight.sh`).
 
 ### Scripted checks (6/6)
 
@@ -268,8 +269,8 @@ get_scorecard hit/miss.
 
 **Check 6 miss input (recorded 2026-08-26):** unknown registry slugs (`nope-not-a-tool`) are validator rejection
 (`isError: true`, `unrecognized_input`), not cache-miss. The smoke miss probe uses a well-formed `github_url` absent
-from registry + R2 (`https://github.com/example/anc-smoke-no-scorecard`) and expects inner `found: false` + `next_tool:
-score_cli`. Curated hits return `source=registry` with `entry` (not always an inline `scorecard` object).
+from registry + R2 (`https://github.com/example/anc-smoke-no-scorecard`) and expects inner `found: false` +
+`next_tool: score_cli`. Curated hits return `source=registry` with `entry` (not always an inline `scorecard` object).
 
 **Legacy Accept / JSON (recorded 2026-08-26):** the agents legacy transport requires dual Accept and defaults to SSE.
 Dispatch keeps the dual-Accept rewrite for the SDK, then coerces SSE → `application/json` when `detectMcpFormat`

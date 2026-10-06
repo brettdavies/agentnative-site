@@ -98,9 +98,9 @@ names a method the lane could be missing, which is why answering `-32601` to a c
 | `resources/read` on a URI that matches no resource | modern | **200** | `tests/worker-mcp-dispatch.test.ts:1083`             |
 | `_meta` missing `clientCapabilities`               | modern | **400** | code `tests/worker-mcp.test.ts:707`; status observed |
 
-The resource-miss rows are the ones worth reading twice. `src/worker/mcp/resources.ts:45` tags the thrown error `.code =
--32002`, but `-32002` never reaches the wire: the SDK era encode seam rewrites it to `-32602` on **both** lanes. A
-client that branches on `-32002` against this server matches nothing.
+The resource-miss rows are the ones worth reading twice. `src/worker/mcp/resources.ts:45` tags the thrown error
+`.code = -32002`, but `-32002` never reaches the wire: the SDK era encode seam rewrites it to `-32602` on **both**
+lanes. A client that branches on `-32002` against this server matches nothing.
 
 `-32002` remains receive-tolerated, because non-SDK servers do emit it. The web-audit resource-miss probe accepts either
 code (`src/worker/audit-web/handlers/mcp.ts:335`, `accept: [-32602, -32002]`), and the tolerance is pinned at
@@ -165,9 +165,9 @@ parsing JSON-RPC. The rules are narrow and the penalty for breaking them is a si
 - **`MCP-Protocol-Version`** carries the claimed revision. A revision the server does not serve draws `-32022` at HTTP
   400 with `data.supported` and `data.requested`.
 - **`Mcp-Method`** must be present and must equal the body's `method` on any request carrying an id. Absent draws
-  `-32020` (`the required Mcp-Method header is absent`); disagreeing draws `-32020` (`the body names method tools/list
-  but the Mcp-Method header names resources/list`). Both observed; the disagreement arm is pinned at
-  `tests/worker-mcp-dispatch.test.ts:1098` through its `Mcp-Name` sibling.
+  `-32020` (`the required Mcp-Method header is absent`); disagreeing draws `-32020`
+  (`the body names method tools/list but the Mcp-Method header names resources/list`). Both observed; the disagreement
+  arm is pinned at `tests/worker-mcp-dispatch.test.ts:1098` through its `Mcp-Name` sibling.
 - **`Mcp-Name`** rides the two methods that name a target, and mirrors a different field in each:
 
 | Method           | `Mcp-Name` mirrors | Verified at                         |

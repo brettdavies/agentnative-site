@@ -38,10 +38,10 @@ and link to the linter that measures it.
   themselves and want to know, in under 60 seconds, what the standard requires, whether their tool already conforms, and
   how to install the linter to check. They read on laptops and larger phones during work, in a context where they decide
   whether to take the standard seriously.
-- **AI agents** consuming the spec programmatically via `/llms.txt`, `/llms-full.txt`, `.md` URL suffixes, and `Accept:
-  text/markdown` content negotiation. Their UX is "does the markdown come back clean, are anchors stable, is the
-  structure predictable across versions." Decisions that make the HTML prettier at the cost of the markdown channel are
-  regressions.
+- **AI agents** consuming the spec programmatically via `/llms.txt`, `/llms-full.txt`, `.md` URL suffixes, and
+  `Accept: text/markdown` content negotiation. Their UX is "does the markdown come back clean, are anchors stable, is
+  the structure predictable across versions." Decisions that make the HTML prettier at the cost of the markdown channel
+  are regressions.
 
 Not primary audiences: managers deciding budget, procurement, the general public.
 

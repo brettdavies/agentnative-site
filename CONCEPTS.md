@@ -269,8 +269,8 @@ snapshots. Distinct from an on-demand audit of a single domain, which caches its
 A host the entry site names in one of its own machine-readable surfaces: the MCP server card's remote or transport URL,
 an api-catalog anchor, the catalog's service-desc target, or RFC 9728 protected-resource metadata. The target of a
 redirect to another origin, answered to a discovery POST on one of the entry site's own MCP paths, is a declared host
-too, and the POST is never re-sent there. A declared host is evaluated for the entry site's scorecard and never
-receives a scorecard of its own from that audit.
+too, and the POST is never re-sent there. A declared host is evaluated for the entry site's scorecard and never receives
+a scorecard of its own from that audit.
 
 ### Follow phase
 

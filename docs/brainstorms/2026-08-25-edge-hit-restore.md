@@ -11,11 +11,11 @@ note: Confirmations closed. Requirements-only unified plan is docs/plans/2026-08
 
 ## Problem
 
-After #265 / #266, negotiated HTML and markdown skip Cloudflare shared-cache reuse (`Cloudflare-CDN-Cache-Control:
-no-store`, no `s-maxage`) so clients see `Vary: Accept, User-Agent`. That made `markdown-vary` a real SHOULD pass on
-`anc.dev`. First-view and agent TTFB no longer get a long edge HIT. Bake-at-build pages (`/scorecards`, `/about`,
-principles) pay that cost even though their bodies only change on deploy. Live web-board URLs (`/`, `/web`,
-`/web/<domain>`) must not freeze behind a day-long HIT.
+After #265 / #266, negotiated HTML and markdown skip Cloudflare shared-cache reuse
+(`Cloudflare-CDN-Cache-Control: no-store`, no `s-maxage`) so clients see `Vary: Accept, User-Agent`. That made
+`markdown-vary` a real SHOULD pass on `anc.dev`. First-view and agent TTFB no longer get a long edge HIT. Bake-at-build
+pages (`/scorecards`, `/about`, principles) pay that cost even though their bodies only change on deploy. Live web-board
+URLs (`/`, `/web`, `/web/<domain>`) must not freeze behind a day-long HIT.
 
 This unit restores edge HIT **without** repeating the 2026-08-25 production bug: a HIT that omitted `Vary`.
 
@@ -76,8 +76,8 @@ markdown, HIT like `/llms.txt`, no `Vary`.
 
 ### CLI boards (bake at build)
 
-Change only on deploy, except homepage HTML which is shared with the live web pane. Browser = HTML. curl with default UA
-= markdown. Explicit `.md` never negotiates to HTML. `/check.md` is a 301.
+Change only on deploy, except homepage HTML which is shared with the live web pane. Browser = HTML. curl with default
+UA = markdown. Explicit `.md` never negotiates to HTML. `/check.md` is a 301.
 
 | Surface                  | URL             | Browser (HTML)   | curl (markdown UA) | Explicit `.md`                 |
 | ------------------------ | --------------- | ---------------- | ------------------ | ------------------------------ |
@@ -171,8 +171,8 @@ Evidence:
 - Worker-generated paths (`/web`, `/web/anc.dev`, HTML/markdown 404) return **no** `cf-cache-status`. The Worker ran.
   Zone cache did not store the response (`no-store` doing its job).
 - Path-keyed `/llms.txt` and `/skill.json` HIT with `s-maxage=86400` and no `Vary` (the SHORT_CACHE class).
-- Negotiation still works under asset HIT: `/about` browser HTML body ≠ curl markdown body; curl UA and `Accept:
-  text/markdown` match `/about.md`.
+- Negotiation still works under asset HIT: `/about` browser HTML body ≠ curl markdown body; curl UA and
+  `Accept: text/markdown` match `/about.md`.
 
 ### Zone Cache Rule canary (created and deleted the same session)
 
