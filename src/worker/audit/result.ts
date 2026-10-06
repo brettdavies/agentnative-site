@@ -43,6 +43,8 @@ import {
 } from '../../shared/audit-envelope';
 import {
   auditPath,
+  badgePath,
+  badgeSlugOf,
   classifyTarget,
   type Lane,
   type Representation,
@@ -379,6 +381,32 @@ async function seedEntryFor(env: ResultEnv, host: string): Promise<WebSeedEntry 
   } catch {
     return undefined;
   }
+}
+
+/**
+ * `/badge/<binary>.svg` 301s to the canonical `/badge/<name>.svg`, the same
+ * curated-slug aliasing `/score/<binary>` already performs.
+ *
+ * The build emits a badge per registry `name` and reaps anything else, while
+ * `anc` builds its embed snippet from the name it was invoked with: `anc audit
+ * --command rg` prints `/badge/rg.svg`, so a reader who copies the snippet the
+ * tool printed got a 404 image beside a working link. Redirecting keeps one
+ * canonical SVG rather than emitting the bytes twice, and image clients
+ * (GitHub's camo proxy included) follow a 301.
+ *
+ * Returns null for everything this route does not own, so a canonical slug is
+ * served by the asset binding and an unknown one still 404s there rather than
+ * resolving to some other tool's badge.
+ */
+export async function badgeAliasRedirect(pathname: string, env: ResultEnv): Promise<Response | null> {
+  const slug = badgeSlugOf(pathname);
+  if (!slug) return null;
+  const registry = await registryOrNull(env);
+  if (!registry) return null;
+  if (Object.hasOwn(registry.by_slug, slug)) return null;
+  const alias = curatedEntryForBinary(slug, registry);
+  if (!hasScorecard(alias) || alias.name === slug) return null;
+  return redirect(badgePath(alias.name));
 }
 
 async function registryOrNull(env: ResultEnv): Promise<RegistryIndex | null> {
