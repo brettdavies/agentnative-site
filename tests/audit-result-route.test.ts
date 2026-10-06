@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import { scoreJsonPath, scoreMarkdownPath, scorePath } from '../src/shared/audit-routes';
-import { _resetResultCaches, handleResultRoute, type ResultEnv } from '../src/worker/audit/result';
+import { _resetResultCaches, badgeAliasRedirect, handleResultRoute, type ResultEnv } from '../src/worker/audit/result';
 import { keyFor as webKeyFor } from '../src/worker/audit-web/cache';
 import { webEnvelope } from '../src/worker/audit-web/core';
 import { keyFor as cliKeyFor } from '../src/worker/score/cache';
@@ -278,6 +278,25 @@ describe('curated slugs (registry first)', () => {
       expect(res.status).toBe(301);
       expect(res.headers.get('location')).toBe(target);
     }
+  });
+
+  test('/badge/rg.svg 301s to the canonical badge; canonical, unknown and non-badge paths fall through', async () => {
+    const env = await seededEnv();
+    // The slug `anc audit --command rg` prints. The build emits the badge
+    // under the registry name only, so without this the copied embed snippet
+    // is a 404 image beside a working link.
+    const aliased = await badgeAliasRedirect('/badge/rg.svg', env);
+    expect(aliased?.status).toBe(301);
+    expect(aliased?.headers.get('location')).toBe('/badge/ripgrep.svg');
+    // A canonical slug is the asset binding's to serve.
+    expect(await badgeAliasRedirect('/badge/ripgrep.svg', env)).toBeNull();
+    // An unknown slug keeps 404ing rather than resolving to another tool's
+    // badge, which would render a confidently wrong score in a README.
+    expect(await badgeAliasRedirect('/badge/not-a-tool.svg', env)).toBeNull();
+    // Paths this route does not own.
+    expect(await badgeAliasRedirect('/score/rg', env)).toBeNull();
+    expect(await badgeAliasRedirect('/badge/rg/nested.svg', env)).toBeNull();
+    expect(await badgeAliasRedirect('/badge/rg.png', env)).toBeNull();
   });
 
   test('the curated HTML fetch asks the binding for the extensionless page, so no html_handling redirect hop is taken', async () => {
