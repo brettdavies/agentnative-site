@@ -68,8 +68,27 @@ type Stage = { record: Promise<HopRecord>; settled: boolean };
  */
 type MemoEntry = { headers: Stage; full: Stage; extend: (deadlineAt: number) => void };
 
-/** One audit's answers, keyed by the request that produced them, and the body bytes they hold. */
-export type RequestMemo = { entries: Map<string, MemoEntry>; retainedBytes: number };
+/** What one audit's memo did with the hops it saw and the bodies it was handed. */
+export type MemoStats = {
+  /** Hops sent to the target. */
+  sent: number;
+  /** Hops answered from a record instead of sent. */
+  reused: number;
+  /** Body bytes kept against MEMO_TOTAL_MAX_BYTES; a record a better one replaced still counts. */
+  retainedBytes: number;
+  /** Non-empty bodies kept. */
+  bodiesRetained: number;
+  largestBodyBytes: number;
+  /** Bodies not kept for being over MEMO_BODY_MAX_BYTES. */
+  overBodyCap: number;
+  /** Bodies not kept because the audit's total would pass MEMO_TOTAL_MAX_BYTES. */
+  overTotalCap: number;
+  /** Body reads the memo runs on its own that have not ended; their bytes are not in `retainedBytes` yet. */
+  readsOpen: number;
+};
+
+/** One audit's answers, keyed by the request that produced them. */
+export type RequestMemo = { entries: Map<string, MemoEntry>; stats: MemoStats };
 
 /**
  * One sent hop: the record as of the headers, the record once the body read
@@ -84,7 +103,19 @@ export type SentHop = {
 };
 
 export function createRequestMemo(): RequestMemo {
-  return { entries: new Map(), retainedBytes: 0 };
+  return {
+    entries: new Map(),
+    stats: {
+      sent: 0,
+      reused: 0,
+      retainedBytes: 0,
+      bodiesRetained: 0,
+      largestBodyBytes: 0,
+      overBodyCap: 0,
+      overTotalCap: 0,
+      readsOpen: 0,
+    },
+  };
 }
 
 export type HopContext = {
@@ -170,11 +201,17 @@ function coverage(record: HopRecord): number {
 }
 
 /** The record the memo keeps for later callers: the body only while it fits under both caps. */
-function retained(record: HopRecord, memo: RequestMemo): HopRecord {
+function retained(record: HopRecord, stats: MemoStats): HopRecord {
   if (record.kind === 'failure') return record;
   const size = record.bytes.byteLength;
-  if (size <= MEMO_BODY_MAX_BYTES && memo.retainedBytes + size <= MEMO_TOTAL_MAX_BYTES) {
-    memo.retainedBytes += size;
+  if (size > MEMO_BODY_MAX_BYTES) {
+    stats.overBodyCap += 1;
+  } else if (stats.retainedBytes + size > MEMO_TOTAL_MAX_BYTES) {
+    stats.overTotalCap += 1;
+  } else {
+    stats.retainedBytes += size;
+    if (size > 0) stats.bodiesRetained += 1;
+    stats.largestBodyBytes = Math.max(stats.largestBodyBytes, size);
     return record;
   }
   return { ...record, bytes: new Uint8Array(0), bodyCap: 0, truncated: false };
@@ -246,19 +283,26 @@ export async function takeHop(
   if (prior !== undefined) {
     const head = await settle(prior.headers, ctx);
     if (head === null) return timedOutFor(ctx);
-    if (answers(head.record, head.waited, ctx)) return head.record;
+    if (answers(head.record, head.waited, ctx)) {
+      memo.stats.reused += 1;
+      return head.record;
+    }
     prior.extend(ctx.deadlineAt);
     const full = await settle(prior.full, ctx);
     if (full === null) return timedOutFor(ctx);
-    if (answers(full.record, full.waited, ctx)) return full.record;
+    if (answers(full.record, full.waited, ctx)) {
+      memo.stats.reused += 1;
+      return full.record;
+    }
     if (Date.now() >= ctx.deadlineAt) return timedOutFor(ctx);
     priorRecord = full.record;
   }
+  memo.stats.sent += 1;
   const sent = send(ctx);
   const full = sent
     .then((hop) => hop.full)
     .then((answer) => {
-      const kept = retained(answer, memo);
+      const kept = retained(answer, memo.stats);
       return priorRecord !== undefined && coverage(priorRecord) > coverage(kept) ? priorRecord : kept;
     });
   memo.entries.set(key, {
@@ -304,13 +348,17 @@ export function answerOf(response: Response, ctx: HopContext): SentHop {
   if (ctx.memo === undefined) {
     return { head, full: readBytes(response, 0).then(() => head), readsBody: false };
   }
+  const stats = ctx.memo.stats;
   const deadline: MovableDeadline = { at: ctx.deadlineAt, moved: new Set() };
+  stats.readsOpen += 1;
   const full = bodyRecord(
     head,
     () => readBytes(response, MEMO_BODY_MAX_BYTES, deadline),
     MEMO_BODY_MAX_BYTES,
     () => deadline.at,
-  );
+  ).finally(() => {
+    stats.readsOpen -= 1;
+  });
   const extend = (deadlineAt: number): void => {
     if (deadlineAt <= deadline.at) return;
     deadline.at = deadlineAt;

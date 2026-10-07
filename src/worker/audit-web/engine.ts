@@ -61,7 +61,7 @@ import type { EvidenceItem, HandlerContext, McpAuthRequired, McpLaneEvidence, Pr
 import { runWebMcp } from './handlers/webmcp';
 import { directArtifactSource, settleMcpAuth, signInResolver } from './mcp-auth';
 import type { WebAuditRegistry, WebCheck, WebSiteType } from './registry';
-import { createRequestMemo } from './request-hop';
+import { createRequestMemo, type MemoStats } from './request-hop';
 import { buildWebScorecard, type EngineResult, type ScorecardStatus, type WebScorecard } from './scorecard';
 import { type AuditFetchOptions, type GuardedFetchOptions, guardedFetch, isEdgeErrorStatus } from './ssrf';
 
@@ -101,8 +101,9 @@ export interface RunWebAuditInput {
 export type AuditEvent =
   | { type: 'discovery'; endpoint: string | null; evidence: EvidenceItem[] }
   | { type: 'result'; result: EngineResult }
-  // `follow` is what the follow slice spent: for the run record, never stored.
-  | { type: 'complete'; scorecard: WebScorecard; complete: boolean; follow: FollowStats }
+  // `follow` is what the follow slice spent and `memo` what the request
+  // memo held: for the run record, never stored.
+  | { type: 'complete'; scorecard: WebScorecard; complete: boolean; follow: FollowStats; memo: MemoStats }
   // Terminal for a target the auditor cannot reach: nothing answered at
   // the network level (no HTTP status from the root fetch or any discovery
   // probe), or the root is http or redirects to http, which anc never
@@ -386,7 +387,8 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const deadline = now() + perAuditDeadlineMs;
   // A row that needs an answer another row already received reads it from
   // the memo instead of asking the target again.
-  const fetchOptions: AuditFetchOptions = { ...input.fetchOptions, memo: createRequestMemo() };
+  const memo = createRequestMemo();
+  const fetchOptions: AuditFetchOptions = { ...input.fetchOptions, memo };
 
   // The single canonical root fetch every root-HTML check and several
   // antecedents read. null = failed at the network level. It runs before
@@ -618,5 +620,5 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     declaredHosts: declared.trail,
     registry: input.registry,
   });
-  yield { type: 'complete', scorecard, complete: !incomplete, follow: followStats };
+  yield { type: 'complete', scorecard, complete: !incomplete, follow: followStats, memo: { ...memo.stats } };
 }

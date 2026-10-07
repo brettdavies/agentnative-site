@@ -12,7 +12,7 @@ import { loadRegistry, stubFetchFor } from '../scripts/web-audit/conformance-cor
 import { SCENARIOS } from '../scripts/web-audit/conformance-scenarios';
 import { runWebAudit } from '../src/worker/audit-web/engine';
 import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
-import { createRequestMemo } from '../src/worker/audit-web/request-hop';
+import { createRequestMemo, type MemoStats } from '../src/worker/audit-web/request-hop';
 import { guardedFetch } from '../src/worker/audit-web/ssrf';
 import { stubFetch } from './helpers/stub-fetch';
 
@@ -84,6 +84,26 @@ describe('guardedFetch with an audit request memo', () => {
     first.headers['x-a'] = 'changed';
     expect(received).toEqual([`GET ${URL_A}`]);
     expect([second.status, second.body, second.headers['x-a']]).toEqual([200, 'User-agent: *', '1']);
+  });
+
+  test('the memo counts the hops it sent and answered from the record, and the body bytes it kept', async () => {
+    const { fetchImpl } = target(() => new Response('User-agent: *'));
+    const memo = createRequestMemo();
+    const llms = 'https://example.com/llms.txt';
+    await guardedFetch(URL_A, {}, { fetchImpl, memo });
+    await guardedFetch(URL_A, {}, { fetchImpl, memo });
+    await guardedFetch(llms, {}, { fetchImpl, memo, maxBodyBytes: 0 });
+    await guardedFetch(llms, {}, { fetchImpl, memo });
+    expect(memo.stats).toEqual({
+      sent: 2,
+      reused: 2,
+      retainedBytes: 26,
+      bodiesRetained: 2,
+      largestBodyBytes: 13,
+      overBodyCap: 0,
+      overTotalCap: 0,
+      readsOpen: 0,
+    });
   });
 
   test('requests that differ in method, header, or body each reach the target', async () => {
@@ -218,9 +238,9 @@ describe('guardedFetch with an audit request memo', () => {
     const { fetchImpl } = target(stalling);
     const memo = createRequestMemo();
     await guardedFetch(URL_A, {}, { fetchImpl, memo, timeoutMs: 40, maxBodyBytes: 0 });
-    expect(stalling.state.cancelled).toBe(false);
+    expect([stalling.state.cancelled, memo.stats.readsOpen]).toEqual([false, 1]);
     await Bun.sleep(80);
-    expect(stalling.state.cancelled).toBe(true);
+    expect([stalling.state.cancelled, memo.stats.readsOpen, memo.stats.retainedBytes]).toEqual([true, 0, 0]);
   });
 
   test("a body reader that joins the memo's body read late in its budget still reads the body", async () => {
@@ -297,6 +317,7 @@ describe('guardedFetch with an audit request memo', () => {
     expect([first.body.length, statusOnly.status, received.length]).toEqual([big.length, 200, 1]);
     const second = await guardedFetch(URL_A, {}, { fetchImpl, memo });
     expect([second.body.length, received.length]).toEqual([big.length, 2]);
+    expect(memo.stats).toMatchObject({ sent: 2, reused: 1, retainedBytes: 0, overBodyCap: 2, overTotalCap: 0 });
   });
 
   test('the memo stops holding bodies once an audit holds 8 MiB of them', async () => {
@@ -308,6 +329,15 @@ describe('guardedFetch with an audit request memo', () => {
     await guardedFetch(urls[0], {}, { fetchImpl, memo });
     await guardedFetch(urls[8], {}, { fetchImpl, memo });
     expect(received.length).toBe(10);
+    expect(memo.stats).toMatchObject({
+      sent: 10,
+      reused: 1,
+      retainedBytes: 8 * megabyte.length,
+      bodiesRetained: 8,
+      largestBodyBytes: megabyte.length,
+      overBodyCap: 0,
+      overTotalCap: 2,
+    });
   });
 
   test('a memo-held redirect is still checked by the guard before a caller follows it', async () => {
@@ -383,5 +413,33 @@ describe('an audit sends each distinct request once', () => {
       if (again.length > 0) repeated[name] = again;
     }
     expect(repeated).toEqual({});
+  });
+
+  test("an audit's complete event reports every request it sent and the body bytes its memo kept", async () => {
+    const scenario = SCENARIOS['run-healthy'];
+    const stub = stubFetchFor(scenario, { unmatched: [] });
+    let received = 0;
+    const fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) => {
+      received += 1;
+      return stub(input, init);
+    }) as typeof fetch;
+    let memo: MemoStats | undefined;
+    for await (const event of runWebAudit({
+      url: scenario.target,
+      registry,
+      siteType: scenario.site_type,
+      specVersion: scenario.spec_version,
+      followDeclarations: scenario.follow_declarations ?? true,
+      domainBudget: ALWAYS_ADMIT_BUDGET,
+      fetchOptions: { fetchImpl },
+      now: () => 0,
+    })) {
+      if (event.type === 'complete') memo = event.memo;
+    }
+    expect(memo?.sent).toBe(received);
+    expect(memo?.reused).toBeGreaterThan(0);
+    expect(memo?.bodiesRetained).toBeGreaterThan(0);
+    expect(memo?.retainedBytes).toBeGreaterThanOrEqual(memo?.largestBodyBytes ?? 0);
+    expect(memo?.largestBodyBytes).toBeGreaterThan(0);
   });
 });

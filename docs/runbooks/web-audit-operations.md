@@ -252,7 +252,14 @@ summary line to Workers Logs (`observability.enabled` with 100% head sampling in
   SHA-256, the same hash its budget key carries), and `follow_budget_errors` (reservations a budget layer error decided,
   per error: `burst-refused` and `read-refused` when the burst floor or the hourly read threw and the domain was
   refused, `put-admitted` when the hourly write threw after a read that showed room and the audit was admitted). A
-  `domain-budget` cause that no `burst-refused` or `read-refused` error accounts for is a spent budget.
+  `domain-budget` cause that no `burst-refused` or `read-refused` error accounts for is a spent budget. The same run
+  also carries what its request memo held, read when the audit completes: `memo_requests_sent` (every request the audit
+  sent, redirect hops included), `memo_requests_reused` (requests answered from an answer already received),
+  `memo_retained_bytes` (body bytes kept against the 8 MiB per-audit cap, counting an answer a better one replaced),
+  `memo_bodies_retained`, `memo_largest_body_bytes`, `memo_bodies_over_body_cap` and `memo_bodies_over_total_cap`
+  (bodies not kept for being over 1 MiB, or for arriving after the audit spent its total), and `memo_reads_open` (body
+  reads still running whose bytes are not counted yet). A nonzero `memo_bodies_over_total_cap` means the audit spent
+  its cap: a later caller that needs one of those bodies sends its request again.
 - `scope: web-audit.error`: the engine or stream task threw; carries the target, surface, and message.
 
 Query them in the dashboard under Workers & Pages -> agentnative-site -> Logs, filtering on the `scope` field.
