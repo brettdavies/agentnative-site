@@ -30,7 +30,7 @@
 
 import { AUDIT_USER_AGENT } from '../../shared/user-agents';
 import type { ProbeResponse } from './assert';
-import { answerOf, bodyOf, failureOf, type HopContext, isRedirect, type RequestMemo, takeHop } from './request-hop';
+import { answerOf, bodyOf, failedHop, type HopContext, isRedirect, type RequestMemo, takeHop } from './request-hop';
 
 export { REDIRECT_STATUSES } from './request-hop';
 
@@ -338,6 +338,9 @@ export async function guardedFetch(
         body: init.body,
       };
       const hopContext: HopContext = {
+        // A first hop's budget runs from the same instant as the deadline,
+        // so callers with the same timeout compare equal.
+        startedAt: hop === 0 ? started : Date.now(),
         deadlineAt: started + timeoutMs,
         signal: controller.signal,
         bodyCap: opts.maxBodyBytes,
@@ -345,7 +348,6 @@ export async function guardedFetch(
         memo: opts.memo,
       };
       const send = async (ctx: HopContext) => {
-        const sentAt = Date.now();
         let response: Response;
         try {
           response = await fetchImpl(request.url, {
@@ -356,9 +358,9 @@ export async function guardedFetch(
             signal: controller.signal,
           });
         } catch (err) {
-          return failureOf(err, sentAt, ctx);
+          return failedHop(err, ctx);
         }
-        return answerOf(response, sentAt, ctx);
+        return answerOf(response, ctx);
       };
       const answer = await takeHop(request, hopContext, send);
       if (answer.kind === 'failure') return fail(answer.error.message);

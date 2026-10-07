@@ -3,8 +3,9 @@
 // of reaching the target again, so a site is not charged twice for one
 // question and a second fetch cannot disagree with the first. A request
 // goes out again only when the answer on record cannot serve the caller:
-// it kept less of the body than the caller reads, or it arrived later than
-// the caller's deadline allows.
+// it holds less of the body than the caller reads, or it arrived later than
+// the caller's deadline allows. A caller that skips the body still leaves
+// the body in the memo for one that reads it.
 
 import { describe, expect, test } from 'bun:test';
 import { loadRegistry, stubFetchFor } from '../scripts/web-audit/conformance-corpus';
@@ -37,16 +38,40 @@ function hang(_url: string, init?: RequestInit): Promise<Response> {
   });
 }
 
-/** A response whose status and headers arrive at once and whose body sends one chunk, then stalls until the caller aborts. */
+/**
+ * A response whose status and headers arrive at once and whose body sends
+ * one chunk, then stalls until the caller aborts or the reader cancels it.
+ * `cancelled` reports whether a reader gave up on the body.
+ */
 function stallsAfterHeaders(status: number, headers: Record<string, string>) {
-  return (_url: string, init?: RequestInit): Response => {
+  const state = { cancelled: false };
+  const answer = (_url: string, init?: RequestInit): Response => {
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new TextEncoder().encode('{"error":'));
         init?.signal?.addEventListener('abort', () => controller.error(ABORTED()));
       },
+      cancel() {
+        state.cancelled = true;
+      },
     });
     return new Response(body, { status, headers });
+  };
+  return Object.assign(answer, { state });
+}
+
+/** A response whose status and headers arrive at once and whose body arrives whole after `delayMs`. */
+function bodyAfter(delayMs: number, text: string) {
+  return (_url: string, init?: RequestInit): Response => {
+    const body = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        await Bun.sleep(delayMs);
+        if (init?.signal?.aborted) return controller.error(ABORTED());
+        controller.enqueue(new TextEncoder().encode(text));
+        controller.close();
+      },
+    });
+    return new Response(body);
   };
 }
 
@@ -79,7 +104,7 @@ describe('guardedFetch with an audit request memo', () => {
     expect(answers.map((a) => a.body)).toEqual(['ok', 'ok', 'ok']);
   });
 
-  test('a status-only probe reads the body another caller kept, and a body reader after a status-only probe asks again', async () => {
+  test('a status-only probe and a body reader share one request in either order', async () => {
     const readerFirst = target(() => new Response('# Guide\n'));
     const memo = createRequestMemo();
     const reader = await guardedFetch(URL_A, {}, { fetchImpl: readerFirst.fetchImpl, memo });
@@ -95,9 +120,7 @@ describe('guardedFetch with an audit request memo', () => {
     const other = createRequestMemo();
     await guardedFetch(URL_A, {}, { fetchImpl: statusFirst.fetchImpl, memo: other, maxBodyBytes: 0 });
     const later = await guardedFetch(URL_A, {}, { fetchImpl: statusFirst.fetchImpl, memo: other });
-    expect([later.body, statusFirst.received.length]).toEqual(['# Guide\n', 2]);
-    await guardedFetch(URL_A, {}, { fetchImpl: statusFirst.fetchImpl, memo: other });
-    expect(statusFirst.received.length).toBe(2);
+    expect([later.body, statusFirst.received.length]).toEqual(['# Guide\n', 1]);
   });
 
   test('a retry that serves less than the answer on record does not replace it', async () => {
@@ -150,7 +173,7 @@ describe('guardedFetch with an audit request memo', () => {
     expect(received.length).toBe(2);
   });
 
-  test('a redirect one caller followed answers a status-only caller that keeps the redirect', async () => {
+  test('a redirect one caller followed answers callers that keep it, with or without its body', async () => {
     const card = 'https://example.com/.well-known/mcp.json';
     const canonical = 'https://example.com/mcp/server-card';
     const { received, fetchImpl } = target((url) =>
@@ -162,7 +185,72 @@ describe('guardedFetch with an audit request memo', () => {
     expect([followed.status, kept.status, kept.headers.location]).toEqual([200, 301, canonical]);
     expect(received).toEqual([`GET ${card}`, `GET ${canonical}`]);
     const withBody = await guardedFetch(card, {}, { fetchImpl, memo, followRedirects: false });
-    expect([withBody.body, received.length]).toEqual(['Moved', 3]);
+    expect([withBody.body, received.length]).toEqual(['Moved', 2]);
+  });
+
+  test('a redirect one caller followed answers a caller that may keep cross-origin redirects', async () => {
+    const endpoint = 'https://example.com/mcp';
+    const { received, fetchImpl } = target((url) =>
+      url === endpoint
+        ? new Response('Moved', { status: 308, headers: { location: `${endpoint}/` } })
+        : new Response('{"ok":true}'),
+    );
+    const memo = createRequestMemo();
+    await guardedFetch(endpoint, {}, { fetchImpl, memo });
+    const returning = await guardedFetch(endpoint, {}, { fetchImpl, memo, crossOriginRedirects: 'return' });
+    expect([returning.status, returning.body]).toEqual([200, '{"ok":true}']);
+    expect(received).toEqual([`GET ${endpoint}`, `GET ${endpoint}/`]);
+  });
+
+  test('a status-only probe answers at the headers while the memo reads a stalling body within its deadline', async () => {
+    const { received, fetchImpl } = target(stallsAfterHeaders(200, {}));
+    const memo = createRequestMemo();
+    const started = Date.now();
+    const statusOnly = await guardedFetch(URL_A, {}, { fetchImpl, memo, timeoutMs: 80, maxBodyBytes: 0 });
+    const statusMs = Date.now() - started;
+    const reader = await guardedFetch(URL_A, {}, { fetchImpl, memo, timeoutMs: 80 });
+    expect([statusOnly.status, statusOnly.error, statusMs < 40]).toEqual([200, null, true]);
+    expect([reader.error, received.length]).toEqual(['TimeoutError: deadline exceeded', 1]);
+  });
+
+  test("the memo's body read stops at the status-only caller's deadline when nobody waits on it", async () => {
+    const stalling = stallsAfterHeaders(200, {});
+    const { fetchImpl } = target(stalling);
+    const memo = createRequestMemo();
+    await guardedFetch(URL_A, {}, { fetchImpl, memo, timeoutMs: 40, maxBodyBytes: 0 });
+    expect(stalling.state.cancelled).toBe(false);
+    await Bun.sleep(80);
+    expect(stalling.state.cancelled).toBe(true);
+  });
+
+  test("a body reader that joins the memo's body read late in its budget still reads the body", async () => {
+    const { received, fetchImpl } = target(bodyAfter(300, 'BODY'));
+    const memo = createRequestMemo();
+    const statusOnly = guardedFetch(URL_A, {}, { fetchImpl, memo, timeoutMs: 1_000, maxBodyBytes: 0 });
+    await Bun.sleep(200);
+    const reader = await guardedFetch(URL_A, {}, { fetchImpl, memo, timeoutMs: 350 });
+    await statusOnly;
+    expect([reader.body, reader.error, received.length]).toEqual(['BODY', null, 1]);
+  });
+
+  test("a body reader with a later deadline pushes the memo's body read back to it", async () => {
+    const { received, fetchImpl } = target(bodyAfter(150, 'BODY'));
+    const memo = createRequestMemo();
+    await guardedFetch(URL_A, {}, { fetchImpl, memo, timeoutMs: 80, maxBodyBytes: 0 });
+    const reader = await guardedFetch(URL_A, {}, { fetchImpl, memo, timeoutMs: 400 });
+    expect([reader.body, reader.error, received.length]).toEqual(['BODY', null, 1]);
+  });
+
+  test("a status-only caller does not wait for a concurrent body reader's stalled body", async () => {
+    const { received, fetchImpl } = target(stallsAfterHeaders(404, { 'ratelimit-limit': '100' }));
+    const memo = createRequestMemo();
+    const reader = guardedFetch(URL_A, {}, { fetchImpl, memo, timeoutMs: 300, maxBodyBytes: 65_536 });
+    await Bun.sleep(10);
+    const started = Date.now();
+    const statusOnly = await guardedFetch(URL_A, {}, { fetchImpl, memo, timeoutMs: 300, maxBodyBytes: 0 });
+    const statusMs = Date.now() - started;
+    expect([statusOnly.status, statusOnly.headers['ratelimit-limit'], statusMs < 100]).toEqual([404, '100', true]);
+    expect([(await reader).error, received.length]).toEqual(['TimeoutError: deadline exceeded', 1]);
   });
 
   test('a body read that fails after the headers still answers a status-only caller', async () => {
@@ -266,44 +354,18 @@ function requestOf(input: RequestInfo | URL, init: RequestInit | undefined): str
   return JSON.stringify([(init?.method ?? 'GET').toUpperCase(), url, headers.sort(), body]);
 }
 
-/** The stub's response with its body wrapped so the test sees whether the auditor read it to the end. */
-function watched(response: Response, onRead: () => void): Response {
-  const source = response.body;
-  if (source === null) {
-    onRead();
-    return response;
-  }
-  const reader = source.getReader();
-  const body = new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      const { done, value } = await reader.read();
-      if (done) {
-        onRead();
-        controller.close();
-      } else controller.enqueue(value);
-    },
-    cancel(reason) {
-      return reader.cancel(reason);
-    },
-  });
-  return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
-}
-
 describe('an audit sends each distinct request once', () => {
   const registry = loadRegistry();
 
-  test('no conformance scenario repeats a request except to read a body no earlier copy read', async () => {
+  test('no conformance scenario sends a request it already sent', async () => {
     const repeated: Record<string, string[]> = {};
     for (const [name, scenario] of Object.entries(SCENARIOS)) {
       const stub = stubFetchFor(scenario, { unmatched: [] });
-      const copies = new Map<string, Array<{ read: boolean }>>();
-      const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const sent = new Map<string, number>();
+      const fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) => {
         const request = requestOf(input, init);
-        const copy = { read: false };
-        copies.set(request, [...(copies.get(request) ?? []), copy]);
-        return watched(await stub(input, init), () => {
-          copy.read = true;
-        });
+        sent.set(request, (sent.get(request) ?? 0) + 1);
+        return stub(input, init);
       }) as typeof fetch;
       for await (const _event of runWebAudit({
         url: scenario.target,
@@ -317,10 +379,8 @@ describe('an audit sends each distinct request once', () => {
       })) {
         // drain the audit
       }
-      const needless = [...copies]
-        .filter(([, sent]) => sent.slice(0, -1).some((copy) => copy.read))
-        .map(([request, sent]) => `x${sent.length} ${request}`);
-      if (needless.length > 0) repeated[name] = needless;
+      const again = [...sent].filter(([, count]) => count > 1).map(([request, count]) => `x${count} ${request}`);
+      if (again.length > 0) repeated[name] = again;
     }
     expect(repeated).toEqual({});
   });

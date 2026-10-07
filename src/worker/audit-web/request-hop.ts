@@ -1,10 +1,14 @@
 // The per-audit memo of what the target answered, one redirect hop at a
 // time, keyed on what the target sees (method, URL, headers, body), so a
 // caller's redirect or body-cap policy never turns one question into two
-// requests. A request goes out again only when the answer on record cannot
-// serve the caller: it kept less of the body than the caller reads, or it
-// arrived later than the caller's deadline allows. Nothing here reaches the
-// network: guardedFetch sends each hop and hands this module the response.
+// requests. Every caller gets the status and headers as soon as they
+// arrive; a caller that does not need the body (a status-only probe, a
+// redirect it follows) returns then, while the memo keeps reading the body
+// for a later caller that does. A request goes out again only when the
+// answer on record cannot serve the caller: it holds less of the body than
+// the caller reads, or it would not have reached the caller by its
+// deadline. Nothing here reaches the network: guardedFetch sends each hop
+// and hands this module the response.
 
 export const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
 
@@ -12,7 +16,8 @@ export const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 30
 // no more than MEMO_TOTAL_MAX_BYTES across the audit, so a target serving
 // large bodies at every path cannot make one audit hold tens of megabytes
 // in an isolate other audits share. A body past either cap still reaches
-// the caller that read it; a later caller that needs it asks again.
+// the caller that read it; a later caller that needs it asks again. A body
+// read for the memo alone stops at MEMO_BODY_MAX_BYTES.
 const MEMO_BODY_MAX_BYTES = 1024 * 1024;
 const MEMO_TOTAL_MAX_BYTES = 8 * 1024 * 1024;
 
@@ -25,14 +30,16 @@ export type HopRequest = {
   body: string | undefined;
 };
 
-/** Why a request or its body read got no further: the message the probe reports, and whether a deadline cut it off. */
-type HopError = { message: string; timedOut: boolean; elapsedMs: number; budgetMs: number };
+/** Why a request or its body read got no further, and when (Date.now() milliseconds). */
+type HopError = { message: string; timedOut: boolean; startedAt: number; endedAt: number; deadlineAt: number };
 
 type HopAnswer = {
   kind: 'answer';
   status: number;
   /** Response headers with lowercased names. */
   headers: Record<string, string>;
+  /** When the request went out, in Date.now() milliseconds. */
+  startedAt: number;
   /** Milliseconds until the status and headers arrived. */
   headersMs: number;
   /** Body bytes read, up to `bodyCap`; empty when `bodyCap` is 0. */
@@ -51,14 +58,38 @@ type HopFailure = { kind: 'failure'; error: HopError };
 
 export type HopRecord = HopAnswer | HopFailure;
 
+/** One stage of an answer, and whether it had settled when a caller joined. */
+type Stage = { record: Promise<HopRecord>; settled: boolean };
+
+/**
+ * One identical request's answer: `headers` settles as soon as the status
+ * and headers are known, `full` once the body read ends. `extend` pushes
+ * the memo's own body read back to a later deadline.
+ */
+type MemoEntry = { headers: Stage; full: Stage; extend: (deadlineAt: number) => void };
+
 /** One audit's answers, keyed by the request that produced them, and the body bytes they hold. */
-export type RequestMemo = { entries: Map<string, Promise<HopRecord>>; retainedBytes: number };
+export type RequestMemo = { entries: Map<string, MemoEntry>; retainedBytes: number };
+
+/**
+ * One sent hop: the record as of the headers, the record once the body read
+ * ends, whether the sending caller reads that body, and, for a body read
+ * the memo runs on its own, a way to push its deadline back.
+ */
+export type SentHop = {
+  head: HopRecord;
+  full: Promise<HopRecord>;
+  readsBody: boolean;
+  extend?: (deadlineAt: number) => void;
+};
 
 export function createRequestMemo(): RequestMemo {
   return { entries: new Map(), retainedBytes: 0 };
 }
 
 export type HopContext = {
+  /** When this hop began, in Date.now() milliseconds; the caller's budget for it runs from here. */
+  startedAt: number;
   /** When the caller's deadline passes, in Date.now() milliseconds. */
   deadlineAt: number;
   /** Aborts when the caller's deadline passes. */
@@ -100,22 +131,35 @@ export function bodyOf(answer: HopAnswer, bodyCap: number | undefined): BodyRead
 }
 
 /**
- * Whether a recorded error answers a caller with `budgetMs` left as its own
- * request would have: a timeout only when the caller's deadline is no
- * longer than the one that ran out, any other error when it arrived within
- * the caller's deadline.
+ * Whether something that took `tookMs` and arrived at `arrivedAt` reaches
+ * the caller as its own request would have. One that settled while the
+ * caller waited reached it by its deadline; one already on record when the
+ * caller joined fits when the time it took fits the caller's budget.
  */
-function errorAnswers(error: HopError, budgetMs: number): boolean {
-  return error.timedOut ? budgetMs <= error.budgetMs : error.elapsedMs <= budgetMs;
+function inTime(tookMs: number, arrivedAt: number, waited: boolean, ctx: HopContext): boolean {
+  return waited ? arrivedAt <= ctx.deadlineAt : tookMs <= ctx.deadlineAt - ctx.startedAt;
+}
+
+/**
+ * Whether a recorded error answers the caller as its own request would
+ * have. A timeout already on record answers a caller whose budget is no
+ * longer than the one that ran out; a timeout that ran out while the caller
+ * waited ended before the caller's deadline, so its own request still has
+ * time. Any other error answers when it arrived in time.
+ */
+function errorAnswers(error: HopError, waited: boolean, ctx: HopContext): boolean {
+  if (!error.timedOut) return inTime(error.endedAt - error.startedAt, error.endedAt, waited, ctx);
+  return !waited && ctx.deadlineAt - ctx.startedAt <= error.deadlineAt - error.startedAt;
 }
 
 /** Whether a stored record answers a caller with `ctx`'s deadline and body cap as a request of its own would have. */
-function answers(record: HopRecord, ctx: HopContext): boolean {
-  const budgetMs = ctx.deadlineAt - Date.now();
-  if (record.kind === 'failure') return errorAnswers(record.error, budgetMs);
-  if (!readsBody(record, ctx)) return record.headersMs <= budgetMs;
-  if (record.bodyError !== undefined) return errorAnswers(record.bodyError, budgetMs);
-  return record.elapsedMs <= budgetMs && bodyOf(record, ctx.bodyCap) !== null;
+function answers(record: HopRecord, waited: boolean, ctx: HopContext): boolean {
+  if (record.kind === 'failure') return errorAnswers(record.error, waited, ctx);
+  if (!readsBody(record, ctx)) return inTime(record.headersMs, record.startedAt + record.headersMs, waited, ctx);
+  if (record.bodyError !== undefined) return errorAnswers(record.bodyError, waited, ctx);
+  return (
+    inTime(record.elapsedMs, record.startedAt + record.elapsedMs, waited, ctx) && bodyOf(record, ctx.bodyCap) !== null
+  );
 }
 
 /** How much of the body a record can serve: nothing (a failure), up to its cap, or all of it. */
@@ -156,89 +200,163 @@ function withinDeadline<T>(pending: Promise<T>, signal: AbortSignal): Promise<T 
   return Promise.race([pending, passed]).finally(() => signal.removeEventListener('abort', onAbort));
 }
 
+function timedOutFor(ctx: HopContext): HopFailure {
+  return failureOf(new DOMException('deadline exceeded', 'TimeoutError'), ctx.startedAt, ctx.deadlineAt);
+}
+
+/** `record` as a stage that notes when it settles. */
+function stage(record: Promise<HopRecord>): Stage {
+  const tracked: Stage = { record, settled: false };
+  void record.then(() => {
+    tracked.settled = true;
+  });
+  return tracked;
+}
+
+/** The stage's record once it settles within the caller's deadline, and whether the caller had to wait for it. */
+async function settle(at: Stage, ctx: HopContext): Promise<{ record: HopRecord; waited: boolean } | null> {
+  const waited = !at.settled;
+  const record = await withinDeadline(at.record, ctx.signal);
+  return record === DEADLINE_PASSED ? null : { record, waited };
+}
+
 /**
  * The answer to `request`: what an identical request already got this audit
  * when that answers the caller, else whatever `send` gets from the target.
- * A caller waiting on an identical request still in flight waits no longer
- * than its own deadline. A new answer that serves less than the one on
- * record (a failure, or less of the body) goes to this caller only; the
- * memo keeps the better one.
+ * A caller waiting on an identical request still in flight, or on the
+ * memo's read of its body, waits no longer than its own deadline, and
+ * pushes the memo's read back to that deadline so the wait gives the body
+ * the time the caller's own request would have. A new answer that serves
+ * less than the one on record (a failure, or less of the body) goes to this
+ * caller only; the memo keeps the better one.
  */
 export async function takeHop(
   request: HopRequest,
   ctx: HopContext,
-  send: (ctx: HopContext) => Promise<HopRecord>,
+  send: (ctx: HopContext) => Promise<SentHop>,
 ): Promise<HopRecord> {
   const memo = ctx.memo;
-  if (memo === undefined) return send(ctx);
-  const started = Date.now();
+  if (memo === undefined) {
+    const hop = await send(ctx);
+    return hop.readsBody ? hop.full : hop.head;
+  }
   const key = keyOf(request);
   const prior = memo.entries.get(key);
-  const priorRecord = prior === undefined ? undefined : await withinDeadline(prior, ctx.signal);
-  if (priorRecord === DEADLINE_PASSED) {
-    return failureOf(new DOMException('deadline exceeded', 'TimeoutError'), started, ctx);
+  let priorRecord: HopRecord | undefined;
+  if (prior !== undefined) {
+    const head = await settle(prior.headers, ctx);
+    if (head === null) return timedOutFor(ctx);
+    if (answers(head.record, head.waited, ctx)) return head.record;
+    prior.extend(ctx.deadlineAt);
+    const full = await settle(prior.full, ctx);
+    if (full === null) return timedOutFor(ctx);
+    if (answers(full.record, full.waited, ctx)) return full.record;
+    if (Date.now() >= ctx.deadlineAt) return timedOutFor(ctx);
+    priorRecord = full.record;
   }
-  if (priorRecord !== undefined && answers(priorRecord, ctx)) return priorRecord;
   const sent = send(ctx);
-  memo.entries.set(
-    key,
-    sent.then((record) => {
-      const kept = retained(record, memo);
+  const full = sent
+    .then((hop) => hop.full)
+    .then((answer) => {
+      const kept = retained(answer, memo);
       return priorRecord !== undefined && coverage(priorRecord) > coverage(kept) ? priorRecord : kept;
-    }),
-  );
-  return sent;
+    });
+  memo.entries.set(key, {
+    headers: stage(sent.then((hop) => (hop.head.kind === 'failure' ? full : hop.head))),
+    full: stage(full),
+    extend: (deadlineAt) => {
+      void sent.then((hop) => hop.extend?.(deadlineAt));
+    },
+  });
+  const hop = await sent;
+  return hop.readsBody ? hop.full : hop.head;
 }
 
-/** The record of a response the target sent, its body read as far as `ctx` needs. */
-export async function answerOf(response: Response, started: number, ctx: HopContext): Promise<HopRecord> {
+/**
+ * The hop for a response the target sent: the status and headers at once,
+ * and the body read as far as the caller needs. A caller that skips the
+ * body leaves it to the memo, which reads up to MEMO_BODY_MAX_BYTES within
+ * the caller's deadline, pushed back when a later caller waits on it.
+ */
+export function answerOf(response: Response, ctx: HopContext): SentHop {
+  const started = ctx.startedAt;
   const headers = lowercased(response.headers);
-  const headersMs = Date.now() - started;
-  const status = response.status;
-  const bodyCap = readsBody({ status, headers }, ctx) ? ctx.bodyCap : 0;
+  const head: HopAnswer = {
+    kind: 'answer',
+    status: response.status,
+    headers,
+    startedAt: started,
+    headersMs: Date.now() - started,
+    bytes: new Uint8Array(0),
+    bodyCap: 0,
+    truncated: false,
+    elapsedMs: Date.now() - started,
+  };
+  if (readsBody(head, ctx)) {
+    const full = bodyRecord(
+      head,
+      () => readBytes(response, ctx.bodyCap),
+      ctx.bodyCap,
+      () => ctx.deadlineAt,
+    );
+    return { head, full, readsBody: true };
+  }
+  if (ctx.memo === undefined) {
+    return { head, full: readBytes(response, 0).then(() => head), readsBody: false };
+  }
+  const deadline: MovableDeadline = { at: ctx.deadlineAt, moved: new Set() };
+  const full = bodyRecord(
+    head,
+    () => readBytes(response, MEMO_BODY_MAX_BYTES, deadline),
+    MEMO_BODY_MAX_BYTES,
+    () => deadline.at,
+  );
+  const extend = (deadlineAt: number): void => {
+    if (deadlineAt <= deadline.at) return;
+    deadline.at = deadlineAt;
+    for (const rearm of deadline.moved) rearm();
+  };
+  return { head, full, readsBody: false, extend };
+}
+
+/** The hop for a request that got no response. */
+export function failedHop(err: unknown, ctx: HopContext): SentHop {
+  const head = failureOf(err, ctx.startedAt, ctx.deadlineAt);
+  return { head, full: Promise.resolve(head), readsBody: false };
+}
+
+/**
+ * The answer record once its body read ends. When the read fails after the
+ * status and headers arrived, they still answer a caller that reads only
+ * the status, and the failure answers a caller that needs the body.
+ */
+async function bodyRecord(
+  head: HopAnswer,
+  read: () => Promise<{ bytes: Uint8Array; truncated: boolean }>,
+  bodyCap: number | undefined,
+  deadlineAt: () => number,
+): Promise<HopAnswer> {
   try {
-    const read = await readBytes(response, bodyCap);
-    const elapsedMs = Date.now() - started;
-    return {
-      kind: 'answer',
-      status,
-      headers,
-      headersMs,
-      bytes: read.bytes,
-      bodyCap,
-      truncated: read.truncated,
-      elapsedMs,
-    };
+    const { bytes, truncated } = await read();
+    return { ...head, bytes, bodyCap, truncated, elapsedMs: Date.now() - head.startedAt };
   } catch (err) {
-    // The status and headers arrived before the body failed, so a caller
-    // that reads only the status is still answered by them.
-    const bodyError = hopError(err, started, ctx);
-    return {
-      kind: 'answer',
-      status,
-      headers,
-      headersMs,
-      bytes: new Uint8Array(0),
-      bodyCap: 0,
-      truncated: false,
-      elapsedMs: bodyError.elapsedMs,
-      bodyError,
-    };
+    const bodyError = hopError(err, head.startedAt, deadlineAt());
+    return { ...head, elapsedMs: bodyError.endedAt - head.startedAt, bodyError };
   }
 }
 
-/** The record of a request that got no response. */
-export function failureOf(err: unknown, started: number, ctx: HopContext): HopFailure {
-  return { kind: 'failure', error: hopError(err, started, ctx) };
+function failureOf(err: unknown, started: number, deadlineAt: number): HopFailure {
+  return { kind: 'failure', error: hopError(err, started, deadlineAt) };
 }
 
-function hopError(err: unknown, started: number, ctx: HopContext): HopError {
+function hopError(err: unknown, started: number, deadlineAt: number): HopError {
   const timedOut = err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError');
   return {
     message: timedOut ? 'TimeoutError: deadline exceeded' : errMsg(err),
     timedOut,
-    elapsedMs: Date.now() - started,
-    budgetMs: ctx.deadlineAt - started,
+    startedAt: started,
+    endedAt: Date.now(),
+    deadlineAt,
   };
 }
 
@@ -250,9 +368,18 @@ function lowercased(source: Headers): Record<string, string> {
   return headers;
 }
 
+/** A deadline a later caller can push back; each running read re-arms its timer through `moved`. */
+type MovableDeadline = { at: number; moved: Set<() => void> };
+
+/**
+ * The body up to `maxBodyBytes`. `deadline` bounds a read nothing else
+ * aborts (the memo's read after its caller has returned): when it passes,
+ * the read stops with a TimeoutError.
+ */
 async function readBytes(
   response: Response,
   maxBodyBytes: number | undefined,
+  deadline?: MovableDeadline,
 ): Promise<{ bytes: Uint8Array; truncated: boolean }> {
   if (maxBodyBytes === 0) {
     if (response.body) {
@@ -269,11 +396,40 @@ async function readBytes(
   }
   const reader = response.body?.getReader();
   if (!reader) return { bytes: new Uint8Array(0), truncated: false };
+  let deadlinePassed = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const arm = (): void => {
+    if (deadline === undefined) return;
+    clearTimeout(timer);
+    timer = setTimeout(
+      () => {
+        deadlinePassed = true;
+        reader.cancel().catch(() => {});
+      },
+      Math.max(0, deadline.at - Date.now()),
+    );
+  };
+  arm();
+  deadline?.moved.add(arm);
+  try {
+    return await readChunks(reader, maxBodyBytes, () => deadlinePassed);
+  } finally {
+    clearTimeout(timer);
+    deadline?.moved.delete(arm);
+  }
+}
+
+async function readChunks(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  maxBodyBytes: number,
+  deadlinePassed: () => boolean,
+): Promise<{ bytes: Uint8Array; truncated: boolean }> {
   const chunks: Uint8Array[] = [];
   let received = 0;
   let truncated = false;
   while (true) {
     const { done, value } = await reader.read();
+    if (deadlinePassed()) throw new DOMException('deadline exceeded', 'TimeoutError');
     if (done) break;
     if (!value) continue;
     const remaining = maxBodyBytes - received;
