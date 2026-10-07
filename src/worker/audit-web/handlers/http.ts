@@ -6,7 +6,7 @@
 import type { RetainedDocumentKey } from '../../../shared/web-audit-documents';
 import { assertHttp, classifyAliasProbe, type ExpectBlock, type ProbeResponse } from '../assert';
 import type { WebCheck } from '../registry';
-import { guardedFetch } from '../ssrf';
+import { guardedFetch, STATUS_ONLY_BODY_BYTES } from '../ssrf';
 import {
   endpointRedirects,
   redirectsToHttp,
@@ -175,7 +175,8 @@ type AliasSpec = string | { path: string; headers?: Record<string, string> };
  * `with.canonical` for target comparison and never probed, so this row adds
  * no subrequest beyond the aliases themselves. Each alias is fetched WITHOUT
  * following redirects, because the default handler reports only the final
- * hop and could never see the 301.
+ * hop and could never see the 301, and status-only, because the verdict
+ * reads the status and Location alone.
  *
  * One correct redirect is enough to pass: a site serves whichever legacy
  * paths it historically published, so requiring all of them would fail a
@@ -209,7 +210,7 @@ export async function runLegacyAliasRedirects(check: WebCheck, ctx: HandlerConte
     const resp = await guardedFetch(
       aliasUrl,
       { headers: spec.headers },
-      { ...ctx.fetchOptions, timeoutMs, followRedirects: false },
+      { ...ctx.fetchOptions, timeoutMs, followRedirects: false, maxBodyBytes: STATUS_ONLY_BODY_BYTES },
     );
     const { verdict, note } = classifyAliasProbe(resp, aliasUrl, canonicalUrl);
     evidence.push({ url: aliasUrl, role: 'alias', status: resp.status, alias_verdict: verdict, why: [note] });

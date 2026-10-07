@@ -351,10 +351,9 @@ describe('API category on api-catalog anchors', () => {
     );
     expect(row(scorecard, 'openapi')).toMatchObject({ status: 'pass', host: 'example.com' });
     expect(row(scorecard, 'json-errors')).toMatchObject({ status: 'pass', host: 'example.com' });
-    expect(hygieneProbes(seen)).toEqual([
-      'https://example.com/v1/items/anc-web-audit-no-such',
-      'https://example.com/v1/items/anc-web-audit-no-such',
-    ]);
+    // json-errors and the rate-limit row ask the same question of the same
+    // URL, so the target receives it once.
+    expect(hygieneProbes(seen)).toEqual(['https://example.com/v1/items/anc-web-audit-no-such']);
     expect(scorecard.declared_hosts).toEqual([]);
   });
 

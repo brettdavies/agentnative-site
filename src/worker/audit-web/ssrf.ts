@@ -15,7 +15,10 @@
 //     and body never reach a host its caller did not name,
 //   - sends no plaintext request: an http request URL is never sent, and
 //     a redirect to http is not taken but answered as the redirect itself,
-//   - wraps the whole chain in one AbortController deadline.
+//   - wraps the whole chain in one AbortController deadline,
+//   - sends each request once per audit when the caller passes the audit's
+//     request memo (request-hop.ts): an identical request reads the answer
+//     already received.
 //
 // DNS-rebinding residual: Workers cannot pre-resolve a hostname and pin
 // the connection to the resolved address, so a public hostname that
@@ -27,6 +30,9 @@
 
 import { AUDIT_USER_AGENT } from '../../shared/user-agents';
 import type { ProbeResponse } from './assert';
+import { answerOf, bodyOf, failureOf, type HopContext, isRedirect, type RequestMemo, takeHop } from './request-hop';
+
+export { REDIRECT_STATUSES } from './request-hop';
 
 /**
  * A refusal names what was refused: the URL itself, when it does not parse
@@ -71,7 +77,12 @@ export type GuardedFetchOptions = {
   crossOriginRedirects?: 'return' | 'refuse';
   /** Injection point for tests; production uses global fetch. */
   fetchImpl?: typeof fetch;
+  /** The audit's request memo: an identical request reads the answer already received. */
+  memo?: RequestMemo;
 };
+
+/** The fetch options an audit hands every probe: the caller's transport plus the audit's request memo. */
+export type AuditFetchOptions = Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects' | 'memo'>;
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_MAX_REDIRECTS = 4;
@@ -90,8 +101,6 @@ function hasHeader(headers: Record<string, string> | undefined, name: string): b
   const wanted = name.toLowerCase();
   return Object.keys(headers).some((k) => k.toLowerCase() === wanted);
 }
-export const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
-
 // Cloudflare answers on the origin's behalf with these when the origin
 // never spoke: 52x for connection and timeout failures, 530 when the host
 // does not resolve. A Worker's fetch returns them rather than throwing, and
@@ -310,9 +319,10 @@ export async function guardedFetch(
     elapsed_ms: Date.now() - started,
   });
 
-  const requestHeaders = hasHeader(init.headers, 'user-agent')
-    ? init.headers
-    : { ...init.headers, 'user-agent': AUDIT_USER_AGENT };
+  const requestHeaders: Record<string, string> =
+    init.headers !== undefined && hasHeader(init.headers, 'user-agent')
+      ? init.headers
+      : { ...init.headers, 'user-agent': AUDIT_USER_AGENT };
 
   try {
     let current = validatePublicUrl(rawUrl);
@@ -321,23 +331,41 @@ export async function guardedFetch(
     const origin = current.url.origin;
 
     for (let hop = 0; hop <= maxRedirects; hop++) {
-      let response: Response;
-      try {
-        response = await fetchImpl(current.url.toString(), {
-          method: init.method ?? 'GET',
-          headers: requestHeaders,
-          body: init.body,
-          redirect: 'manual',
-          signal: controller.signal,
-        });
-      } catch (err) {
-        return fail(errMsg(err));
-      }
+      const request = {
+        url: current.url.toString(),
+        method: init.method ?? 'GET',
+        headers: requestHeaders,
+        body: init.body,
+      };
+      const hopContext: HopContext = {
+        deadlineAt: started + timeoutMs,
+        signal: controller.signal,
+        bodyCap: opts.maxBodyBytes,
+        keepsRedirect: opts.followRedirects === false || opts.crossOriginRedirects === 'return',
+        memo: opts.memo,
+      };
+      const send = async (ctx: HopContext) => {
+        const sentAt = Date.now();
+        let response: Response;
+        try {
+          response = await fetchImpl(request.url, {
+            method: request.method,
+            headers: request.headers,
+            body: request.body,
+            redirect: 'manual',
+            signal: controller.signal,
+          });
+        } catch (err) {
+          return failureOf(err, sentAt, ctx);
+        }
+        return answerOf(response, sentAt, ctx);
+      };
+      const answer = await takeHop(request, hopContext, send);
+      if (answer.kind === 'failure') return fail(answer.error.message);
 
-      const location = response.headers.get('location');
-      const redirect = REDIRECT_STATUSES.has(response.status) && location ? location : null;
+      const redirect = isRedirect(answer) ? (answer.headers.location ?? null) : null;
       if (redirect !== null && opts.refuseRedirects === true) {
-        return fail(`redirect refused: ${response.status} to ${redirect}`);
+        return fail(`redirect refused: ${answer.status} to ${redirect}`);
       }
       if (redirect !== null && opts.followRedirects !== false) {
         let next: URL;
@@ -348,7 +376,7 @@ export async function guardedFetch(
         }
         const offOrigin = opts.crossOriginRedirects !== undefined && next.origin !== origin;
         if (offOrigin && opts.crossOriginRedirects === 'refuse') {
-          return fail(`redirect refused: ${response.status} to ${redirect}`);
+          return fail(`redirect refused: ${answer.status} to ${redirect}`);
         }
         if (!offOrigin) {
           const validated = validatePublicUrl(next.toString());
@@ -361,10 +389,10 @@ export async function guardedFetch(
           }
           if (validated.url.protocol !== 'https:') {
             return {
-              status: response.status,
-              headers: lowercased(response.headers),
+              status: answer.status,
+              headers: { ...answer.headers },
               body: '',
-              error: `redirect refused: ${response.status} to ${redirect}: not https`,
+              error: `redirect refused: ${answer.status} to ${redirect}: not https`,
               refused: 'insecure-scheme',
               elapsed_ms: Date.now() - started,
             };
@@ -377,16 +405,13 @@ export async function guardedFetch(
         }
       }
 
-      const headers = lowercased(response.headers);
-      let read: BodyRead;
-      try {
-        read = await readBody(response, opts.maxBodyBytes);
-      } catch (err) {
-        return fail(errMsg(err));
-      }
+      // takeHop answers only with a record that serves this caller's cap,
+      // so a body this caller cannot read is a body read that failed.
+      const read = bodyOf(answer, opts.maxBodyBytes);
+      if (read === null) return fail(answer.bodyError?.message ?? 'body unavailable');
       return {
-        status: response.status,
-        headers,
+        status: answer.status,
+        headers: { ...answer.headers },
         body: read.body,
         error: null,
         elapsed_ms: Date.now() - started,
@@ -409,71 +434,3 @@ export const DOCUMENT_MAX_BODY_BYTES = 256 * 1024;
 export const METADATA_MAX_BODY_BYTES = 64 * 1024;
 /** Cap for an OpenAPI description the API catalog declares. */
 export const OPENAPI_MAX_BODY_BYTES = 512 * 1024;
-
-type BodyRead = { body: string; truncated: boolean };
-
-function lowercased(source: Headers): Record<string, string> {
-  const headers: Record<string, string> = {};
-  source.forEach((value, name) => {
-    headers[name.toLowerCase()] = value;
-  });
-  return headers;
-}
-
-async function readBody(response: Response, maxBodyBytes: number | undefined): Promise<BodyRead> {
-  if (maxBodyBytes === 0) {
-    if (response.body) {
-      try {
-        await response.body.cancel();
-      } catch {
-        // Already locked or closed.
-      }
-    }
-    return { body: '', truncated: false };
-  }
-  if (maxBodyBytes === undefined) {
-    return { body: await response.text(), truncated: false };
-  }
-  const reader = response.body?.getReader();
-  if (!reader) return { body: '', truncated: false };
-  const chunks: Uint8Array[] = [];
-  let received = 0;
-  let truncated = false;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (!value) continue;
-    const remaining = maxBodyBytes - received;
-    if (remaining <= 0) {
-      truncated = true;
-      await reader.cancel();
-      break;
-    }
-    if (value.byteLength > remaining) {
-      chunks.push(value.slice(0, remaining));
-      received = maxBodyBytes;
-      truncated = true;
-      await reader.cancel();
-      break;
-    }
-    chunks.push(value);
-    received += value.byteLength;
-  }
-  let total = 0;
-  for (const chunk of chunks) total += chunk.byteLength;
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return { body: new TextDecoder().decode(out), truncated };
-}
-
-function errMsg(err: unknown): string {
-  if (err instanceof Error) {
-    if (err.name === 'AbortError' || err.name === 'TimeoutError') return `TimeoutError: deadline exceeded`;
-    return `${err.name}: ${err.message}`;
-  }
-  return String(err);
-}

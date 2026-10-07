@@ -12,7 +12,7 @@
 
 import { parseJsonRpc } from '../assert';
 import type { WebCheck } from '../registry';
-import { AUDIT_PROBE_MAX_BODY_BYTES, type GuardedFetchOptions, guardedFetch } from '../ssrf';
+import { AUDIT_PROBE_MAX_BODY_BYTES, type AuditFetchOptions, guardedFetch } from '../ssrf';
 import { mcpEndpointRedirects, remainingDeadlineMs, retryShapedWhy, timeoutMsFor } from './shared';
 import type { EvidenceItem, HandlerContext, McpLaneEvidence, McpModernLane, ProbeOutcome } from './types';
 
@@ -545,7 +545,7 @@ export async function notifyMcpInitialized(
   sessionId: string,
   opts: {
     timeoutMs: number;
-    fetchOptions?: Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects'>;
+    fetchOptions?: AuditFetchOptions;
     /** The endpoint is on a declared host: see HandlerContext.mcpEndpointFollowed. */
     followed?: boolean;
   },

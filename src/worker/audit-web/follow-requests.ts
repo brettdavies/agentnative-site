@@ -95,7 +95,7 @@ export interface SliceRequests {
 export function sliceRequests(input: {
   budget: DomainBudget;
   phase: PhaseBudget;
-  fetchOptions?: Pick<GuardedFetchOptions, 'fetchImpl'>;
+  fetchOptions?: Pick<GuardedFetchOptions, 'fetchImpl' | 'memo'>;
 }): SliceRequests {
   const evidence: EvidenceItem[] = [];
   const hosts: string[] = [];
