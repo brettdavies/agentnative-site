@@ -310,6 +310,8 @@ export async function guardedFetch(
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const auditEnded = opts.memo?.ended.signal;
+  const endWithAudit = (): void => controller.abort();
 
   const fail = (error: string): ProbeResponse => ({
     status: null,
@@ -325,6 +327,8 @@ export async function guardedFetch(
       : { ...init.headers, 'user-agent': AUDIT_USER_AGENT };
 
   try {
+    if (auditEnded?.aborted) return fail('audit ended');
+    auditEnded?.addEventListener('abort', endWithAudit);
     let current = validatePublicUrl(rawUrl);
     if (!current.ok) return fail(current.reason.startsWith('blocked') ? current.reason : `blocked: ${current.reason}`);
     if (current.url.protocol !== 'https:') return { ...notHttps(), elapsed_ms: Date.now() - started };
@@ -423,6 +427,7 @@ export async function guardedFetch(
     return fail(`redirect limit exceeded (${maxRedirects} hops)`);
   } finally {
     clearTimeout(timer);
+    auditEnded?.removeEventListener('abort', endWithAudit);
   }
 }
 
