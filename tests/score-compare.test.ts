@@ -352,6 +352,37 @@ describe('reruns and the majority rule', () => {
     expect(report.remeasured).toEqual([]);
   });
 
+  test('a noise-listed row whose majorities differ is noise while both builds return a shared result', () => {
+    const at = (base: Row, head: Row, pct = 60) => ({
+      kubectl: {
+        base: scorecard([base], { badge: { eligible: false, score_pct: base.status === 'pass' ? pct + 1 : pct } }),
+        head: scorecard([head], { badge: { eligible: false, score_pct: head.status === 'pass' ? pct + 1 : pct } }),
+      },
+    });
+    // Base runs pass, warn, pass, warn and head runs pass, pass, pass, warn:
+    // the rerun majorities are warn and pass, and each build returned both.
+    const rounds = [at(pass, pass), at(QUIET, pass), at(pass, pass), at(QUIET, QUIET)];
+
+    const listed = compare(rounds, NOISE);
+    expect(listed.moved).toEqual([]);
+    expect(keys(listed.noise)).toEqual(['kubectl p7-must-quiet p7-quiet']);
+    expect(listed.noise[0].runs.base.majority.status).toBe('warn');
+    expect(listed.noise[0].runs.head.majority.status).toBe('pass');
+    expect(listed.derived_moved).toEqual([]);
+    expect(listed.derived_noise.map((d: any) => d.field)).toContain('badge.score_pct');
+
+    const unlisted = compare(rounds);
+    expect(keys(unlisted.moved)).toEqual(['kubectl p7-must-quiet p7-quiet']);
+    expect(unlisted.noise).toEqual([]);
+  });
+
+  test('a noise-listed row moves when the two builds share no result', () => {
+    const moved = { kubectl: { base: scorecard([QUIET]), head: scorecard([pass]) } };
+    const report = compare([moved, moved, moved, moved], NOISE);
+    expect(keys(report.moved)).toEqual(['kubectl p7-must-quiet p7-quiet']);
+    expect(report.noise).toEqual([]);
+  });
+
   test('a row that moved in the first run and settles in the reruns is shown as re-measured, not dropped', () => {
     const moved = { kubectl: { base: scorecard([QUIET]), head: scorecard([pass]) } };
     const steady = { kubectl: { base: scorecard([QUIET]), head: scorecard([QUIET]) } };
@@ -471,6 +502,24 @@ describe('rendering', () => {
     const split = compare([moved, moved, steady, moved]);
     expect(perRun(renderMarkdown(split, MANIFEST))).toContain('| kubectl | `p7-must-quiet` | `p7-quiet` | moved |');
     expect(renderText(split, MANIFEST)).toContain('runs  base: A A A A (majority A)  head: B B A B (majority B)');
+  });
+
+  test('a noise row is listed with its runs under its own heading, apart from moved rows', () => {
+    const pass = { ...QUIET, status: 'pass', evidence: null };
+    const pair = (base: Row, head: Row) => ({ kubectl: { base: scorecard([base]), head: scorecard([head]) } });
+    const noisy = compare(
+      [pair(pass, pass), pair(QUIET, pass), pair(pass, pass), pair(QUIET, QUIET)],
+      new Set(['kubectl\tp7-must-quiet\tp7-quiet']),
+    );
+
+    const text = renderText(noisy, MANIFEST);
+    expect(text).toContain('Moved rows: 0');
+    // The row, and the two summary counts that follow it.
+    const section = text.slice(text.indexOf('Noise, a result shared by both builds: 3')).split('\n\n')[0];
+    expect(section).toContain('kubectl  p7-must-quiet  p7-quiet');
+    expect(section).toContain('kubectl  summary.pass');
+    expect(section).toContain('runs  base: A B A B (majority B)  head: A A A B (majority A)');
+    expect(renderMarkdown(noisy, MANIFEST)).toContain('| kubectl | `p7-must-quiet` | `p7-quiet` | noise |');
   });
 });
 

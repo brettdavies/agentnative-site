@@ -130,8 +130,9 @@ every option.
   `run.duration_ms` and `run.invocation` differ on every run, so the diff leaves them out.
 - **Reruns.** In a before/after, every tool with a moved row and every tool the noise list names runs three more times
   per build. A row's result under a build is the `(status, evidence, confidence)` value that two or more of those three
-  runs agree on, and the row moves when the two builds' results differ. Reruns only measure again: a noise-listed row
-  always reruns and always appears in the report with its per-run results.
+  runs agree on, and the row moves when the two builds' results differ. A noise-listed row is held to more: it differs
+  between two runs of one build, so it moves only when the two builds share no result in any run. Reruns only measure
+  again: a noise-listed row always reruns and always appears in the report with its per-run results.
 
 ### Reading the report
 
@@ -141,6 +142,9 @@ The report prints to stdout, and the run directory holds it as `diff.json` and `
   `propagated from` an antecedent audit that moved in the same run. In an A/A run these are the rows `noise.tsv`
   records.
 - **Derived fields moved.** The scorecard-level fields, per tool.
+- **Noise.** A noise-listed row whose majorities differ while some run under each build returned the same result, and
+  the derived fields of its tool. A row that flips at random gives two builds different majorities about half the time,
+  so the report lists every result and counts no move.
 - **Unstable.** A rerun row with no majority under one build. The report lists every result and picks none.
 - **Re-measured, not moved.** A rerun row whose majority is the same under both builds: every noise-listed row, and any
   row that differed in some run.

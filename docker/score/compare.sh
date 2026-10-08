@@ -14,7 +14,8 @@
 #   diff    --cli <repo> --image <image> [--noise <tsv>] <base-ref> <head-ref>
 #       Run both builds, each in its own container. Every tool with a moved row
 #       or a noise-listed row then runs three more times per build, and a row
-#       moves when its majority result differs between the builds.
+#       moves when its majority result differs between the builds. A
+#       noise-listed row moves only when the builds share no result.
 #   capture --image <image> [--subcommands <tsv>]
 #       Save each tool's `--help` under out/captures/. With --subcommands (lines
 #       of binary<TAB>subcommand) save each `<binary> <subcommand> --help`.

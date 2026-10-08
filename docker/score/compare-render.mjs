@@ -126,6 +126,8 @@ export function renderText(report, manifest) {
       `  ${entry.tool}  ${entry.id ?? entry.field}  ${entry.audit_id ?? ''}`.trimEnd(),
       ...textRuns(entry, names),
     ];
+    const noise = [...report.noise, ...report.derived_noise];
+    section(`Noise, a result shared by both builds: ${noise.length}`, noise.flatMap(perRun));
     const unstable = [...report.unstable, ...report.derived_unstable];
     section(`Unstable, no majority under one build: ${unstable.length}`, unstable.flatMap(perRun));
     section(`Re-measured, not moved: ${report.remeasured.length}`, report.remeasured.flatMap(perRun));
@@ -215,6 +217,8 @@ export function renderMarkdown(report, manifest) {
     const split = voted.filter((move) => !unanimous(move.runs));
     const rows = [
       ...split.map(perRun('moved')),
+      ...report.noise.map(perRun('noise')),
+      ...report.derived_noise.map(perRun('noise')),
       ...report.unstable.map(perRun('unstable')),
       ...report.derived_unstable.map(perRun('unstable')),
       ...report.remeasured.map(perRun('not moved')),

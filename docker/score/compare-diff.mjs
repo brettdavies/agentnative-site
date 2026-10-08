@@ -42,9 +42,11 @@ const ABSENT = { absent: true };
  *   mode: string,
  *   tools: { selected: number, compared: number, rerun: string[] },
  *   moved: RowMove[],
+ *   noise: VotedRow[],
  *   unstable: VotedRow[],
  *   remeasured: VotedRow[],
  *   derived_moved: DerivedMove[],
+ *   derived_noise: Array<{ tool: string, field: string, runs: Runs }>,
  *   derived_unstable: Array<{ tool: string, field: string, runs: Runs }>,
  *   harness_bugs: Array<{ tool: string, round: number, derived: DerivedMove[] }>,
  *   not_scored: Array<{ tool: string, round: number, base: string, head: string }>,
@@ -224,13 +226,26 @@ function votes(pairs, kind) {
   });
 }
 
+/** Whether some run under each build returned the same result. */
+function sharesResult(runs) {
+  const seen = (side) => new Set([side.initial, ...side.reruns].filter(Boolean).map((slot) => JSON.stringify(slot)));
+  const base = seen(runs.base);
+  return [...seen(runs.head)].some((result) => base.has(result));
+}
+
 /**
- * Whether a voted key moved, has no majority under a build, or was measured
- * again and held. `null` is a key that never differed and nobody listed.
+ * Whether a voted key moved, is noise, has no majority under a build, or was
+ * measured again and held. `null` is a key that never differed and nobody
+ * listed.
+ *
+ * A noise-listed key differs between two runs of one build, so differing
+ * majorities alone do not show that the builds differ: a row that flips at
+ * random gives two builds different majorities about half the time. It moves
+ * only when the builds share no result at all.
  */
 function verdict({ runs, varies }, noiseListed) {
   const [base, head] = [runs.base.majority, runs.head.majority];
-  if (base && head && !same(base, head)) return 'moved';
+  if (base && head && !same(base, head)) return noiseListed && sharesResult(runs) ? 'noise' : 'moved';
   if (!varies && !noiseListed) return null;
   return base && head ? 'remeasured' : 'unstable';
 }
@@ -265,21 +280,25 @@ function firstRunMoves(report, tool, { base, head }) {
 
 function votedMoves(report, tool, pairs, noise) {
   const moved = [];
+  let noisyTool = false;
   for (const vote of votes(pairs, 'rows')) {
     const [id, audit_id] = vote.key.split('\t');
     const noise_listed = noise.has(`${tool}\t${vote.key}`);
+    noisyTool ||= noise_listed;
     const { runs } = vote;
     const kind = verdict(vote, noise_listed);
     if (kind === 'moved') moved.push({ ...rowMove(tool, vote.key, runs.base.majority, runs.head.majority), runs });
     else if (kind) report[kind].push({ tool, id, audit_id, noise_listed, runs });
   }
+  // A scorecard's derived fields follow its rows, so a noise-listed row makes
+  // every derived field of its tool as noisy as the row.
   for (const vote of votes(pairs, 'derived')) {
     const { runs } = vote;
-    const kind = verdict(vote, false);
+    const kind = verdict(vote, noisyTool);
     if (kind === 'moved') {
       report.derived_moved.push({ ...derivedMove(tool, vote.key, runs.base.majority, runs.head.majority), runs });
-    } else if (kind === 'unstable') {
-      report.derived_unstable.push({ tool, field: vote.key, runs });
+    } else if (kind === 'noise' || kind === 'unstable') {
+      report[`derived_${kind}`].push({ tool, field: vote.key, runs });
     }
   }
   return moved;
@@ -297,9 +316,11 @@ export function buildReport(rounds, { mode, noise = new Set() }) {
     mode,
     tools: { selected: initial.size, compared: 0, rerun: [] },
     moved: [],
+    noise: [],
     unstable: [],
     remeasured: [],
     derived_moved: [],
+    derived_noise: [],
     derived_unstable: [],
     harness_bugs: [],
     not_scored: [],
