@@ -631,20 +631,17 @@ const PRESENT_ROWS_DRAWING_401 = [
 ];
 
 /**
- * A protected server whose handshakes fail transiently once discovery has
- * found it: the discovery POSTs draw the 401, and wave 1's initialize and
- * server/discover get `transient` instead.
+ * A protected server whose modern handshake fails transiently: the
+ * discovery POSTs draw the 401, wave 1's initialize reads the 401 discovery
+ * already drew rather than asking again, and server/discover, which
+ * discovery never sends, gets `transient` instead.
  */
 function flakyHandshakes(transient: Route): Record<string, Route> {
   const server = protectedServer(SAME, SAME_METADATA);
-  let initializes = 0;
   return {
     ...server,
     [`POST ${SAME}`]: (init) => {
-      const headers = new Headers(init?.headers);
-      const body = String(init?.body ?? '');
-      if (headers.get('mcp-method') === 'server/discover') return transient(init);
-      if (body.includes('"initialize"') && ++initializes > 1) return transient(init);
+      if (new Headers(init?.headers).get('mcp-method') === 'server/discover') return transient(init);
       return server[`POST ${SAME}`](init);
     },
   };
@@ -673,7 +670,7 @@ describe('a handshake that fails transiently on an endpoint discovery found thro
       expect({ label, endpoint: scorecard.mcp_endpoint }).toEqual({ label, endpoint: SAME });
       expect({ label, handshakes: readings(scorecard, ['mcp-initialize', 'mcp-server-discover']) }).toEqual({
         label,
-        handshakes: { 'mcp-initialize': ['error', null], 'mcp-server-discover': ['n_a', 'auth-required'] },
+        handshakes: { 'mcp-initialize': ['n_a', 'auth-required'], 'mcp-server-discover': ['n_a', 'auth-required'] },
       });
       expect({ label, readings: readings(scorecard, [...SESSION_ROWS, ...PRESENT_ROWS_DRAWING_401]) }).toEqual({
         label,

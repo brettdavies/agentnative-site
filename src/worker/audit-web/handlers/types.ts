@@ -10,7 +10,7 @@ import type { ApiTargets } from '../api-targets';
 import type { ProbeResponse } from '../assert';
 import type { RetainedDocument } from '../discovery-documents';
 import type { SignInChallenge } from '../mcp-auth';
-import type { GuardedFetchOptions } from '../ssrf';
+import type { AuditFetchOptions } from '../ssrf';
 
 /**
  * Internal probe status: `absent` means the surface is not there
@@ -118,7 +118,7 @@ export interface HandlerContext {
    */
   scopedDirs?: string[];
   /** Passed straight to guardedFetch (fetchImpl injection for tests, hop cap). */
-  fetchOptions?: Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects'>;
+  fetchOptions?: AuditFetchOptions;
   /**
    * Wave-1 retained response bodies keyed by check id (e.g. `llms-txt`).
    * Handlers that soften on a discoverable twin read this instead of
