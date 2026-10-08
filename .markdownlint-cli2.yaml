@@ -91,6 +91,7 @@ ignores:
   # are the single ignore list read by `bun run lint`, the pre-commit hook, and
   # the unslop skill, so all three skip the same paths.
   - "dist/**"                        # build output
+  - "docker/score/out/**"            # gitignored scorer output: compare.sh reports and its build worktree
   - "content/**"                     # page sources with interactive inline-HTML widgets
   - "docs/solutions/**"              # symlinked private repo
   - "docs/research/**"

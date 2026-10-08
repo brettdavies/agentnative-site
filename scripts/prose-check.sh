@@ -159,6 +159,9 @@ done
 #   3. `dist/` — build output (gitignored). Generated artifacts are not
 #      authored prose; they re-derive from content/* on each build.
 #   4. `.claude/` — vendored Claude tooling docs, not site-authored content.
+#   5. `docker/score/out/` — scorer output (gitignored): compare.sh reports
+#      and the CLI worktree it builds from. Full-scan only; a gitignored path
+#      never reaches the changed-only list.
 # These edits are restored after each `bash scripts/sync-prose-tooling.sh` run
 # until upstream lands the `--exclude PATTERN` flag tracked at
 # `agentnative-spec/.context/compound-engineering/todos/010-pending-p0-prose-check-consumer-exclusion-config.md`.
@@ -178,6 +181,7 @@ else
       -not -path './.context/*' \
       -not -path './.claude/*' \
       -not -path './dist/*' \
+      -not -path './docker/score/out/*' \
       -not -path './scripts/__fixtures__/*' \
       -not -path './docs/brainstorms/*' \
       -not -path './docs/plans/*' \
