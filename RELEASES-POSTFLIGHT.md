@@ -34,8 +34,8 @@ scripts/release/postflight.sh --env prod all
 
 The script (`scripts/release/postflight.sh`) covers the automatable post-deploy gates: `deploy.yml` conclusion,
 container app readiness, front-page and leaderboard renders, the registry-fast-path `/api/score` smoke, the live MCP
-suite via `scripts/release/mcp-smoke.sh`, the cache-purge confirmation for `/skill` artifacts, and the prod-only `main →
-dev` backport signal.
+suite via `scripts/release/mcp-smoke.sh`, the cache-purge confirmation for `/skill` artifacts, and the prod-only
+`main → dev` backport signal.
 
 The production live-DO smoke against a non-registry binary requires a browser. The real Turnstile site key + secret gate
 the JSON path until the service-token bypass ships per the plan at
@@ -44,17 +44,17 @@ The script reports that gate as a SKIP with the manual recipe; the gate body in 
 
 Sub-commands let you re-run one verification in isolation. Each is parameterized on `--env`:
 
-| Sub-command | What it checks                                                                                        | Source of truth                        |
-| ----------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `deploy`    | `deploy.yml` on the env's branch (`dev` for staging, `main` for prod): conclusion=success             | `gh run view`                          |
-| `container` | Env container app (`agentnative-site[-staging]-sandbox`) state is `ready`                             | `bunx wrangler containers list`        |
-| `pages`     | `<env-url>/`, `/scorecards`, and `/api/score` registry-hit all return expected                        | `curl`                                 |
-| `retired`   | Retired paths answer 404 with no redirect, and the published inbound links 301 to a pinned destination; run after the zone purge | `curl`                |
-| `sitemap`   | Every `<loc>` in `<env-url>/sitemap.xml` returns 200                                                  | `curl`                                 |
-| `mcp`       | `<env-url>/mcp` initialize + `tools/list` + registry-tier symmetry + live audit against `$MCP_BINARY` | `scripts/release/mcp-smoke.sh`         |
-| `purge`     | `<env-url>/skill.json` version matches `src/data/skill/skill.json`                                    | `curl`                                 |
-| `backport`  | Merged PR to `dev` with `--release-slug` in its title (prod only; SKIPs on staging)                   | `gh pr list --base dev --state merged` |
-| `all`       | Every above (live-DO smoke is documented manually below)                                              |                                        |
+| Sub-command | What it checks                                                                                                                   | Source of truth                        |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `deploy`    | `deploy.yml` on the env's branch (`dev` for staging, `main` for prod): conclusion=success                                        | `gh run view`                          |
+| `container` | Env container app (`agentnative-site[-staging]-sandbox`) state is `ready`                                                        | `bunx wrangler containers list`        |
+| `pages`     | `<env-url>/`, `/scorecards`, and `/api/score` registry-hit all return expected                                                   | `curl`                                 |
+| `retired`   | Retired paths answer 404 with no redirect, and the published inbound links 301 to a pinned destination; run after the zone purge | `curl`                                 |
+| `sitemap`   | Every `<loc>` in `<env-url>/sitemap.xml` returns 200                                                                             | `curl`                                 |
+| `mcp`       | `<env-url>/mcp` initialize + `tools/list` + registry-tier symmetry + live audit against `$MCP_BINARY`                            | `scripts/release/mcp-smoke.sh`         |
+| `purge`     | `<env-url>/skill.json` version matches `src/data/skill/skill.json`                                                               | `curl`                                 |
+| `backport`  | Merged PR to `dev` with `--release-slug` in its title (prod only; SKIPs on staging)                                              | `gh pr list --base dev --state merged` |
+| `all`       | Every above (live-DO smoke is documented manually below)                                                                         |                                        |
 
 Flags:
 
@@ -74,8 +74,8 @@ Flags:
 Driven by `scripts/release/postflight.sh --env <staging|prod> deploy` and `scripts/release/postflight.sh --env
 <staging|prod> container`.
 
-- [ ] **Last-good identifier recorded.** Before the release merges, note the production deployment id a rollback
-  needs somewhere reachable under incident pressure, so a rollback is a single command:
+- [ ] **Last-good identifier recorded.** Before the release merges, note the production deployment id a rollback needs
+  somewhere reachable under incident pressure, so a rollback is a single command:
 
   ```bash
   bun x wrangler deployments list | head -20          # current production deployment id
@@ -90,8 +90,8 @@ Driven by `scripts/release/postflight.sh --env <staging|prod> deploy` and `scrip
   [`RELEASES-RATIONALE.md` § DO migrations are one-way walls](./RELEASES-RATIONALE.md#do-migrations-are-one-way-walls)).
 
 - [ ] **Env deploy green end-to-end.** The deploy gate watches `deploy.yml` on `dev` (staging) or `main` (prod). For the
-  release flow, the `release/<slug> → main` PR merge triggers the prod run. Watch with `gh run watch <run-id>
-  --exit-status`, then verify explicitly per `~/.claude/ci-watch-prompt.sh`:
+  release flow, the `release/<slug> → main` PR merge triggers the prod run. Watch with
+  `gh run watch <run-id> --exit-status`, then verify explicitly per `~/.claude/ci-watch-prompt.sh`:
 
   ```bash
   gh pr view <num> --json statusCheckRollup,mergeStateStatus \
@@ -172,8 +172,8 @@ SKIP with a pointer to the manual recipe below. See the deferred-bypass plan at
 - **Service-token (CI / scripted path).** Once the service-token bypass lands per the plan at
   [`docs/plans/2026-06-01-003-feat-production-live-do-smoke-bypass-plan.md`](./docs/plans/2026-06-01-003-feat-production-live-do-smoke-bypass-plan.md),
   re-use the staging smoke recipe with an added `X-Anc-Smoke-Token: ${SMOKE_SERVICE_TOKEN}` header. The bypass skips
-  Turnstile only; rate-limit + kill-switch stay enforced; bypassed runs emit a distinct telemetry tag (`freshness:
-  "live-smoke"`) so they stay separable from user traffic in Analytics Engine.
+  Turnstile only; rate-limit + kill-switch stay enforced; bypassed runs emit a distinct telemetry tag
+  (`freshness: "live-smoke"`) so they stay separable from user traffic in Analytics Engine.
 
   Either path satisfies the box. Until the bypass ships, the manual browser path is the only option;
   `scripts/release/postflight.sh all` reports this gate as a SKIP with the manual recipe.
@@ -184,10 +184,10 @@ The deployed counterpart to PREFLIGHT's
 [Live MCP surface against `wrangler dev --local`](./RELEASES-PREFLIGHT.md#live-mcp-surface-mandatory). What this section
 catches and the preflight could not: deploy-side rate-limiter bindings (`MCP_LIMITER` 60/60s, `MCP_AUDIT_LIMITER` 5/60s
 burst + 5/60min per-IP KV ceiling), binding drift between `wrangler.jsonc` and the live Worker, and either secret kill
-switch (`MCP_ENABLED`, `MCP_LIVE_SCORING_ENABLED`) left off in the target environment. Those two are `wrangler secret
-put` values that appear in no wrangler block, and an unset secret reads as off, so absence fails closed. The committed
-var `MCP_LEGACY_ENABLED` is the other shape: it rides the deploy, so drift there is a `wrangler.jsonc` question, not a
-secret one. Shapes and flip verbs:
+switch (`MCP_ENABLED`, `MCP_LIVE_SCORING_ENABLED`) left off in the target environment. Those two are
+`wrangler secret put` values that appear in no wrangler block, and an unset secret reads as off, so absence fails
+closed. The committed var `MCP_LEGACY_ENABLED` is the other shape: it rides the deploy, so drift there is a
+`wrangler.jsonc` question, not a secret one. Shapes and flip verbs:
 [`RELEASES.md` § Bindings added by the MCP endpoint](./RELEASES.md#bindings-added-by-the-mcp-endpoint).
 
 Runs against both envs:
@@ -307,15 +307,15 @@ Run `scripts/release/postflight.sh mcp` to run all three MCP gates in sequence.
 Driven by `scripts/release/postflight.sh --env prod backport`. The gate SKIPs on `--env staging` because staging deploys
 directly from `dev` — there is no `main → dev` flow to verify.
 
-- [ ] **Backport `main` → `dev`** via the **PR `scripts/sync-dev-after-release.sh v<version>` opens against `dev`.**
-  The release branch lands edits on `main` that never round-trip to `dev` (the `package.json` version, the
-  `CHANGELOG.md` section, RELEASES.md meta-edits). The script writes the released version into `package.json`, copies
-  `CHANGELOG.md` from `main`, and adopts every other release-only edit whose `dev` copy still matches the previous `v*`
-  tag. It lists the contested paths both branches changed since that tag and leaves them out; name the ones to take
-  with `--only PATH`, or take them all with `--include-contested`. It then opens a PR titled
-  `chore(release): sync dev after v<version>`; merge it once CI is green. That keeps the next release's preflight
-  diff-B quiet, so a real missed change stands out instead of hiding in expected divergence noise. Never merge `main`
-  into `dev` or push to `dev` directly (see
+- [ ] **Backport `main` → `dev`** via the **PR `scripts/sync-dev-after-release.sh v<version>` opens against `dev`.** The
+  release branch lands edits on `main` that never round-trip to `dev` (the `package.json` version, the `CHANGELOG.md`
+  section, RELEASES.md meta-edits). The script writes the released version into `package.json`, copies `CHANGELOG.md`
+  from `main`, and adopts every other release-only edit whose `dev` copy still matches the previous `v*` tag. It lists
+  the contested paths both branches changed since that tag and leaves them out; name the ones to take with
+  `--only PATH`, or take them all with `--include-contested`. It then opens a PR titled
+  `chore(release): sync dev after v<version>`; merge it once CI is green. That keeps the next release's preflight diff-B
+  quiet, so a real missed change stands out instead of hiding in expected divergence noise. Never merge `main` into
+  `dev` or push to `dev` directly (see
   [`RELEASES.md` § After merge](./RELEASES.md#after-merge-tag-then-sync-dev-with-the-release)).
 
   The gate (`scripts/release/postflight.sh --env prod --release-slug v<version> backport`) is signal-agnostic about

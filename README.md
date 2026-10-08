@@ -35,9 +35,9 @@ scoring engine itself lives in [`agentnative-cli`](https://github.com/brettdavie
 
 ## Stack
 
-Cloudflare Worker over Static Assets. Build pipeline renders markdown in `content/` to HTML at `dist/` via `bun
-src/build/build.mjs`. Live scoring runs in a Cloudflare Sandbox Durable Object, cached in R2, rate-limited by KV, and
-gated by Turnstile. Full inventory in [`wrangler.jsonc`](./wrangler.jsonc); design contract in
+Cloudflare Worker over Static Assets. Build pipeline renders markdown in `content/` to HTML at `dist/` via
+`bun src/build/build.mjs`. Live scoring runs in a Cloudflare Sandbox Durable Object, cached in R2, rate-limited by KV,
+and gated by Turnstile. Full inventory in [`wrangler.jsonc`](./wrangler.jsonc); design contract in
 [`DESIGN.md`](./DESIGN.md).
 
 ## Local development

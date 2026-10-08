@@ -157,9 +157,9 @@ describe('runWebAudit two-wave evaluation', () => {
     const rows = resultsOf(events);
     expect(rows.find((r) => r.id === 'robots')?.status).toBe('pass');
     expect(rows.find((r) => r.id === 'robots-ai-rules')?.status).toBe('pass');
-    // robots.txt is fetched once by the robots probe and once by the
-    // applied robots-ai-rules body assertion; the gate itself adds none.
-    expect(seen.filter((s) => s.endsWith('/robots.txt')).length).toBe(2);
+    // robots-ai-rules reads the answer the robots probe already received,
+    // and the gate itself adds no request.
+    expect(seen.filter((s) => s.endsWith('/robots.txt')).length).toBe(1);
   });
 
   test('robots-ai-rules is n_a (antecedent-unmet) without a robots.txt and probes nothing', async () => {

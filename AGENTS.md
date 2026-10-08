@@ -33,8 +33,8 @@ The scope for v0 is decided and lives in:
   reconciles `content/principles/p*-*.md` after a `sync-spec.sh` run, because bumping before reconciliation lies to
   visitors about site currency. Always ≤ `SPEC_VERSION`; lag during the manual reconciliation window is honest. The OG
   card renders the same value; regenerate `public/og-image.png` with `bun run og` after a bump. The badge SVGs use a
-  different source (each scorecard's own `spec_version` field). Three sources for three different events (vendor /
-  score / reconcile).
+  different source (each scorecard's own `spec_version` field). Three sources for three different events (vendor / score
+  / reconcile).
 - Workflow detail in [`src/data/spec/README.md`](src/data/spec/README.md); cross-repo version model at
   [`docs/solutions/best-practices/agentnative-version-model-2026-05-01.md`](docs/solutions/best-practices/agentnative-version-model-2026-05-01.md);
   governing pattern at
@@ -124,9 +124,9 @@ Resources: `anc://registry` (concrete) plus four templates `anc://tool/{slug}`, 
 falls back to a shared `anon` bucket on missing `cf-connecting-ip`. `MCP_AUDIT_LIMITER` gates `score_cli` cache-miss
 audits only, at 5 fresh audits per 60 minutes per IP, with **no anon fallback**. `audit_website` fresh audits key
 `WEB_AUDIT_LIMITER_IP` (30 per 60 seconds per IP burst, no anon fallback) plus a shared 30-per-hour-per-IP ceiling;
-missing IP returns `-32099` rather than consuming a shared bucket, because the audit cost is non-trivial. The
-browser path reaches the same hourly counter through `POST /api/score`, gated on a session rather than an IP: a
-Turnstile solve mints a `__Host-anc-session` cookie, `WEB_AUDIT_LIMITER` caps 10 audits per session per 60 seconds keyed
+missing IP returns `-32099` rather than consuming a shared bucket, because the audit cost is non-trivial. The browser
+path reaches the same hourly counter through `POST /api/score`, gated on a session rather than an IP: a Turnstile solve
+mints a `__Host-anc-session` cookie, `WEB_AUDIT_LIMITER` caps 10 audits per session per 60 seconds keyed
 `<sid>:<sha256(target)>`, and `WEB_AUDIT_LIMITER_IP` is the coarse per-IP fallback. The hourly window is enforced in two
 layers: the CF Rate Limiting binding only accepts `period: 10 | 60`, so the binding holds the per-60-seconds burst floor
 and an application-side KV-backed per-hour window in `SCORE_KV` (`mcp_audit:<ip>:<hour_bucket>` /
@@ -147,10 +147,10 @@ with `wrangler secret put` and no deploy; an unset secret reads as off, so absen
 a committed var, `"true"` in the top-level and `env.staging` `vars` blocks; its sunset flip is a committed edit through
 a PR, with `wrangler deploy --var` as the transient drill override. `WEB_AUDIT_ENABLED` and `WEB_AUDIT_FOLLOW_ENABLED`
 are `vars` bindings on staging and `wrangler secret put` values on production, where an unset value reads as off. A
-binding name is a var or a secret, never both: `wrangler secret put`
-against a declared var name is rejected with Cloudflare API 10053. Production commands carry no `--env` flag, because
-production is the top-level config and there is no `env.production` block. Per-flag shapes, flip verbs, and the `--var`
-hazards: the [operator runbook](docs/runbooks/mcp-operator.md).
+binding name is a var or a secret, never both: `wrangler secret put` against a declared var name is rejected with
+Cloudflare API 10053. Production commands carry no `--env` flag, because production is the top-level config and there is
+no `env.production` block. Per-flag shapes, flip verbs, and the `--var` hazards: the
+[operator runbook](docs/runbooks/mcp-operator.md).
 
 - `MCP_ENABLED`: gates the whole `/mcp` branch. Falsy returns `503 Service Unavailable` with `Retry-After: 3600` and a
   one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error.
@@ -158,8 +158,8 @@ hazards: the [operator runbook](docs/runbooks/mcp-operator.md).
   `next_tool: get_scorecard` redirect; the read tier stays alive.
 - `MCP_LEGACY_ENABLED`: gates the legacy lane only. Falsy returns JSON-RPC `-32022` (`data.supported: ["2026-07-28"]`)
   at the shell before the SDK handles legacy `initialize` / stateless legacy calls; modern SEP-2243 requests stay live.
-- `WEB_AUDIT_ENABLED`: gates the website audit (`audit_website` and the endpoint's web lane). Falsy returns `audited:
-  false` with a disabled message; `get_website_audit` still serves cached web scorecards.
+- `WEB_AUDIT_ENABLED`: gates the website audit (`audit_website` and the endpoint's web lane). Falsy returns
+  `audited: false` with a disabled message; `get_website_audit` still serves cached web scorecards.
 - `WEB_AUDIT_FOLLOW_ENABLED`: gates following the hosts a site declares (its MCP server, its API host) on every web
   audit: the endpoint's web lane, `audit_website`, and the rescore. Falsy keeps audits running on the site's own origin;
   the stored scorecard records `follow_declarations: false` and rows that need a declared host read `n_a` with reason
@@ -169,10 +169,10 @@ hazards: the [operator runbook](docs/runbooks/mcp-operator.md).
 the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error envelopes at HTTP 200
 (`-32099` for rate-limit breach at either limiter; `-32022` with `data.supported: ["2026-07-28"]` when the disabled
 legacy lane rejects a request) or at HTTP 400 (`-32700` for malformed JSON with `id: null`; `-32600` for an invalid
-batch; `-32020` for a header mismatch; `-32022` with `data.requested` for an unsupported version claim). The `406 Not
-Acceptable` Accept-header rejection is the one transport error that bypasses the JSON-RPC envelope. **Cache state is
-data, not failure**: a `get_scorecard` miss is `isError: false` with `found: false, next_tool`, and a `score_cli` hit is
-`isError: false` with `audited: false, next_tool`.
+batch; `-32020` for a header mismatch; `-32022` with `data.requested` for an unsupported version claim). The
+`406 Not Acceptable` Accept-header rejection is the one transport error that bypasses the JSON-RPC envelope. **Cache
+state is data, not failure**: a `get_scorecard` miss is `isError: false` with `found: false, next_tool`, and a
+`score_cli` hit is `isError: false` with `audited: false, next_tool`.
 
 **Origin posture: server-to-agent, no CORS.** `POST /mcp` returns no `Access-Control-Allow-Origin` header. MCP clients
 are agent runtimes (Claude Code, Codex, Cursor, custom CLIs) that do not issue CORS preflights. Browser-origin POSTs
@@ -181,11 +181,11 @@ browser-reachable `/mcp` would let any malicious web page trigger `score_cli` ru
 `cf-connecting-ip`. A future use case needing browser access gets its own KTD revision, an explicit allow-list, and a
 rate-limit policy designed for browser traffic.
 
-**Request log: one structured line per call, AFTER the gate decision.** Every `POST /mcp` request emits one `event:
-mcp.request` JSON log line carrying era, method, client name, protocol version, host, response format, outcome, and ms
-bucket. It carries no IP, slug, or tool results. Firing after the rate-limit gate keeps Workers Logs volume bounded
-under attack while still recording the denial. The log is the public posture for a no-auth catalog: the surface is open,
-the inventory is published.
+**Request log: one structured line per call, AFTER the gate decision.** Every `POST /mcp` request emits one
+`event: mcp.request` JSON log line carrying era, method, client name, protocol version, host, response format, outcome,
+and ms bucket. It carries no IP, slug, or tool results. Firing after the rate-limit gate keeps Workers Logs volume
+bounded under attack while still recording the denial. The log is the public posture for a no-auth catalog: the surface
+is open, the inventory is published.
 
 **Spec revision drift gate.** The handshake's `protocolVersion`, `/.well-known/mcp/server-card.json` `protocolVersion`,
 `content/mcp-skill.md`'s wire-level reference block, and `src/worker/mcp/instructions.ts`'s `SPEC_REVISION` constant all
@@ -279,28 +279,28 @@ Until then, the agent-side browser-verify rule above is the working gate.
 `bun run dev` (which runs `bun run build && wrangler dev --env staging --local --port 8787`) on `http://localhost:8787`
 is the only valid local preview. The Worker entrypoint at `src/worker/index.ts` is the source of content negotiation,
 the `applyHeaders` policy (`Link: rel=alternate`, `X-Llms-Txt`, staging `X-Robots-Tag: noindex`, `Cache-Control`), the
-`/mcp` transport, the `POST /api/score` transact endpoint with the `/scoring` progress page and the
-`/score/<target>` result route it forwards to, the retired-path redirects, the `/_internal/*` 404 guard, and the
-entry pages' `{{TURNSTILE_SITEKEY}}` substitution. Without the Worker, none of those
-contracts are visible. Static-file servers (`python -m http.server`, `serve`, `npx http-server`, etc.) bypass the Worker
-entirely and produce a false preview. Never use them to verify any of those surfaces or the `.md`-twin contract.
+`/mcp` transport, the `POST /api/score` transact endpoint with the `/scoring` progress page and the `/score/<target>`
+result route it forwards to, the retired-path redirects, the `/_internal/*` 404 guard, and the entry pages'
+`{{TURNSTILE_SITEKEY}}` substitution. Without the Worker, none of those contracts are visible. Static-file servers
+(`python -m http.server`, `serve`, `npx http-server`, etc.) bypass the Worker entirely and produce a false preview.
+Never use them to verify any of those surfaces or the `.md`-twin contract.
 
 ```bash
 bun run dev    # http://localhost:8787, staging bindings, local Worker
 ```
 
 `--env staging` is load-bearing: it picks up the staging container image pin, the always-pass Turnstile test sitekey,
-the staging-only `MCP_CACHE_BYPASS_ALLOWED` / `WEB_AUDIT_ENABLED` / `WEB_AUDIT_FOLLOW_ENABLED` vars, and the staging
-R2 / KV / rate-limit namespaces.
-The top-level (production) env may carry a container pin that fails to boot locally. `--local` keeps the rate-limit
-namespaces, R2, and asset directory in-process; dropping it would route to the deployed staging Worker and bypass the
-local build.
+the staging-only `MCP_CACHE_BYPASS_ALLOWED` / `WEB_AUDIT_ENABLED` / `WEB_AUDIT_FOLLOW_ENABLED` vars, and the staging R2
+/ KV / rate-limit namespaces. The top-level (production) env may carry a container pin that fails to boot locally.
+`--local` keeps the rate-limit namespaces, R2, and asset directory in-process; dropping it would route to the deployed
+staging Worker and bypass the local build.
 
 **`MCP_ENABLED` is a secret, so no `--env` picks it up.** It appears in no `vars` block, and the kill-switch check is
-`env.MCP_ENABLED !== 'true'`, so a local run starts with the MCP surface off: `POST /mcp` answers `503` with `mcp is
-currently disabled by the operator`. To exercise `/mcp` locally, write `MCP_ENABLED="true"` into `.dev.vars.staging`,
-the per-environment local-secret file `wrangler dev --env staging` reads. `.dev.vars*` is gitignored, so the file is
-yours alone and never reaches a deploy. Same shape for `MCP_LIVE_SCORING_ENABLED` when exercising `score_cli`.
+`env.MCP_ENABLED !== 'true'`, so a local run starts with the MCP surface off: `POST /mcp` answers `503` with
+`mcp is currently disabled by the operator`. To exercise `/mcp` locally, write `MCP_ENABLED="true"` into
+`.dev.vars.staging`, the per-environment local-secret file `wrangler dev --env staging` reads. `.dev.vars*` is
+gitignored, so the file is yours alone and never reaches a deploy. Same shape for `MCP_LIVE_SCORING_ENABLED` when
+exercising `score_cli`.
 
 Production-mode preview (rare, only when verifying the production block of `wrangler.jsonc`):
 
@@ -359,16 +359,16 @@ engine against a public URL) and for operating the web-board rescore (weekly cro
   `origin/main` with `dev`'s tree overlaid, PR'd to main. `main` blocks direct commits through its ruleset. `dev`
   accepts them, and the dev-only doc paths listed under
   [`RELEASES.md` § Dev-direct exception](./RELEASES.md#dev-direct-exception) are committed that way on purpose: they
-  never ship to `main`, so a PR buys nothing. Code goes through a branch and a PR.
-  See [`RELEASES.md`](./RELEASES.md) for the full workflow.
+  never ship to `main`, so a PR buys nothing. Code goes through a branch and a PR. See [`RELEASES.md`](./RELEASES.md)
+  for the full workflow.
 - **Commits:** Conventional Commits. Short, specific messages.
 - **Worker logs go through the emitter.** Every structured record the Worker writes passes through
-  `src/worker/telemetry/log.ts`: a call site names its `scope` (a closed union; adding a scope means adding it there) and
-  its fields, and nothing else. The emitter merges the request-scoped ambient fields, caps client-supplied names, buckets
-  durations, drops undefined fields, and hands the object to `console` unserialized. Never `console.log(JSON.stringify(...))`
-  in Worker code: a pre-serialized string arrives as one text `message`, so its fields cannot be filtered or grouped in
-  Workers Logs, and the emitter's caps and swallow posture are bypassed. Tests capture records through the emitter's sink
-  (`tests/helpers/log-capture.ts`), never by patching `console`.
+  `src/worker/telemetry/log.ts`: a call site names its `scope` (a closed union; adding a scope means adding it there)
+  and its fields, and nothing else. The emitter merges the request-scoped ambient fields, caps client-supplied names,
+  buckets durations, drops undefined fields, and hands the object to `console` unserialized. Never
+  `console.log(JSON.stringify(...))` in Worker code: a pre-serialized string arrives as one text `message`, so its
+  fields cannot be filtered or grouped in Workers Logs, and the emitter's caps and swallow posture are bypassed. Tests
+  capture records through the emitter's sink (`tests/helpers/log-capture.ts`), never by patching `console`.
 - **PRs:** Squash merge. PR title becomes commit title; PR body becomes commit body (repo setting:
   `squashMergeCommitMessage: PR_BODY`).
 - **Rulesets:** `.github/rulesets/protect-main.json` and `protect-dev.json` are the source of truth for branch
@@ -386,10 +386,10 @@ engine against a public URL) and for operating the web-board rescore (weekly cro
 - **Assert against the representation you actually received.** Every `/score/<target>` and content page serves an HTML
   page and a markdown twin from one URL, chosen by `Accept`. `curl` sends `Accept: */*` and resolves to the twin, so
   grepping a bare `curl` response for HTML markers (`data-web-audit-context`, `class="web-check"`, a `<time>` element)
-  finds nothing on a page that renders them correctly. "The assertion found nothing" and "the feature
-  is missing" are indistinguishable until you confirm which document you got. Send an explicit `Accept:
-  text/html,application/xhtml+xml` when checking HTML, `Accept: text/markdown` (or the `.md` suffix) when checking the
-  twin, and check a marker unique to that representation before trusting a negative result.
+  finds nothing on a page that renders them correctly. "The assertion found nothing" and "the feature is missing" are
+  indistinguishable until you confirm which document you got. Send an explicit `Accept: text/html,application/xhtml+xml`
+  when checking HTML, `Accept: text/markdown` (or the `.md` suffix) when checking the twin, and check a marker unique to
+  that representation before trusting a negative result.
 - **Playwright browsers:** system-provided on the dev host: dotfiles provisions them into `$PLAYWRIGHT_BROWSERS_PATH`;
   never run `playwright install` locally (the node extractor deadlocks on that kernel). This repo exact-pins
   `@playwright/test` (see `package.json`) to the dotfiles-canonical version so the resolved browser revisions match
@@ -397,8 +397,8 @@ engine against a public URL) and for operating the web-board rescore (weekly cro
 - `deploy.yml`: publishes to the `*.workers.dev` staging on every push to `main`.
 - `guard-main-docs.yml`: blocks `docs/plans/`, `docs/solutions/`, `docs/brainstorms/` from reaching main.
 - `guard-release-branch.yml`: rejects PRs to main whose head isn't `release/*`.
-- `guard-main-provenance.yml`: requires every non-exempt commit in a PR to main to carry a `(#N)` PR reference;
-  skipped for `release/*` heads.
+- `guard-main-provenance.yml`: requires every non-exempt commit in a PR to main to carry a `(#N)` PR reference; skipped
+  for `release/*` heads.
 
 ## Tool-site sequencing (do not violate)
 

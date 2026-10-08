@@ -25,8 +25,8 @@ Two layers of enforcement:
    that targets the production registry MUST consult this workflow's check before pushing — the firewall workflow is the
    single source of truth for the gate.
 
-The third layer is the convention: after the spike report writes, dispose of the local image immediately (`docker image
-rm anc-sandbox-spike:<sha>`). U7's `run-spike.sh --dispose` automates this.
+The third layer is the convention: after the spike report writes, dispose of the local image immediately
+(`docker image rm anc-sandbox-spike:<sha>`). U7's `run-spike.sh --dispose` automates this.
 
 ## Layout
 

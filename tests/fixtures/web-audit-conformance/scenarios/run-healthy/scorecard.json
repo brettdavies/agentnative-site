@@ -52,8 +52,8 @@
   "summary": {
     "pass": 57,
     "noncompliant": 0,
-    "broken": 2,
-    "absent": 2,
+    "broken": 1,
+    "absent": 3,
     "n_a": 7,
     "skip": 0,
     "error": 0
@@ -72,10 +72,10 @@
       "verified": 21
     }
   },
-  "score_pct": 93,
+  "score_pct": 96,
   "score": {
-    "relative": 93,
-    "global": 86
+    "relative": 96,
+    "global": 88
   },
   "categories": [
     {
@@ -1174,7 +1174,7 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P7",
-      "status": "broken",
+      "status": "absent",
       "evidence": "https://example.com/robots.txt -> 200 (body no match /^\\s*Content-Signal:\\s*(ai-train|search|ai-input)/)",
       "hosts": [
         {

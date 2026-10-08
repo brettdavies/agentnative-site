@@ -9,7 +9,10 @@
 //     from the declared-hosts trail, the request count, the elapsed time,
 //     the requests per declared domain under that domain's hash, the same
 //     hash its budget's KV key carries, and the reservations a budget layer
-//     error decided, so an outage reads apart from a spent hour.
+//     error decided, so an outage reads apart from a spent hour. It also
+//     records what the request memo held: the requests sent and answered
+//     from the memo, the body bytes kept, and the bodies either cap turned
+//     away, so the memo's caps can be sized from what audits actually keep.
 //   - WEB_AUDIT_DEBUG === 'true': additionally one `web-audit.check` line
 //     per check result and a `web-audit.discovery` line with the full probe
 //     evidence, both on the emitter's debug tier. Bound in env.staging.vars
@@ -21,6 +24,7 @@ import { sha256Hex } from './cache';
 import type { AuditEvent } from './engine';
 import type { FollowStats } from './follow';
 import type { DeclaredHostEntry } from './provenance';
+import type { MemoStats } from './request-hop';
 
 export interface AuditLogEnv {
   WEB_AUDIT_DEBUG?: string;
@@ -56,6 +60,20 @@ async function followFields(trail: readonly DeclaredHostEntry[], stats: FollowSt
   };
 }
 
+/** The run record's request-memo fields. */
+function memoFields(stats: MemoStats): Record<string, number> {
+  return {
+    memo_requests_sent: stats.sent,
+    memo_requests_reused: stats.reused,
+    memo_retained_bytes: stats.retainedBytes,
+    memo_bodies_retained: stats.bodiesRetained,
+    memo_largest_body_bytes: stats.largestBodyBytes,
+    memo_bodies_over_body_cap: stats.overBodyCap,
+    memo_bodies_over_total_cap: stats.overTotalCap,
+    memo_reads_open: stats.readsOpen,
+  };
+}
+
 /**
  * Pass-through wrapper over the engine's event stream that emits the
  * per-audit summary (and per-event debug lines) as events flow, so the
@@ -73,6 +91,7 @@ export async function* instrumentAuditEvents(
   let terminal = 'none';
   let endpoint: string | null = null;
   let follow: Record<string, unknown> = {};
+  let memo: Record<string, number> = {};
   try {
     for await (const event of events) {
       if (event.type === 'discovery') {
@@ -92,6 +111,7 @@ export async function* instrumentAuditEvents(
       } else if (event.type === 'complete') {
         terminal = event.complete ? 'complete' : 'incomplete';
         follow = await followFields(event.scorecard.declared_hosts ?? [], event.follow);
+        memo = memoFields(event.memo);
       } else if (event.type === 'unreachable') {
         terminal = 'unreachable';
       }
@@ -109,6 +129,7 @@ export async function* instrumentAuditEvents(
         elapsed_ms: Date.now() - started,
         checks: statusCounts,
         ...follow,
+        ...memo,
       },
     );
   }

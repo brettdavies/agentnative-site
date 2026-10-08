@@ -20,7 +20,7 @@ const INJECTED_FETCH: ReadonlySet<string> = new Set(['fetchImpl', 'probeFetch'])
 const ALLOWED: Record<string, string> = {
   'src/worker/audit-web/ssrf.ts: const fetchImpl = opts.fetchImpl ?? fetch;':
     'guardedFetch itself: production requests reach the global fetch only here',
-  'src/worker/audit-web/ssrf.ts: response = await fetchImpl(current.url.toString(), {':
+  'src/worker/audit-web/ssrf.ts: response = await fetchImpl(request.url, {':
     'guardedFetch itself: the one request each hop sends, after the guard admits its URL',
 };
 

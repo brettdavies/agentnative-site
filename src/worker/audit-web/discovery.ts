@@ -62,11 +62,11 @@ import type { EvidenceItem } from './handlers/types';
 import { directArtifactSource, type SignInChallenge, signInEndpoint } from './mcp-auth';
 import type { MetadataMatch } from './reciprocity';
 import type { WebAuditDiscoveryConfig } from './registry';
-import { DOCUMENT_MAX_BODY_BYTES, type GuardedFetchOptions, guardedFetch } from './ssrf';
+import { type AuditFetchOptions, DOCUMENT_MAX_BODY_BYTES, guardedFetch } from './ssrf';
 
 export interface DiscoveryOptions {
   timeoutMs: number;
-  fetchOptions?: Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects'>;
+  fetchOptions?: AuditFetchOptions;
   /** Absolute per-audit deadline in ms; hops stop once it is spent. */
   deadlineAt?: number;
   /** Injectable clock, matching the engine's deterministic deadline tests. */
