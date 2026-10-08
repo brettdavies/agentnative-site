@@ -4,6 +4,7 @@
 // fetch is the only network path).
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { loadRegistry } from '../scripts/web-audit/conformance-corpus';
 import type { RetainedDocumentKey } from '../src/shared/web-audit-documents';
 import type { RetainedDocument } from '../src/worker/audit-web/discovery-documents';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
@@ -157,6 +158,20 @@ describe('runHttp', () => {
       ctx({ fetchImpl }),
     );
     expect(outcome.status).toBe('absent');
+  });
+
+  test('a robots.txt without AI-crawler rules or Content-Signal reads both directive rows absent', async () => {
+    const registry = loadRegistry();
+    const fetchImpl = stubFetch(
+      () => new Response('User-agent: Googlebot\nDisallow: /private\n\nSitemap: https://example.com/sitemap.xml\n'),
+    );
+    const statuses: Record<string, string> = {};
+    for (const id of ['robots-ai-rules', 'content-signals']) {
+      const entry = registry.checks.find((c) => c.id === id);
+      if (!entry) throw new Error(`registry has no ${id} check`);
+      statuses[id] = (await runHttp(entry, ctx({ fetchImpl }))).status;
+    }
+    expect(statuses).toEqual({ 'robots-ai-rules': 'absent', 'content-signals': 'absent' });
   });
 
   test('mixed candidates: a broken candidate outranks absent ones', async () => {

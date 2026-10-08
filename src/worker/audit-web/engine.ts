@@ -61,8 +61,9 @@ import type { EvidenceItem, HandlerContext, McpAuthRequired, McpLaneEvidence, Pr
 import { runWebMcp } from './handlers/webmcp';
 import { directArtifactSource, settleMcpAuth, signInResolver } from './mcp-auth';
 import type { WebAuditRegistry, WebCheck, WebSiteType } from './registry';
+import { createRequestMemo, type MemoStats } from './request-hop';
 import { buildWebScorecard, type EngineResult, type ScorecardStatus, type WebScorecard } from './scorecard';
-import { type GuardedFetchOptions, guardedFetch, isEdgeErrorStatus } from './ssrf';
+import { type AuditFetchOptions, type GuardedFetchOptions, guardedFetch, isEdgeErrorStatus } from './ssrf';
 
 const DEFAULT_CONCURRENCY = 6;
 const DEFAULT_PER_CHECK_TIMEOUT_MS = 8_000;
@@ -100,8 +101,9 @@ export interface RunWebAuditInput {
 export type AuditEvent =
   | { type: 'discovery'; endpoint: string | null; evidence: EvidenceItem[] }
   | { type: 'result'; result: EngineResult }
-  // `follow` is what the follow slice spent: for the run record, never stored.
-  | { type: 'complete'; scorecard: WebScorecard; complete: boolean; follow: FollowStats }
+  // `follow` is what the follow slice spent and `memo` what the request
+  // memo held: for the run record, never stored.
+  | { type: 'complete'; scorecard: WebScorecard; complete: boolean; follow: FollowStats; memo: MemoStats }
   // Terminal for a target the auditor cannot reach: nothing answered at
   // the network level (no HTTP status from the root fetch or any discovery
   // probe), or the root is http or redirects to http, which anc never
@@ -383,13 +385,17 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const configuredTimeoutMs = input.perCheckTimeoutMs ?? DEFAULT_PER_CHECK_TIMEOUT_MS;
   const perAuditDeadlineMs = input.perAuditDeadlineMs ?? DEFAULT_PER_AUDIT_DEADLINE_MS;
   const deadline = now() + perAuditDeadlineMs;
+  // A row that needs an answer another row already received reads it from
+  // the memo instead of asking the target again.
+  const memo = createRequestMemo();
+  const fetchOptions: AuditFetchOptions = { ...input.fetchOptions, memo };
 
   // The single canonical root fetch every root-HTML check and several
   // antecedents read. null = failed at the network level. It runs before
   // discovery because it doubles as the reachability probe: a network-dead
   // root drops every later probe to the degraded timeout so a tarpitting
   // target cannot spend the whole deadline on a handful of fetches.
-  const rootResp = await guardedFetch(base, {}, { ...input.fetchOptions, timeoutMs: configuredTimeoutMs });
+  const rootResp = await guardedFetch(base, {}, { ...fetchOptions, timeoutMs: configuredTimeoutMs });
   if (rootResp.refused === 'insecure-scheme') {
     const how = rootResp.status === null ? 'is not https' : 'redirects to http';
     yield { type: 'unreachable', reason: `${base} ${how}, and ${NO_PLAINTEXT_REQUEST}.` };
@@ -400,7 +406,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     root === null ? Math.min(configuredTimeoutMs, DEGRADED_PER_CHECK_TIMEOUT_MS) : configuredTimeoutMs;
 
   const discoveryConfig = input.registry.mcp_discovery;
-  const phaseOptions = { timeoutMs: perCheckTimeoutMs, deadlineAt: deadline, now, fetchOptions: input.fetchOptions };
+  const phaseOptions = { timeoutMs: perCheckTimeoutMs, deadlineAt: deadline, now, fetchOptions };
   const documents = await readDiscoveryDocuments(input.url, discoveryConfig, phaseOptions);
   const rootFromTarget = root !== null && !isEdgeErrorStatus(root.status);
   const following = input.followDeclarations !== false;
@@ -471,7 +477,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     apiTargets: api,
     apiDescriptionBodies: descriptionBodies,
     apiHostProbes,
-    fetchOptions: input.fetchOptions,
+    fetchOptions,
     mcpSessionId,
     mcpLanes,
     mcpAuth,
@@ -515,7 +521,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const signIn = signInResolver({
     endpoint: declared.endpoint,
     known: declared.metadata,
-    source: directArtifactSource(() => (deadline - now() > 0 ? requestTimeoutMs() : null), input.fetchOptions),
+    source: directArtifactSource(() => (deadline - now() > 0 ? requestTimeoutMs() : null), fetchOptions),
   });
   mcpAuth = await settleMcpAuth({ observed: declared.challenge, sources, signIn });
   if (mcpAuth === null) mcpSignIn = async (answer) => (await signIn(answer)) !== null;
@@ -556,7 +562,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   if (mcpSessionId && declared.endpoint) {
     await notifyMcpInitialized(declared.endpoint, mcpSessionId, {
       timeoutMs: requestTimeoutMs(),
-      fetchOptions: input.fetchOptions,
+      fetchOptions,
       followed: declared.followed,
     });
     if (deadline - now() <= 0) incomplete = true;
@@ -614,5 +620,5 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     declaredHosts: declared.trail,
     registry: input.registry,
   });
-  yield { type: 'complete', scorecard, complete: !incomplete, follow: followStats };
+  yield { type: 'complete', scorecard, complete: !incomplete, follow: followStats, memo: { ...memo.stats } };
 }

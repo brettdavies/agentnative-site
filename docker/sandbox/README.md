@@ -88,8 +88,8 @@ bun x wrangler containers images list
 
 ### Image-retention discipline
 
-NEVER delete a tag from the CF managed registry that backed a shipped Worker version. Deletion silently breaks `wrangler
-rollback` for any version that referenced the deleted image, per
+NEVER delete a tag from the CF managed registry that backed a shipped Worker version. Deletion silently breaks
+`wrangler rollback` for any version that referenced the deleted image, per
 [Containers Limits](https://developers.cloudflare.com/containers/platform-details/limits/). The 50 GB account-wide cap
 will eventually require a prune; treat it as a quarterly manual exercise paired with explicit review of which Worker
 versions become unrollback-able. Pair every git release tag with the registry URI in `RELEASES.md` so the inventory
@@ -107,8 +107,8 @@ appears in a deployed layer, `.dockerignore` has stopped being read by the build
 If you cannot run `wrangler containers build` locally, set the `image:` field temporarily back to a Dockerfile path
 (`./docker/sandbox/Dockerfile`) and let `cloudflare/wrangler-action` build inline on `ubuntu-latest`. Expect a ~60-130s
 cold build per deploy (no GHA-side layer cache; `cloudflare/wrangler-action` shells out to plain `docker build`). The
-registry-side push is auto-skipped when the resulting image already exists at the same tag (`"Image already exists
-remotely, skipping push"`). This is a fallback; the primary path is the local build above.
+registry-side push is auto-skipped when the resulting image already exists at the same tag
+(`"Image already exists remotely, skipping push"`). This is a fallback; the primary path is the local build above.
 
 ## SHA pinning
 

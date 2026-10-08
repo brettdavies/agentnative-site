@@ -305,11 +305,12 @@ open https://dash.cloudflare.com/?to=/:account/workers/services/view/agentnative
 
 Resolution:
 
-1. If a recent Worker version coincides with the spike, roll it back: `bun x wrangler rollback <version-id> --env
-   staging`. The DO migration `v1` stays; rollback only reverts code + bindings.
+1. If a recent Worker version coincides with the spike, roll it back:
+   `bun x wrangler rollback <version-id> --env staging`. The DO migration `v1` stays; rollback only reverts code +
+   bindings.
 2. If the image was bumped recently, inspect the image build for missing dependencies (matches the U6
-   `python:3.12-slim-trixie` sdist allowlist pattern); deploy a corrected image via the standard `wrangler containers
-   build -p` → `wrangler deploy` flow documented in
+   `python:3.12-slim-trixie` sdist allowlist pattern); deploy a corrected image via the standard
+   `wrangler containers build -p` → `wrangler deploy` flow documented in
    [`RELEASES.md` § Sandbox image releases](../../RELEASES.md#sandbox-image-releases).
 3. If neither, raise the kill-switch (see above) and investigate offline.
 

@@ -70,8 +70,8 @@
   "summary": {
     "pass": 10,
     "noncompliant": 0,
-    "broken": 3,
-    "absent": 6,
+    "broken": 1,
+    "absent": 8,
     "n_a": 48,
     "skip": 0,
     "error": 1
@@ -90,10 +90,10 @@
       "verified": 3
     }
   },
-  "score_pct": 38,
+  "score_pct": 51,
   "score": {
-    "relative": 38,
-    "global": 11
+    "relative": 51,
+    "global": 14
   },
   "categories": [
     {
@@ -1032,7 +1032,7 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P7",
-      "status": "broken",
+      "status": "absent",
       "evidence": "https://example.com/robots.txt -> 200 (body no match /^\\s*User-agent:\\s*(\\*|GPTBot|OAI-SearchBot|ChatGPT-User|Claude|ClaudeBot|Anthropic|Google-Extended|PerplexityBot|CCBot|Bytespider)/)",
       "hosts": [
         {
@@ -1050,7 +1050,7 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P7",
-      "status": "broken",
+      "status": "absent",
       "evidence": "https://example.com/robots.txt -> 200 (body no match /^\\s*Content-Signal:\\s*(ai-train|search|ai-input)/)",
       "hosts": [
         {

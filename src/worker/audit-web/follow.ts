@@ -96,7 +96,7 @@ export interface FollowInput {
   timeoutMs: number;
   deadlineAt: number;
   now: () => number;
-  fetchOptions?: Pick<GuardedFetchOptions, 'fetchImpl'>;
+  fetchOptions?: Pick<GuardedFetchOptions, 'fetchImpl' | 'memo'>;
 }
 
 /** What the slice spent, for the audit's run record. */

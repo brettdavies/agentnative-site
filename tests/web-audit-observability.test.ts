@@ -56,6 +56,16 @@ const COMPLETE_EVENT: AuditEvent = {
   scorecard: { score_pct: 50 } as WebScorecard,
   complete: true,
   follow: { requests: 0, domainRequests: {}, elapsedMs: 0, budgetErrors: {}, budgetRefusals: {} },
+  memo: {
+    sent: 9,
+    reused: 4,
+    retainedBytes: 2048,
+    bodiesRetained: 3,
+    largestBodyBytes: 1024,
+    overBodyCap: 1,
+    overTotalCap: 0,
+    readsOpen: 1,
+  },
 };
 
 describe('instrumentAuditEvents', () => {
@@ -80,6 +90,32 @@ describe('instrumentAuditEvents', () => {
       expect(summaries[0].follow_declarations).toBe(true);
       expect(lines.some((l) => l.scope === 'web-audit.check')).toBe(false);
       expect(lines.some((l) => l.scope === 'web-audit.discovery')).toBe(false);
+    } finally {
+      logs.restore();
+    }
+  });
+
+  test('the run summary records what the request memo sent, answered from the record, and kept', async () => {
+    const logs = captureLogs();
+    try {
+      await collect(
+        instrumentAuditEvents(
+          eventsOf([COMPLETE_EVENT]),
+          {},
+          { target: 'x', surface: 'rescore', followDeclarations: true },
+        ),
+      );
+      const summary = logs.records.map((r) => r.record).find((l) => l.scope === 'web-audit.run');
+      expect(summary).toMatchObject({
+        memo_requests_sent: 9,
+        memo_requests_reused: 4,
+        memo_retained_bytes: 2048,
+        memo_bodies_retained: 3,
+        memo_largest_body_bytes: 1024,
+        memo_bodies_over_body_cap: 1,
+        memo_bodies_over_total_cap: 0,
+        memo_reads_open: 1,
+      });
     } finally {
       logs.restore();
     }

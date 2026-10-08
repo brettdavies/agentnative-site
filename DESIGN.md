@@ -34,8 +34,8 @@ check out `dev` to read them locally.
 **Generator — `scripts/design/`** (tooling, not shipped to dist but lives on `main`):
 
 - [`scripts/design/generate-palette.mjs`](scripts/design/generate-palette.mjs) — the script that emits both artifacts:
-  writes `src/styles/foundation.css` and (on the `dev` branch) `docs/research/design/color-analysis.md`. Run via `cd
-  scripts/design && bun install && bun run generate` (or `bun run scripts/design/generate-palette.mjs` from the repo
+  writes `src/styles/foundation.css` and (on the `dev` branch) `docs/research/design/color-analysis.md`. Run via
+  `cd scripts/design && bun install && bun run generate` (or `bun run scripts/design/generate-palette.mjs` from the repo
   root).
 
 ## 1. Summary
@@ -236,38 +236,37 @@ Rollback is `wrangler rollback`.
 - **HTML responses** carry `Link: </p<n>.md>; rel="alternate"; type="text/markdown"` and `X-Llms-Txt: /llms.txt`.
 - **Markdown responses** carry `Content-Type: text/markdown; charset=utf-8` and `X-Robots-Tag: noindex`.
 - **Result pages** (`/score/<target>`, its `/md` twin, and the negotiated markdown form) carry two alternates in `Link`:
-  `</score/<target>/md>; rel="alternate"; type="text/markdown"` and `</score/<target>/json>; rel="alternate";
-  type="application/json"`, byte-equal to the page's `<head>` alternates. The `/json` representation carries no `Link`
-  and no `Vary`.
+  `</score/<target>/md>; rel="alternate"; type="text/markdown"` and
+  `</score/<target>/json>; rel="alternate"; type="application/json"`, byte-equal to the page's `<head>` alternates. The
+  `/json` representation carries no `Link` and no `Vary`.
 
 **Cache strategy (P4).** Three classes, written only by `applyHeaders` (`src/worker/headers.ts`). A route that knows
 more than the path does passes the class it served (the result route: a curated slug and a live binary share a path
 shape); a 4xx/5xx or an always-MISS path is MISS regardless.
 
 - **HIT-1d** — bake-at-build HTML/markdown (`/about`, `/p1`–`/p8`, bare `/audit`, curated `/score/<slug>` and its `/md`
-  twin, `/mcp-skill`, GET `/mcp` as a page, other spec/docs pages without a live board). Browser: `Cache-Control:
-  public, max-age=300, stale-while-revalidate=60` (no `s-maxage`; that re-arms the custom-domain zone HIT that stored
-  the Worker response and dropped `Vary`). Edge: `Cloudflare-CDN-Cache-Control: public, max-age=86400`. Extensionless
-  URLs keep `Vary: Accept, User-Agent`. Explicit `.md` is one representation (no `Vary`). A new Worker version starts
-  with an empty cache (`cache.cross_version_cache` stays off). Path-keyed `/llms.txt`, `.json`, `.svg`, and the curated
-  `/score/<slug>/json` keep `Cache-Control: public, max-age=300, s-maxage=86400, stale-while-revalidate=60` with no
-  `Vary`.
+  twin, `/mcp-skill`, GET `/mcp` as a page, other spec/docs pages without a live board). Browser:
+  `Cache-Control: public, max-age=300, stale-while-revalidate=60` (no `s-maxage`; that re-arms the custom-domain zone
+  HIT that stored the Worker response and dropped `Vary`). Edge: `Cloudflare-CDN-Cache-Control: public, max-age=86400`.
+  Extensionless URLs keep `Vary: Accept, User-Agent`. Explicit `.md` is one representation (no `Vary`). A new Worker
+  version starts with an empty cache (`cache.cross_version_cache` stays off). Path-keyed `/llms.txt`, `.json`, `.svg`,
+  and the curated `/score/<slug>/json` keep
+  `Cache-Control: public, max-age=300, s-maxage=86400, stale-while-revalidate=60` with no `Vary`.
 - **HIT-min** — the live board and live results, every representation alike: `/`, `/index.md`, `/scorecards`,
   `/scorecards.md`, and their `?lane=`/`?view=` queries; a live or branch-scoped `/score/<target>` with its `/md` and
-  `/json`; and a website `/score/<host>` with its `/md` and `/json`. Browser: `Cache-Control: public, max-age=0,
-  must-revalidate` so a tag purge is visible on the next navigation. Edge: `Cloudflare-CDN-Cache-Control: public,
-  max-age=300`. `Cache-Tag: home` on `/`, `/index.md`, and `/scorecards*`; `web:{host}` on a website result;
-  `cli:{binary}` on a live CLI result and
-  `cli:{owner}/{repo}@{branch}` on a branch run. The Durable Object purges the `cli:` tag after its R2 write; the web
-  stream and the rescore workflow purge `web:{host}` with `web` and `home`. `/audit` with a query string is HIT-min with
-  no tag, so a prefill hop never mints a day-long edge key. Explicit `.md` and `/md` twins and `/json` still have no
-  `Vary`.
+  `/json`; and a website `/score/<host>` with its `/md` and `/json`. Browser:
+  `Cache-Control: public, max-age=0, must-revalidate` so a tag purge is visible on the next navigation. Edge:
+  `Cloudflare-CDN-Cache-Control: public, max-age=300`. `Cache-Tag: home` on `/`, `/index.md`, and `/scorecards*`;
+  `web:{host}` on a website result; `cli:{binary}` on a live CLI result and `cli:{owner}/{repo}@{branch}` on a branch
+  run. The Durable Object purges the `cli:` tag after its R2 write; the web stream and the rescore workflow purge
+  `web:{host}` with `web` and `home`. `/audit` with a query string is HIT-min with no tag, so a prefill hop never mints
+  a day-long edge key. Explicit `.md` and `/md` twins and `/json` still have no `Vary`.
 - **MISS** — every-request `Cache-Control: no-store` plus `Cloudflare-CDN-Cache-Control: no-store`, untagged.
   `/scoring*`, `POST /mcp`, `/api/score`, a `/score/<target>?v=` fetch, the 202 in-progress `/json`, and every Worker
   4xx/5xx (including a never-audited `/score/<target>`). A stored 5xx would otherwise become a skip-Worker HIT.
 
-Hashed immutable assets (fonts at `/fonts/*`, the content-hashed `/og-image.png`) carry `Cache-Control: public,
-max-age=31536000, immutable`.
+Hashed immutable assets (fonts at `/fonts/*`, the content-hashed `/og-image.png`) carry
+`Cache-Control: public, max-age=31536000, immutable`.
 
 **404 handling (A10).** Uses the Workers Static Assets default 404 body; no custom 404 page in v0.
 
@@ -275,8 +274,8 @@ max-age=31536000, immutable`.
 
 - **Nine pages.** Everything a framework provides by default (sidebar nav, search indexing, component library,
   multi-version switcher) is either unused or faintly in the way.
-- **Content-negotiation semantics stay in one file we own.** Even with Starlight's plugin ecosystem, `Accept:
-  text/markdown` on the same URL is not a plugin; it is a Worker concern. If the Worker exists regardless, the
+- **Content-negotiation semantics stay in one file we own.** Even with Starlight's plugin ecosystem,
+  `Accept: text/markdown` on the same URL is not a plugin; it is a Worker concern. If the Worker exists regardless, the
   framework's incremental value for this site collapses to "it generates the HTML shell," which we can do in ~40 lines
   of templating.
 - **Plugin supply chain.** With Astro + Starlight + three agent-native plugins, we depend on four moving parts
@@ -442,8 +441,8 @@ await writeFile("dist/sitemap.xml",   buildSitemap([...principles, "check", "abo
 
 ### 3.5 Invariants (hold regardless of stack)
 
-Markdown is the source of truth. Same `.md` renders the HTML and is served raw for `/p1.md`, `/p1` under `Accept:
-text/markdown`, and `/llms-full.txt`. `llms.txt` + `llms-full.txt` at site root per llmstxt.org. Schema.org
+Markdown is the source of truth. Same `.md` renders the HTML and is served raw for `/p1.md`, `/p1` under
+`Accept: text/markdown`, and `/llms-full.txt`. `llms.txt` + `llms-full.txt` at site root per llmstxt.org. Schema.org
 `TechArticle` JSON-LD in every HTML `<head>`. **Anchor slugs LOCKED, do not rename:** `#p1-non-interactive-by-default`,
 `#p2-structured-parseable-output`, `#p3-progressive-help-discovery`, `#p4-fail-fast-actionable-errors`,
 `#p5-safe-retries-mutation-boundaries`, `#p6-composable-predictable-command-structure`,
@@ -539,10 +538,10 @@ Access-Control-Allow-Origin: *
 X-Robots-Tag:                noindex
 ```
 
-No `Link: rel="alternate"` and no `X-Llms-Txt` on JSON paths, because there's no markdown twin for `.json`. The `Accept:
-text/markdown` content-negotiation rewrite in `src/worker/index.ts` short-circuits on `.json` paths so `Accept:
-text/markdown` against `/skill.json` returns the JSON unchanged rather than 404'ing on a non-existent `/skill.json.md`
-twin.
+No `Link: rel="alternate"` and no `X-Llms-Txt` on JSON paths, because there's no markdown twin for `.json`. The
+`Accept: text/markdown` content-negotiation rewrite in `src/worker/index.ts` short-circuits on `.json` paths so
+`Accept: text/markdown` against `/skill.json` returns the JSON unchanged rather than 404'ing on a non-existent
+`/skill.json.md` twin.
 
 **Build-step outputs (added to the §3.4.1 table):**
 
@@ -579,8 +578,8 @@ now link here instead:
 - `src/build/build.mjs`'s leaderboard methodology HTML — links to `/install` instead of inlining brew/cargo.
 - `src/build/scorecards-render.mjs`'s per-tool scorecard CTA — links to `/install` instead of inlining brew.
 
-A grep-based assertion in regression #6 fails the build if `brew install brettdavies/tap/agentnative` or `cargo install
-agentnative` ever reappears outside `content/install.md`.
+A grep-based assertion in regression #6 fails the build if `brew install brettdavies/tap/agentnative` or
+`cargo install agentnative` ever reappears outside `content/install.md`.
 
 ## 4. Decision B — visual system
 
@@ -727,9 +726,10 @@ nothing needs to be self-hosted for a design review:
   name `"Uncut Sans"`.
 - Monaspace Xenon: [Fontsource via jsdelivr](https://www.jsdelivr.com/package/npm/@fontsource/monaspace-xenon) serves
   static weight 400 under family name `"Monaspace Xenon"`. We use the static-weight Fontsource package (not
-  `@fontsource-variable/*`) because Fontsource does not publish a variable build for Monaspace Xenon (`variable_support:
-  false` per their API), and GitHub Next's own variable woff2 cannot be mirrored through jsdelivr (the GitHub repo
-  exceeds the 50 MB CDN mirror limit). Weight 400 is enough to render the preview's code samples; no italics.
+  `@fontsource-variable/*`) because Fontsource does not publish a variable build for Monaspace Xenon
+  (`variable_support: false` per their API), and GitHub Next's own variable woff2 cannot be mirrored through jsdelivr
+  (the GitHub repo exceeds the 50 MB CDN mirror limit). Weight 400 is enough to render the preview's code samples; no
+  italics.
 
 Both CDN packages register their `@font-face` rules under the exact family names `foundation.css` references, so the
 preview needs no `--font-*` overrides. If either CDN is blocked (offline demo, strict network), the preview falls back
@@ -889,10 +889,10 @@ Preview at `docs/research/design/must-should-may-preview.html` (dev branch only)
 60) in both modes; see `docs/research/design/color-analysis.md`.
 
 **How the build applies the markup.** A small remark plugin runs a single inline pass at render time. It replaces
-bare-word occurrences of `MUST` / `MUST NOT` / `SHOULD` / `SHOULD NOT` / `MAY` in prose text nodes with `<strong
-class="rfc-must">MUST</strong>` (and tier-appropriate classes). Skips occurrences inside `<code>`, `<pre>`, and link
-labels so we do not recolor shell output or URL text. Cost: ~30 lines. Raw markdown stays unchanged (uppercase keywords
-in source) so the `text/markdown` channel is a pristine copy.
+bare-word occurrences of `MUST` / `MUST NOT` / `SHOULD` / `SHOULD NOT` / `MAY` in prose text nodes with
+`<strong class="rfc-must">MUST</strong>` (and tier-appropriate classes). Skips occurrences inside `<code>`, `<pre>`, and
+link labels so we do not recolor shell output or URL text. Cost: ~30 lines. Raw markdown stays unchanged (uppercase
+keywords in source) so the `text/markdown` channel is a pristine copy.
 
 **Regex and scope (C2).** The plugin visits mdast `text` nodes only (not `inlineCode`, not `code`, not `link` children)
 and replaces matches of:
@@ -926,9 +926,9 @@ the full keyword (`MUST` / `MUST NOT` / `SHOULD` / `SHOULD NOT` / `MAY`), it:
 2. Does NOT emit an inner second `<strong>` wrapper.
 
 Detection: the plugin's visitor sees `(node, index, parent)` where `parent.type === 'strong'`. The result is one
-`<strong class="rfc-must">MUST:</strong>` instead of the invalid nested `<strong><strong
-class="rfc-must">MUST</strong>:</strong>`. Every other context (plain prose, headings, list-item first-child where the
-parent is `listItem`/`paragraph`/etc.) uses the default wrap-in-new-`<strong>` behavior.
+`<strong class="rfc-must">MUST:</strong>` instead of the invalid nested
+`<strong><strong class="rfc-must">MUST</strong>:</strong>`. Every other context (plain prose, headings, list-item
+first-child where the parent is `listItem`/`paragraph`/etc.) uses the default wrap-in-new-`<strong>` behavior.
 
 #### Deferred: block-level treatment (decide once the site is live)
 
@@ -938,10 +938,10 @@ lists) wants extra visual chunking so a scroll-speed reader can see which tier a
 forecloses the side-stripe; two post-ban candidates remain, both to be evaluated against real principle content after
 the site is rendering:
 
-1. **Leading RFC tag.** Render each requirement-list item with a colored, bold keyword tag as a left prefix: `MUST Use
-   try_parse() instead of parse().` The tag carries the color; no border, no background fill. Reads like a rendered RFC
-   draft. Implementation: remark plugin's second pass inserts `<span class="rfc-tag rfc-must">MUST</span>` before the
-   `<li>` text; a small CSS rule sets fixed-width inline-block. Cost: ~40 lines of plugin + ~8 lines of CSS.
+1. **Leading RFC tag.** Render each requirement-list item with a colored, bold keyword tag as a left prefix:
+   `MUST Use try_parse() instead of parse().` The tag carries the color; no border, no background fill. Reads like a
+   rendered RFC draft. Implementation: remark plugin's second pass inserts `<span class="rfc-tag rfc-must">MUST</span>`
+   before the `<li>` text; a small CSS rule sets fixed-width inline-block. Cost: ~40 lines of plugin + ~8 lines of CSS.
 2. **Full background tint.** Wrap each requirement-list paragraph with `class="callout must"` (or `should` / `may`);
    foundation.css adds `.callout.* { background: var(--must-wash); padding: ... }`: flat fill, no border. Reads as a
    tinted panel, more visual weight than the leading tag. Cost: ~20 lines of plugin + ~6 lines of CSS + three wash
@@ -1054,9 +1054,9 @@ ensures an OS preference of dark does not override an explicit user choice of li
 
 **JS behavior** (sketch, ~40 lines):
 
-1. An inline `<script>` in `<head>` (before first paint) reads `localStorage.getItem('theme')` and sets `<html
-   data-theme="...">`. This avoids a light-flash on a user who prefers dark. Runs synchronously, ~15 lines minified,
-   inlined in the HTML shell.
+1. An inline `<script>` in `<head>` (before first paint) reads `localStorage.getItem('theme')` and sets
+   `<html data-theme="...">`. This avoids a light-flash on a user who prefers dark. Runs synchronously, ~15 lines
+   minified, inlined in the HTML shell.
 2. A deferred script attaches click handlers to three buttons (`system` / `light` / `dark`). Clicking writes
    `localStorage` and updates the attribute.
 3. The `system` state removes the attribute entirely so the media query re-engages.
@@ -1088,8 +1088,8 @@ Accessibility: the toggle is a `<button>` group with `aria-pressed`, keyboard-na
   Space toggle it with zero JS; the nav bundle adds Escape-to-close. Routes without a nav entry (methodology, coverage,
   contribute, the web board) stay reachable from the footer meta row and in-page cross-links.
 - **Footer**: three centered rows inside a `.container` — the "Ask an AI" provider icons in 42px circles (every inline
-  SVG carries explicit width/height; iOS Safari renders viewBox-only inline SVG at 0×0), the mono `Source spec · cli ·
-  site · skill` row, and the version/doc/machine-surface meta row.
+  SVG carries explicit width/height; iOS Safari renders viewBox-only inline SVG at 0×0), the mono
+  `Source spec · cli · site · skill` row, and the version/doc/machine-surface meta row.
 - **Page columns**: each archetype owns its measure. The homepage composes full-bleed sections with an inner
   `.container` (72rem). Reading pages (`/p{N}` and every content subpage) render inside `.doc` (52rem). Scorecard pages
   (CLI, live, and web) render inside `.scorecard-page` (64rem). Boards use the leaderboard table width (92ch).
@@ -1136,10 +1136,10 @@ The card design landed on 2026-04-30 via a `/design-shotgun` → `/impeccable` �
 
 **Future extension: per-page OG cards.** The current model uses one shared `/og-image.png` for every page. The generator
 architecture (`Playwright → Sharp → palette PNG`, deterministic, foundation-token-driven) is reusable for per-principle
-(`/p1`-`/p7`) and per-scorecard (`/scorecards/<tool>`) cards when those land. Concrete extension shape: `bun run og
---input scripts/og/og-<kind>.html --output public/og/<slug>.png --data k=v,k=v`. The script's existing `[data-version]`
-injection seam already prefigures the data-injection step. Out of scope for v0.1; tracked in the plan's "Deferred to
-Separate Tasks" alongside favicon decoupling.
+(`/p1`-`/p7`) and per-scorecard (`/scorecards/<tool>`) cards when those land. Concrete extension shape:
+`bun run og --input scripts/og/og-<kind>.html --output public/og/<slug>.png --data k=v,k=v`. The script's existing
+`[data-version]` injection seam already prefigures the data-injection step. Out of scope for v0.1; tracked in the plan's
+"Deferred to Separate Tasks" alongside favicon decoupling.
 
 ### 4.14 Schema.org / SEO surface
 
@@ -1174,12 +1174,12 @@ slug, a live binary, a branch snapshot, and a website host from one spine.
 - **Cards and boards**: `.card` is the terminal-flavored proof panel (title bar, command line, `.bigscore` numerals,
   check rows with `.st` chips). `.board` renders leaderboard rows (`.lrow`: rank, name + `.name-sub`, meter). Full-bleed
   section bands use `.band-surface`.
-- **The result spine** (`src/shared/result-spine.ts`): every result page opens the same way, whichever lane produced
-  it. A crumb back to the board, a mono `h1` naming the target with the lane beside it as a `.tier`-style outline chip,
-  and one meta line carrying the tier, the freshness sentence, and the two twin links. Under the spine the lanes differ
-  in content, not layout: a CLI result renders principle rows (`.pscore__row`), a website result renders its check
-  rows. A result that can be re-audited carries the control as a `.btn--ghost` with tabular numerals, disabled with a
-  countdown until `freshness.refresh_after`; a curated page carries none.
+- **The result spine** (`src/shared/result-spine.ts`): every result page opens the same way, whichever lane produced it.
+  A crumb back to the board, a mono `h1` naming the target with the lane beside it as a `.tier`-style outline chip, and
+  one meta line carrying the tier, the freshness sentence, and the two twin links. Under the spine the lanes differ in
+  content, not layout: a CLI result renders principle rows (`.pscore__row`), a website result renders its check rows. A
+  result that can be re-audited carries the control as a `.btn--ghost` with tabular numerals, disabled with a countdown
+  until `freshness.refresh_after`; a curated page carries none.
 - **The progress page** (`/scoring`): the run's phases as status rows, each a `.stpill` that holds a `running` state
   while its phase is open and resolves to pass or fail. It is the one page with no cached form, so it renders per
   request and is never stored at the edge.
@@ -1228,8 +1228,8 @@ Research sources cited in this revision:
 
 - WebSearch 2026-04-14: Astro + Starlight markdown endpoints and `.md` content negotiation — surfaced
   `starlight-dot-md`, `starlight-llms-txt`, `starlight-copy-button`, and related March 2026 releases.
-- WebSearch 2026-04-14: Mintlify llms.txt / `.md` suffix / content negotiation — confirmed auto-generation, `Accept:
-  text/markdown` on same URL, `Link` and `X-Llms-Txt` headers, `X-Robots-Tag: noindex` on markdown variant.
+- WebSearch 2026-04-14: Mintlify llms.txt / `.md` suffix / content negotiation — confirmed auto-generation,
+  `Accept: text/markdown` on same URL, `Link` and `X-Llms-Txt` headers, `X-Robots-Tag: noindex` on markdown variant.
 - WebSearch 2026-04-14: Color psychology developer-tool documentation, warm vs cool neutrals — landingpageflow, toptal,
   darosoft, ametra, medium (Qamarjafari 2025), sensationalcolor. Consensus: cool neutrals for developer-facing reference
   material; selective warm accents for MUST/attention callouts.
