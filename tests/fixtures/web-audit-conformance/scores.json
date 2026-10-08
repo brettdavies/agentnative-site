@@ -5920,8 +5920,8 @@
     ]
   },
   "http-robots-no-ai-rules": {
-    "score_pct": 38,
-    "score": {"relative":38,"global":11},
+    "score_pct": 51,
+    "score": {"relative":51,"global":14},
     "results": [
       {"id":"openapi","status":"absent"},
       {"id":"json-schemas","status":"n_a","na_reason":"antecedent-unmet"},
@@ -5981,8 +5981,8 @@
       {"id":"link-headers","status":"absent"},
       {"id":"root-link-rel","status":"pass"},
       {"id":"dns-aid","status":"error"},
-      {"id":"robots-ai-rules","status":"broken"},
-      {"id":"content-signals","status":"broken"},
+      {"id":"robots-ai-rules","status":"absent"},
+      {"id":"content-signals","status":"absent"},
       {"id":"web-bot-auth","status":"n_a","na_reason":"optional-absent"},
       {"id":"security-txt","status":"n_a","na_reason":"optional-absent"},
       {"id":"a2a-agent-card","status":"n_a","na_reason":"optional-absent"},
@@ -8733,8 +8733,8 @@
   },
   "run-edge-530": {"unreachable":true},
   "run-healthy": {
-    "score_pct": 93,
-    "score": {"relative":93,"global":86},
+    "score_pct": 96,
+    "score": {"relative":96,"global":88},
     "results": [
       {"id":"openapi","status":"pass"},
       {"id":"json-schemas","status":"pass"},
@@ -8795,7 +8795,7 @@
       {"id":"root-link-rel","status":"pass"},
       {"id":"dns-aid","status":"n_a","na_reason":"optional-absent"},
       {"id":"robots-ai-rules","status":"pass"},
-      {"id":"content-signals","status":"broken"},
+      {"id":"content-signals","status":"absent"},
       {"id":"web-bot-auth","status":"n_a","na_reason":"optional-absent"},
       {"id":"security-txt","status":"broken"},
       {"id":"a2a-agent-card","status":"pass"},
