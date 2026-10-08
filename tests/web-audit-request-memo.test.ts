@@ -12,7 +12,14 @@ import { loadRegistry, stubFetchFor } from '../scripts/web-audit/conformance-cor
 import { SCENARIOS } from '../scripts/web-audit/conformance-scenarios';
 import { runWebAudit } from '../src/worker/audit-web/engine';
 import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
-import { createRequestMemo, type MemoStats } from '../src/worker/audit-web/request-hop';
+import {
+  closeRequestMemo,
+  createRequestMemo,
+  failedHop,
+  type HopContext,
+  type MemoStats,
+  takeHop,
+} from '../src/worker/audit-web/request-hop';
 import { guardedFetch } from '../src/worker/audit-web/ssrf';
 import { stubFetch } from './helpers/stub-fetch';
 
@@ -282,6 +289,72 @@ describe('guardedFetch with an audit request memo', () => {
     expect([reader.status, reader.error]).toEqual([null, 'TimeoutError: deadline exceeded']);
     expect([statusOnly.status, statusOnly.error, statusOnly.headers['ratelimit-limit']]).toEqual([404, null, '100']);
     expect([sameReader.error, received.length]).toEqual(['TimeoutError: deadline exceeded', 1]);
+  });
+
+  test('closing the memo stops a body read it runs on its own and lets go of every answer', async () => {
+    const stalling = stallsAfterHeaders(200, {});
+    const { fetchImpl } = target(stalling);
+    const memo = createRequestMemo();
+    await guardedFetch(URL_A, {}, { fetchImpl, memo, timeoutMs: 5_000, maxBodyBytes: 0 });
+    expect([stalling.state.cancelled, memo.stats.readsOpen, memo.entries.size]).toEqual([false, 1, 1]);
+    closeRequestMemo(memo);
+    closeRequestMemo(memo);
+    await Bun.sleep(10);
+    expect([stalling.state.cancelled, memo.stats.readsOpen, memo.entries.size]).toEqual([true, 0, 0]);
+  });
+
+  test('closing the memo aborts a request still waiting on the target', async () => {
+    const { received, fetchImpl } = target(hang);
+    const memo = createRequestMemo();
+    const started = Date.now();
+    const pending = guardedFetch(URL_A, {}, { fetchImpl, memo, timeoutMs: 5_000 });
+    await Bun.sleep(10);
+    closeRequestMemo(memo);
+    const answer = await pending;
+    expect([answer.status, received.length, Date.now() - started < 1_000]).toEqual([null, 1, true]);
+  });
+
+  test('a closed memo sends nothing and keeps nothing', async () => {
+    const { received, fetchImpl } = target(() => new Response('ok'));
+    const memo = createRequestMemo();
+    closeRequestMemo(memo);
+    const answer = await guardedFetch(URL_A, {}, { fetchImpl, memo });
+    expect([answer.status, received.length, memo.entries.size]).toEqual([null, 0, 0]);
+  });
+
+  test('a caller still waiting on the memo when it closes cannot keep its body read running', async () => {
+    const stalling = stallsAfterHeaders(200, {});
+    const { fetchImpl } = target(stalling);
+    const memo = createRequestMemo();
+    await guardedFetch(URL_A, {}, { fetchImpl, memo, timeoutMs: 5_000, maxBodyBytes: 0 });
+    const waiting = guardedFetch(URL_A, {}, { fetchImpl, memo, timeoutMs: 5_000 });
+    closeRequestMemo(memo);
+    await waiting;
+    await Bun.sleep(10);
+    expect([stalling.state.cancelled, memo.stats.readsOpen]).toEqual([true, 0]);
+  });
+
+  test('a caller still waiting on the memo when it closes keeps nothing in it', async () => {
+    const memo = createRequestMemo();
+    const request = { url: URL_A, method: 'GET', headers: {}, body: undefined };
+    const within = (timeoutMs: number): HopContext => {
+      const startedAt = Date.now();
+      return {
+        startedAt,
+        deadlineAt: startedAt + timeoutMs,
+        signal: new AbortController().signal,
+        bodyCap: undefined,
+        keepsRedirect: false,
+        memo,
+      };
+    };
+    const timesOut = async (ctx: HopContext) => failedHop(ABORTED(), ctx);
+    await takeHop(request, within(50), timesOut);
+    await Bun.sleep(1);
+    const waiting = takeHop(request, within(5_000), timesOut);
+    closeRequestMemo(memo);
+    await waiting;
+    expect(memo.entries.size).toBe(0);
   });
 
   test('a caller waiting on an identical request in flight gives up at its own deadline', async () => {
