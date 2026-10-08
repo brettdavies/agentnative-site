@@ -87,8 +87,18 @@ export type MemoStats = {
   readsOpen: number;
 };
 
-/** One audit's answers, keyed by the request that produced them. */
-export type RequestMemo = { entries: Map<string, MemoEntry>; stats: MemoStats };
+/**
+ * One audit's answers, keyed by the request that produced them. `ended`
+ * aborts when the audit ends, stopping every request still in flight for
+ * it; from then on the memo keeps nothing and sends nothing. `captures` are
+ * the body reads the memo runs on its own.
+ */
+export type RequestMemo = {
+  entries: Map<string, MemoEntry>;
+  stats: MemoStats;
+  ended: AbortController;
+  captures: Set<MovableDeadline>;
+};
 
 /**
  * One sent hop: the record as of the headers, the record once the body read
@@ -105,6 +115,8 @@ export type SentHop = {
 export function createRequestMemo(): RequestMemo {
   return {
     entries: new Map(),
+    ended: new AbortController(),
+    captures: new Set(),
     stats: {
       sent: 0,
       reused: 0,
@@ -116,6 +128,23 @@ export function createRequestMemo(): RequestMemo {
       readsOpen: 0,
     },
   };
+}
+
+/**
+ * Release everything the memo holds once its audit ends: stop each body read
+ * it runs on its own, abort every request still in flight for the audit, and
+ * drop every kept answer, so nothing the audit allocated outlives it in an
+ * isolate other requests share. Idempotent.
+ */
+export function closeRequestMemo(memo: RequestMemo): void {
+  if (memo.ended.signal.aborted) return;
+  memo.ended.abort();
+  for (const capture of memo.captures) {
+    capture.at = Date.now();
+    for (const rearm of capture.moved) rearm();
+  }
+  memo.captures.clear();
+  memo.entries.clear();
 }
 
 export type HopContext = {
@@ -297,6 +326,12 @@ export async function takeHop(
     if (Date.now() >= ctx.deadlineAt) return timedOutFor(ctx);
     priorRecord = full.record;
   }
+  // Once the audit has ended, even while this caller waited, the memo has no
+  // answer to give and keeps none: the request is the caller's alone.
+  if (memo.ended.signal.aborted) {
+    const hop = await send(ctx);
+    return hop.readsBody ? hop.full : hop.head;
+  }
   memo.stats.sent += 1;
   const sent = send(ctx);
   const full = sent
@@ -345,22 +380,26 @@ export function answerOf(response: Response, ctx: HopContext): SentHop {
     );
     return { head, full, readsBody: true };
   }
-  if (ctx.memo === undefined) {
+  const memo = ctx.memo;
+  if (memo === undefined || memo.ended.signal.aborted) {
     return { head, full: readBytes(response, 0).then(() => head), readsBody: false };
   }
-  const stats = ctx.memo.stats;
   const deadline: MovableDeadline = { at: ctx.deadlineAt, moved: new Set() };
-  stats.readsOpen += 1;
+  memo.captures.add(deadline);
+  memo.stats.readsOpen += 1;
   const full = bodyRecord(
     head,
     () => readBytes(response, MEMO_BODY_MAX_BYTES, deadline),
     MEMO_BODY_MAX_BYTES,
     () => deadline.at,
   ).finally(() => {
-    stats.readsOpen -= 1;
+    memo.stats.readsOpen -= 1;
+    memo.captures.delete(deadline);
   });
+  // A caller still waiting when the audit ends cannot push the read back past
+  // the moment close stopped it.
   const extend = (deadlineAt: number): void => {
-    if (deadlineAt <= deadline.at) return;
+    if (memo.ended.signal.aborted || deadlineAt <= deadline.at) return;
     deadline.at = deadlineAt;
     for (const rearm of deadline.moved) rearm();
   };

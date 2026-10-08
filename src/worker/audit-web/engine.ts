@@ -61,7 +61,7 @@ import type { EvidenceItem, HandlerContext, McpAuthRequired, McpLaneEvidence, Pr
 import { runWebMcp } from './handlers/webmcp';
 import { directArtifactSource, settleMcpAuth, signInResolver } from './mcp-auth';
 import type { WebAuditRegistry, WebCheck, WebSiteType } from './registry';
-import { createRequestMemo, type MemoStats } from './request-hop';
+import { closeRequestMemo, createRequestMemo, type MemoStats, type RequestMemo } from './request-hop';
 import { buildWebScorecard, type EngineResult, type ScorecardStatus, type WebScorecard } from './scorecard';
 import { type AuditFetchOptions, type GuardedFetchOptions, guardedFetch, isEdgeErrorStatus } from './ssrf';
 
@@ -378,7 +378,23 @@ async function* mapConcurrentUnordered<T, R>(
   }
 }
 
+/**
+ * Audit one site. The audit's request memo closes as `complete` is yielded,
+ * so the consumer's work on the scorecard runs without it, and whenever the
+ * generator ends otherwise: at an early return, on a thrown error, or when
+ * the consumer stops iterating. No request or body read the audit started
+ * outlives it.
+ */
 export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<AuditEvent> {
+  const memo = createRequestMemo();
+  try {
+    yield* auditWith(input, memo);
+  } finally {
+    closeRequestMemo(memo);
+  }
+}
+
+async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGenerator<AuditEvent> {
   const { base, host, domain } = normalizeBase(input.url);
   const now = input.now ?? Date.now;
   const concurrency = input.concurrency ?? DEFAULT_CONCURRENCY;
@@ -387,7 +403,6 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const deadline = now() + perAuditDeadlineMs;
   // A row that needs an answer another row already received reads it from
   // the memo instead of asking the target again.
-  const memo = createRequestMemo();
   const fetchOptions: AuditFetchOptions = { ...input.fetchOptions, memo };
 
   // The single canonical root fetch every root-HTML check and several
@@ -620,5 +635,9 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     declaredHosts: declared.trail,
     registry: input.registry,
   });
-  yield { type: 'complete', scorecard, complete: !incomplete, follow: followStats, memo: { ...memo.stats } };
+  // The stats describe the audit as it finished, including the body reads
+  // close is about to stop.
+  const memoStats = { ...memo.stats };
+  closeRequestMemo(memo);
+  yield { type: 'complete', scorecard, complete: !incomplete, follow: followStats, memo: memoStats };
 }
