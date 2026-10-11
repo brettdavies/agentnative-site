@@ -821,7 +821,7 @@
     },
     {
       "id": "markdown-vary",
-      "label": "Negotiated responses carry Vary Accept, User-Agent",
+      "label": "Negotiated responses carry Vary Accept",
       "category": "content-for-agents",
       "group": "P2",
       "layer": "web",
@@ -829,7 +829,7 @@
       "tier": "recommended",
       "principle": "P2",
       "status": "absent",
-      "evidence": "https://example.com/ -> 200 (header vary no match /accept(?:user-agent|[^-\\n\\r\\u2028\\u2029].*user-agent)|user-agent.*accept(?:[^-]|$)/)",
+      "evidence": "https://example.com/ -> 200 (header vary no match /(?:^|,|\\s)accept(?:,|\\s|[^-a-z]|$)/)",
       "hosts": [
         {
           "host": "example.com"
