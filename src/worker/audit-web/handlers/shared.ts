@@ -155,7 +155,31 @@ export function phaseBudget(
   };
 }
 
-const MARKDOWN_HREF_RE = /\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+/**
+ * Parse markdown link destinations from body text, handling both bare URLs
+ * and angle-bracket-wrapped URLs per CommonMark.
+ *
+ * CommonMark allows two forms:
+ * - [text](url) or [text](url "title")  - bare destination
+ * - [text](<url>) or [text](<url> "title")  - angle-bracket-wrapped destination
+ *
+ * When angle brackets wrap the destination, they are part of the syntax and
+ * must be stripped from the actual URL.
+ *
+ * This regex captures:
+ * - Group 1: URL from angle-bracket form (<url>)
+ * - Group 2: URL from bare form (url)
+ * The actual URL is whichever group matched.
+ */
+const MARKDOWN_HREF_RE = /\]\((?:<([^>]+)>|([^)\s]+))(?:\s+"[^"]*")?\)/g;
+
+/**
+ * Extract the URL from a markdown link match, stripping angle brackets.
+ */
+export function extractMarkdownHref(match: RegExpExecArray): string {
+  // match[1] is angle-bracket form, match[2] is bare form
+  return match[1] ?? match[2];
+}
 
 function isRecoveryPath(pathname: string): boolean {
   return (
@@ -178,9 +202,10 @@ export function sameOriginRecoveryLink(body: string, base: string): { ok: boolea
     return { ok: false, why: 'unparseable audit origin' };
   }
   for (const match of body.matchAll(MARKDOWN_HREF_RE)) {
+    const raw = extractMarkdownHref(match);
     let url: URL;
     try {
-      url = new URL(match[1], base);
+      url = new URL(raw, base);
     } catch {
       continue;
     }

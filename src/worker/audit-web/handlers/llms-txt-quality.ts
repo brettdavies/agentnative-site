@@ -7,10 +7,17 @@
 
 import type { WebCheck } from '../registry';
 import { guardedFetch, STATUS_ONLY_BODY_BYTES, validatePublicUrl } from '../ssrf';
-import { plaintextItem, redirectsToHttp, redirectsToHttpItem, remainingDeadlineMs, timeoutMsFor } from './shared';
+import {
+  extractMarkdownHref,
+  plaintextItem,
+  redirectsToHttp,
+  redirectsToHttpItem,
+  remainingDeadlineMs,
+  timeoutMsFor,
+} from './shared';
 import type { EvidenceItem, HandlerContext, ProbeOutcome, ProbeStatus } from './types';
 
-const MARKDOWN_LINK_RE = /\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+const MARKDOWN_LINK_RE = /\]\((?:<([^>]+)>|([^)\s]+))(?:\s+"[^"]*")?\)/g;
 const DEFAULT_MAX_LINKS = 8;
 const WHEN_TO_USE_HEADING = /^#{1,3}\s+.*(when\s+to\s+use|programmatic access|when to (?:connect|call) (?:the )?mcp)/im;
 
@@ -39,7 +46,7 @@ function hrefsFrom(body: string, base: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const match of body.matchAll(MARKDOWN_LINK_RE)) {
-    const raw = match[1];
+    const raw = extractMarkdownHref(match);
     if (raw.startsWith('#') || raw.startsWith('mailto:') || raw.startsWith('javascript:')) continue;
     let href: string;
     try {
