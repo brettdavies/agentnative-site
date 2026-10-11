@@ -7,13 +7,13 @@
 
 import type { WebCheck } from '../registry';
 import { AUDIT_PROBE_MAX_BODY_BYTES, guardedFetch, validatePublicUrl } from '../ssrf';
-import { remainingDeadlineMs, timeoutMsFor } from './shared';
+import { extractMarkdownHref, remainingDeadlineMs, timeoutMsFor } from './shared';
 import type { HandlerContext, ProbeOutcome } from './types';
 
 const MIN_VISIBLE_CHARS = 200;
 const MAX_TWIN_PROBES = 3;
 const MIN_TWIN_CHARS = 40;
-const MARKDOWN_LINK_RE = /\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+const MARKDOWN_LINK_RE = /\]\((?:<([^>]+)>|([^)\s]+))(?:\s+"[^"]*")?\)/g;
 const INDEX_PATHS = new Set(['/llms.txt', '/llms-full.txt', '/robots.txt', '/sitemap.xml', '/favicon.ico']);
 
 function visibleText(html: string): string {
@@ -40,9 +40,10 @@ function contentHrefs(llmsBody: string, base: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const match of llmsBody.matchAll(MARKDOWN_LINK_RE)) {
+    const raw = extractMarkdownHref(match);
     let url: URL;
     try {
-      url = new URL(match[1], base);
+      url = new URL(raw, base);
     } catch {
       continue;
     }

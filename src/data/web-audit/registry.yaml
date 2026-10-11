@@ -826,19 +826,19 @@ checks:
     site_types: [all]
     antecedent: markdown-twin
     weight: 1
-    title: Negotiated responses carry Vary Accept, User-Agent
+    title: Negotiated responses carry Vary Accept
     breadcrumb: Markdown Vary
     handler: http
     with:
       path: /
       expect:
-        # Both tokens present, in either order, with `accept` not the prefix of
-        # `accept-encoding` or `accept-language`. Spelled without lookaround
-        # because the CLI compiles every registry pattern with a linear-time
-        # engine that has none; tests/web-audit-vary-pattern.test.ts pins it
-        # to the lookaround form it replaces.
-        header_regex: { name: vary, pattern: "accept(?:user-agent|[^-\\n\\r\\u2028\\u2029].*user-agent)|user-agent.*accept(?:[^-]|$)" }
-    hint: 'Emit Vary: Accept, User-Agent when the markdown twin is negotiated on the same URL, so shared caches never serve one client the wrong variant.'
+        # Accept must be present in Vary as a token (not as a prefix of
+        # accept-encoding or accept-language). Match accept when preceded by
+        # start/comma/space and followed by end/comma/space/non-letter (but not
+        # dash-letter). Spelled without lookaround because the CLI compiles
+        # every registry pattern with a linear-time engine that has none.
+        header_regex: { name: vary, pattern: "(?:^|,|\\s)accept(?:,|\\s|[^-a-z]|$)" }
+    hint: 'Emit Vary: Accept when the markdown twin is negotiated on the same URL, so shared caches never serve one client the wrong variant.'
 
   - id: markdown-frontmatter
     category: content-for-agents
