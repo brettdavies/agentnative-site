@@ -292,5 +292,7 @@ describe('built dist artifacts', () => {
   test('dist/sitemap.xml includes /mcp-skill', async () => {
     const sitemap = await readFile(join(DIST_DIR, 'sitemap.xml'), 'utf8');
     expect(sitemap).toContain('/mcp-skill');
+    expect(sitemap).toContain('https://anc.dev/mcp-docs');
+    expect(sitemap).not.toContain('<loc>https://anc.dev/mcp</loc>');
   });
 });

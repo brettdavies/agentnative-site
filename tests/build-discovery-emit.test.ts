@@ -401,6 +401,7 @@ describe('auth.md (built dist/)', () => {
     expect(raw).toContain('## CORS posture');
     expect(raw).toContain('authentication.required: false');
     expect(raw).toContain('https://anc.dev/mcp');
+    expect(raw).toContain('https://anc.dev/mcp-docs.md');
     expect(raw).toContain('oauth-protected-resource');
     expect(raw).toContain('oauth-authorization-server');
     expect(raw).toContain('/.well-known/mcp/server-card.json');

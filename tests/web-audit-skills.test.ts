@@ -199,6 +199,8 @@ describe('agent-skills directory of pointers (U11)', () => {
     const md = buildAgentSkillsIndexMd('https://anc.dev', webSkills);
     expect(md).toContain('# Agent skills on anc.dev');
     expect(md).toContain('[web-audit-fix-openapi](https://anc.dev/fix/openapi.md)');
+    expect(md).toContain('[MCP endpoint docs](https://anc.dev/mcp-docs.md)');
+    expect(md).toContain('returns 405');
   });
 
   test('the built dist index lists every check with a resolvable target', async () => {

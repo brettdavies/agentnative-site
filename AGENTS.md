@@ -83,7 +83,9 @@ render step. Deploy via `wrangler`.
 
 `POST https://anc.dev/mcp` exposes the catalog over a streamable HTTP MCP server on spec revision `2026-07-28`, with SDK
 v2 dual-stack support for legacy (`initialize` → `tools/call`) and modern (SEP-2243 headers + `_meta` in params, no
-`initialize`) clients on one endpoint. The client integration guide is [`content/mcp-skill.md`](content/mcp-skill.md)
+`initialize`) clients on one endpoint. `GET /mcp` returns 405 (`Allow: POST`, `Cache-Control: no-store`) for every
+Accept value; the endpoint description is [`content/mcp-docs.md`](content/mcp-docs.md) (served at `/mcp-docs`). The
+client integration guide is [`content/mcp-skill.md`](content/mcp-skill.md)
 (served at `/mcp-skill.md` and `/mcp-skill/`); operator-facing material lives in
 [`docs/runbooks/mcp-operator.md`](docs/runbooks/mcp-operator.md) and is not published. This section is the
 agent-onboarding summary: enough to know what the surface is, what it costs, and how it fails.

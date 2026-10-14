@@ -78,7 +78,7 @@ will surprise them. Nothing here is a vanity metric because the audits map one-t
 
 ## From an agent: CLI tools
 
-An MCP client can score a CLI without the form. The [anc.dev MCP server](/mcp) exposes `score_cli`, which installs and
+An MCP client can score a CLI without the form. The [anc.dev MCP server](/mcp-docs) exposes `score_cli`, which installs and
 audits a tool live under its own per-source rate limits, and `get_scorecard`, which reads a curated or cached scorecard.
 Both take a tool name, an install command, or a GitHub URL, and `score_cli` returns the scorecard's URL.
 
