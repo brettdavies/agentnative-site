@@ -33,11 +33,16 @@ export type ExpectBlock = {
   status?: number[];
   /**
    * Pass when the response status is below this bound (exclusive). Models
-   * "the endpoint answered deliberately, not a 5xx" for a check whose only
-   * failure is a hang or a server error, where the exact success code is
-   * immaterial (a fast-fail 4xx and a documented-surface 2xx both pass).
+   * "the endpoint answered deliberately, not a 5xx". Pair with
+   * `sse_when_success` when a 2xx document is itself the failure.
    */
   status_below?: number;
+  /**
+   * When the status is 2xx, Content-Type must include text/event-stream.
+   * A document (HTML, markdown) or any other success type fails. Non-2xx
+   * statuses are left to status / status_below, so a 405 still passes.
+   */
+  sse_when_success?: boolean;
   content_type?: string;
   header_present?: string;
   header_regex?: { name: string; pattern: string };
@@ -76,6 +81,16 @@ export function assertHttp(expect: ExpectBlock, resp: ProbeResponse): AssertOutc
   if (expect.status_below !== undefined) {
     const ok = status !== null && status < expect.status_below;
     reasons.push(`status ${status} ${ok ? 'below' : 'not below'} ${expect.status_below}`);
+    if (!ok) return { ok: false, reasons };
+  }
+  if (expect.sse_when_success === true && status !== null && status >= 200 && status < 300) {
+    const ct = headers['content-type'] ?? '';
+    const ok = /text\/event-stream/i.test(ct);
+    reasons.push(
+      ok
+        ? `content-type ${JSON.stringify(ct)} is text/event-stream`
+        : `content-type ${JSON.stringify(ct)} is not text/event-stream; return 405 or an SSE stream`,
+    );
     if (!ok) return { ok: false, reasons };
   }
   if (expect.content_type !== undefined) {
