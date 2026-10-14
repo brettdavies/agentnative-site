@@ -213,33 +213,82 @@ describe('runHttp', () => {
     expect(outcome.evidence[0].body).toContain('# Site');
   });
 
-  test('mcp-get-fast-fail: a documented GET surface (fast 200) passes', async () => {
-    const fetchImpl = stubFetch(() => new Response('<html>MCP docs</html>', { status: 200 }));
-    const outcome = await runHttp(
-      check({
-        with: { path: '{mcp_endpoint}', method: 'GET', timeout: 8, expect: { status_below: 500 } },
-      }),
-      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
-    );
+  function mcpGetFastFailCheck(): WebCheck {
+    const found = loadRegistry().checks.find((item) => item.id === 'mcp-get-fast-fail');
+    if (found === undefined) throw new Error('registry is missing mcp-get-fast-fail');
+    return found;
+  }
+
+  test('mcp-get-fast-fail: the probe sends Accept text/event-stream', async () => {
+    const seen: Array<HeadersInit | undefined> = [];
+    const fetchImpl = stubFetch((_url, init) => {
+      seen.push(init?.headers);
+      return new Response('method not allowed', { status: 405, headers: { allow: 'POST' } });
+    });
+    const outcome = await runHttp(mcpGetFastFailCheck(), ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }));
     expect(outcome.status).toBe('pass');
+    expect(new Headers(seen[0]).get('accept')).toBe('text/event-stream');
+  });
+
+  test('mcp-get-fast-fail: 200 HTML is broken', async () => {
+    const fetchImpl = stubFetch(
+      () => new Response('<html>MCP docs</html>', { status: 200, headers: { 'content-type': 'text/html' } }),
+    );
+    const outcome = await runHttp(mcpGetFastFailCheck(), ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }));
+    expect(outcome.status).toBe('broken');
     expect(outcome.evidence[0].status).toBe(200);
+    expect(JSON.stringify(outcome.evidence[0].why)).toContain('return 405 or an SSE stream');
+  });
+
+  test('mcp-get-fast-fail: 200 markdown is broken', async () => {
+    const fetchImpl = stubFetch(
+      () => new Response('# MCP\n', { status: 200, headers: { 'content-type': 'text/markdown' } }),
+    );
+    const outcome = await runHttp(mcpGetFastFailCheck(), ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }));
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('mcp-get-fast-fail: 200 text/event-stream passes', async () => {
+    const fetchImpl = stubFetch(
+      () =>
+        new Response('event: message\ndata: {}\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } }),
+    );
+    const outcome = await runHttp(mcpGetFastFailCheck(), ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }));
+    expect(outcome.status).toBe('pass');
   });
 
   test('mcp-get-fast-fail: a fast-fail 405 passes', async () => {
     const fetchImpl = stubFetch(() => new Response('method not allowed', { status: 405 }));
+    const outcome = await runHttp(mcpGetFastFailCheck(), ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }));
+    expect(outcome.status).toBe('pass');
+  });
+
+  test('mcp-get-fast-fail: GET on the in-process worker passes', async () => {
+    const env = {
+      ASSETS: {
+        fetch: () =>
+          Promise.resolve(
+            new Response('<html>cached</html>', { status: 200, headers: { 'content-type': 'text/html' } }),
+          ),
+      },
+    } as unknown as Env;
+    const inProcess = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input as string | URL, init);
+      const headers = new Headers(req.headers);
+      if (!headers.has('host')) headers.set('host', new URL(req.url).host);
+      return worker.fetch(new Request(req, { headers }), env, {} as ExecutionContext);
+    }) as typeof fetch;
     const outcome = await runHttp(
-      check({ with: { path: '{mcp_endpoint}', method: 'GET', timeout: 8, expect: { status_below: 500 } } }),
-      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+      mcpGetFastFailCheck(),
+      ctx({ fetchImpl: inProcess, mcpEndpoint: 'https://anc.dev/mcp' }),
     );
     expect(outcome.status).toBe('pass');
+    expect(outcome.evidence[0].status).toBe(405);
   });
 
   test('mcp-get-fast-fail: a 5xx on GET is broken (present but misbehaves)', async () => {
     const fetchImpl = stubFetch(() => new Response('oops', { status: 502 }));
-    const outcome = await runHttp(
-      check({ with: { path: '{mcp_endpoint}', method: 'GET', timeout: 8, expect: { status_below: 500 } } }),
-      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
-    );
+    const outcome = await runHttp(mcpGetFastFailCheck(), ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }));
     expect(outcome.status).toBe('broken');
   });
 
@@ -250,7 +299,7 @@ describe('runHttp', () => {
       return Promise.reject(err);
     }) as unknown as typeof fetch;
     const outcome = await runHttp(
-      check({ with: { path: '{mcp_endpoint}', method: 'GET', timeout: 8, expect: { status_below: 500 } } }),
+      mcpGetFastFailCheck(),
       ctx({ fetchImpl: timeoutFetch, mcpEndpoint: 'https://example.com/mcp' }),
     );
     expect(outcome.status).toBe('broken');
@@ -259,10 +308,7 @@ describe('runHttp', () => {
   test('mcp-get-fast-fail: an HTTP 408 or 429 answer is an operational error, not a fast answer', async () => {
     for (const [status, reason] of RETRY_SHAPED) {
       const fetchImpl = stubFetch(() => new Response('slow down', { status, headers: { 'retry-after': '30' } }));
-      const outcome = await runHttp(
-        check({ with: { path: '{mcp_endpoint}', method: 'GET', timeout: 8, expect: { status_below: 500 } } }),
-        ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
-      );
+      const outcome = await runHttp(mcpGetFastFailCheck(), ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }));
       expect(`${status}:${outcome.status}`).toBe(`${status}:error`);
       expect(outcome.evidence[0].why).toEqual([`the target answered HTTP ${status} ${reason}; not scored`]);
     }

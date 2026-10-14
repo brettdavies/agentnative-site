@@ -27,19 +27,14 @@
 //                   text/plain rejection in src/worker/index.ts (no
 //                   JSON-RPC envelope at the pre-JSON-RPC layer).
 //
-// detectMcpGetFormat — GET /mcp endpoint ('html' | 'json' | 'markdown').
-//                      HTML wins ties because the canonical caller is a
-//                      human clicking the literal MCP URL from the
-//                      homepage. The worker short-circuits 'json' to
-//                      proxy /.well-known/mcp (above the kill switch);
-//                      'html' and 'markdown' fall through to the asset-
-//                      first dispatch which renders dist/mcp.html and
-//                      dist/mcp.md via the standard site shell.
+// GET /mcp is not negotiated. The worker answers every GET with 405
+// before this module sees it, so the gateway does not classify that
+// path into an HTML or markdown cache class.
 //
 // See docs/DESIGN.md §3.4 (Worker paragraph) + eng review A3. Site-side
 // test matrix lives in tests/worker.test.ts; /api/score q-value tests live
-// in the same file's /api/score describe block; /mcp q-value tests live
-// in tests/worker-mcp-dispatch.test.ts.
+// in the same file's /api/score describe block; POST /mcp q-value tests
+// live in tests/worker-mcp-dispatch.test.ts.
 
 import accepts from 'accepts';
 import { isScorePath } from '../shared/audit-routes';
@@ -47,7 +42,6 @@ import { isScorePath } from '../shared/audit-routes';
 export type Preference = 'html' | 'markdown';
 export type ScorePreference = 'json' | 'markdown';
 export type McpFormat = 'json' | 'sse' | false;
-export type McpGetFormat = 'html' | 'json' | 'markdown';
 
 const SITE_PREFERENCE_ORDER = ['text/html', 'text/markdown', 'text/plain'];
 
@@ -96,7 +90,6 @@ function isMarkdownEligibleAgent(request: Request): boolean {
 const SCORE_PREFERENCE_ORDER = ['application/json', 'text/markdown', 'text/html'];
 const RESULT_PREFERENCE_ORDER = ['text/html', 'text/markdown', 'text/plain', 'application/json'];
 const MCP_FORMAT_ORDER = ['application/json', 'text/event-stream'];
-const MCP_GET_ORDER = ['text/html', 'application/json', 'text/markdown'];
 
 /**
  * Shim a Workers `Request` into the shape `accepts` expects: it only reads
@@ -175,30 +168,9 @@ export function detectMcpFormat(request: Request): McpFormat {
   return match === 'text/event-stream' ? 'sse' : 'json';
 }
 
-export function detectMcpGetFormat(request: Request): McpGetFormat {
-  const acceptHeader = request.headers.get('accept');
-  // Absent / empty / `*/*` reduces to 'html' so curl with no flags and
-  // browsers both land on the rendered descriptor page. Callers who
-  // want JSON or markdown ask for it explicitly.
-  if (!acceptHeader || acceptHeader.trim() === '' || acceptHeader.includes('*/*')) {
-    return 'html';
-  }
-  // @ts-expect-error — see detectPreference above.
-  const match = accepts(shim(request)).type(MCP_GET_ORDER);
-  if (match === 'application/json') return 'json';
-  if (match === 'text/markdown') return 'markdown';
-  return 'html';
-}
-
 /** Canonical Accept the inner Worker sees after gateway classification. */
 const SITE_CLASS_ACCEPT: Record<Preference, string> = {
   html: 'text/html',
-  markdown: 'text/markdown',
-};
-
-const MCP_GET_CLASS_ACCEPT: Record<McpGetFormat, string> = {
-  html: 'text/html',
-  json: 'application/json',
   markdown: 'text/markdown',
 };
 
@@ -212,10 +184,6 @@ export function isGetOrHead(method: string): boolean {
   return upper === 'GET' || upper === 'HEAD';
 }
 
-function mcpGetPathname(pathname: string): boolean {
-  return pathname === '/mcp' || pathname === '/mcp/';
-}
-
 function applyUaClass(headers: Headers, siteClass: Preference): void {
   if (siteClass === 'markdown') {
     headers.set('user-agent', MARKDOWN_CLASS_UA);
@@ -227,9 +195,8 @@ function applyUaClass(headers: Headers, siteClass: Preference): void {
 /**
  * Uncached-gateway rewrite (KTD1 / KTD8): classify HTML vs markdown the way
  * detectPreference already does, then canonicalize Accept and UA so Workers
- * Caching keys on the class rather than raw header strings. GET /mcp uses
- * detectMcpGetFormat so the JSON 301 cannot share a cache object with the
- * HTML/markdown page.
+ * Caching keys on the class rather than raw header strings. /mcp never
+ * reaches this rewrite: the gateway serves it from the uncached entrypoint.
  */
 export function classifyGatewayRequest(request: Request): Request {
   const url = new URL(request.url);
@@ -239,18 +206,7 @@ export function classifyGatewayRequest(request: Request): Request {
   const siteClass = detectPreference(request);
   applyUaClass(headers, siteClass);
 
-  if (mcpGetPathname(url.pathname)) {
-    const mcpFormat = detectMcpGetFormat(request);
-    // detectMcpGetFormat defaults */* to HTML so a human clicking /mcp gets
-    // the page. Keep that for browser UAs. A markdown-class UA (curl) with
-    // no type preference still gets the markdown twin — otherwise the
-    // gateway would stamp text/html and freeze HTML as a skip-Worker HIT.
-    if (mcpFormat === 'html' && siteClass === 'markdown') {
-      headers.set('accept', SITE_CLASS_ACCEPT.markdown);
-    } else {
-      headers.set('accept', MCP_GET_CLASS_ACCEPT[mcpFormat]);
-    }
-  } else if (isScorePath(url.pathname)) {
+  if (isScorePath(url.pathname)) {
     // A result path has three classes: the JSON envelope is a negotiable
     // representation of the bare path, so an Accept that ranks JSON above
     // HTML must reach the route.

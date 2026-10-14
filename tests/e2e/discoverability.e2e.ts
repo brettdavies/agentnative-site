@@ -53,13 +53,14 @@ test.describe('staging MCP descriptor aliases', () => {
     expect(body.mcp_endpoint).toBe(`${STAGING_BASE}/mcp`);
   });
 
-  test('GET /mcp with a JSON Accept 301s to the canonical card', async ({ request }) => {
+  test('GET /mcp with a JSON Accept returns 405, not the card', async ({ request }) => {
     const res = await request.get(`${STAGING_BASE}/mcp`, {
       headers: { ...ACCESS_HEADERS, accept: 'application/json' },
       maxRedirects: 0,
     });
-    expect(res.status()).toBe(301);
-    expect(res.headers().location).toBe(`${STAGING_BASE}/.well-known/mcp/server-card.json`);
+    expect(res.status()).toBe(405);
+    expect(res.headers().allow).toBe('POST');
+    expect(res.headers().location).toBeUndefined();
   });
 
   test('canonical server-card.json carries mcp_endpoint, version, transport, documentation', async ({ request }) => {
@@ -159,6 +160,7 @@ test.describe('staging /llms.txt', () => {
     // Navigational links follow the deployment, so a staging reader stays
     // on staging rather than being sent to production mid-corpus.
     expect(text).toContain(`${STAGING_BASE}/mcp`);
+    expect(text).toContain(`${STAGING_BASE}/mcp-docs.md`);
     expect(text).toContain(`${STAGING_BASE}/.well-known/mcp/server-card.json`);
     expect(text).toContain(`${STAGING_BASE}/mcp-skill.md`);
     const section = text.slice(progIdx, princIdx);
@@ -181,7 +183,7 @@ test.describe('staging discovery pointers', () => {
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
   });
 
-  for (const page of ['/', '/mcp', '/mcp-skill/']) {
+  for (const page of ['/', '/mcp-docs', '/mcp-skill/']) {
     test(`${page} HTML head links every discovery document`, async ({ request }) => {
       const res = await request.get(`${STAGING_BASE}${page}`, { headers: { ...ACCESS_HEADERS, accept: 'text/html' } });
       expect(res.status()).toBe(200);
@@ -195,8 +197,10 @@ test.describe('staging discovery pointers', () => {
     });
   }
 
-  test('the /mcp markdown twin lists every discovery document, SEP-1649 card first', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/mcp`, { headers: { ...ACCESS_HEADERS, accept: 'text/markdown' } });
+  test('the /mcp-docs markdown twin lists every discovery document, SEP-1649 card first', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/mcp-docs`, {
+      headers: { ...ACCESS_HEADERS, accept: 'text/markdown' },
+    });
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('text/markdown');
     const md = await res.text();
@@ -285,6 +289,7 @@ test.describe('staging agent-readiness well-known surfaces', () => {
     const text = await res.text();
     expect(text).toContain('# Agent skills on anc.dev');
     expect(text).toContain('web-audit-fix-');
+    expect(text).toContain(`${STAGING_BASE}/mcp-docs.md`);
   });
 
   test('/.well-known/agent-skills/index.json lists the MCP skill with a digest', async ({ request }) => {

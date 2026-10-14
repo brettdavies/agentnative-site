@@ -80,7 +80,7 @@ function buildInstructionsText(siteUrl: string): string {
     FOLLOW_DISCLOSURE,
     `Spec revision is pinned to ${SPEC_REVISION}; the ${SEP_1649_CARD_PATH} server card advertises the same value, and the ` +
       'two are bumped in lockstep when the SDK is upgraded.',
-    `Connect now at ${siteUrl}/mcp (no authentication). Full recipes remain at ${docsUrl}.`,
+    `Connect now at ${siteUrl}/mcp (no authentication). GET ${siteUrl}/mcp returns 405; the endpoint description is ${siteUrl}/mcp-docs. Full recipes remain at ${docsUrl}.`,
   ].join(' ');
 }
 

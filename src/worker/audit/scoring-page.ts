@@ -140,7 +140,7 @@ async function progressPage(env: ScoringPageEnv, accepted: Accepted, refresh: bo
     <a class="btn btn--ghost" href="${auditPath()}" data-scoring-other hidden>Audit something else</a>
   </div>
   <noscript>
-    <p>This page runs a live audit with JavaScript. Without it, read the saved result at <a href="${saved}">${saved}</a>, or call the <code>${readTool}</code> MCP tool at <a href="/mcp">/mcp</a>.</p>
+    <p>This page runs a live audit with JavaScript. Without it, read the saved result at <a href="${saved}">${saved}</a>, or call the <code>${readTool}</code> MCP tool (<code>POST /mcp</code>, <a href="/mcp-docs">docs</a>).</p>
   </noscript>
   <script defer src="${SCRIPT_SRC}"></script>
 </article>`;
