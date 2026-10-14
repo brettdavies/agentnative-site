@@ -1132,15 +1132,18 @@ The card design landed on 2026-04-30 via a `/design-shotgun` → `/impeccable` �
   (sourced verbatim from `src/build/shell.mjs`'s footer literal so the OG and the rendered footer never drift).
 - No logo, no illustration, no gradient, no photography. No side-stripe borders.
 - File: `public/og-image.png`, 1200×630, under 150 KB.
-- `og:image:alt` + `twitter:image:alt` are emitted by `src/build/shell.mjs` (`OG_IMAGE_ALT` constant): "agent-native CLI
-  standard — anc.dev — seven principles for CLIs that agents can operate".
+- `og:image:alt` + `twitter:image:alt` for the site-wide card are `SITE_OG_IMAGE_ALT` in `src/shared/og-card.ts`. Scorecard
+  pages override both with a sentence that names the brand and the same rounded percent the page shows.
 
-**Future extension: per-page OG cards.** The current model uses one shared `/og-image.png` for every page. The generator
-architecture (`Playwright → Sharp → palette PNG`, deterministic, foundation-token-driven) is reusable for per-principle
-(`/p1`-`/p7`) and per-scorecard (`/scorecards/<tool>`) cards when those land. Concrete extension shape:
-`bun run og --input scripts/og/og-<kind>.html --output public/og/<slug>.png --data k=v,k=v`. The script's existing
-`[data-version]` injection seam already prefigures the data-injection step. Out of scope for v0.1; tracked in the plan's
-"Deferred to Separate Tasks" alongside favicon decoupling.
+**Per-scorecard cards.** `/score/<target>` (curated CLI, live CLI, branch, and website) points `og:image` and
+`twitter:image` at `/og/score/<target>/<key>.png`, 1200×630. The site-wide `/og-image.png` stays the default for every
+other page. The key is `s<rounded>-v<spec>` (`s80-v0.6.0`), or `pending` / `unscored`. A rescore mints a new URL, so an
+immutable edge cache of the previous PNG does not have to be purged. A key that is not the stored score 301s to the key
+that is. The Worker draws one fixed SVG (ANC mark, ANC × brand lockup, the percent, a meter) and rasterizes it with
+resvg-wasm. The brand tile is the homepage's apple-touch icon, PNG/SVG icon, or `og:image`, fetched over https inside
+a two-second budget and the web-audit host check; a miss, a timeout, an SVG that will not draw, or no homepage is a
+two-letter wordmark. Playwright remains the generator for the site-wide card only: it cannot run inside the Worker, and
+a website scorecard is not known at build time.
 
 ### 4.14 Schema.org / SEO surface
 
