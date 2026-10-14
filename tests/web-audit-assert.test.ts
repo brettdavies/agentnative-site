@@ -163,6 +163,31 @@ describe('assertHttp — semantics', () => {
     expect(reasons).toEqual([]);
   });
 
+  test('sse_when_success fails a 2xx document and passes 405 or an SSE stream', () => {
+    const expectBlock = { status_below: 500, sse_when_success: true };
+    const html = assertHttp(
+      expectBlock,
+      resp({ status: 200, headers: { 'content-type': 'text/html' }, body: '<html>' }),
+    );
+    expect(html.ok).toBe(false);
+    expect(html.reasons.join(' ')).toContain('return 405 or an SSE stream');
+    const markdown = assertHttp(
+      expectBlock,
+      resp({ status: 200, headers: { 'content-type': 'text/markdown' }, body: '# MCP' }),
+    );
+    expect(markdown.ok).toBe(false);
+    const stream = assertHttp(
+      expectBlock,
+      resp({ status: 200, headers: { 'content-type': 'text/event-stream' }, body: 'data: {}\n\n' }),
+    );
+    expect(stream.ok).toBe(true);
+    const refused = assertHttp(
+      expectBlock,
+      resp({ status: 405, headers: { 'content-type': 'text/plain', allow: 'POST' }, body: 'Method not allowed' }),
+    );
+    expect(refused.ok).toBe(true);
+  });
+
   test('status_below records a below/not-below reason', () => {
     const pass = assertHttp({ status_below: 500 }, resp({ status: 301 }));
     expect(pass.ok).toBe(true);
