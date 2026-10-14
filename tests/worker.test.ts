@@ -14,6 +14,7 @@ import { classifyGatewayRequest, detectPreference } from '../src/worker/accept';
 import { applyHeaders, isRepresentationPinned, isStagingHost, resultCacheClass } from '../src/worker/headers';
 import worker from '../src/worker/index';
 import { _resetIndexCache } from '../src/worker/score/core';
+import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
 
 function req(url: string, accept?: string, ua?: string): Request {
   const headers: Record<string, string> = {};
@@ -1071,6 +1072,11 @@ describe('worker.fetch — CN rewrite + asset lookup', () => {
 // ---------------------------------------------------------------------------
 
 describe('negotiation predicate — CN rewrite and applyHeaders agree', () => {
+  // A prior test in the same isolate can cache a real registry index. With
+  // that cache warm, /badge/rg.svg redirects before the asset lookup.
+  beforeEach(() => {
+    _resetRegistryIndexCache();
+  });
   const paths = [
     '/p3',
     '/about',
