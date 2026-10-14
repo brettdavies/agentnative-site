@@ -36,6 +36,10 @@ async function webRegistryJson(): Promise<string> {
 
 const SHELL_TEMPLATE = `<!doctype html><html><head><title>{{TITLE}}</title><meta name="description" content="{{DESCRIPTION}}" /><link rel="canonical" href="https://anc.dev{{CANONICAL_PATH}}" />
     {{ALTERNATES}}
+    <meta property="og:image" content="{{OG_IMAGE}}" />
+    <meta property="og:image:alt" content="{{OG_IMAGE_ALT}}" />
+    <meta name="twitter:image" content="{{OG_IMAGE}}" />
+    <meta name="twitter:card" content="summary_large_image" />
 </head><body><main>{{BODY}}</main><footer><a href="{{MARKDOWN_TWIN_PATH}}">This page as markdown</a></footer></body></html>`;
 
 const REGISTRY_INDEX = {
@@ -919,5 +923,23 @@ describe('review pins', () => {
     expect(html).not.toContain('<img');
     expect(html).not.toContain('onerror=1>');
     expect(html).toContain('&lt;img');
+  });
+});
+
+describe('scorecard social card', () => {
+  test('a website page and a live CLI page point og:image at the score the page shows', async () => {
+    const env = await seededEnv();
+    const web = await route('/score/anc.dev', env, { accept: 'text/html' });
+    expect(web.status).toBe(200);
+    const webHtml = await web.text();
+    const webImage = `https://anc.dev/og/score/anc.dev/s64-v${SPEC_VERSION}.png`;
+    expect(webHtml).toContain(`property="og:image" content="${webImage}"`);
+    expect(webHtml).toContain(`name="twitter:image" content="${webImage}"`);
+    expect(webHtml).toContain('summary_large_image');
+    expect(webHtml).toContain('Anc scored 64%');
+    const cli = await route('/score/ouch', env, { accept: 'text/html' });
+    const cliHtml = await cli.text();
+    expect(cliHtml).toContain(`https://anc.dev/og/score/ouch/s71-v${SPEC_VERSION}.png`);
+    expect(cliHtml).toContain('ouch scored 71%');
   });
 });

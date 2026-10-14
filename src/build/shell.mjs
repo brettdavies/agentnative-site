@@ -16,6 +16,7 @@ import {
   renderBreadcrumbNav,
 } from '../shared/breadcrumb.ts';
 import { MCP_DISCOVERY_DOCUMENTS, SEP_1649_CARD_PATH } from '../shared/mcp-discovery';
+import { SITE_OG_IMAGE_ALT, SITE_OG_IMAGE_PATH } from '../shared/og-card.ts';
 import { markdownAlternateLink } from '../shared/result-head';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
 import { loadInstallCommands } from './install-commands.mjs';
@@ -67,16 +68,6 @@ const renderNavLink = (entry, path) => {
   const attr = entry.navAttr ? ` ${entry.navAttr}` : '';
   return `          <a href="${entry.href}"${attr}${current}>${entry.label}</a>`;
 };
-
-// Alt text for the OG card. Single source-of-truth: applies to every
-// page's og:image:alt + twitter:image:alt because the site uses one
-// shared OG image (see docs/DESIGN.md §4.13). The card itself is
-// rendered from scripts/og/og.html via scripts/og/generate.ts and
-// shows MUST/SHOULD/MAY-prefixed normative statements; the alt text
-// describes the *content* of that card so screen readers and link-
-// preview crawlers convey what a sighted viewer sees.
-const OG_IMAGE_ALT =
-  'anc.dev, the agent-native standard: MUST run without prompting, SHOULD speak machine-first, MAY decorate when a TTY is open. One bar for agent-readiness, on two surfaces.';
 
 // Handed to a third-party LLM (ChatGPT/Claude/Perplexity), which can only
 // fetch a publicly reachable URL. Staging sits behind Cloudflare Access,
@@ -192,6 +183,8 @@ export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
     // agent standing on it, so the Worker-rendered shell carries the same
     // registration script the built entry pages do.
     extraScripts: [WEBMCP_SCRIPT],
+    ogImage: '{{OG_IMAGE}}',
+    ogImageAlt: '{{OG_IMAGE_ALT}}',
   });
 }
 
@@ -213,6 +206,9 @@ export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
  * @param {boolean=} args.turnstileSitekey   — true on form pages that acquire
  *     a token (`/` via isIndex, `/web-audit`). Emits the same placeholder meta.
  * @param {string=} args.baseUrl             — absolute base (default prod).
+ * @param {string=} args.ogImage             — absolute, site-relative, or a `{{OG_IMAGE}}`
+ *     placeholder. Omitted pages use the site-wide card.
+ * @param {string=} args.ogImageAlt          — alt for that card. Omitted pages use the site-wide alt.
  * @returns {string} full HTML document.
  */
 export function emitShell({
@@ -232,6 +228,8 @@ export function emitShell({
   turnstileSitekey = false,
   baseUrl,
   extraScripts = [],
+  ogImage = null,
+  ogImageAlt = null,
 }) {
   // Everything `base` feeds below is crawler-facing identity: the
   // canonical link, the OpenGraph/Twitter block, and the JSON-LD @id
@@ -241,7 +239,8 @@ export function emitShell({
   // no base at all.
   const base = canonicalBaseUrl(baseUrl);
   const canonical = base + canonicalPath;
-  const ogImage = `${base}/og-image.png`;
+  const resolvedOgImage = resolveOgImage(base, ogImage);
+  const resolvedOgAlt = ogImageAlt ?? SITE_OG_IMAGE_ALT;
 
   // One trail feeds both renderings, so the nav a reader sees and the
   // BreadcrumbList a crawler reads can never name different parents.
@@ -296,7 +295,7 @@ export function emitShell({
         headline: title,
         description,
         url: canonical,
-        image: ogImage,
+        image: resolvedOgImage,
         isPartOf: { '@id': siteId },
         author: {
           '@type': 'Person',
@@ -387,16 +386,16 @@ ${isIndex || turnstileSitekey ? `    <meta name="turnstile-sitekey" content="{{T
     <meta property="og:title" content="${esc(title)}" />
     <meta property="og:description" content="${esc(description)}" />
     <meta property="og:url" content="${canonical}" />
-    <meta property="og:image" content="${ogImage}" />
+    <meta property="og:image" content="${esc(resolvedOgImage)}" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="${OG_IMAGE_ALT}" />
+    <meta property="og:image:alt" content="${esc(resolvedOgAlt)}" />
     <meta property="og:site_name" content="${SITE_NAME}" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${esc(title)}" />
     <meta name="twitter:description" content="${esc(description)}" />
-    <meta name="twitter:image" content="${ogImage}" />
-    <meta name="twitter:image:alt" content="${OG_IMAGE_ALT}" />
+    <meta name="twitter:image" content="${esc(resolvedOgImage)}" />
+    <meta name="twitter:image:alt" content="${esc(resolvedOgAlt)}" />
 
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32" />
@@ -509,4 +508,12 @@ ${extraScripts.map((s) => `    <script src="${s}" defer></script>`).join('\n')}
   </body>
 </html>
 `;
+}
+
+/** Absolute card URL. A placeholder or an absolute URL passes through; a site path gets the canonical base. */
+function resolveOgImage(base, ogImage) {
+  if (!ogImage) return `${base}${SITE_OG_IMAGE_PATH}`;
+  if (ogImage.startsWith('{{') || ogImage.startsWith('https://') || ogImage.startsWith('http://')) return ogImage;
+  if (ogImage.startsWith('/')) return `${base}${ogImage}`;
+  return ogImage;
 }

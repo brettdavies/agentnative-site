@@ -58,7 +58,9 @@ import {
 import { escHtml } from '../../shared/esc-html';
 import { resultAlternateLinks } from '../../shared/result-head';
 import { type ReauditControl, type ResultTier, type SpineInput, shortDate } from '../../shared/result-spine';
+import { brandName, cliOgIdentity, scoreOgAlt, scoreOgKey, scoreOgUrl } from '../../shared/score-og';
 import { buildScorecardBody, buildScorecardMarkdown } from '../../shared/scorecard-format.mjs';
+import { CANONICAL_SITE_URL } from '../../shared/site-url';
 import { detectResultPreference } from '../accept';
 import {
   canonicalTargetOf,
@@ -529,6 +531,11 @@ async function respond(ctx: RenderContext, rendered: Rendered): Promise<Response
       ? `${target} scored ${pct ?? 0}% for agent-readiness against the agentnative web audit (spec ${rendered.envelope.spec_version}).`
       : `${target} scored ${pct ?? 0}% against the agent-native CLI standard (spec ${rendered.envelope.spec_version}).`;
   const body = `${await rendered.html()}${controlAssets(ctx, rendered.spine)}`;
+  const scorePct = typeof pct === 'number' ? pct : null;
+  const friendly = lane === 'web' ? ((await seedEntryFor(ctx.env, target))?.name ?? null) : null;
+  const tool = (rendered.envelope.scorecard as { tool?: { name?: string; binary?: string } } | null)?.tool;
+  const identity = lane === 'web' ? brandName(target, friendly) : cliOgIdentity(target, tool);
+  const ogKey = scoreOgKey({ scorePct, specVersion: rendered.envelope.spec_version });
   const html = substituteShell(template, {
     title,
     description,
@@ -537,6 +544,8 @@ async function respond(ctx: RenderContext, rendered: Rendered): Promise<Response
     markdownTwinPath: scoreMarkdownPath(target),
     body,
     alternatesHtml: resultAlternateLinks(target),
+    ogImage: scoreOgUrl(CANONICAL_SITE_URL, target, ogKey),
+    ogImageAlt: scoreOgAlt({ name: identity.name, lane, scorePct }),
   });
   return finish(
     ctx,
