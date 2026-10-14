@@ -33,6 +33,8 @@ export type RegistryEntry = {
   install: string;
   audit_profile?: string;
   repo?: string;
+  /** Project homepage (https only). The scorecard card fetches a logo from it. */
+  url?: string;
   // Present when the tool has a committed scorecard. The Worker uses
   // these to build the spec_version + anc_version + auditor_url triad
   // and route to /score/<slug> without fetching the scorecard JSON.
@@ -53,35 +55,36 @@ export type RegistryIndex = {
   by_owner_repo: Record<string, RegistryEntry>;
 };
 
-// Module-scope promise cache. Workers re-instantiate isolates frequently
-// so the staleness window is bounded; the singleton avoids re-parsing the
-// JSON on every request inside the same isolate. One copy serves the
-// transact endpoint, the `/api/score` GET handler, and the result route.
-let registryIndexPromise: Promise<RegistryIndex> | null = null;
+// Per-binding promise cache. Workers re-instantiate isolates frequently, so
+// the staleness window is bounded; the cache avoids re-parsing the JSON on
+// every request inside one isolate. Keyed on the env that owns ASSETS, so
+// two callers with different bindings cannot observe each other's index.
+let registryByEnv = new WeakMap<AssetEnv, Promise<RegistryIndex>>();
 
 type AssetEnv = { ASSETS: Fetcher };
 
 /**
- * Fetch + cache `/registry-index.json` for the lifetime of the isolate.
- * Resets to null on fetch failure so the next request retries.
+ * Fetch + cache `/registry-index.json` for the lifetime of this binding.
+ * A failed fetch drops the entry so the next request retries.
  */
 export function loadRegistryIndex(env: AssetEnv): Promise<RegistryIndex> {
-  if (!registryIndexPromise) {
-    registryIndexPromise = (async () => {
-      const res = await env.ASSETS.fetch(new Request('https://assets.internal/registry-index.json'));
-      if (!res.ok) throw new Error(`registry-index fetch failed (status ${res.status})`);
-      return (await res.json()) as RegistryIndex;
-    })().catch((err) => {
-      registryIndexPromise = null;
-      throw err;
-    });
-  }
-  return registryIndexPromise;
+  const cached = registryByEnv.get(env);
+  if (cached) return cached;
+  const promise = (async () => {
+    const res = await env.ASSETS.fetch(new Request('https://assets.internal/registry-index.json'));
+    if (!res.ok) throw new Error(`registry-index fetch failed (status ${res.status})`);
+    return (await res.json()) as RegistryIndex;
+  })().catch((err: unknown) => {
+    if (registryByEnv.get(env) === promise) registryByEnv.delete(env);
+    throw err;
+  });
+  registryByEnv.set(env, promise);
+  return promise;
 }
 
-/** Test-only — drop the cached registry-index promise. */
+/** Test-only — drop every cached registry-index promise. */
 export function _resetRegistryIndexCache(): void {
-  registryIndexPromise = null;
+  registryByEnv = new WeakMap();
 }
 
 /**

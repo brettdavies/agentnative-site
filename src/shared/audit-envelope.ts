@@ -121,7 +121,8 @@ function asCliScorecard(scorecard: unknown): CliScorecardLike {
   return typeof scorecard === 'object' && scorecard !== null ? (scorecard as CliScorecardLike) : {};
 }
 
-function scorePctOf(scorecard: unknown): number | undefined {
+/** The headline percent the page prints: the badge score, else the flat `score_pct`. */
+export function scorePctOf(scorecard: unknown): number | undefined {
   const pct = (scorecard as { badge?: { score_pct?: unknown }; score_pct?: unknown } | null)?.badge?.score_pct;
   if (typeof pct === 'number') return pct;
   const flat = (scorecard as { score_pct?: unknown } | null)?.score_pct;

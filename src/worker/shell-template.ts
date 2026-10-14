@@ -10,6 +10,7 @@
 // representations.
 
 import { BREADCRUMB_JSONLD_TOKEN, breadcrumbJsonLd, breadcrumbTrail, renderBreadcrumbNav } from '../shared/breadcrumb';
+import { SITE_OG_IMAGE_ALT, SITE_OG_IMAGE_PATH } from '../shared/og-card';
 import { markdownAlternateLink } from '../shared/result-head';
 import { escHtml } from '../shared/scorecard-format.mjs';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
@@ -51,11 +52,17 @@ export type ShellFields = {
    * slug where its name belongs without ever failing.
    */
   breadcrumb: string;
+  /** Absolute card URL. Omitted pages keep the site-wide card. */
+  ogImage?: string;
+  /** Alt text for that card. */
+  ogImageAlt?: string;
 };
 
 export function substituteShell(template: string, fields: ShellFields): string {
   const twin = fields.markdownTwinPath ?? `${fields.canonicalPath}.md`;
   const alternates = fields.alternatesHtml ?? markdownAlternateLink(twin);
+  const ogImage = fields.ogImage ?? `${CANONICAL_SITE_URL}${SITE_OG_IMAGE_PATH}`;
+  const ogImageAlt = fields.ogImageAlt ?? SITE_OG_IMAGE_ALT;
   // The template deferred its breadcrumb to request time, because a trail
   // cannot be split out of a path that does not exist at build time. Both
   // renderings come from one trail here, the same way a built page's do.
@@ -72,6 +79,8 @@ export function substituteShell(template: string, fields: ShellFields): string {
       .replaceAll('{{CANONICAL_PATH}}', escHtml(fields.canonicalPath))
       .replaceAll('{{MARKDOWN_TWIN_PATH}}', escHtml(twin))
       .replaceAll('{{ALTERNATES}}', alternates)
+      .replaceAll('{{OG_IMAGE}}', escHtml(ogImage))
+      .replaceAll('{{OG_IMAGE_ALT}}', escHtml(ogImageAlt))
       .replaceAll('{{BODY}}', fields.body)
   );
 }
