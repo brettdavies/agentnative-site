@@ -140,7 +140,8 @@ const SOURCE_REPOS = [
 const MACHINE_ENTRY_POINTS = [
   { href: '/llms.txt', note: 'LLM-friendly index' },
   { href: '/llms-full.txt', note: 'full spec corpus' },
-  { href: '/mcp', note: 'Streamable-HTTP MCP endpoint' },
+  { href: '/mcp', note: 'Streamable-HTTP MCP endpoint (POST)' },
+  { href: '/mcp-docs', note: 'MCP endpoint docs' },
   ...MCP_DISCOVERY_DOCUMENTS.map((d) => ({ href: d.path, note: d.label })),
   { href: '/skill.json', note: 'agent-native skill bundle' },
   { href: '/.well-known/api-catalog', note: 'RFC 9727 API catalog' },
@@ -381,6 +382,7 @@ export function emitShell({
     <link rel="describedby" href="${SEP_1649_CARD_PATH}" />
     ${DISCOVERY_HEAD_LINKS}
     <link rel="mcp" href="/mcp" />
+    <link rel="help" href="/mcp-docs" title="MCP endpoint docs" />
 ${isIndex || turnstileSitekey ? `    <meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />\n` : ''}
 
     <meta property="og:type" content="article" />
@@ -498,6 +500,7 @@ ${SOURCE_REPOS.map(
           <a href="/llms.txt">llms.txt</a>
           <a href="/llms-full.txt">llms-full.txt</a>
           <a href="/mcp-skill/">MCP</a>
+          <a href="/mcp-docs">MCP docs</a>
           <a href="${markdownTwinPath}">This page as markdown</a>
         </p>
       </div>

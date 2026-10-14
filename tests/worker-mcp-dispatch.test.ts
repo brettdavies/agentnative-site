@@ -1,5 +1,5 @@
 // POST /mcp dispatch tests for U4 — covers detectMcpFormat, the
-// MCP_ENABLED kill switch, the method gate (405 Allow: GET, POST), the
+// MCP_ENABLED kill switch, the method gate (405 Allow: POST), the
 // Accept-header gate (406 text/plain), the MCP_LIMITER -32099
 // envelope, the `mcp.request` rate_limited emission, and the response-
 // shaping invariants (no Access-Control-Allow-Origin, Cache-Control:
@@ -13,7 +13,7 @@
 // dist/_internal/mcp-catalog.json on disk.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { detectMcpFormat, detectMcpGetFormat } from '../src/worker/accept';
+import { detectMcpFormat } from '../src/worker/accept';
 import worker, { type Env } from '../src/worker/index';
 import { extractTransportErrorCode } from '../src/worker/mcp/telemetry';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
@@ -128,9 +128,9 @@ function makeEnv(opts: { enabled?: boolean; limiter?: RateStub; legacyEnabled?: 
             }),
           );
         }
-        if (path === '/mcp') {
-          // Mirrors CF Static Assets html_handling=auto-trailing-slash:
-          // GET /mcp resolves to dist/mcp.html at the asset layer.
+        if (path === '/mcp' || path === '/mcp.md' || path === '/mcp.html') {
+          // The protocol path and the retired twins must not be served from
+          // assets. A hit here means the worker fell through.
           return Promise.resolve(
             new Response(FIXTURE_MCP_HTML, {
               status: 200,
@@ -138,7 +138,15 @@ function makeEnv(opts: { enabled?: boolean; limiter?: RateStub; legacyEnabled?: 
             }),
           );
         }
-        if (path === '/mcp.md') {
+        if (path === '/mcp-docs') {
+          return Promise.resolve(
+            new Response(FIXTURE_MCP_HTML, {
+              status: 200,
+              headers: { 'content-type': 'text/html; charset=utf-8' },
+            }),
+          );
+        }
+        if (path === '/mcp-docs.md') {
           return Promise.resolve(
             new Response(FIXTURE_MCP_MD, {
               status: 200,
@@ -284,7 +292,7 @@ describe('POST /mcp — MCP_ENABLED kill switch', () => {
 
 describe('POST /mcp — method gate', () => {
   for (const method of ['PUT', 'DELETE', 'PATCH']) {
-    test(`${method} returns 405 with Allow: GET, POST`, async () => {
+    test(`${method} returns 405 with Allow: POST`, async () => {
       const env = makeEnv();
       const res = await worker.fetch(
         new Request('https://anc.dev/mcp', { method, headers: { accept: 'application/json' } }),
@@ -292,156 +300,121 @@ describe('POST /mcp — method gate', () => {
         {} as ExecutionContext,
       );
       expect(res.status).toBe(405);
-      expect(res.headers.get('allow')).toBe('GET, POST');
+      expect(res.headers.get('allow')).toBe('POST');
     });
   }
 });
 
-describe('detectMcpGetFormat', () => {
-  function req(accept?: string): Request {
-    return new Request('https://anc.dev/mcp', {
-      headers: accept !== undefined ? { accept } : {},
-    });
-  }
-
-  test('absent Accept defaults to html', () => {
-    expect(detectMcpGetFormat(req())).toBe('html');
-  });
-
-  test('empty Accept defaults to html', () => {
-    expect(detectMcpGetFormat(req(''))).toBe('html');
-  });
-
-  test('*/* defaults to html', () => {
-    expect(detectMcpGetFormat(req('*/*'))).toBe('html');
-  });
-
-  test('text/html alone returns html', () => {
-    expect(detectMcpGetFormat(req('text/html'))).toBe('html');
-  });
-
-  test('application/json alone returns json', () => {
-    expect(detectMcpGetFormat(req('application/json'))).toBe('json');
-  });
-
-  test('text/markdown alone returns markdown', () => {
-    expect(detectMcpGetFormat(req('text/markdown'))).toBe('markdown');
-  });
-
-  test('html + json with no q-values returns html (html wins ties)', () => {
-    expect(detectMcpGetFormat(req('text/html,application/json'))).toBe('html');
-  });
-
-  test('higher q on json wins', () => {
-    expect(detectMcpGetFormat(req('text/html;q=0.5,application/json;q=1.0'))).toBe('json');
-  });
-
-  test('higher q on markdown wins', () => {
-    expect(detectMcpGetFormat(req('text/html;q=0.1,text/markdown;q=1.0'))).toBe('markdown');
-  });
-
-  test('text/plain alone falls back to html', () => {
-    expect(detectMcpGetFormat(req('text/plain'))).toBe('html');
-  });
-});
-
-describe('GET /mcp — content-negotiated descriptor', () => {
-  async function getMcp(env: Env, accept?: string): Promise<Response> {
+describe('GET /mcp — protocol only', () => {
+  async function getMcp(env: Env, accept?: string, method = 'GET'): Promise<Response> {
     const headers: Record<string, string> = {};
     if (accept !== undefined) headers.accept = accept;
-    return worker.fetch(new Request('https://anc.dev/mcp', { method: 'GET', headers }), env, {} as ExecutionContext);
+    return worker.fetch(new Request('https://anc.dev/mcp', { method, headers }), env, {} as ExecutionContext);
   }
 
-  test('default (no Accept) serves dist/mcp.html via asset-first fallthrough', async () => {
-    const env = makeEnv();
-    const res = await getMcp(env);
-    expect(res.status).toBe(200);
-    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('text/html');
+  async function expectMethodNotAllowed(res: Response, origin = 'https://anc.dev'): Promise<void> {
+    expect(res.status).toBe(405);
+    expect(res.headers.get('allow')).toBe('POST');
+    expect((res.headers.get('cache-control') ?? '').toLowerCase()).toContain('no-store');
+    expect((res.headers.get('cdn-cache-control') ?? '').toLowerCase()).toBe('no-store');
+    expect((res.headers.get('cloudflare-cdn-cache-control') ?? '').toLowerCase()).toBe('no-store');
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('text/plain');
     const body = await res.text();
-    expect(body).toContain('anc.dev MCP server');
-  });
+    expect(body.toLowerCase()).toContain('method not allowed');
+    expect(body).toContain(`${origin}/mcp-docs`);
+    expect(body).not.toContain('<html');
+    expect(body).not.toContain('anc.dev MCP server');
+  }
 
-  test('curl GET /mcp with */* serves the markdown twin', async () => {
+  for (const accept of [undefined, '', '*/*', 'text/html', 'text/markdown', 'text/event-stream', 'application/json']) {
+    test(`GET Accept ${accept === undefined ? '(absent)' : JSON.stringify(accept)} returns 405`, async () => {
+      const env = makeEnv();
+      await expectMethodNotAllowed(await getMcp(env, accept));
+    });
+  }
+
+  test('HEAD returns 405 with an empty body and the same headers', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(
-      new Request('https://anc.dev/mcp', {
-        method: 'GET',
-        headers: { accept: '*/*', 'user-agent': 'curl/8.7.1' },
-      }),
-      env,
-      {} as ExecutionContext,
-    );
-    expect(res.status).toBe(200);
-    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('text/markdown');
+    const res = await getMcp(env, 'text/event-stream', 'HEAD');
+    expect(res.status).toBe(405);
+    expect(res.headers.get('allow')).toBe('POST');
+    expect((res.headers.get('cache-control') ?? '').toLowerCase()).toContain('no-store');
+    expect(await res.text()).toBe('');
   });
 
-  test('Accept: text/html serves dist/mcp.html', async () => {
+  test('GET /mcp/ returns 405, not a trailing-slash asset', async () => {
     const env = makeEnv();
-    const res = await getMcp(env, 'text/html');
-    expect(res.status).toBe(200);
-    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('text/html');
+    const res = await worker.fetch(new Request('https://anc.dev/mcp/'), env, {} as ExecutionContext);
+    await expectMethodNotAllowed(res);
   });
 
-  test('Accept: text/markdown rewrites to dist/mcp.md via detectPreference', async () => {
-    const env = makeEnv();
-    const res = await getMcp(env, 'text/markdown');
-    expect(res.status).toBe(200);
-    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('text/markdown');
-    const body = await res.text();
-    expect(body).toContain('# anc.dev MCP server');
-  });
-
-  test('Accept: application/json 301s to the canonical server-card path', async () => {
-    const env = makeEnv();
-    const res = await getMcp(env, 'application/json');
-    expect(res.status).toBe(301);
-    expect(res.headers.get('location')).toBe('https://anc.dev/.well-known/mcp/server-card.json');
-    expect(res.headers.get('access-control-allow-origin')).toBe('*');
-    expect(res.headers.get('vary')).toBe('Accept, User-Agent');
-  });
-
-  test('the JSON redirect targets the inbound request origin (env-aware)', async () => {
-    const env = makeEnv();
-    const res = await worker.fetch(
-      new Request('http://localhost:8788/mcp', {
-        method: 'GET',
-        headers: { accept: 'application/json' },
-      }),
-      env,
-      {} as ExecutionContext,
-    );
-    expect(res.status).toBe(301);
-    expect(res.headers.get('location')).toBe('http://localhost:8788/.well-known/mcp/server-card.json');
-  });
-
-  test('JSON redirect uses cacheable Cache-Control (not no-store)', async () => {
-    const env = makeEnv();
-    const res = await getMcp(env, 'application/json');
-    const cc = res.headers.get('cache-control') ?? '';
-    expect(cc).toContain('max-age=300');
-    expect(cc).not.toContain('no-store');
-  });
-
-  test('JSON redirect served even when MCP_ENABLED is off (URL identity bypass)', async () => {
+  test('GET returns 405 even when MCP_ENABLED is off', async () => {
     const env = makeEnv({ enabled: false });
-    const res = await getMcp(env, 'application/json');
-    expect(res.status).toBe(301);
-    expect(res.headers.get('location')).toBe('https://anc.dev/.well-known/mcp/server-card.json');
+    await expectMethodNotAllowed(await getMcp(env, 'text/html'));
+  });
+
+  test('the docs URL uses the request origin', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(new Request('http://localhost:8788/mcp'), env, {} as ExecutionContext);
+    await expectMethodNotAllowed(res, 'http://localhost:8788');
+  });
+
+  test('GET does not enter the cached entrypoint', async () => {
+    const seen: string[] = [];
+    const ctx = {
+      exports: {
+        Cached: {
+          fetch(request: Request) {
+            seen.push(new URL(request.url).pathname);
+            return new Response('cached-page', { status: 200, headers: { 'content-type': 'text/html' } });
+          },
+        },
+      },
+    } as unknown as ExecutionContext;
+    const res = await worker.fetch(
+      new Request('https://anc.dev/mcp', { headers: { accept: 'text/html' } }),
+      makeEnv(),
+      ctx,
+    );
+    expect(seen).toEqual([]);
+    expect(res.status).toBe(405);
+    expect(await res.text()).not.toContain('cached-page');
   });
 });
 
-describe('GET /mcp.md — markdown twin', () => {
-  test('serves dist/mcp.md asset directly', async () => {
+describe('GET /mcp-docs — endpoint description', () => {
+  test('Accept: text/html serves the docs page', async () => {
     const env = makeEnv();
     const res = await worker.fetch(
-      new Request('https://anc.dev/mcp.md', { method: 'GET' }),
+      new Request('https://anc.dev/mcp-docs', { headers: { accept: 'text/html' } }),
+      env,
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('text/html');
+    expect(await res.text()).toContain('anc.dev MCP server');
+  });
+
+  test('Accept: text/markdown serves the twin', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(
+      new Request('https://anc.dev/mcp-docs', { headers: { accept: 'text/markdown' } }),
       env,
       {} as ExecutionContext,
     );
     expect(res.status).toBe(200);
     expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('text/markdown');
-    const body = await res.text();
-    expect(body).toContain('# anc.dev MCP server');
+    expect(await res.text()).toContain('# anc.dev MCP server');
+  });
+});
+
+describe('GET /mcp.md — retired twin', () => {
+  test('301s to /mcp-docs.md', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(new Request('https://anc.dev/mcp.md'), env, {} as ExecutionContext);
+    expect(res.status).toBe(301);
+    expect(res.headers.get('location')).toBe('/mcp-docs.md');
   });
 });
 
@@ -752,11 +725,12 @@ describe('POST /mcp — response posture', () => {
     );
     // OPTIONS doesn't match the /mcp dispatch (which carves out methods
     // !== 'OPTIONS'); control flows past the branch into the asset-first
-    // dispatch. dist/mcp.html now exists as a regular content page so
-    // the asset returns it, but the response intentionally lacks the
-    // Access-Control-Allow-Origin header. A browser CORS preflight
-    // sees no ACAO and rejects the cross-origin POST — the deliberate
-    // browser-blocked posture for the JSON-RPC surface (KTD-10 / R15).
+    // dispatch. There is no asset at /mcp, so the answer is a 404, and
+    // it intentionally lacks Access-Control-Allow-Origin. A browser CORS
+    // preflight sees no ACAO and rejects the cross-origin POST — the
+    // deliberate browser-blocked posture (KTD-10 / R15).
+    expect(res.status).not.toBe(405);
+    expect(res.headers.get('allow')).toBeNull();
     expect(res.headers.get('access-control-allow-origin')).toBeNull();
   });
 });

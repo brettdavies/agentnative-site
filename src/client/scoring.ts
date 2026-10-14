@@ -395,7 +395,7 @@ class ScoringRun {
     if (!this.sitekey) {
       this.fail({
         headline: 'Live audits are not available here.',
-        bodyHtml: `Read the saved result at <a href="${scoreMarkdownPath(this.target)}">its markdown twin</a>, or call the MCP read tools at <a href="/mcp">/mcp</a>.`,
+        bodyHtml: `Read the saved result at <a href="${scoreMarkdownPath(this.target)}">its markdown twin</a>, or call the MCP read tools (<code>POST /mcp</code>, <a href="/mcp-docs">docs</a>).`,
       });
       return;
     }
