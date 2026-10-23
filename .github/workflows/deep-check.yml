@@ -82,9 +82,6 @@ permissions:
   # Needed by preflight's `gh api actions/workflows/...` calls to list prior runs.
   actions: read
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   preflight:
     name: preflight · skip if nothing new
