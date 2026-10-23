@@ -30,9 +30,6 @@ concurrency:
   group: spec-drift
   cancel-in-progress: false
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   check:
     name: check · compare watched sources with their pins
