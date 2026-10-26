@@ -195,6 +195,7 @@ the first two, `im` for the body patterns) and `results[i] = new RegExp(pattern,
 | `http-transport-timeout-error` | a timeout on a check without an explicit hang budget is an operational error | `llms-txt` |
 | `http-ua-negotiation` | the CLI and AI user-agent probes receive the markdown twin while the default probe receives HTML | `markdown-cli-ua`, `markdown-agent-ua`, `accept-markdown`, `markdown-accept-plain`, `agent-ua-reachable` |
 | `http-ua-negotiation-absent` | every markdown-shaped request receives HTML, so the twin family is absent | `markdown-cli-ua`, `markdown-agent-ua`, `accept-markdown`, `markdown-accept-plain` |
+| `llms-quality-angle-bracket-pass` | an llms.txt link whose destination sits in angle brackets and holds a space and parentheses is fetched without the brackets, and the links row passes | `llms-txt-links` |
 | `llms-quality-broken-link` | a link that answers 5xx makes the links row broken | `llms-txt-links` |
 | `llms-quality-dead-and-http-link` | an llms.txt that lists a dead link and an http link: the http link is never requested, though it would answer with a server error that would read broken, and the dead link decides the links row, which reads absent | `llms-txt-links` |
 | `llms-quality-dead-link` | a link that answers 404 makes the links row absent | `llms-txt-links` |

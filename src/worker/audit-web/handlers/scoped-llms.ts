@@ -11,11 +11,10 @@
 
 import type { WebCheck } from '../registry';
 import { guardedFetch, validatePublicUrl } from '../ssrf';
-import { redirectsToHttp, redirectsToHttpItem, timeoutMsFor } from './shared';
+import { markdownHrefs, redirectsToHttp, redirectsToHttpItem, timeoutMsFor } from './shared';
 import type { HandlerContext, ProbeOutcome, ProbeStatus } from './types';
 
 const DEFAULT_MAX_CANDIDATES = 8;
-const MARKDOWN_LINK_RE = /\]\(([^)\s]+)\)/g;
 const SITEMAP_LOC_RE = /<loc>\s*([^<\s]+)\s*<\/loc>/gi;
 
 function topLevelDir(href: string, base: string): string | null {
@@ -38,8 +37,8 @@ function topLevelDir(href: string, base: string): string | null {
  */
 export function enumerateScopedDirs(llmsBody: string, sitemapBody: string, base: string): string[] {
   const dirs = new Set<string>();
-  for (const match of llmsBody.matchAll(MARKDOWN_LINK_RE)) {
-    const dir = topLevelDir(match[1], base);
+  for (const href of markdownHrefs(llmsBody)) {
+    const dir = topLevelDir(href, base);
     if (dir) dirs.add(dir);
   }
   for (const match of sitemapBody.matchAll(SITEMAP_LOC_RE)) {
