@@ -315,6 +315,7 @@ describe('GET /mcp — protocol only', () => {
   async function expectMethodNotAllowed(res: Response, origin = 'https://anc.dev'): Promise<void> {
     expect(res.status).toBe(405);
     expect(res.headers.get('allow')).toBe('POST');
+    expect(res.headers.get('link')).toBe(`<${origin}/mcp-docs>; rel="service-doc"`);
     expect((res.headers.get('cache-control') ?? '').toLowerCase()).toContain('no-store');
     expect((res.headers.get('cdn-cache-control') ?? '').toLowerCase()).toBe('no-store');
     expect((res.headers.get('cloudflare-cdn-cache-control') ?? '').toLowerCase()).toBe('no-store');
@@ -343,11 +344,18 @@ describe('GET /mcp — protocol only', () => {
     expect(await res.text()).toBe('');
   });
 
-  test('GET /mcp/ returns 405, not a trailing-slash asset', async () => {
-    const env = makeEnv();
-    const res = await worker.fetch(new Request('https://anc.dev/mcp/'), env, {} as ExecutionContext);
-    await expectMethodNotAllowed(res);
-  });
+  for (const method of ['GET', 'HEAD', 'POST']) {
+    test(`${method} /mcp/ is a 308 to /mcp, not a trailing-slash asset`, async () => {
+      const env = makeEnv();
+      const res = await worker.fetch(
+        new Request('https://anc.dev/mcp/?x=1', { method, ...(method === 'POST' ? { body: '{}' } : {}) }),
+        env,
+        {} as ExecutionContext,
+      );
+      expect(res.status).toBe(308);
+      expect(res.headers.get('location')).toBe('https://anc.dev/mcp?x=1');
+    });
+  }
 
   test('GET returns 405 even when MCP_ENABLED is off', async () => {
     const env = makeEnv({ enabled: false });

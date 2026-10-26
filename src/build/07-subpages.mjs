@@ -130,9 +130,8 @@ export async function emitSubPages({ distDir, contentDir, themeInit }) {
     // twin source, not the composed twin.
     subPageData.push({ name, source: twinSource, title });
   }
-  // A previous build wrote the docs page at the protocol path. The Worker
-  // answers /mcp before assets, and deleting the files keeps a stale
-  // dist/ from serving the document if that order ever slips.
+  // dist/ is not cleared between builds, and /mcp is the protocol endpoint:
+  // no asset may answer it, whatever order the Worker dispatches in.
   await unlink(join(distDir, 'mcp.html')).catch(() => {});
   await unlink(join(distDir, 'mcp.md')).catch(() => {});
   return subPageData;

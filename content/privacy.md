@@ -7,7 +7,7 @@ the upper bound of what the site collects.
 
 For every request, whoever or whatever sent it, the site derives at most:
 
-- the path requested and the surface that served it (HTML page, markdown twin, or [MCP](/mcp))
+- the path requested and the surface that served it (HTML page, markdown twin, or [MCP](/mcp-docs))
 - the response status, latency, and cache state
 - a client class from a closed taxonomy: a human browser, or one of four automated classes (AI fetcher, AI crawler,
   search crawler, CLI client)

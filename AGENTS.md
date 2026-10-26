@@ -83,12 +83,12 @@ render step. Deploy via `wrangler`.
 
 `POST https://anc.dev/mcp` exposes the catalog over a streamable HTTP MCP server on spec revision `2026-07-28`, with SDK
 v2 dual-stack support for legacy (`initialize` → `tools/call`) and modern (SEP-2243 headers + `_meta` in params, no
-`initialize`) clients on one endpoint. `GET /mcp` returns 405 (`Allow: POST`, `Cache-Control: no-store`) for every
-Accept value; the endpoint description is [`content/mcp-docs.md`](content/mcp-docs.md) (served at `/mcp-docs`). The
-client integration guide is [`content/mcp-skill.md`](content/mcp-skill.md)
-(served at `/mcp-skill.md` and `/mcp-skill/`); operator-facing material lives in
-[`docs/runbooks/mcp-operator.md`](docs/runbooks/mcp-operator.md) and is not published. This section is the
-agent-onboarding summary: enough to know what the surface is, what it costs, and how it fails.
+`initialize`) clients on one endpoint. `GET /mcp` returns 405 (`Allow: POST`, `Cache-Control: no-store`, a
+`rel="service-doc"` link to `/mcp-docs`) for every Accept value, and `/mcp/` is a 308 to `/mcp` for every method but
+OPTIONS; the endpoint description is [`content/mcp-docs.md`](content/mcp-docs.md) (served at `/mcp-docs`). The client
+integration guide is [`content/mcp-skill.md`](content/mcp-skill.md) (served at `/mcp-skill.md` and `/mcp-skill/`);
+operator-facing material lives in [`docs/runbooks/mcp-operator.md`](docs/runbooks/mcp-operator.md) and is not published.
+This section is the agent-onboarding summary: enough to know what the surface is, what it costs, and how it fails.
 [`docs/runbooks/mcp-wire-protocol.md`](docs/runbooks/mcp-wire-protocol.md) is the wire-level reference behind it: the
 per-lane error-code table with the producing layer and delivery for each code, the SEP-2243 header mirror, the `_meta`
 envelope, cache-hint scope, and the GET posture. Read it before changing anything on the wire or bumping the revision.
@@ -172,9 +172,10 @@ the JSON-RPC envelope itself is successful. Transport-level failures return JSON
 (`-32099` for rate-limit breach at either limiter; `-32022` with `data.supported: ["2026-07-28"]` when the disabled
 legacy lane rejects a request) or at HTTP 400 (`-32700` for malformed JSON with `id: null`; `-32600` for an invalid
 batch; `-32020` for a header mismatch; `-32022` with `data.requested` for an unsupported version claim). The
-`406 Not Acceptable` Accept-header rejection is the one transport error that bypasses the JSON-RPC envelope. **Cache
-state is data, not failure**: a `get_scorecard` miss is `isError: false` with `found: false, next_tool`, and a
-`score_cli` hit is `isError: false` with `audited: false, next_tool`.
+`405 Method Not Allowed` for any method but POST and the `406 Not Acceptable` Accept-header rejection are the transport
+errors that bypass the JSON-RPC envelope. **Cache state is data, not failure**: a `get_scorecard` miss is
+`isError: false` with `found: false, next_tool`, and a `score_cli` hit is `isError: false` with
+`audited: false, next_tool`.
 
 **Origin posture: server-to-agent, no CORS.** `POST /mcp` returns no `Access-Control-Allow-Origin` header. MCP clients
 are agent runtimes (Claude Code, Codex, Cursor, custom CLIs) that do not issue CORS preflights. Browser-origin POSTs

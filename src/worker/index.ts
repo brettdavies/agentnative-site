@@ -119,10 +119,12 @@ function serveSite(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   );
 }
 
-/** The streamable-HTTP endpoint. `/mcp/server-card` and `/mcp-docs` are other paths. */
+/** The streamable-HTTP endpoint and its trailing-slash alias. `/mcp/server-card` and `/mcp-docs` are other paths. */
 function isMcpProtocolPath(pathname: string): boolean {
-  return pathname === '/mcp' || pathname === '/mcp/';
+  return pathname === '/mcp' || pathname === MCP_SLASH_ALIAS;
 }
+
+const MCP_SLASH_ALIAS = '/mcp/';
 
 // Cached inner fetch entrypoint (KTD1). wrangler.jsonc `exports.Cached` is
 // the skip-Worker HIT target; default `fetch` is the uncached gateway.
@@ -482,6 +484,7 @@ function mcpProtocolMethodNotAllowed(request: Request): Response {
     status: 405,
     headers: {
       Allow: 'POST',
+      Link: `<${origin}${MCP_DOCS_PATH}>; rel="service-doc"`,
       'content-type': 'text/plain; charset=utf-8',
       'cache-control': 'no-store',
       'cdn-cache-control': 'no-store',
@@ -658,7 +661,15 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   //      JSON-RPC, not browser-to-server (KTD-10 / R15). When the
   //      client negotiated JSON, SSE bodies from the legacy transport
   //      are coerced to application/json (coerceMcpJsonResponse).
-  if (isMcpProtocolPath(pathname) && request.method !== 'OPTIONS') {
+  // The trailing-slash form names the same endpoint. 308 keeps a POST and its
+  // body, so a client configured with `/mcp/` still reaches the server.
+  if (pathname === MCP_SLASH_ALIAS && request.method !== 'OPTIONS') {
+    const target = new URL(request.url);
+    target.pathname = '/mcp';
+    return new Response(null, { status: 308, headers: { Location: target.toString(), 'cache-control': 'no-store' } });
+  }
+
+  if (pathname === '/mcp' && request.method !== 'OPTIONS') {
     // GET/HEAD are 405 even when the kill switch is off, so a disabled
     // surface cannot fall through to a cached document.
     if (request.method === 'GET' || request.method === 'HEAD') {
@@ -1100,9 +1111,8 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const started = Date.now();
     const redirected = canonicalHostRedirect(request);
-    // /mcp skips the cached entrypoint. A previous version stored an HTML
-    // or markdown document for GET /mcp, and a skip-Worker HIT would keep
-    // serving that page after this handler started returning 405.
+    // The protocol endpoint never enters the cached entrypoint: a skip-Worker
+    // HIT replays a stored GET response, and /mcp answers GET with 405.
     const response =
       redirected ??
       (isMcpProtocolPath(new URL(request.url).pathname)
