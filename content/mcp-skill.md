@@ -460,9 +460,9 @@ roll. Both ceilings are pre-data placeholders sized from parity with sister depl
 
 For clients that need the protocol details.
 
-**Endpoint.** `POST https://anc.dev/mcp`. `GET` is also serviceable: it returns the human landing page, or a permanent
-redirect to the SEP-1649 server card under a JSON `Accept`. Every other method returns `405 Method Not Allowed`
-advertising `Allow: GET, POST`. No authentication.
+**Endpoint.** `POST https://anc.dev/mcp`. `GET` returns `405 Method Not Allowed` with `Allow: POST` and
+`Cache-Control: no-store`, for every `Accept` value. The human-readable description is [/mcp-docs](/mcp-docs). Every
+other method returns `405` advertising `Allow: POST`. `OPTIONS` is not handled. No authentication.
 
 **Transport.** Streamable HTTP per MCP spec revision `2026-07-28`. Legacy clients send `initialize` with client
 `protocolVersion=2025-06-18`; modern clients use `MCP-Protocol-Version: 2026-07-28`, `Mcp-Method`, optional `Mcp-Name`

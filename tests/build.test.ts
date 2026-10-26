@@ -516,6 +516,7 @@ describe('emitShell — OG image alt text', () => {
       '/llms.txt',
       '/llms-full.txt',
       '/mcp',
+      '/mcp-docs',
       '/.well-known/mcp/server-card.json',
       '/mcp/server-card',
       '/.well-known/ai-catalog.json',

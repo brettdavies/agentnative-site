@@ -305,13 +305,17 @@ describe('toolsFor(pathname)', () => {
 
   test('orientation pages keep the three URL tools only', () => {
     expect(names('/p1')).toEqual(['get_principle_url', 'get_llms_index', 'get_mcp_endpoint']);
-    expect(names('/mcp')).toEqual(names('/p1'));
+    expect(names('/mcp-docs')).toEqual(names('/p1'));
+    expect(names('/mcp')).toEqual([]);
   });
 
   test('get_mcp_endpoint names every discovery document on the page origin, SEP-1649 card first', async () => {
-    const tool = toolsFor('/mcp', { origin: 'https://staging.example' }).find((t) => t.name === 'get_mcp_endpoint');
+    const tool = toolsFor('/mcp-docs', { origin: 'https://staging.example' }).find(
+      (t) => t.name === 'get_mcp_endpoint',
+    );
     const answer = String(await tool?.execute({}));
     expect(answer).toContain('MCP endpoint: https://staging.example/mcp');
+    expect(answer).toContain('Endpoint docs: https://staging.example/mcp-docs');
     const lines = MCP_DISCOVERY_DOCUMENTS.map((d) => `${d.label}: https://staging.example${d.path}`);
     const positions = lines.map((line) => answer.split('\n').indexOf(line));
     expect(positions.every((index) => index >= 0)).toBe(true);
@@ -332,7 +336,7 @@ describe('toolsFor(pathname)', () => {
 
   test('names, descriptions, and schemas stay inside the WebMCP caps', () => {
     const seen = new Set<string>();
-    for (const path of ['/', '/audit', '/score/anc.dev', '/p1', '/mcp']) {
+    for (const path of ['/', '/audit', '/score/anc.dev', '/p1', '/mcp-docs']) {
       for (const tool of toolsFor(path, { origin: 'https://anc.dev' })) {
         expect(tool.name.length).toBeLessThanOrEqual(30);
         expect(tool.description.length).toBeLessThanOrEqual(500);

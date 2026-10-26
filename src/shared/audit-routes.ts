@@ -59,6 +59,10 @@ export const API_SCORE_PATH = '/api/score';
 export const RETIRED_REDIRECTS: Readonly<Record<string, string>> = {
   '/web-audit': `${AUDIT_PATH}?lane=web`,
   '/web-audit.md': `${AUDIT_PATH}.md`,
+  // The endpoint description used to be served at /mcp. The protocol path
+  // now answers 405; these twins move to the docs page.
+  '/mcp.md': '/mcp-docs.md',
+  '/mcp.html': '/mcp-docs',
 };
 
 /** The retired website result path; its host is the target the result route serves. */

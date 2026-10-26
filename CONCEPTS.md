@@ -316,8 +316,8 @@ its pin and opens one issue per drifted source.
 ### MCP endpoint
 
 The site's Model Context Protocol server at `/mcp`: a streamable-HTTP, JSON-RPC surface that exposes the anc100 registry
-and scoring tools to agents. GET returns the landing page (or, under a JSON `Accept` header, a permanent redirect to the
-MCP server card); POST carries JSON-RPC. Unauthenticated by design, because the catalog is public.
+and scoring tools to agents. GET returns 405 Method Not Allowed (`Allow: POST`) for every Accept value. The endpoint
+description is `/mcp-docs`. POST carries JSON-RPC. Unauthenticated by design, because the catalog is public.
 
 ### MCP era
 

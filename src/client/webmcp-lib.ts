@@ -76,7 +76,7 @@ export function isResultPath(pathname: string): boolean {
 
 export function isOrientationPath(pathname: string): boolean {
   const p = normalizePath(pathname);
-  return p === '/mcp' || /^\/p[1-8]$/.test(p) || isHomePath(p);
+  return p === '/mcp-docs' || /^\/p[1-8]$/.test(p) || isHomePath(p);
 }
 
 export function capExecute(text: string): string {

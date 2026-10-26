@@ -45,7 +45,7 @@ imperfect capability always beats withdrawing it.
 
 ## From an agent: websites
 
-An MCP client can run the audit without the form. The [anc.dev MCP server](/mcp) exposes four web tools:
+An MCP client can run the audit without the form. The [anc.dev MCP server](/mcp-docs) exposes four web tools:
 
 - `audit_website(url, site_type?, public_listing?, follow_declarations?)`: run a fresh audit; every observed non-passing
   row carries inline remediation with a copy-paste prompt. By default the audit also contacts the hosts the site

@@ -728,6 +728,43 @@ export const SCENARIOS: Record<string, Scenario> = {
     ['mcp-get-fast-fail'],
     [...baseline(), ...cardSurface(), get(MCP_PATH, TIMEOUT), ...noModernLane(), ...legacyMcp()],
   ),
+  'http-get-fast-fail-html-broken': scenario(
+    'a GET with Accept text/event-stream that returns 200 HTML is broken',
+    ['mcp-get-fast-fail'],
+    [
+      ...baseline(),
+      ...cardSurface(),
+      get(MCP_PATH, html('<html>MCP docs</html>'), { accept: 'text/event-stream' }),
+      ...noModernLane(),
+      ...legacyMcp(),
+    ],
+  ),
+  'http-get-fast-fail-markdown-broken': scenario(
+    'a GET with Accept text/event-stream that returns 200 markdown is broken',
+    ['mcp-get-fast-fail'],
+    [
+      ...baseline(),
+      ...cardSurface(),
+      get(MCP_PATH, md('# MCP\n'), { accept: 'text/event-stream' }),
+      ...noModernLane(),
+      ...legacyMcp(),
+    ],
+  ),
+  'http-get-fast-fail-sse-pass': scenario(
+    'a GET that returns 200 text/event-stream passes',
+    ['mcp-get-fast-fail'],
+    [
+      ...baseline(),
+      ...cardSurface(),
+      get(
+        MCP_PATH,
+        res(200, { 'content-type': 'text/event-stream' }, 'event: message\ndata: {}\n\n'),
+        { accept: 'text/event-stream' },
+      ),
+      ...noModernLane(),
+      ...legacyMcp(),
+    ],
+  ),
   'http-header-regex-pass': scenario('Link and Vary header assertions pass on the root headers', ['link-headers', 'markdown-vary'], [
     ...negotiatedRoot(),
   ]),

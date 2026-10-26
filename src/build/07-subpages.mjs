@@ -18,7 +18,7 @@
 // this list, src/build/10-sitemap.mjs's hardcoded paths, and src/build/shell.mjs's
 // nav. See docs/solutions/conventions/new-content-page-requires-three-registrations-2026-05-21.md.
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { renderAuditForm } from './audit-form.mjs';
 import { extractDescription, extractTitle } from './content.mjs';
@@ -70,15 +70,10 @@ export const SUB_PAGES = [
   // facing material lives in the in-repo runbook at
   // `docs/runbooks/mcp-operator.md` and is not published.
   { name: 'mcp-skill', breadcrumb: 'MCP skill' },
-  // /mcp renders as a regular content page (HTML + MD twin) so a
-  // human or crawler clicking the literal endpoint URL lands on a
-  // shell-wrapped descriptor — same header, theme toggle, footer as
-  // every other content page. The Worker intercepts /mcp for POST
-  // (JSON-RPC) and for GET + Accept: application/json (proxies
-  // /.well-known/mcp). Other GET methods fall through to the asset-
-  // first dispatch which serves dist/mcp.html or the .md twin via
-  // the site's standard content negotiation.
-  { name: 'mcp', breadcrumb: 'MCP' },
+  // /mcp is the protocol endpoint (POST JSON-RPC, GET 405). This page
+  // is the human and agent description of that endpoint, with the same
+  // HTML and markdown negotiation as every other content page.
+  { name: 'mcp-docs', breadcrumb: 'MCP' },
 ];
 
 // The HTML page gets the widget markup; the twin (and llms-full.txt) get
@@ -122,7 +117,7 @@ export async function emitSubPages({ distDir, contentDir, themeInit }) {
         // Every subpage renders inside the shared reading treatment.
         bodyHtml: `<article class="container doc">${html}</article>`,
         themeInitJs: themeInit,
-        extraScripts: extraScripts ?? (name === 'mcp' ? [WEBMCP_SCRIPT] : []),
+        extraScripts: extraScripts ?? (name === 'mcp-docs' ? [WEBMCP_SCRIPT] : []),
         turnstileSitekey: name === 'web-audit' || name === 'audit',
       }),
     );
@@ -135,5 +130,9 @@ export async function emitSubPages({ distDir, contentDir, themeInit }) {
     // twin source, not the composed twin.
     subPageData.push({ name, source: twinSource, title });
   }
+  // dist/ is not cleared between builds, and /mcp is the protocol endpoint:
+  // no asset may answer it, whatever order the Worker dispatches in.
+  await unlink(join(distDir, 'mcp.html')).catch(() => {});
+  await unlink(join(distDir, 'mcp.md')).catch(() => {});
   return subPageData;
 }

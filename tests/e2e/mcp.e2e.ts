@@ -422,13 +422,28 @@ test.describe('staging /mcp — gate posture', () => {
     expect(text).not.toContain('jsonrpc');
   });
 
-  test('GET /mcp serves the endpoint landing page as HTML', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/mcp`, { headers: ACCESS_HEADERS });
+  for (const accept of ['text/event-stream', 'text/html', 'text/markdown', 'application/json', '*/*']) {
+    test(`GET /mcp Accept ${accept} returns 405 Allow POST`, async ({ request }) => {
+      const res = await request.get(`${STAGING_BASE}/mcp`, {
+        headers: { ...ACCESS_HEADERS, accept },
+        maxRedirects: 0,
+      });
+      expect(res.status()).toBe(405);
+      expect(res.headers().allow).toBe('POST');
+      expect(res.headers()['cache-control'] ?? '').toContain('no-store');
+      const text = await res.text();
+      expect(text).toContain(`${STAGING_BASE}/mcp-docs`);
+      expect(text).not.toContain('<html');
+    });
+  }
+
+  test('GET /mcp-docs serves the endpoint description', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/mcp-docs`, {
+      headers: { ...ACCESS_HEADERS, accept: 'text/html' },
+    });
     expect(res.status()).toBe(200);
-    const ct = res.headers()['content-type'] ?? '';
-    expect(ct).toContain('text/html');
-    const text = await res.text();
-    expect(text).toContain('anc.dev MCP server');
+    expect(res.headers()['content-type'] ?? '').toContain('text/html');
+    expect(await res.text()).toContain('anc.dev MCP server');
   });
 
   test('response carries no Access-Control-Allow-Origin header (KTD-10 server-to-agent posture)', async ({

@@ -29,7 +29,7 @@ import {
   MCP_SERVER_CARD_TYPE,
   SEP_1649_CARD_SEED_PATH,
 } from '../shared/mcp-discovery';
-import { classifyGatewayRequest, detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
+import { classifyGatewayRequest, detectMcpFormat, detectPreference } from './accept';
 import { type AuditApiEnv, handleAuditApi, isAuditApiPath } from './audit/api';
 import type { AuditJob } from './audit/job';
 import { badgeAliasRedirect, handleResultRoute, type ResultEnv } from './audit/result';
@@ -102,21 +102,35 @@ export { WebRescoreWorkflow } from './audit-web/rescore-workflow';
 // durable_objects sections.
 export { Sandbox } from './score/do';
 
+/**
+ * Serve one request with the request-scoped log context entered here.
+ * `Cached.fetch` is an RPC hop that resets async context, so the store
+ * has to be entered on this side of that hop. The uncached `/mcp` bypass
+ * calls the same function so a protocol response is logged the same way
+ * without entering the cached entrypoint.
+ */
+function serveSite(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  return runWithRequestContext({}, () =>
+    runWithHitMinPurge(ctx, async () => {
+      const response = await handleSiteRequest(request, env, ctx);
+      await flushHitMinPurge();
+      return response;
+    }),
+  );
+}
+
+/** The streamable-HTTP endpoint and its trailing-slash alias. `/mcp/server-card` and `/mcp-docs` are other paths. */
+function isMcpProtocolPath(pathname: string): boolean {
+  return pathname === '/mcp' || pathname === MCP_SLASH_ALIAS;
+}
+
+const MCP_SLASH_ALIAS = '/mcp/';
+
 // Cached inner fetch entrypoint (KTD1). wrangler.jsonc `exports.Cached` is
 // the skip-Worker HIT target; default `fetch` is the uncached gateway.
 export class Cached extends WorkerEntrypoint<Env> {
   async fetch(request: Request): Promise<Response> {
-    // The gateway reaches this entrypoint over ctx.exports.Cached.fetch, an
-    // RPC hop that resets the async context: a store entered in
-    // default.fetch reads undefined on this side, so the request context
-    // is entered here, where the emit sites below can see it.
-    return runWithRequestContext({}, () =>
-      runWithHitMinPurge(this.ctx, async () => {
-        const response = await handleSiteRequest(request, this.env, this.ctx);
-        await flushHitMinPurge();
-        return response;
-      }),
-    );
+    return serveSite(request, this.env, this.ctx);
   }
 
   /** Purge HIT-min objects by Cache-Tag. Scoped to this cached entrypoint. */
@@ -278,8 +292,8 @@ function rewriteMcpDescriptorUrls(data: Record<string, unknown>, origin: string)
  * inbound request's origin. Seed: dist/_internal/mcp-server-card.json.
  *
  * Served at GET /.well-known/mcp/server-card.json. The pointer aliases
- * (/.well-known/mcp, /mcp.json, /.well-known/mcp.json) and GET /mcp with
- * Accept: application/json 301 to it.
+ * (/.well-known/mcp, /mcp.json, /.well-known/mcp.json) 301 to it.
+ * GET /mcp does not: that path is the protocol endpoint and answers 405.
  */
 async function buildMcpDescriptorJsonBody(request: Request, env: Env): Promise<string | null> {
   const seedUrl = new URL(request.url);
@@ -389,10 +403,9 @@ function rewriteApiCatalog(data: Record<string, unknown>, origin: string): void 
 }
 
 /**
- * 301 a legacy descriptor alias (or `GET /mcp` with a JSON Accept) to
- * the canonical SEP-1649 card path. Permanent + cacheable: the aliases
- * are pointers, and the canonical-plus-redirect-aliases audit rule
- * credits only 301/308.
+ * 301 a legacy descriptor alias to the canonical SEP-1649 card path.
+ * Permanent + cacheable: the aliases are pointers, and the
+ * canonical-plus-redirect-aliases audit rule credits only 301/308.
  */
 function mcpDescriptorRedirect(request: Request): Response {
   const origin = new URL(request.url).origin;
@@ -447,6 +460,35 @@ function discoveryGetOnly405(): Response {
       Allow: 'GET',
       'content-type': 'text/plain; charset=utf-8',
       'cache-control': 'no-store',
+    },
+  });
+}
+
+/** Human-readable description of the protocol endpoint. Not served at /mcp. */
+const MCP_DOCS_PATH = '/mcp-docs';
+
+/**
+ * Streamable HTTP on a stateless server: GET is 405, not an SSE stream
+ * and not a document. OPTIONS is not handled (it falls through and 404s
+ * with no CORS headers), so Allow names POST only. no-store on every
+ * cache header so a previously cached HTML or markdown page cannot stay
+ * fresh at this URL.
+ */
+function mcpProtocolMethodNotAllowed(request: Request): Response {
+  const origin = new URL(request.url).origin;
+  const body =
+    request.method === 'HEAD'
+      ? null
+      : `Method not allowed. ${origin}/mcp accepts POST.\nDocs: ${origin}${MCP_DOCS_PATH}\n`;
+  return new Response(body, {
+    status: 405,
+    headers: {
+      Allow: 'POST',
+      Link: `<${origin}${MCP_DOCS_PATH}>; rel="service-doc"`,
+      'content-type': 'text/plain; charset=utf-8',
+      'cache-control': 'no-store',
+      'cdn-cache-control': 'no-store',
+      'cloudflare-cdn-cache-control': 'no-store',
     },
   });
 }
@@ -579,24 +621,23 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
     return discoveryCatalogResponse(body, `${AI_CATALOG_TYPE}; charset=utf-8`);
   }
 
-  // /mcp — streamable HTTP MCP server (POST) plus a content-negotiated
-  // GET surface. Sits above /_internal/ interception and the asset
-  // fetch so the entry-point ordering keeps the /mcp branch in front
-  // of the asset-first dispatch (KTD-10 of the MCP endpoint plan).
+  // /mcp — streamable HTTP MCP server. Protocol only: POST is JSON-RPC,
+  // GET and HEAD are 405 for every Accept. The human page is /mcp-docs.
+  // Sits above /_internal/ interception and the asset fetch so no static
+  // file at this path can answer (KTD-10 of the MCP endpoint plan). The
+  // gateway also skips the cached entrypoint for this path, so a HIT
+  // from the previous document cannot be replayed.
   //
-  // GET dispatch:
-  //   - Accept: application/json → 301 to the canonical server-card
-  //     path (the URL identity documents itself even when the JSON-RPC
-  //     handler is offline).
-  //   - Accept: text/html or text/markdown → no early return; control
-  //     flows past this branch into the asset-first dispatch, which
-  //     serves dist/mcp.html (and the .md twin via the standard
-  //     detectPreference content negotiation).
+  // OPTIONS deliberately falls through to the asset-first dispatch
+  // below. There is no asset here, so the answer is 404 with no
+  // Access-Control-Allow-Origin. That is the browser-blocked posture
+  // for cross-origin preflights (KTD-10 / R15). MCP clients are agent
+  // runtimes that never issue OPTIONS.
   //
   // POST dispatch enforces, in order:
   //
   //   1. MCP_ENABLED kill switch — 503 Retry-After when disabled.
-  //   2. Method check — non-POST returns 405 Allow: GET, POST.
+  //   2. Method check — non-POST returns 405 Allow: POST.
   //   3. Accept-header check — neither MIME acceptable returns 406
   //      text/plain (no JSON-RPC envelope at the pre-JSON-RPC layer).
   //   4. MCP_LEGACY_ENABLED legacy gate — when the legacy lane is
@@ -620,199 +661,108 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   //      JSON-RPC, not browser-to-server (KTD-10 / R15). When the
   //      client negotiated JSON, SSE bodies from the legacy transport
   //      are coerced to application/json (coerceMcpJsonResponse).
+  // The trailing-slash form names the same endpoint. 308 keeps a POST and its
+  // body, so a client configured with `/mcp/` still reaches the server.
+  if (pathname === MCP_SLASH_ALIAS && request.method !== 'OPTIONS') {
+    const target = new URL(request.url);
+    target.pathname = '/mcp';
+    return new Response(null, { status: 308, headers: { Location: target.toString(), 'cache-control': 'no-store' } });
+  }
+
   if (pathname === '/mcp' && request.method !== 'OPTIONS') {
-    // OPTIONS deliberately falls through to the asset-first dispatch
-    // below — CF Static Assets returns 404, which is the deliberate
-    // browser-blocked posture for cross-origin preflights (KTD-10 /
-    // R15). MCP clients are agent runtimes that never issue OPTIONS,
-    // so this is the right shape.
+    // GET/HEAD are 405 even when the kill switch is off, so a disabled
+    // surface cannot fall through to a cached document.
+    if (request.method === 'GET' || request.method === 'HEAD') {
+      return mcpProtocolMethodNotAllowed(request);
+    }
 
-    if (request.method === 'GET') {
-      const getFormat = detectMcpGetFormat(request);
-      if (getFormat === 'json') {
-        return mcpDescriptorRedirect(request);
-      }
-      // 'html' or 'markdown' — control flows past this branch into
-      // the asset-first dispatch below. dist/mcp.html ships from
-      // emitSubPages with the full site shell (header, theme toggle,
-      // footer); detectPreference rewrites to dist/mcp.md when the
-      // caller prefers text/markdown.
-    } else {
-      // Step 1: MCP_ENABLED kill switch.
-      if (env.MCP_ENABLED !== 'true') {
-        const host = new URL(request.url).host;
-        const disabled = new Response('mcp is currently disabled by the operator\n', {
-          status: 503,
-          headers: {
-            'content-type': 'text/plain; charset=utf-8',
-            'retry-after': '3600',
-            'cache-control': 'no-store',
-          },
-        });
-        logMcpRequest({
-          era: 'legacy',
-          method: null,
-          name: null,
-          client_name: null,
-          protocol_version: null,
-          host,
-          response_format: servedResponseFormat(disabled),
-          outcome: 'disabled',
-          error_code: null,
-          duration_ms: 0,
-        });
-        return disabled;
-      }
-
-      // Step 2: method check. GET handled above; POST falls through
-      // to the JSON-RPC pipeline; PUT/DELETE/PATCH lands here with
-      // Allow advertising the two serviceable methods.
-      if (request.method !== 'POST') {
-        return new Response('method not allowed\n', {
-          status: 405,
-          headers: {
-            Allow: 'GET, POST',
-            'content-type': 'text/plain; charset=utf-8',
-            'cache-control': 'no-store',
-          },
-        });
-      }
-
-      // Step 3: Accept-header check.
-      const format = detectMcpFormat(request);
+    if (env.MCP_ENABLED !== 'true') {
       const host = new URL(request.url).host;
-      if (format === false) {
-        // The 406 rejection happens before any JSON-RPC parsing so the
-        // body is plain text without a `jsonrpc`/`id`/`error` envelope.
-        const rejected = new Response(
-          'POST /mcp serves application/json or text/event-stream; the request Accept header allowed neither.\n',
-          {
-            status: 406,
-            headers: {
-              'content-type': 'text/plain; charset=utf-8',
-              'cache-control': 'no-store',
-            },
-          },
-        );
-        logMcpRequest({
-          era: 'legacy',
-          method: null,
-          name: null,
-          client_name: null,
-          protocol_version: null,
-          host,
-          response_format: servedResponseFormat(rejected),
-          outcome: 'accept_rejected',
-          error_code: null,
-          duration_ms: 0,
-        });
-        return rejected;
-      }
-
-      const started = Date.now();
-      let parsedBody: unknown;
-      try {
-        parsedBody = await request.clone().json();
-      } catch {
-        parsedBody = undefined;
-      }
-
-      const legacyEra = await isLegacyRequest(request, parsedBody);
-      const era: McpEra = legacyEra ? 'legacy' : 'modern';
-      const legacyMode = resolveLegacyMode(env as McpEnv);
-
-      // Step 4: MCP_LEGACY_ENABLED legacy gate. Unparseable bodies
-      // classify as legacy-era by default, so the gate additionally
-      // requires a parsed body: malformed JSON falls through to the
-      // SDK's -32700 parse error instead of a misleading era reject.
-      if (legacyMode === 'reject' && legacyEra && parsedBody !== undefined) {
-        const rejected = jsonRpcError(
-          -32022,
-          `legacy MCP requests are disabled; use MCP ${SPEC_REVISION}`,
-          jsonRpcId(parsedBody),
-          {
-            supported: [SPEC_REVISION],
-          },
-        );
-        logMcpRequest({
-          era,
-          method: headerMcpMethod(request) ?? classifyRpcMethod(parsedBody),
-          name: headerMcpName(request) ?? classifyToolName(parsedBody),
-          client_name: extractClientNameFromBody(parsedBody),
-          protocol_version: extractProtocolVersion(parsedBody, request),
-          host,
-          response_format: servedResponseFormat(rejected),
-          outcome: 'legacy_rejected',
-          error_code: -32022,
-          duration_ms: Date.now() - started,
-        });
-        return rejected;
-      }
-
-      // Step 5: MCP_LIMITER gate (era-aware read tier).
-      let gateResult: 'passed' | 'rate_limited' = 'passed';
-      if (env.MCP_LIMITER) {
-        const catalog = await loadCatalog(env as McpEnv);
-        const ip = request.headers.get('cf-connecting-ip') ?? 'anon';
-        const key = buildMcpRateLimitKey({
-          era,
-          ip,
-          mcpName: headerMcpName(request),
-          catalog,
-        });
-        const { success } = await env.MCP_LIMITER.limit({ key });
-        if (!success) gateResult = 'rate_limited';
-      }
-      if (gateResult === 'rate_limited') {
-        const limited = jsonRpcError(-32099, 'rate limit exceeded', jsonRpcId(parsedBody));
-        logMcpRequest({
-          era,
-          method: headerMcpMethod(request) ?? (legacyEra ? 'tools/call' : null),
-          name: headerMcpName(request),
-          client_name: extractClientNameFromBody(parsedBody),
-          protocol_version: extractProtocolVersion(parsedBody, request),
-          host,
-          response_format: servedResponseFormat(limited),
-          outcome: 'rate_limited',
-          error_code: -32099,
-          duration_ms: Date.now() - started,
-        });
-        return limited;
-      }
-
-      // Step 6: SDK Accept-rewrite shim.
-      const sdkHeaders = new Headers(request.headers);
-      sdkHeaders.set('accept', 'application/json, text/event-stream');
-      const sdkRequest = new Request(request, { headers: sdkHeaders });
-
-      // Step 7: warmed catalog + module-scoped handler.
-      await loadCatalog(env as McpEnv);
-      getWarmCatalog(); // assert warmed before sync factory read
-      const handler = getMcpHandler({ jsonResponse: format === 'json', legacy: legacyMode });
-      const rawResponse = await runWithMcpRequest(sdkRequest, () =>
-        runWithMcpEnv(env as McpEnv, () => handler.fetch(sdkRequest, { parsedBody })),
-      );
-      // Legacy transport SSE→JSON when the client negotiated JSON (see
-      // coerce-json-response.ts). Modern responseMode:'json' already returns
-      // application/json; this is a no-op on that path.
-      const response = await coerceMcpJsonResponse(rawResponse, format);
-      const headers = new Headers(response.headers);
-      stripCorsHeaders(headers);
-      headers.set('cache-control', 'no-store');
-
-      // Read the error code before the body is handed to the outgoing
-      // Response: extractTransportErrorCode clones, and a cloned body cannot
-      // be taken after another Response has adopted it.
-      const errorCode = await extractTransportErrorCode(response);
-      let outcome: McpRequestOutcome = errorCode != null ? 'error' : 'ok';
-      if (outcome === 'ok' && !response.ok) outcome = 'error';
-
-      const outgoing = new Response(response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers,
+      const disabled = new Response('mcp is currently disabled by the operator\n', {
+        status: 503,
+        headers: {
+          'content-type': 'text/plain; charset=utf-8',
+          'retry-after': '3600',
+          'cache-control': 'no-store',
+        },
       });
+      logMcpRequest({
+        era: 'legacy',
+        method: null,
+        name: null,
+        client_name: null,
+        protocol_version: null,
+        host,
+        response_format: servedResponseFormat(disabled),
+        outcome: 'disabled',
+        error_code: null,
+        duration_ms: 0,
+      });
+      return disabled;
+    }
 
+    // Step 2: method check. GET and HEAD returned above. POST falls
+    // through to the JSON-RPC pipeline. PUT/DELETE/PATCH land here.
+    if (request.method !== 'POST') {
+      return mcpProtocolMethodNotAllowed(request);
+    }
+
+    // Step 3: Accept-header check.
+    const format = detectMcpFormat(request);
+    const host = new URL(request.url).host;
+    if (format === false) {
+      // The 406 rejection happens before any JSON-RPC parsing so the
+      // body is plain text without a `jsonrpc`/`id`/`error` envelope.
+      const rejected = new Response(
+        'POST /mcp serves application/json or text/event-stream; the request Accept header allowed neither.\n',
+        {
+          status: 406,
+          headers: {
+            'content-type': 'text/plain; charset=utf-8',
+            'cache-control': 'no-store',
+          },
+        },
+      );
+      logMcpRequest({
+        era: 'legacy',
+        method: null,
+        name: null,
+        client_name: null,
+        protocol_version: null,
+        host,
+        response_format: servedResponseFormat(rejected),
+        outcome: 'accept_rejected',
+        error_code: null,
+        duration_ms: 0,
+      });
+      return rejected;
+    }
+
+    const started = Date.now();
+    let parsedBody: unknown;
+    try {
+      parsedBody = await request.clone().json();
+    } catch {
+      parsedBody = undefined;
+    }
+
+    const legacyEra = await isLegacyRequest(request, parsedBody);
+    const era: McpEra = legacyEra ? 'legacy' : 'modern';
+    const legacyMode = resolveLegacyMode(env as McpEnv);
+
+    // Step 4: MCP_LEGACY_ENABLED legacy gate. Unparseable bodies
+    // classify as legacy-era by default, so the gate additionally
+    // requires a parsed body: malformed JSON falls through to the
+    // SDK's -32700 parse error instead of a misleading era reject.
+    if (legacyMode === 'reject' && legacyEra && parsedBody !== undefined) {
+      const rejected = jsonRpcError(
+        -32022,
+        `legacy MCP requests are disabled; use MCP ${SPEC_REVISION}`,
+        jsonRpcId(parsedBody),
+        {
+          supported: [SPEC_REVISION],
+        },
+      );
       logMcpRequest({
         era,
         method: headerMcpMethod(request) ?? classifyRpcMethod(parsedBody),
@@ -820,16 +770,94 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
         client_name: extractClientNameFromBody(parsedBody),
         protocol_version: extractProtocolVersion(parsedBody, request),
         host,
-        // Derived from the coerced response so the value matches what the
-        // client receives, not what its Accept header asked for.
-        response_format: servedResponseFormat(outgoing),
-        outcome,
-        error_code: errorCode,
+        response_format: servedResponseFormat(rejected),
+        outcome: 'legacy_rejected',
+        error_code: -32022,
         duration_ms: Date.now() - started,
       });
-
-      return outgoing;
+      return rejected;
     }
+
+    // Step 5: MCP_LIMITER gate (era-aware read tier).
+    let gateResult: 'passed' | 'rate_limited' = 'passed';
+    if (env.MCP_LIMITER) {
+      const catalog = await loadCatalog(env as McpEnv);
+      const ip = request.headers.get('cf-connecting-ip') ?? 'anon';
+      const key = buildMcpRateLimitKey({
+        era,
+        ip,
+        mcpName: headerMcpName(request),
+        catalog,
+      });
+      const { success } = await env.MCP_LIMITER.limit({ key });
+      if (!success) gateResult = 'rate_limited';
+    }
+    if (gateResult === 'rate_limited') {
+      const limited = jsonRpcError(-32099, 'rate limit exceeded', jsonRpcId(parsedBody));
+      logMcpRequest({
+        era,
+        method: headerMcpMethod(request) ?? (legacyEra ? 'tools/call' : null),
+        name: headerMcpName(request),
+        client_name: extractClientNameFromBody(parsedBody),
+        protocol_version: extractProtocolVersion(parsedBody, request),
+        host,
+        response_format: servedResponseFormat(limited),
+        outcome: 'rate_limited',
+        error_code: -32099,
+        duration_ms: Date.now() - started,
+      });
+      return limited;
+    }
+
+    // Step 6: SDK Accept-rewrite shim.
+    const sdkHeaders = new Headers(request.headers);
+    sdkHeaders.set('accept', 'application/json, text/event-stream');
+    const sdkRequest = new Request(request, { headers: sdkHeaders });
+
+    // Step 7: warmed catalog + module-scoped handler.
+    await loadCatalog(env as McpEnv);
+    getWarmCatalog(); // assert warmed before sync factory read
+    const handler = getMcpHandler({ jsonResponse: format === 'json', legacy: legacyMode });
+    const rawResponse = await runWithMcpRequest(sdkRequest, () =>
+      runWithMcpEnv(env as McpEnv, () => handler.fetch(sdkRequest, { parsedBody })),
+    );
+    // Legacy transport SSE→JSON when the client negotiated JSON (see
+    // coerce-json-response.ts). Modern responseMode:'json' already returns
+    // application/json; this is a no-op on that path.
+    const response = await coerceMcpJsonResponse(rawResponse, format);
+    const headers = new Headers(response.headers);
+    stripCorsHeaders(headers);
+    headers.set('cache-control', 'no-store');
+
+    // Read the error code before the body is handed to the outgoing
+    // Response: extractTransportErrorCode clones, and a cloned body cannot
+    // be taken after another Response has adopted it.
+    const errorCode = await extractTransportErrorCode(response);
+    let outcome: McpRequestOutcome = errorCode != null ? 'error' : 'ok';
+    if (outcome === 'ok' && !response.ok) outcome = 'error';
+
+    const outgoing = new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+
+    logMcpRequest({
+      era,
+      method: headerMcpMethod(request) ?? classifyRpcMethod(parsedBody),
+      name: headerMcpName(request) ?? classifyToolName(parsedBody),
+      client_name: extractClientNameFromBody(parsedBody),
+      protocol_version: extractProtocolVersion(parsedBody, request),
+      host,
+      // Derived from the coerced response so the value matches what the
+      // client receives, not what its Accept header asked for.
+      response_format: servedResponseFormat(outgoing),
+      outcome,
+      error_code: errorCode,
+      duration_ms: Date.now() - started,
+    });
+
+    return outgoing;
   }
 
   if (isResultPath(pathname)) {
@@ -1082,8 +1110,14 @@ const WEB_RESCORE_CRON = '0 9 * * SUN';
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const started = Date.now();
+    const redirected = canonicalHostRedirect(request);
+    // The protocol endpoint never enters the cached entrypoint: a skip-Worker
+    // HIT replays a stored GET response, and /mcp answers GET with 405.
     const response =
-      canonicalHostRedirect(request) ?? (await loopbackCachedFetch(ctx, env, classifyGatewayRequest(request)));
+      redirected ??
+      (isMcpProtocolPath(new URL(request.url).pathname)
+        ? await serveSite(request, env, ctx)
+        : await loopbackCachedFetch(ctx, env, classifyGatewayRequest(request)));
     recordPageRequest(request, response, Date.now() - started);
     return response;
   },

@@ -14,6 +14,7 @@ import { classifyGatewayRequest, detectPreference } from '../src/worker/accept';
 import { applyHeaders, isRepresentationPinned, isStagingHost, resultCacheClass } from '../src/worker/headers';
 import worker from '../src/worker/index';
 import { _resetIndexCache } from '../src/worker/score/core';
+import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
 
 function req(url: string, accept?: string, ua?: string): Request {
   const headers: Record<string, string> = {};
@@ -223,18 +224,12 @@ describe('classifyGatewayRequest — format-class table', () => {
     expect(classified.headers.get('user-agent')).toBeNull();
   });
 
-  test('GET /mcp with Accept: application/json keeps JSON Accept (not the site HTML/markdown pair)', () => {
+  test('GET /mcp is classified as a site page; the gateway never uses that classification', () => {
+    // The protocol path skips the cached entrypoint, so this smash is unused.
     const json = classifyGatewayRequest(req('https://anc.dev/mcp', 'application/json'));
-    const html = classifyGatewayRequest(req('https://anc.dev/mcp', 'text/html', UA.browser));
-    expect(json.headers.get('accept')).toBe('application/json');
-    expect(html.headers.get('accept')).toBe('text/html');
-  });
-
-  test('GET /mcp with curl UA and */* is markdown, not HTML', () => {
     const curl = classifyGatewayRequest(req('https://anc.dev/mcp', '*/*', UA.curl));
-    const browser = classifyGatewayRequest(req('https://anc.dev/mcp', '*/*', UA.browser));
+    expect(json.headers.get('accept')).toBe('text/html');
     expect(curl.headers.get('accept')).toBe('text/markdown');
-    expect(browser.headers.get('accept')).toBe('text/html');
   });
 
   test('the gateway leaves the request host alone', () => {
@@ -284,21 +279,25 @@ describe('gateway dispatch — inner Cached is the fetch target', () => {
     expect(seen[0]?.headers.get('user-agent')).toBeNull();
   });
 
-  test('GET /mcp JSON 301 is classified separately from an HTML GET /mcp', async () => {
+  test('GET /mcp skips Cached.fetch and returns 405', async () => {
     const seen: string[] = [];
     const ctx = {
       exports: {
         Cached: {
           fetch(request: Request) {
             seen.push(request.headers.get('accept') ?? '');
-            return new Response('inner');
+            return new Response('inner', { headers: { 'content-type': 'text/html' } });
           },
         },
       },
     } as unknown as ExecutionContext;
-    await worker.fetch(req('https://anc.dev/mcp', 'application/json'), makeEnv(), ctx);
-    await worker.fetch(req('https://anc.dev/mcp', 'text/html', UA.browser), makeEnv(), ctx);
-    expect(seen).toEqual(['application/json', 'text/html']);
+    const json = await worker.fetch(req('https://anc.dev/mcp', 'application/json'), makeEnv(), ctx);
+    const html = await worker.fetch(req('https://anc.dev/mcp', 'text/html', UA.browser), makeEnv(), ctx);
+    expect(seen).toEqual([]);
+    expect(json.status).toBe(405);
+    expect(html.status).toBe(405);
+    expect(json.headers.get('allow')).toBe('POST');
+    expect(await json.text()).toContain('https://anc.dev/mcp-docs');
   });
 });
 
@@ -1073,6 +1072,11 @@ describe('worker.fetch — CN rewrite + asset lookup', () => {
 // ---------------------------------------------------------------------------
 
 describe('negotiation predicate — CN rewrite and applyHeaders agree', () => {
+  // A prior test in the same isolate can cache a real registry index. With
+  // that cache warm, /badge/rg.svg redirects before the asset lookup.
+  beforeEach(() => {
+    _resetRegistryIndexCache();
+  });
   const paths = [
     '/p3',
     '/about',

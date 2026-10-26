@@ -42,6 +42,7 @@ export function orientationTools(origin: string): WebMcpTool[] {
         return capExecute(
           [
             `MCP endpoint: ${origin}/mcp`,
+            `Endpoint docs: ${origin}/mcp-docs`,
             `Client guide: ${origin}/mcp-skill.md`,
             ...MCP_DISCOVERY_DOCUMENTS.map((d) => `${d.label}: ${origin}${d.path}`),
           ].join('\n'),

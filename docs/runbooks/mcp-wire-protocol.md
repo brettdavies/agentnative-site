@@ -151,7 +151,7 @@ these as JSON-RPC errors is a common client bug.
 | Condition                            | Response                                   | Verified at                                                |
 | ------------------------------------ | ------------------------------------------ | ---------------------------------------------------------- |
 | `MCP_ENABLED` is not `'true'`        | **503**, `Retry-After: 3600`, `text/plain` | `tests/worker-mcp-dispatch.test.ts:292`, body shape `:300` |
-| Method is neither `GET` nor `POST`   | **405**, `Allow: GET, POST`, `text/plain`  | `tests/worker-mcp-dispatch.test.ts:309`                    |
+| Method is not `POST` (`GET` included) | **405**, `Allow: POST`, `text/plain`, `Cache-Control: no-store` | `tests/worker-mcp-dispatch.test.ts` |
 | `Accept` allows neither JSON nor SSE | **406**, `text/plain`                      | `tests/worker-mcp-dispatch.test.ts:531`                    |
 
 The 406 is pre-JSON-RPC by design (`src/worker/index.ts:615`): there is no negotiated type in which to serialize an
@@ -242,37 +242,26 @@ values out of a live `tools/list` response rather than asserting the constant.
 
 ## GET posture
 
-There are two defensible answers to `GET` on an MCP endpoint, and the divergence is worth stating plainly because a
-reviewer expecting one will read the other as a bug.
+A streamable-HTTP `GET` opens the server-to-client SSE notification stream. anc is stateless and has nothing to push, so
+it does not open that stream. `GET /mcp` and `HEAD /mcp` return **405 Method Not Allowed** for every `Accept` value,
+including `text/event-stream`, `text/html`, `text/markdown`, and `application/json`.
 
-The hazard both answers address is the same: a streamable-HTTP `GET` routed into the transport opens the
-server-to-client SSE notification stream, and a stateless server with nothing to push parks that connection until the
-caller times out.
+The response carries `Allow: POST`, `Link: <…/mcp-docs>; rel="service-doc"` (RFC 8631), `Cache-Control: no-store`,
+`CDN-Cache-Control: no-store`, and `Cloudflare-CDN-Cache-Control: no-store`. The body is plain text and names the docs
+URL (`/mcp-docs` on the request origin). The 405 is served even when `MCP_ENABLED` is off, so a disabled surface cannot
+fall through to a document. The gateway does not enter the cached entrypoint for `/mcp` or `/mcp/`, and the build does
+not emit `dist/mcp.html` or `dist/mcp.md`, so a previously cached page has no asset to replay. `PUT`, `DELETE`, and
+`PATCH` use the same 405 when the kill switch is on. `OPTIONS` is not handled: it falls through and 404s with no CORS
+headers (KTD-10 / R15). `/mcp/` is a 308 to `/mcp` for every other method, so a POST keeps its body and a client
+configured with the trailing slash still reaches the server.
 
-1. **Fast-fail.** Answer non-`POST` at the router with `405 Method Not Allowed`.
-2. **Serve a documented surface.** Return something a human or an agent can read.
+The human and agent description of the endpoint is `/mcp-docs` (HTML and markdown negotiation). `/mcp.md` and
+`/mcp.html` 301 there. The server card, the AI catalog, and `rel="mcp"` still name `https://anc.dev/mcp` as the server.
 
-anc takes the second, deliberately. `GET /mcp` is content-negotiated (`src/worker/index.ts:560-569`):
-
-| `Accept`               | Response                                       | Verified at                                     |
-| ---------------------- | ---------------------------------------------- | ----------------------------------------------- |
-| `application/json`     | **301** to `/.well-known/mcp/server-card.json` | `tests/worker-mcp-dispatch.test.ts:418`         |
-| `text/html`, or absent | **200** `dist/mcp.html`, the full site shell   | `tests/worker-mcp-dispatch.test.ts:402`, `:379` |
-| `text/markdown`        | **200** `dist/mcp.md`, the markdown twin       | `tests/worker-mcp-dispatch.test.ts:409`         |
-
-The reasoning: the endpoint's URL should document itself. An agent that finds `/mcp` in an `llms.txt` and issues a plain
-`GET` gets a page explaining the surface instead of a rejection, and one that asks for JSON gets machine-readable
-identity. That identity survives the kill switch, because the JSON redirect is served even when `MCP_ENABLED` is off
-(`tests/worker-mcp-dispatch.test.ts:449`): a disabled surface still says what it is.
-
-The 405 is not abandoned, only narrowed. `PUT`, `DELETE`, and `PATCH` get `405` with `Allow: GET, POST`
-(`src/worker/index.ts:600-609`, `tests/worker-mcp-dispatch.test.ts:309`). Note the `Allow` value names both serviceable
-methods, so it differs from the fast-fail posture's `Allow: POST`.
-
-Scoring treats both answers as conforming. The `mcp-get-fast-fail` check fails only on a held-open hang or a `5xx`
-(`src/data/web-audit/registry.yaml:355-368`; remediation prose at `src/data/web-audit/remediation.yaml:222-233`).
-`OPTIONS` deliberately falls through to static assets and 404s, which is the browser-blocked posture for a
-server-to-agent endpoint (`src/worker/index.ts:554-558`).
+`mcp-get-fast-fail` probes `GET` with `Accept: text/event-stream`. A `200` whose content type is not `text/event-stream`
+(HTML or markdown included) is broken. A `405`, or a `200` of `text/event-stream`, passes. A held-open hang or a `5xx`
+is broken. Remediation says to return 405 or an SSE stream (`src/data/web-audit/remediation.yaml`, key
+`mcp-get-fast-fail`). Pinned in `tests/worker-mcp-dispatch.test.ts` and `tests/web-audit-handlers.test.ts`.
 
 ## Codes deliberately not probed
 

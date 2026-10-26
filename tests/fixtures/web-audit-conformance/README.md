@@ -181,6 +181,9 @@ the first two, `im` for the body patterns) and `results[i] = new RegExp(pattern,
 | `http-content-type-mismatch` | a 200 with the wrong content type is broken (present but invalid) | `json-schemas` |
 | `http-discovery-cards` | the well-known discovery and auth documents answer with the expected JSON shapes | `a2a-agent-card`, `ai-catalog`, `agent-skills`, `security-txt`, `web-bot-auth`, `oauth-discovery`, `api-catalog`, `sitemap`, `llms-full-txt` |
 | `http-discovery-cards-broken` | discovery documents that answer 200 with the wrong shape are broken | `a2a-agent-card`, `ai-catalog`, `agent-skills`, `security-txt`, `web-bot-auth` |
+| `http-get-fast-fail-html-broken` | a GET with Accept text/event-stream that returns 200 HTML is broken | `mcp-get-fast-fail` |
+| `http-get-fast-fail-markdown-broken` | a GET with Accept text/event-stream that returns 200 markdown is broken | `mcp-get-fast-fail` |
+| `http-get-fast-fail-sse-pass` | a GET that returns 200 text/event-stream passes | `mcp-get-fast-fail` |
 | `http-get-fast-fail-timeout-broken` | a held-open GET on the MCP endpoint times out against its explicit budget and is broken | `mcp-get-fast-fail` |
 | `http-header-regex-absent` | Link and Vary header assertions miss when the headers are absent | `link-headers`, `markdown-vary` |
 | `http-header-regex-pass` | Link and Vary header assertions pass on the root headers | `link-headers`, `markdown-vary` |
