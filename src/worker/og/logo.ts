@@ -211,7 +211,12 @@ async function logoFromDataUri(href: string, fonts: ScoreOgFonts): Promise<Score
   const match = /^data:([^;,]+)?(;base64)?,([\s\S]*)$/i.exec(href);
   if (!match) return null;
   const mime = (match[1] ?? '').toLowerCase();
-  const payload = match[2] ? atob(match[3].replace(/\s/g, '')) : decodeURIComponent(match[3]);
+  let payload: string;
+  try {
+    payload = match[2] ? atob(match[3].replace(/\s/g, '')) : decodeURIComponent(match[3]);
+  } catch {
+    return null;
+  }
   const bytes = new Uint8Array(payload.length);
   for (let i = 0; i < payload.length; i++) bytes[i] = payload.charCodeAt(i);
   if (bytes.byteLength > IMAGE_CAP) return null;

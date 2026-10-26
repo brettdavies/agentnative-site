@@ -1,4 +1,5 @@
-// Render a few scorecard cards to /opt/cursor/artifacts for the pull request.
+// Render sample scorecard cards for visual review:
+//   bun scripts/og/score-samples.ts [out-dir]   (default .context/og-samples)
 // Railway's score is read from the live JSON twin when it answers; the CLI
 // cards are read from the committed scorecards. Logos use the same fetcher
 // the Worker uses, and a failure becomes the wordmark.
@@ -9,8 +10,8 @@ import { cliOgIdentity, type ScoreOgCard } from '../../src/shared/score-og';
 import { resolveLogo } from '../../src/worker/og/logo';
 import { renderScoreOgPng, type ScoreOgFonts } from '../../src/worker/og/render';
 
-const OUT = '/opt/cursor/artifacts';
 const ROOT = new URL('../..', import.meta.url);
+const OUT = process.argv[2] ?? join(ROOT.pathname, '.context', 'og-samples');
 
 async function fonts(): Promise<ScoreOgFonts> {
   const dir = new URL('../../src/worker/og/fonts/', import.meta.url);

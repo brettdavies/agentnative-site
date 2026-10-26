@@ -120,9 +120,9 @@ export function scoreOgAlt(input: {
   pending?: boolean;
 }): string {
   const surface = input.lane === 'web' ? 'agent-readiness audit' : 'agent-native CLI scorecard';
-  if (input.pending) return `${input.name} — audit in progress. ${surface} on anc.dev.`;
+  if (input.pending) return `${input.name}: audit in progress. ${surface} on anc.dev.`;
   const rounded = roundedScore(input.scorePct);
-  if (rounded === null) return `${input.name} — unscored. ${surface} on anc.dev.`;
+  if (rounded === null) return `${input.name}: unscored. ${surface} on anc.dev.`;
   return `${input.name} scored ${rounded}%. ${surface} on anc.dev.`;
 }
 
@@ -297,8 +297,7 @@ export function renderScoreOgSvg(card: ScoreOgCard): string {
   ${subtitle ? `<text x="400" y="334" fill="${COLOR.muted}" font-family="Monaspace Xenon" font-size="26">${escHtml(subtitle)}</text>` : ''}
   <rect x="64" y="430" width="1072" height="16" rx="8" fill="${COLOR.track}"/>
   <rect x="64" y="430" width="${meterWidth}" height="16" rx="8" fill="${bar}"/>
-  <text x="64" y="560" fill="${COLOR.accent}" font-family="Monaspace Xenon" font-size="24">anc.dev</text>
-  <text x="176" y="560" fill="${COLOR.muted}" font-family="Monaspace Xenon" font-size="24">·  ${escHtml(footerTail)}</text>
+  <text x="64" y="560" font-family="Monaspace Xenon" font-size="24"><tspan fill="${COLOR.accent}">anc.dev</tspan><tspan fill="${COLOR.muted}"> · ${escHtml(footerTail)}</tspan></text>
 </svg>`;
 }
 

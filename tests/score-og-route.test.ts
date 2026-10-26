@@ -191,6 +191,24 @@ describe('scorecard OG route', () => {
     png(new Uint8Array(await res.arrayBuffer()));
   });
 
+  test.each([
+    ['base64 that does not decode', 'data:image/png;base64,%%%%'],
+    ['a percent escape that does not decode', 'data:image/svg+xml,%E0%A4%A'],
+  ])('a homepage icon given as %s falls back to the wordmark', async (_label, href) => {
+    const env = makeEnv({ cache: { [await webKeyFor('https://anc.dev/', SPEC_VERSION)]: WEB_RECORD } });
+    const fetchImpl: LogoFetch = async () =>
+      new Response(`<html><head><link rel="icon" href="${href}"></head></html>`, {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    const res = await handleScoreOg(request(`/og/score/anc.dev/s64-v${SPEC_VERSION}.png`), env as never, {
+      fonts: await fonts(),
+      fetchImpl,
+    });
+    expect(res.status).toBe(200);
+    png(new Uint8Array(await res.arrayBuffer()));
+  });
+
   test('POST is rejected', async () => {
     const res = await handleScoreOg(request('/og/score/anc.dev/s64-v0.6.0.png', 'POST'), makeEnv() as never);
     expect(res.status).toBe(405);

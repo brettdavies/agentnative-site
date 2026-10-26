@@ -12,20 +12,22 @@ const FONT_PATHS = [
   '/_internal/og-fonts/monaspace-xenon-500.otf',
 ] as const;
 
-let cached: { env: { ASSETS: Fetcher }; fonts: ScoreOgFonts } | null = null;
+let cached: Promise<ScoreOgFonts> | null = null;
 
-export async function loadScoreOgFonts(env: { ASSETS: Fetcher }): Promise<ScoreOgFonts> {
-  if (cached && cached.env === env) return cached.fonts;
-  const buffers = await Promise.all(
-    FONT_PATHS.map(async (path) => {
-      const res = await env.ASSETS.fetch(new Request(`https://assets.internal${path}`));
-      if (!res.ok) throw new Error(`scorecard OG font missing: ${path} (${res.status})`);
-      return new Uint8Array(await res.arrayBuffer());
-    }),
-  );
-  const fonts = buffers as unknown as ScoreOgFonts;
-  cached = { env, fonts };
-  return fonts;
+export function loadScoreOgFonts(env: { ASSETS: Fetcher }): Promise<ScoreOgFonts> {
+  if (!cached) {
+    cached = Promise.all(
+      FONT_PATHS.map(async (path) => {
+        const res = await env.ASSETS.fetch(new Request(`https://assets.internal${path}`));
+        if (!res.ok) throw new Error(`scorecard OG font missing: ${path} (${res.status})`);
+        return new Uint8Array(await res.arrayBuffer());
+      }),
+    ).then(([regular, bold, mono]) => [regular, bold, mono] as const);
+    cached.catch(() => {
+      cached = null;
+    });
+  }
+  return cached;
 }
 
 /** Test-only: drop the isolate cache. */
