@@ -6,10 +6,17 @@
 // text/plain, or emits Vary (applicable but absent -> no penalty).
 
 import { describe, expect, test } from 'bun:test';
+import { loadRegistry } from '../scripts/web-audit/conformance-corpus';
 import { AI_USER_FETCHER_PROBE_UA, CLI_PROBE_UA } from '../src/shared/user-agents';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
 import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
+
+function registryWith(id: string): WebCheck['with'] {
+  const check = loadRegistry().checks.find((c) => c.id === id);
+  if (!check) throw new Error(`${id} is not in the registry`);
+  return check.with;
+}
 
 function makeCheck(partial: Partial<WebCheck> & { id: string }): WebCheck {
   return {
@@ -69,7 +76,7 @@ const MARKDOWN_CHECKS: WebCheck[] = [
     tier: 'recommended',
     keyword: 'should',
     antecedent: 'markdown-twin',
-    with: { path: '/', expect: { header_regex: { name: 'vary', pattern: '(?:^|,|\\s)accept(?:,|\\s|[^-a-z]|$)' } } },
+    with: registryWith('markdown-vary'),
   }),
 ];
 
@@ -314,40 +321,19 @@ describe('markdown-to-agents rewards: a markdown site that never adopts the affo
     expect(row?.na_reason).toBeUndefined();
   });
 
-  test('markdown-vary accepts Vary: Accept alone (Bug 2 regression)', async () => {
-    // Regression test for Bug 2: A site that only varies on Accept should
-    // pass with just Vary: Accept, without requiring User-Agent.
-    function variesOnAcceptOnly(): Response {
-      return htmlResponse({ link: MD_ALTERNATE_LINK, vary: 'Accept' });
-    }
-    const { fetchImpl } = siteFetch(variesOnAcceptOnly);
-    const events = await collect(
-      runWebAudit({
-        url: 'https://example.com/',
-        registry: registryOf(MARKDOWN_CHECKS),
-        fetchOptions: { fetchImpl },
-        domainBudget: ALWAYS_ADMIT_BUDGET,
-      }),
-    );
-    const row = resultsOf(events).find((r) => r.id === 'markdown-vary');
-    expect(row?.status).toBe('pass');
-  });
-
-  test('markdown-vary still accepts Vary: Accept, User-Agent', async () => {
-    // Sites that vary on both Accept and User-Agent should still pass.
-    function variesOnBoth(): Response {
-      return htmlResponse({ link: MD_ALTERNATE_LINK, vary: 'Accept, User-Agent' });
-    }
-    const { fetchImpl } = siteFetch(variesOnBoth);
-    const events = await collect(
-      runWebAudit({
-        url: 'https://example.com/',
-        registry: registryOf(MARKDOWN_CHECKS),
-        fetchOptions: { fetchImpl },
-        domainBudget: ALWAYS_ADMIT_BUDGET,
-      }),
-    );
-    const row = resultsOf(events).find((r) => r.id === 'markdown-vary');
-    expect(row?.status).toBe('pass');
-  });
+  test.each(['Accept', 'Accept, User-Agent', 'User-Agent, Accept', '*'])(
+    'markdown-vary passes Vary: %s',
+    async (vary) => {
+      const { fetchImpl } = siteFetch(() => htmlResponse({ link: MD_ALTERNATE_LINK, vary }));
+      const events = await collect(
+        runWebAudit({
+          url: 'https://example.com/',
+          registry: registryOf(MARKDOWN_CHECKS),
+          fetchOptions: { fetchImpl },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
+        }),
+      );
+      expect(resultsOf(events).find((r) => r.id === 'markdown-vary')?.status).toBe('pass');
+    },
+  );
 });

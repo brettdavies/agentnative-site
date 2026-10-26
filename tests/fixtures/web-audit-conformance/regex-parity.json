@@ -1457,7 +1457,7 @@
     {
       "check_id": "markdown-vary",
       "field": "header_regex",
-      "pattern": "(?:^|,|\\s)accept(?:,|\\s|[^-a-z]|$)",
+      "pattern": "(?:^|[\\s,])(?:accept|\\*)(?:[\\s,]|$)",
       "flags": "i",
       "results": [
         false,
@@ -1565,7 +1565,7 @@
         false,
         false,
         false,
-        false,
+        true,
         false,
         false,
         false,
@@ -1597,7 +1597,7 @@
         false,
         false,
         false,
-        false
+        true
       ]
     },
     {

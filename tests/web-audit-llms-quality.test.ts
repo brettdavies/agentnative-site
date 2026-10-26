@@ -349,9 +349,7 @@ describe('llms.txt quality trio', () => {
     });
   });
 
-  test('angle-bracket-wrapped link destinations are parsed correctly', async () => {
-    // Regression test for Bug 1: CommonMark allows [text](<url>) where angle
-    // brackets are syntax, not part of the URL. The parser must strip them.
+  test('an angle-bracketed link destination is fetched without its brackets', async () => {
     const body = `# Site
 
 > Summary
@@ -376,11 +374,9 @@ describe('llms.txt quality trio', () => {
     );
     const row = resultsOf(events).find((r) => r.id === 'llms-txt-links');
     expect(row?.status).toBe('pass');
-    // Verify the URLs were fetched without angle brackets
     expect(sent).toContain('https://example.com/guide%20with%20spaces.md');
     expect(sent).toContain('https://example.com/regular.md');
     expect(sent).toContain('https://example.com/page(1).md');
-    // Verify angle brackets are NOT in the fetched URLs
     expect(sent.some((u) => u.includes('<') || u.includes('>'))).toBe(false);
   });
 

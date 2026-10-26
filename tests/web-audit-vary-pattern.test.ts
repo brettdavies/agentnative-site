@@ -1,9 +1,9 @@
-// The markdown-vary check's header pattern must match "Accept is named in
-// Vary, and the Accept token is not a prefix of Accept-Encoding /
-// Accept-Language" without lookaround, because the CLI compiles every
-// registry pattern with a linear-time engine that has none. This pins the
-// rewritten pattern to the semantic requirement it implements over a
-// hand-written table and an exhaustive sweep of short header values.
+// The markdown-vary check's header pattern passes when Vary names `accept`
+// or `*` as a whole field name, so Accept-Encoding and Accept-Language do not
+// count. It is spelled without lookaround because the CLI compiles every
+// registry pattern with a linear-time engine that has none. This holds the
+// pattern to a token-splitting oracle over a hand-written table and an
+// exhaustive sweep of short header values.
 
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -15,13 +15,10 @@ import type { WebAuditRegistry } from '../src/worker/audit-web/registry';
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
 const REGISTRY_PATH = join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml');
 
-/** The semantic requirement: Accept present as a token, not as a prefix of accept-encoding/accept-language. */
+/** The rule the pattern implements: some whitespace- or comma-separated name is `accept` or `*`. */
 function semanticMatch(value: string): boolean {
-  const lower = value.toLowerCase();
-  // Split by comma and whitespace to get tokens
-  const tokens = lower.split(/[\s,]+/).filter(t => t.length > 0);
-  // Accept must be present as a standalone token (not accept-encoding, accept-language, etc.)
-  return tokens.includes('accept');
+  const names = value.toLowerCase().split(/[\s,]+/);
+  return names.includes('accept') || names.includes('*');
 }
 
 function registryVaryPattern(): string {
@@ -56,7 +53,11 @@ const TABLE = [
   ['acceptuser-agent', false],
   ['user-agentaccept', false],
   ['ACCEPT, USER-AGENT', true],
-  ['*', false],
+  ['*', true],
+  ['accept-encoding, *', true],
+  ['x-*', false],
+  ['accept1', false],
+  ['accept;q=1', false],
   ['', false],
   [' ', false],
   ['accept user-agent', true],
@@ -84,7 +85,18 @@ function* shortStrings(maxLen: number): Generator<string> {
 
 /** Deterministic header values built from the tokens the pattern cares about. */
 function tokenStrings(): string[] {
-  const tokens = ['accept', 'accept-encoding', 'accept-language', 'user-agent', 'origin', 'accept-', 'acceptx', ''];
+  const tokens = [
+    'accept',
+    'accept-encoding',
+    'accept-language',
+    'user-agent',
+    'origin',
+    'accept-',
+    'acceptx',
+    '*',
+    'x-*',
+    '',
+  ];
   const seps = [', ', ',', ' ', '', '\n', '\r\n', '\u2028'];
   const out: string[] = [];
   for (const a of tokens) {
@@ -115,7 +127,9 @@ describe('markdown-vary header pattern', () => {
     for (const value of shortStrings(6)) {
       const expected = semanticMatch(value);
       if (rewritten.test(value) !== expected) {
-        throw new Error(`disagreement on ${JSON.stringify(value)}: pattern=${rewritten.test(value)}, semantic=${expected}`);
+        throw new Error(
+          `disagreement on ${JSON.stringify(value)}: pattern=${rewritten.test(value)}, semantic=${expected}`,
+        );
       }
       checked += 1;
     }
@@ -127,7 +141,9 @@ describe('markdown-vary header pattern', () => {
     for (const value of tokenStrings()) {
       const expected = semanticMatch(value);
       if (rewritten.test(value) !== expected) {
-        throw new Error(`disagreement on ${JSON.stringify(value)}: pattern=${rewritten.test(value)}, semantic=${expected}`);
+        throw new Error(
+          `disagreement on ${JSON.stringify(value)}: pattern=${rewritten.test(value)}, semantic=${expected}`,
+        );
       }
     }
   });

@@ -829,7 +829,7 @@
       "tier": "recommended",
       "principle": "P2",
       "status": "absent",
-      "evidence": "https://example.com/ -> 200 (header vary no match /(?:^|,|\\s)accept(?:,|\\s|[^-a-z]|$)/)",
+      "evidence": "https://example.com/ -> 200 (header vary no match /(?:^|[\\s,])(?:accept|\\*)(?:[\\s,]|$)/)",
       "hosts": [
         {
           "host": "example.com"

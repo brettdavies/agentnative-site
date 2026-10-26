@@ -832,13 +832,11 @@ checks:
     with:
       path: /
       expect:
-        # Accept must be present in Vary as a token (not as a prefix of
-        # accept-encoding or accept-language). Match accept when preceded by
-        # start/comma/space and followed by end/comma/space/non-letter (but not
-        # dash-letter). Spelled without lookaround because the CLI compiles
-        # every registry pattern with a linear-time engine that has none.
-        header_regex: { name: vary, pattern: "(?:^|,|\\s)accept(?:,|\\s|[^-a-z]|$)" }
-    hint: 'Emit Vary: Accept when the markdown twin is negotiated on the same URL, so shared caches never serve one client the wrong variant.'
+        # `accept` (or `*`) as a whole field name, so Accept-Encoding and
+        # Accept-Language do not count. Spelled without lookaround because the
+        # CLI compiles every registry pattern with a linear-time engine.
+        header_regex: { name: vary, pattern: "(?:^|[\\s,])(?:accept|\\*)(?:[\\s,]|$)" }
+    hint: 'Name every request header the markdown twin is negotiated on in Vary (Accept, plus User-Agent when agent User-Agents also get markdown), so shared caches never serve one client the wrong variant.'
 
   - id: markdown-frontmatter
     category: content-for-agents

@@ -162,6 +162,11 @@ const LLMS_TXT_HTTP_LINK = LLMS_TXT_FULL.replace(
   `\n- [Plain](${HTTP_LINK}): the same docs over plaintext\n\n## When to use`,
 );
 
+const LLMS_TXT_ANGLE_LINK = LLMS_TXT_FULL.replace(
+  '[Guide](https://example.com/docs/guide.md)',
+  '[Guide](<https://example.com/docs/getting started (v2).md>)',
+);
+
 const LLMS_FULL_TXT = '# Example\n\n## Guide\n\nEverything in one fetch.\n';
 const SCOPED_LLMS = '# Docs\n\n- [Guide](/docs/guide.md)\n';
 const GUIDE_MD = '# Guide\n\nA substantial guide body that runs well past the forty-character floor.\n';
@@ -1556,6 +1561,16 @@ export const SCENARIOS: Record<string, Scenario> = {
     get('/docs/guide.md', md(GUIDE_MD)),
     get('/docs/api.md', md(GUIDE_MD)),
   ]),
+  'llms-quality-angle-bracket-pass': scenario(
+    'an llms.txt link whose destination sits in angle brackets and holds a space and parentheses is fetched without the brackets, and the links row passes',
+    ['llms-txt-links'],
+    [
+      ...baseline(),
+      get('/llms.txt', text(LLMS_TXT_ANGLE_LINK)),
+      get('/docs/getting%20started%20(v2).md', md(GUIDE_MD)),
+      get('/docs/api.md', md(GUIDE_MD)),
+    ],
+  ),
   'llms-quality-h1-only': scenario('an llms.txt with only an H1 misses format, has no links to follow, and has no when-to-use heading', ['llms-txt-format', 'llms-txt-links', 'llms-txt-when-to-use'], [
     ...baseline(),
     get('/llms.txt', text(LLMS_TXT_H1_ONLY)),
