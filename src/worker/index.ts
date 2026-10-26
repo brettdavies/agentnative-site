@@ -863,7 +863,7 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   }
 
   if (isScoreOgPath(pathname)) {
-    return handleScoreOg(request, env as ResultEnv);
+    return handleScoreOg(request, env as ResultEnv, { waitUntil: (promise) => ctx.waitUntil(promise) });
   }
 
   if (isResultPath(pathname)) {

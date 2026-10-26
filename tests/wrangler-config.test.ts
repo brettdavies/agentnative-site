@@ -381,6 +381,13 @@ describe('RELEASES.md — R2 score-cache lifecycle setup commands (plan U7)', ()
       /wrangler r2 bucket lifecycle add anc-score-cache-staging scores-7day-ttl scores\/ --expire-days 7/,
     );
   });
+
+  test('documents the 30-day og/ lifecycle command for both buckets', () => {
+    expect(releases).toMatch(/wrangler r2 bucket lifecycle add anc-score-cache og-30day-ttl og\/ --expire-days 30/);
+    expect(releases).toMatch(
+      /wrangler r2 bucket lifecycle add anc-score-cache-staging og-30day-ttl og\/ --expire-days 30/,
+    );
+  });
 });
 
 // R2 Data Catalog enablement on the lake buckets lives in the Cloudflare

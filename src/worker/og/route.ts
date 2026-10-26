@@ -6,7 +6,8 @@
 // minted into a card. Finished keys are cached immutably: a rescore changes
 // the URL the page advertises, and the previous object can stay at the edge.
 // Pending and unscored stay on the short cache, because the next run
-// replaces them at the same URL.
+// replaces them at the same URL. A finished card is also stored in R2
+// (./store.ts), so an edge miss reads it rather than drawing it again.
 
 import {
   isImmutableScoreOgKey,
@@ -21,6 +22,7 @@ import { emitLog } from '../telemetry/log';
 import { loadScoreOgFonts } from './fonts';
 import { type LogoFetch, resolveLogo } from './logo';
 import { renderScoreOgPng, type ScoreOgFonts } from './render';
+import { readStoredCard, storeCard } from './store';
 import { loadScoreOgSubject, type ScoreOgEnv } from './subject';
 
 export type ScoreOgDeps = {
@@ -28,6 +30,8 @@ export type ScoreOgDeps = {
   fetchImpl?: LogoFetch;
   budgetMs?: number;
   now?: () => number;
+  /** Runs the R2 store after the response; the request's ctx.waitUntil in the Worker. */
+  waitUntil?: (promise: Promise<unknown>) => void;
 };
 
 const REDIRECT_CACHE: CacheClassSpec = { klass: 'hit-min' };
@@ -84,6 +88,15 @@ export async function handleScoreOg(request: Request, env: ScoreOgEnv, deps: Sco
     });
   }
 
+  const immutable = isImmutableScoreOgKey(key);
+  if (immutable) {
+    const stored = await readStoredCard(env.SCORE_CACHE, subject.target, key).catch(() => null);
+    if (stored) {
+      log('stored', started, undefined, subject.card.lane);
+      return pngResponse(request, url.pathname, stored, immutable);
+    }
+  }
+
   try {
     const fonts = deps.fonts ?? (await loadScoreOgFonts(env));
     const logo =
@@ -97,24 +110,35 @@ export async function handleScoreOg(request: Request, env: ScoreOgEnv, deps: Sco
             now: deps.now,
           });
     const png = await renderScoreOgPng({ ...subject.card, logo }, fonts);
-    const body = new ArrayBuffer(png.byteLength);
-    new Uint8Array(body).set(png);
     log('ok', started, undefined, subject.card.lane, logo ? 'image' : 'wordmark');
-    const headers = new Headers({
-      'content-type': 'image/png',
-      'content-length': String(png.byteLength),
-      'x-robots-tag': 'noindex',
-    });
-    return applyHeaders(new Response(body, { status: 200, headers }), {
-      request,
-      pathname: url.pathname,
-      servedMarkdown: false,
-      cache: { klass: isImmutableScoreOgKey(key) ? 'immutable' : 'hit-min' },
-    });
+    if (immutable) {
+      const store = storeCard(env.SCORE_CACHE, subject.target, key, png).catch((err: unknown) =>
+        log('store-error', started, err, subject.card.lane),
+      );
+      if (deps.waitUntil) deps.waitUntil(store);
+      else await store;
+    }
+    return pngResponse(request, url.pathname, png, immutable);
   } catch (err) {
     log('error', started, err, subject.card.lane);
     return text(request, 500, 'scorecard image failed\n');
   }
+}
+
+function pngResponse(request: Request, pathname: string, png: Uint8Array, immutable: boolean): Response {
+  const body = new ArrayBuffer(png.byteLength);
+  new Uint8Array(body).set(png);
+  const headers = new Headers({
+    'content-type': 'image/png',
+    'content-length': String(png.byteLength),
+    'x-robots-tag': 'noindex',
+  });
+  return applyHeaders(new Response(body, { status: 200, headers }), {
+    request,
+    pathname,
+    servedMarkdown: false,
+    cache: { klass: immutable ? 'immutable' : 'hit-min' },
+  });
 }
 
 function text(request: Request, status: number, body: string, extra?: Record<string, string>): Response {

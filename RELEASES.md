@@ -498,7 +498,12 @@ Configure once per bucket (idempotent on the rule name):
 ```bash
 bun x wrangler r2 bucket lifecycle add anc-score-cache scores-7day-ttl scores/ --expire-days 7 -y
 bun x wrangler r2 bucket lifecycle add anc-score-cache-staging scores-7day-ttl scores/ --expire-days 7 -y
+bun x wrangler r2 bucket lifecycle add anc-score-cache og-30day-ttl og/ --expire-days 30 -y
+bun x wrangler r2 bucket lifecycle add anc-score-cache-staging og-30day-ttl og/ --expire-days 30 -y
 ```
+
+`og/` holds the scorecard social cards the Worker draws. Storing a card deletes the target's older cards, so the 30-day
+rule only bounds cards whose target stopped being requested; an expired card is drawn again on its next request.
 
 Verify:
 

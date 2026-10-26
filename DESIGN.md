@@ -1132,18 +1132,20 @@ The card design landed on 2026-04-30 via a `/design-shotgun` → `/impeccable` �
   (sourced verbatim from `src/build/shell.mjs`'s footer literal so the OG and the rendered footer never drift).
 - No logo, no illustration, no gradient, no photography. No side-stripe borders.
 - File: `public/og-image.png`, 1200×630, under 150 KB.
-- `og:image:alt` + `twitter:image:alt` for the site-wide card are `SITE_OG_IMAGE_ALT` in `src/shared/og-card.ts`. Scorecard
-  pages override both with a sentence that names the brand and the same rounded percent the page shows.
+- `og:image:alt` + `twitter:image:alt` for the site-wide card are `SITE_OG_IMAGE_ALT` in `src/shared/og-card.ts`.
+  Scorecard pages override both with a sentence that names the brand and the same rounded percent the page shows.
 
 **Per-scorecard cards.** `/score/<target>` (curated CLI, live CLI, branch, and website) points `og:image` and
 `twitter:image` at `/og/score/<target>/<key>.png`, 1200×630. The site-wide `/og-image.png` stays the default for every
 other page. The key is `s<rounded>-v<spec>` (`s80-v0.6.0`), or `pending` / `unscored`. A rescore mints a new URL, so an
 immutable edge cache of the previous PNG does not have to be purged. A key that is not the stored score 301s to the key
 that is. The Worker draws one fixed SVG (ANC mark, ANC × brand lockup, the percent, a meter) and rasterizes it with
-resvg-wasm. The brand tile is the homepage's apple-touch icon, PNG/SVG icon, or `og:image`, fetched over https inside
-a two-second budget and the web-audit host check; a miss, a timeout, an SVG that will not draw, or no homepage is a
+resvg-wasm. The brand tile is the homepage's apple-touch icon, PNG/SVG icon, or `og:image`, fetched over https inside a
+two-second budget and the web-audit host check; a miss, a timeout, an SVG that will not draw, or no homepage is a
 two-letter wordmark. Playwright remains the generator for the site-wide card only: it cannot run inside the Worker, and
-a website scorecard is not known at build time.
+a website scorecard is not known at build time. A finished card is stored in the `SCORE_CACHE` R2 bucket under
+`og/score/<sha256(target)>/<key>.png`, so an edge miss reads it instead of drawing again; storing a key deletes the
+target's other cards, and the `og-30day-ttl` lifecycle rule bounds the rest. Pending and unscored cards are not stored.
 
 ### 4.14 Schema.org / SEO surface
 
