@@ -99,7 +99,7 @@ test.describe('MCP endpoint — GET is protocol-only', () => {
     const res = await request.get('/mcp-docs.md');
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('text/markdown');
-    expect(await res.text()).toContain('405 Method Not Allowed');
+    expect(await res.text()).toMatch(/405 Method Not\s+Allowed/);
   });
 
   test('llms.txt links the endpoint and the docs page, and the docs link resolves', async ({ request, baseURL }) => {
