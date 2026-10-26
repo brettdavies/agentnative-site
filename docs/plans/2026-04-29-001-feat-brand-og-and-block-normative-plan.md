@@ -1,9 +1,11 @@
 ---
 title: "feat: Brand-aligned OG image + block-level MUST/SHOULD/MAY treatment"
 type: feat
-status: shipped
+status: released
+completed: 2026-04-30
+released_in: "#60"
+prs: ["#54", "#56"]
 date: 2026-04-29
-shipped_in: "src/build/plugins/normative-block.mjs + regenerated public/og-image.png on main; live since the v0.1 launch cascade."
 origin:
   - .context/compound-engineering/todos/004-pending-p2-block-level-must-should-may.md
   - .context/compound-engineering/todos/005-pending-p2-og-image-regeneration.md
@@ -210,7 +212,7 @@ system. Local patterns are sufficient.
   matching skill family keeps the AI-slop bar consistent with what shipped on the site.
 - **Decision: Typography polish via `/typeset`, visual QA via `/design-review`.** Required by the user's
   `feedback_route_visual_fixes_via_skills.md` memory and by R5 / R12.
-- **Decision: Add `og:image:alt` meta tag to `src/build/shell.mjs`** — currently missing (R10). Single-source the alt
+- **Decision: Add `og:image:alt` meta tag to `src/build/shell.mjs`** (R10). Single-source the alt
   text in `shell.mjs` so it applies to every page (matching the current single-OG model).
 - **Decision: Generator runs as `bun run og` script, not on every build.** Output is committed binary at
   `public/og-image.png`; `assets.mjs` continues to copy it byte-for-byte to `dist/og-image.png`. Running on every build
@@ -309,7 +311,7 @@ CI:
 
 ### Block-level normative treatment (PR 1, branch `feat/block-level-normative`)
 
-- [ ] **Unit 1: Block-level MUST/SHOULD/MAY treatment**
+- [x] **Unit 1: Block-level MUST/SHOULD/MAY treatment**
 
 **Goal:** Promote each `**KEYWORD:**` paragraph + immediately-following bulleted list into a single `<aside
 class="normative normative--{must,should,may}">` container with a leading keyword badge, while preserving the existing
@@ -412,7 +414,7 @@ mid-paragraph or non-list-followed normative keywords stay inline.
 
 ### OG image regeneration (PR 2, branch `feat/og-brand-deterministic`)
 
-- [ ] **Unit 2: Concept exploration via `/design-shotgun`**
+- [x] **Unit 2: Concept exploration via `/design-shotgun`**
 
 **Goal:** Generate three OG card concepts as renderable HTML variants and produce a comparison artifact for user
 selection.
@@ -464,7 +466,7 @@ and shotgun screenshots stay in the working tree until Unit 3 finalizes the chos
 - `/design-shotgun` produces a comparison view with all three rendered.
 - User selects A, B, or C.
 
-- [ ] **Unit 3: Finalize chosen concept via `/impeccable` + `/typeset`**
+- [x] **Unit 3: Finalize chosen concept via `/impeccable` + `/typeset`**
 
 **Goal:** Take the user-selected concept HTML and refine it to production quality: anti-AI-slop pass via `/impeccable`,
 typography polish via `/typeset`. Output is a single source-of-truth `og.html` + `og.css` pair.
@@ -511,7 +513,7 @@ short-circuit — these are the per-saved-memory routing requirements.
 - Capture finalized screenshot to `.context/screenshots/005-og-finalize/` (per user's `feedback_screenshots_location.md`
   memory).
 
-- [ ] **Unit 4: Deterministic Playwright renderer + meta wiring + asset regen**
+- [x] **Unit 4: Deterministic Playwright renderer + meta wiring + asset regen**
 
 **Goal:** Replace the Gemini-based generator with a Playwright HTML→PNG generator. Wire the missing `og:image:alt` meta
 tag. Regenerate `public/og-image.png` from the new pipeline. Delete the obsolete Python script and update the design
@@ -542,7 +544,7 @@ doc.
 - Generator script:
 
 1. Resolve repo root via `import.meta.url`.
-2. Read `src/build/shell.mjs` source, regex-extract the version literal (currently `v0.1.0`). This is the same SoT the
+2. Read `src/build/shell.mjs` source, regex-extract the version literal. This is the same SoT the
    footer ships from, so the OG never drifts from the visible UI.
 3. Launch Playwright Chromium headless, viewport 1200×630, deviceScaleFactor 2 (renders at 2400×1260).
 4. `page.goto('file://' + repoRoot + '/docs/design/og.html')` with version injected via a query string
@@ -593,7 +595,7 @@ doc.
 - Facebook Sharing Debugger: confirm new image.
 - Capture screenshots of each validator's output to `.context/screenshots/005-og-validators/`.
 
-- [ ] **Unit 5: Visual QA via `/design-review`**
+- [x] **Unit 5: Visual QA via `/design-review`**
 
 **Goal:** Final visual QA pass on the rendered OG PNG. Catch any spacing/hierarchy/AI-slop issues the earlier skills
 missed.

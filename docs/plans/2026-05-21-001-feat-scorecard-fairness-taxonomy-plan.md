@@ -1,9 +1,11 @@
 ---
 title: 'feat: Scorecard status taxonomy + scoring fairness (Path 2)'
 type: feat
-status: shipped
+status: released
+completed: 2026-06-01
+released_in: "#145"
+prs: ["#123", "#128", "#129", "#136", "brettdavies/agentnative#34", "brettdavies/agentnative#39", "brettdavies/agentnative#44", "brettdavies/agentnative-cli#59", "brettdavies/agentnative-cli#62", "brettdavies/agentnative-cli#64", "brettdavies/agentnative-cli#72", "brettdavies/agentnative-skill#23"]
 date: 2026-05-21
-shipped_in: "Cross-repo: spec v0.5.0 (d5d4086, PR #44), CLI v0.5.0 (eba2145, PR #72), skill v0.5.0 (dff0412, PR #23), site via release #145 (08958bc). Schema landed at 0.6 per plan, then advanced to 0.7 alongside the check to audit rename (CLI PR #65). Full 98-tool registry rescored on schema 0.7 against anc v0.5.0. Plan retained as the historical record of the migration arc, decision rationale (7-status vs annotated skip, conditional antecedents, deferral of compound antecedents to v2), and release-train ordering."
 origin: anc v0.4.0 rescore session, 2026-05-21 — sandbox-driven fairness analysis triggered by the v0.4.0 behavioral audit expansion (11 → 18 checks) widening the denominator and exposing the existing scoring algorithm's conflations
 ---
 
@@ -424,16 +426,9 @@ propagation table, worked examples, and conditional-row migrations all landed on
 to `main` and tagged. The standalone spec issue proposing the 7-status taxonomy was dropped (the plan, PR #34, and
 `principles/AGENTS.md` together carry the proposal; a single-repo issue would be redundant).
 
-**Source location (where U1 lives today, as of 2026-05-26):**
-
-- Branch: `agentnative-spec` `dev`, head commit `b4f4d02` (PR #34 squash-merge).
-- `main`: does NOT contain U1. Latest `main` commit is `1625416` (release: PRODUCT.md migration), predates PR #34.
-- Tags: latest is `v0.4.0` (tagged 2026-05-07), which predates U1. There is no `v0.5.0` or `v0.5.0-rc.*` tag.
-
 **Downstream-consumer impact:** Both `agentnative-cli` and `agentnative-site` vendor the spec via their respective
-`scripts/sync-spec.sh`. The default resolution path returns the latest `v*` tag (currently `v0.4.0`), so a blind
-`sync-spec.sh` rerun re-pulls pre-U1 content. To consume U1 ahead of a spec release, use the `--ref` flag (or the
-`SPEC_REF` env var) added to both scripts alongside this plan unit:
+`scripts/sync-spec.sh`. The default resolution path returns the latest `v*` tag. To consume U1 ahead of a spec
+release, use the `--ref` flag (or the `SPEC_REF` env var) added to both scripts alongside this plan unit:
 
 ```bash
 # Pull U1 by branch HEAD (recommended for early iteration):
@@ -761,8 +756,8 @@ published tap formula). U7 gates this unit.
 
 ### U7. Release train — publish the audit-capable `anc` (spec → cli → skill)
 
-**Status:** [in-progress — spec stage shipped 2026-05-30 as v0.5.0 (PR brettdavies/agentnative#44 → `d5d4086`); cli
-stage next, then skill, then website]
+**Status:** [shipped: spec v0.5.0 (brettdavies/agentnative#44), cli v0.5.0 (brettdavies/agentnative-cli#72), skill
+v0.5.0 (brettdavies/agentnative-skill#23)]
 
 **Repos (release strictly in this order):** `brettdavies/agentnative` (spec) → `brettdavies/agentnative-cli` (cli) →
 `brettdavies/agentnative-skill` (skill). The site is the fourth and final stage — U6's rescore lands on `dev`, then
@@ -805,8 +800,7 @@ audit-capable published CLI (tracked in the live-scoring plan, but the release a
 - **CLI:** schema-0.6 / 7-status emission (U2 — cli `dev` `3839696`), behavioral-only credit-weighted `score_pct` +
   floor 70 (U3b — cli `dev` `43d4f7c`), the `check`→`audit` rename (agentnative-cli #65 — cli `dev` `ff1275f`), and a
   spec re-vendor at `v0.5.0`. The published `anc` must expose the `audit` subcommand: the site shipped its half of the
-  rename in #131 (`5073bd7`), so the live-scoring worker and `docker/score/score-anc100.sh` now invoke `anc audit`,
-  which the current published `v0.4.0` (ships `anc check`, schema 0.5) does not provide.
+  rename in #131 (`5073bd7`), so the live-scoring worker and `docker/score/score-anc100.sh` now invoke `anc audit`.
 - **Skill:** the `check`→`audit` rename (agentnative-skill #19 — skill `dev` `e6bf388`) plus a spec re-vendor at
   `v0.5.0`. #19 re-vendored spec `v0.4.0` (pre-taxonomy), so the release must re-vendor *forward* to the new spec tag,
   not stay at `v0.4.0`, so the published bundle's `anc audit` examples match the released cli and the released spec.
@@ -1004,9 +998,8 @@ It uses inline-deps via PEP 723; no environment setup required. Invocation: `uv 
 - **Sandbox script:** `scripts/score-sandbox.py`
 - **Long-form dataframe:** `.context/score-sandbox/long.parquet` (regenerable)
 - **Per-tool table:** `.context/score-sandbox/tools.csv` (regenerable)
-- **v0.4.0 rescore output:** held on `feat/rescore-v0.4.0` branch, not yet merged
 - **CLI README v0.4.0 dogfood section:** `anc audit . --binary` = 18 checks, 15 pass / 1 warn / 0 fail / 2 skip / 0
-  error → 94% under current formula
+  error → 94% under the pass/(pass+warn+fail) formula
 - **RFC 2119** (key words for requirement levels)
 - **RFC 8174** (uppercase vs lowercase ambiguity)
 - **PR #108** (site README rewrite which introduced the `## Scoring` section that triggered the fairness conversation)

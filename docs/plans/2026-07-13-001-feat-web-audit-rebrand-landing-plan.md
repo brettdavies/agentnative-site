@@ -1,9 +1,11 @@
 ---
 title: Web-Audit and Rebrand Landing Sequence - Plan
 type: feat
-date: 2026-07-13
-status: completed
+status: released
 completed: 2026-07-14
+released_in: "#205"
+prs: ["#195", "#197", "#198", "#199", "#201"]
+date: 2026-07-13
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 product_contract_source: ce-plan-bootstrap
@@ -16,8 +18,7 @@ execution: code
 
 - **Objective:** land the 49-commit stack on `feat/design-system-port` as four sequential `dev` deployments: three for
   the web audit (reusing PRs #197, #198, #199 re-sliced to fresh boundaries) and one new PR for the design-system-port
-  rebrand (opened as #201). #195 becomes the canonical home for the MCP-descriptor-path fix and lands first. All five
-  merged to `dev`: #195 (`fef13e1`), #197 (`0d49c03`), #198 (`32452fd`), #199 (`3123dac`), #201 (`e4269ed`).
+  rebrand (opened as #201). #195 becomes the canonical home for the MCP-descriptor-path fix and lands first.
 - **Authority:** the deployment slicing, the staging-only scope, and the #195-canonical decision are user-confirmed and
   settled (this run's scoping gate). Repo conventions (AGENTS.md, the global git/CI rules) govern anything left open;
   the implementer decides remaining details.

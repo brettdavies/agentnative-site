@@ -1,22 +1,16 @@
 ---
 title: "feat: Live scoring via Cloudflare Sandbox + Worker (v3 — install-binary only)"
 type: feat
-status: shipped
+status: released
+completed: 2026-06-01
+released_in: "#145"
+prs: ["#77", "#78", "#79", "#80", "#81", "#84", "#93", "#95", "#96", "#97", "#98", "#99", "#100", "#101", "#102", "#103", "#104", "#143"]
 date: 2026-04-28
 revised: 2026-06-02
-shipped_in: "U1-U8 on dev across spring 2026; promoted to main via release #115 (live-scoring v3 + anc 0.4.0) and #145 (live-scoring v3 + audit rename + spec v0.5.0)."
 origin: docs/brainstorms/live-scoring-spike.md
 ---
 
 # feat: Live Scoring via Cloudflare Sandbox + Worker (v3)
-
-> **REWRITE NOTE (2026-05-04).** This document replaces v2 (filed 2026-04-28). v2 was incorrectly framed against the
-> 2026-04-17 CEO design's Premises #2 (no toolchains, install-from-binary only) and #4 (web shows summary + top-3,
-> CTA is install-anc-locally). v2 carried Debian-trixie-slim glibc (~3.5-4.5 GB on `standard-1`), a GitHub clone +
-> source-only fallback path, and a full-scorecard web rendering — none of which match the design. v3 returns to the
-> design's Alpine + musl image (~100-300 MB on `basic`), drops the clone phase entirely (we install pre-built
-> binaries; we never compile), restricts the web result to summary + top-3 issues with the install-anc-locally CTA
-> as primary, and adds the input-parser unit that v2 never had. Show HN remains gated on this functionality.
 
 ---
 
@@ -31,197 +25,6 @@ theatrical spinner (no sandbox spawn). Unknown inputs that resolve to an install
 sandbox container, install via the appropriate package manager (apk / cargo binstall / pip wheel / npm / go install /
 downloaded tarball), run `anc audit --command <name> --output json`, write through to R2, return to the user. Anything
 that doesn't resolve to an installable binary bounces out with the install-anc-locally CTA.
-
----
-
-## Current state — 2026-05-20
-
-### Shipped to dev (~70% to rollout)
-
-- U1 — build-time `registry-index` + `discovery-hints-index` (PR
-  [#78](https://github.com/brettdavies/agentnative-site/pull/78), commit `82b74dd`)
-- U2 — Alpine + musl sandbox image source at `docker/sandbox/Dockerfile` (PR
-  [#79](https://github.com/brettdavies/agentnative-site/pull/79), commit `bf14daf`)
-- U3 — wrangler bindings live on staging AND production; DO is a stub returning `{error: 'sandbox_stub_until_u6'}` (PR
-  [#81](https://github.com/brettdavies/agentnative-site/pull/81), commit `09fe91f`). Production-Worker side shipped
-  2026-05-15 via release PR [#85](https://github.com/brettdavies/agentnative-site/pull/85) (merge SHA `e79b7ce`); DO
-  migration v1 applied to the named-prod side on that deploy.
-- U4 — input parser + GitHub URL discovery chain (PR [#80](https://github.com/brettdavies/agentnative-site/pull/80),
-  commit `5ac59ca`)
-- U3-followup — sandbox image migration off Docker Hub to the Cloudflare managed registry, with the default workflow
-  reframed to staging-leads-prod (PR [#84](https://github.com/brettdavies/agentnative-site/pull/84), merged 2026-05-14).
-  Staging container app `agentnative-site-staging-sandbox-staging` (id `a0309fd2-9622-4dd8-a6a8-faf95292f08e`) is live
-  on `registry.cloudflare.com/<acct>/anc-sandbox:30f61f1`, version v2, 6/6 healthy. Production-Worker container app
-  shipped 2026-05-15 via release PR [#85](https://github.com/brettdavies/agentnative-site/pull/85) on the same image pin
-  (lockstep); CI main-targeting pin-equality guard exercised cleanly on PR #85's first run.
-- discovery-hit-rate gate (PR [#77](https://github.com/brettdavies/agentnative-site/pull/77), commit `078d233`)
-- U5 — Worker `/api/score` route with content negotiation, R11-triad response shape, registry-fast-path (unmetered),
-  Turnstile siteverify, signed HMAC session cookie, KV kill switch, and dual rate-limits — shipped 2026-05-15 via PR
-  [#93](https://github.com/brettdavies/agentnative-site/pull/93) (commit `8a03bcb`). DO still returned
-  `sandbox_stub_until_u6` at U5 ship; the route was exercised end-to-end to the DO boundary so U6 could drop in without
-  further plumbing.
-- U6 — Sandbox DO install + score with two-phase egress (`allowedInstall` → `noHttp`) — shipped 2026-05-18 via PR
-  [#95](https://github.com/brettdavies/agentnative-site/pull/95) (commit `af9f568`). Real `@cloudflare/sandbox` DO
-  replaces the stub; `sandbox-exec.ts` orchestrator handles per-PM install + `anc audit --output json`.
-- U7 — R2 cache (read-on-hit, write-on-miss) + unified `lookupScorecard()` returning a tagged-union (`curated | cached |
-  miss`); cache key `scores/{binary}/{anc-version}.json`; 7-day TTL via R2 bucket lifecycle rule — shipped across four
-  PRs 2026-05-19:
-- PR [#96](https://github.com/brettdavies/agentnative-site/pull/96) (commit `6c9d665`) — core cache wrapper, unified
-  lookup, handler rewrite.
-- PR [#97](https://github.com/brettdavies/agentnative-site/pull/97) (commit `ef1f518`) — corrects the `wrangler r2
-  bucket lifecycle add` syntax in RELEASES.md (positional bucket/name/prefix args, `--expire-days` flag) and pins the
-  corrected shape via a drift-guard test.
-- PR [#98](https://github.com/brettdavies/agentnative-site/pull/98) (commit `f053733`) — red-team test coverage
-  (cross-PM aliasing under one binary, github-url with hint HIT/MISS, `?fromCache=false` write semantics), opt-in
-  staging cache smoke script (`scripts/staging-cache-smoke.sh`), and Cloudflare Access in front of the staging Worker as
-  DDoS defense (idempotent bootstrap at `scripts/cf-access-bootstrap.sh`).
-- PR [#99](https://github.com/brettdavies/agentnative-site/pull/99) (commit `eb9cbc7`) — sandbox base swap to
-  `python:3.12-slim-trixie`, sdist allowlist (`pyperclip`, `pycparser`) gated by a 7-day supply-chain release-delay
-  (`PIP_UPLOADED_PRIOR_TO`, `UV_EXCLUDE_NEWER="7 days"`), staging instance promoted to `standard-2` (lifts pip
-  extraction CPU/IO budget for aider-chat's 91 MB wheel set), and a runbook/decision-log split: `RELEASES.md` becomes
-  runbook-only (commands, paths, tables), `ARCHITECTURE.md` is a new top-level decision log holding all rationale prose.
-  Staging container app now on `:d87ed0a` + `standard-2`. Production promotion is unblocked as of 2026-06-01 (U10
-  shipped); the next release cuts a `release/*` branch per `RELEASES.md`.
-- U8 — Homepage live-scoring form, invisible Turnstile + lazy-load, 2 s theater floor, three class-specific bounce
-  panels, install-anc CTA, CSP allowlist for `challenges.cloudflare.com`, build-emitted
-  `src/worker/spec-version.gen.ts`, markdown-twin silence invariant, shareable result page at `/score/live/<binary>`
-  (HTML + markdown twin) — branch `feat/u8-homepage-form` (off `dev` commit `37e5375`). 16 commits across the chain,
-  head at `45b66c6`. PR pending. Resolves the K-decision on result presentation (option 3, redirect to a shareable
-  subpage) using a cache-key-derived URL rather than a minted session id: the live path already writes through to
-  `scores/<binary>/<spec-version>.json` in R2, so the share URL reads from the same key the cache layer already
-  populated. See "Discovered during U8 execution (2026-05-20)" below for the scope items that grew beyond the original
-  U8 spec (input handling expansions, pipeline gates-before-discovery reorder, post-discovery cache + telemetry,
-  discovery-tier move from DO to Worker).
-
-### Discovered post-U3 shipment (2026-05-14 audit)
-
-Three findings surfaced during the U3-followup audit. The Docker Hub blocker is resolved; the other two are open.
-
-**Docker Hub deprecation — RESOLVED via U3-followup (PR #84).** The `containers[].image` field used to pin
-`docker.io/brettdavies/anc-sandbox@sha256:...`; the registry deprecation manifested as repeating `ImagePullError "the
-image registry credentials are invalid"` on the staging container app. PR #84 ships local-build-once via `wrangler
-containers build -p` and pins both env blocks to `registry.cloudflare.com/<acct>/anc-sandbox:<git-sha>`. Deploy never
-rebuilds. GHA fallback via `cloudflare/wrangler-action@v3.14.1` stays available for the rare offline-Brett case
-(~60-130s cold build per deploy; no GHA-side layer cache; push auto-skipped when the existing tag still matches).
-
-**Routing drift — RESOLVED via release PR #85 (2026-05-15).** Release PR
-[#85](https://github.com/brettdavies/agentnative-site/pull/85) (merge SHA `e79b7ce`) brought the named-production Worker
-current with 11 dev-side PRs since #73 plus the docs/research cleanup commit, and `deploy.yml` created a fresh Custom
-Domain binding for `anc.dev` against `agentnative-site` per the top-level `routes:` field. R2 bucket `anc-score-cache`
-was created out-of-band beforehand. DO migration v1 (`new_sqlite_classes: ["Sandbox"]`) applied cleanly to the
-named-prod side for the first time (one-way wall — production now cannot `wrangler rollback` across v1). Verified
-post-deploy: `curl https://anc.dev/` returns 200 with no `x-robots-tag`; `curl
-https://agentnative-site-staging.brettdavies.workers.dev/` returns 200 with `x-robots-tag: noindex`; CF API confirms one
-record `hostname=anc.dev, service=agentnative-site, environment=production, enabled=true`. Surprise finding during
-execution: the staging binding had already cleared between the prior session's audit and the start of the release
-session (DELETE on the cited record id returned `Origin '8721a2ad...' not found`), so the planned mid-merge detach was a
-no-op. CF derives custom-domain record ids deterministically from `(account, zone, hostname)`, so the new prod binding
-reused the same id as the prior staging binding — the id in the audit was not stale, just reusable. Follow-ups: clean up
-the orphan DO namespace on staging (`a4fb92ed020241cb802c1d5176a39608`) as a documented quarterly action, and PR
-`docs/research/` into the `brettdavies/.github` reusable `guard-main-docs.yml` so that path is blocked from `main` like
-`docs/plans/`/`docs/solutions/`/`docs/brainstorms/`/`docs/reviews/` already are.
-
-**Default image workflow reframed — staging-leads-prod.** The original U3-followup spec said "pin both env blocks to the
-same tag (shared-tag-pin)" with a rationale of "avoids the multi-env double-build". That rationale was a leftover from
-the inline-Dockerfile-path pattern — under registry URIs, deploys never rebuild and the double-build penalty does not
-exist. The two env blocks are independent CF resources (separate container apps, separate version histories) and can
-legitimately diverge. PR #84 adopts staging-leads-prod as the default: new images bump `env.staging` only and soak on
-the staging Worker, then a release PR to main promotes the top-level pin to match. The lockstep pattern remains
-available as a shortcut for low-risk image bumps (base-image patches, dependency-only updates). CI guard in `ci.yml`
-enforces this discipline per PR target: registry-existence is always checked on both pins; equality is enforced only
-when `base_ref == main`.
-
-### Discovered during U8 execution (2026-05-20)
-
-Scope grew beyond the original U8 spec along five axes; each shipped on the `feat/u8-homepage-form` branch and is
-covered by tests + the full red-team suite. None of these break the U8 acceptance bar — they enlarge what U8 ships
-without weakening the original guarantees.
-
-- **Input handling expansions** (commit `b295e3b`, with red-team coverage in `tests/score-validate.test.ts`):
-- `http://` URLs are silently upgraded to `https://` rather than bounced as `non_https_url` — the validator was the only
-  place `non_https_url` ever fired, and treating http as an honest mistake is friendlier than rejecting.
-- `owner/repo` shorthand (e.g., `tobi/qmd`) is treated as a github-url. Same regex floor as a full URL; same downstream
-  pipeline.
-- `/tree/<branch>` URLs capture the branch and route through a git-clone install path that the sandbox shells with
-  `shellQuote()` on every interpolation. Branch-scoped scores never write to the cache (clobbering the default-branch
-  scorecard would be a correctness regression) and never get a share URL.
-- **GitHub accessibility fast-fail** (commit `119d65c`, `src/worker/score/github-accessibility.ts`). For github-url
-  inputs without a hint or branch, the Worker issues one HEAD probe against `github.com/<owner>/<repo>` before paying
-  the discovery fan-out. A clean 404 short-circuits with `github_repo_not_accessible` (new ScoreError variant). 5-minute
-  in-isolate cache absorbs repeat probes. Fails OPEN on 5xx / timeout / abort so a github outage doesn't break scoring.
-- **Discovery hardening + cost reduction** (commits `b34f0d5`, `ec19fa0`, `db40006`):
-- `discoverBinary` fans out Step 2/3/4 (release asset, registry parse, README parse) concurrently via
-  `Promise.allSettled` with an 8-second deadline; priority pick is release > registry > README. A
-  `diagnostics.agreed_binary` field captures when multiple tiers agreed.
-- The whole discovery chain moved from the Sandbox DO into the Worker via `src/worker/score/resolve-spec.ts`. A
-  `chain_no_resolve` paste (e.g., `brettdavies/dotfiles`) now bounces in ~200 ms at the Worker tier instead of spinning
-  a container to discover the same fact. The DO contract narrowed from `{input, hash}` to `{spec, hash}` with the
-  resolved `InstallSpec` — DO no longer fetches `loadHintsIndex` or runs brew/go fallbacks.
-- Pipeline ordering was corrected (commit `db40006`): metered gates (kill-switch → Turnstile → rate-limit) now fire
-  BEFORE the github HEAD and discovery fan-out. Pre-fix, an unauthenticated caller could fan out the ~5 parallel
-  registry/Releases calls per request at zero rate-limit cost. The R6 unmetered contract (curated + cached hits bypass
-  gates) is preserved because step 2 short-circuits ahead of the gate block.
-- Sandbox `directInstallCommand` auto-detects the binary inside an extracted archive when archive name ≠ tool name
-  (`gogcli` archive ships `gog`, etc.): `find -perm /111`, filter doc filenames + non-binary extensions, awk-score by
-  name proximity, emit `DETECTED_BINARY=<name>` to stdout. Worker whitelist-validates the result against
-  `[A-Za-z0-9._-]{1,64}`.
-- **Post-discovery cache lookup with telemetry** (commit `c042c46`). A second R2 read fires at step 6.5 between
-  `resolveSpec` and DO dispatch, keyed by the resolved `spec.binary` rather than the input-derived binary. Sparing the
-  DO container spawn on github-url-without-hint pastes that miss the round-1 cache but landed in the cache via a prior
-  request. One structured `score.tier` log line per request captures `tier ∈ {curated, cache_pre, cache_post, live,
-  error_<code>}` plus per-tier attempt + hit flags so operators can query "what percentage of cache hits came from pre
-  vs post discovery?" via the observability binding. Cache reshape (maximize round-1 hits) is explicitly out of scope
-  for U8.
-- **Result-presentation K-decision resolved.** Plan listed three candidate shapes (inline / modal / shareable subpage).
-  Implementation picked option 3 with a twist: the share URL is `/score/live/<binary>`, derived from the cache key the
-  live path already populates, rather than a minted session id. Same shape as the rest of the site (HTML + markdown twin
-  under the same path, no `.html` extension). Server-rendered via `src/worker/score/summary-render.ts` re-using the
-  shared scorecard formatter at `src/shared/scorecard-format.mjs`. The slug `live` is reserved in `scorecards.mjs` so no
-  curated tool name can collide with the dynamic share route.
-- **Install-command binary cross-check** (commit `45dd881`). `cargo install bat` and similar input shapes resolve to
-  `binary='bat'` via the parser, then `lookupRegistry` consults `by_slug` directly — landing on the curated scorecard
-  instead of paying the live path for a tool the site already has audited.
-- **Comment hygiene** (commit `45b66c6`, this branch only). 36 branch-touched files had plan-ID anchors (U1-U10, R1-R12,
-  K1-K8, A1-A15, P1-P10 in non-principle context) stripped from comments and JSDoc. Files this branch never touched
-  still carry their anchors; a follow-up sweep is queued separately.
-
-### Deferred follow-ups
-
-- **U10.1 — automated kill cron.** A scheduled Worker that queries the `SCORE_TELEMETRY` Analytics Engine dataset for
-  rolling 24h request count and auto-flips `scoring_disabled` past a threshold. All primitives (AE dataset + kill switch
-- Workers cron) exist; threshold tuning needs real traffic data, so the wiring is deferred.
-- **Production-side procedure block** in the live-scoring monitoring runbook (commands, thresholds, escalation paths
-  against `anc.dev`). Lands with the first production release that promotes live scoring.
-
-### Risks to design against
-
-- **Cost ceiling has no native auto-cap on Cloudflare.** Per spike 04 (citing
-  <https://developers.cloudflare.com/changelog/post/2026-04-13-billable-usage-dashboard-and-budget-alerts/>), the April
-  2026 Budget Alerts + Billable Usage dashboard are email-only — there is no "Cloudflare disables your Worker when it
-  crosses $X" primitive. Minimum viable defense for v3 launch (see Cost ceiling and abuse mitigation section below):
-  Turnstile invisible mode + lazy-load on the homepage form, rekey `SCORE_LIMITER` from per-IP to `session-cookie +
-  tool-arg-hash`, in-Worker KV `scoring_disabled` kill switch, and Cloudflare Budget Alert. A true hard daily cap (DO +
-  alarm + cost-budget counter) is deferred to v3.1.
-- **Abuse.** Anonymous + unauthenticated GitHub API path means the discovery chain hits `api.github.com` at the unauth
-  60/hr/IP ceiling: IP exhaustion is shared across users. Consider a server-side GitHub PAT for discovery, or
-  token-the-user.
-- **Correctness.** Plan currently assumes `anc audit --command <binary> --output json` matches local `anc audit` output.
-  PATH composition inside the container is also deferred. Specify both as part of U6 acceptance criteria.
-- **Failure modes.** No `installSpec` for unsupported PMs (e.g., brew on Alpine): bounce-out is the design but the
-  bounce-out UX isn't built. Sandbox cold-start, container crash, network timeout, two-phase egress misconfig are all
-  unobservable today.
-- **Rollback fragility (per spike 03).** Two new constraints land in the Risk Analysis section: (1) any DO migration
-  permanently strands earlier versions from `wrangler rollback` (cite
-  <https://developers.cloudflare.com/workers/configuration/versions-and-deployments/rollbacks/> Bindings section); (2)
-  deleting a container image from the CF managed registry silently breaks rollback for any version that referenced it
-  (cite <https://developers.cloudflare.com/containers/platform-details/limits/> footnote). Discipline: never delete
-  shipped-version images, treat DO migrations as one-way walls.
-
-### Branch baseline
-
-All units (U1 through U10) are squash-merged on `dev`. The next promotion to `main` follows the standard `release/*`
-cherry-pick flow in `RELEASES.md`, gated by the live-DO smoke step in `RELEASES-PREFLIGHT.md`. U10.1 (auto-kill cron)
-remains deferred per the "Deferred follow-ups" section above.
 
 ---
 
@@ -903,87 +706,87 @@ review pass. Each names the source reviewer and a one-line resolution suggestion
 
 ## Output Structure
 
-`[shipped]` lives on dev now, `[pending]` not yet started, `[mod]` an existing file modified on ship.
+`[mod]` marks an existing file modified on ship.
 
 ```text
 docker/
-  sandbox/                          # [shipped] — v3 image (Alpine + musl, no toolchains)
+  sandbox/                          # v3 image (Alpine + musl, no toolchains)
                                     #   Used by: CF runtime live-scoring of user-pasted tools (this plan).
                                     #   NOT used for batch-scoring the registry (that's docker/score/).
-    Dockerfile                      # [shipped] — cloudflare/sandbox:0.9.2-musl + apk install + anc bottle
-    README.md                       # [shipped/mod] U3 — local-build recipe + Dockerfile SHA-pin
+    Dockerfile                      # cloudflare/sandbox:0.9.2-musl + apk install + anc bottle
+    README.md                       # [mod] U3 — local-build recipe + Dockerfile SHA-pin
                                     #   discipline + what's NOT in the image; production push moves
                                     #   inline to `wrangler deploy` per U3 (CF managed registry)
-  score/                            # [shipped, pre-existing] — out of scope for THIS plan
+  score/                            # pre-existing — out of scope for THIS plan
                                     #   Debian/glibc batch-scoring image used by scripts/regen-scorecards.sh
                                     #   to produce dist/scorecards/*.json from registry.yaml.
                                     #   Orthogonal to docker/sandbox/ (different OS, different purpose, much
                                     #   larger). Documented here for inventory completeness; do not merge.
-discovery-hints.yaml                # [shipped] — owner/repo -> {pm, package, binary} for U4 step 0.5
+discovery-hints.yaml                # owner/repo -> {pm, package, binary} for U4 step 0.5
 registry.yaml                       # [mod] (existing) — single-source tools data; consumed by U1 + U4
 src/
   build/
-    registry-index.mjs              # [shipped] — emits dist/registry-index.json + dist/discovery-hints-index.json
+    registry-index.mjs              # emits dist/registry-index.json + dist/discovery-hints-index.json
     build.mjs                       # [mod] — calls emitBuildIndexes after loadRegistry
-    score-page.mjs                  # [pending] U8 — emits dist/score.html form + dist/score.md twin
+    score-page.mjs                  # U8 — emits dist/score.html form + dist/score.md twin
   client/
-    live-score.ts                   # [pending] U8 — form submit + fetch + 2s theater + progress polling
+    live-score.ts                   # U8 — form submit + fetch + 2s theater + progress polling
   worker/
-    index.ts                        # [pending] U5 — adds /api/score path-prefix branch
-    spec-version.gen.ts             # [pending] U8 (build-emitted) — SPEC_VERSION + SITE_SPEC_VERSION constants
-    score/                          # [shipped] — Worker-side score handler module
-      validate.ts                   # [shipped] — input classification (slug / install-command / GitHub URL)
-      parse-install.ts              # [shipped] — install-command parser (brew/cargo/bun/uv/pip/npm/go/yarn/pnpm)
-      discover-binary.ts            # [shipped] — 4-step discovery chain with F1-tightened step 3
-      registry-lookup.ts            # [shipped] — registry-index + discovery-hints hit-test
-      handler.ts                    # [pending] U5 — /api/score route entry; URL validate + rate limit + cache + DO
-      cache.ts                      # [pending] U7 — R2 read/write keyed by scores/{slug}/{anc-v}/{tool-v}.json
-      do.ts                         # [pending] U6 (stub at U3) — Sandbox DO class (extends Sandbox)
-      sandbox-exec.ts               # [pending] U6 — two-phase egress + install + anc audit + result parsing
-      response-shape.ts             # [pending] U5 — spec_version + anc_version + auditor_url triad
-      content-negotiation.ts        # [pending] U5 — /api/score.md vs /api/score.json branching
-      summary-render.ts             # [pending] U8 — buildScoreSummaryBody (header + score + top-3 + CTA)
+    index.ts                        # U5 — adds /api/score path-prefix branch
+    spec-version.gen.ts             # U8 (build-emitted) — SPEC_VERSION + SITE_SPEC_VERSION constants
+    score/                          # Worker-side score handler module
+      validate.ts                   # input classification (slug / install-command / GitHub URL)
+      parse-install.ts              # install-command parser (brew/cargo/bun/uv/pip/npm/go/yarn/pnpm)
+      discover-binary.ts            # 4-step discovery chain with F1-tightened step 3
+      registry-lookup.ts            # registry-index + discovery-hints hit-test
+      handler.ts                    # U5 — /api/score route entry; URL validate + rate limit + cache + DO
+      cache.ts                      # U7 — R2 read/write keyed by scores/{slug}/{anc-v}/{tool-v}.json
+      do.ts                         # U6 (stub at U3) — Sandbox DO class (extends Sandbox)
+      sandbox-exec.ts               # U6 — two-phase egress + install + anc audit + result parsing
+      response-shape.ts             # U5 — spec_version + anc_version + auditor_url triad
+      content-negotiation.ts        # U5 — /api/score.md vs /api/score.json branching
+      summary-render.ts             # U8 — buildScoreSummaryBody (header + score + top-3 + CTA)
 dist/
-  registry-index.json               # [shipped] — emitted artifact (gitignored), 96 slugs / 93 owner/repos
-  discovery-hints-index.json        # [shipped] — emitted artifact (gitignored), 3 seed hints
-  score.html                        # [pending] U8 — paste-input form page with install-anc CTA
-  score.md                          # [pending] U8 — markdown twin of /score
+  registry-index.json               # emitted artifact (gitignored), 96 slugs / 93 owner/repos
+  discovery-hints-index.json        # emitted artifact (gitignored), 3 seed hints
+  score.html                        # U8 — paste-input form page with install-anc CTA
+  score.md                          # U8 — markdown twin of /score
   js/
-    live-score.js                   # [pending] U8 — bundled output of src/client/live-score.ts
+    live-score.js                   # U8 — bundled output of src/client/live-score.ts
 tests/
-  worker.test.ts                    # [pending] U5 (modify) — adds /api/score branch tests, extends CN preferences
-  registry-index.test.ts            # [shipped] — build-time emission unit tests (22 tests)
+  worker.test.ts                    # U5 (modify) — adds /api/score branch tests, extends CN preferences
+  registry-index.test.ts            # build-time emission unit tests (22 tests)
   regression.test.ts                # [mod] — adds regression #7 for live-scoring indexes (3 tests)
-  dockerfile-sandbox.test.ts        # [shipped] — static shape assertions on docker/sandbox/Dockerfile (12 tests)
-  score-validate.test.ts            # [shipped] — input validation matrix (21 tests)
-  score-parse-install.test.ts       # [shipped] — install-command parser table (33 tests)
-  score-discover-binary.test.ts     # [shipped] — GitHub URL discovery chain with mocked fetcher (18 tests)
-  score-registry-lookup.test.ts     # [shipped] — registry+hints lookup ordering + case-insensitive (10 tests)
-  score-handler.test.ts             # [pending] U5 — handler.ts unit tests
-  score-cache.test.ts               # [pending] U7 — R2 cache read/write
-  score-response-shape.test.ts      # [pending] U5 — spec_version/anc_version/auditor_url triad enforcement
-  score-contract.test.ts            # [shipped] U9 — cross-validates /api/score JSON ↔ committed scorecards (PR #101)
+  dockerfile-sandbox.test.ts        # static shape assertions on docker/sandbox/Dockerfile (12 tests)
+  score-validate.test.ts            # input validation matrix (21 tests)
+  score-parse-install.test.ts       # install-command parser table (33 tests)
+  score-discover-binary.test.ts     # GitHub URL discovery chain with mocked fetcher (18 tests)
+  score-registry-lookup.test.ts     # registry+hints lookup ordering + case-insensitive (10 tests)
+  score-handler.test.ts             # U5 — handler.ts unit tests
+  score-cache.test.ts               # U7 — R2 cache read/write
+  score-response-shape.test.ts      # U5 — spec_version/anc_version/auditor_url triad enforcement
+  score-contract.test.ts            # U9 — cross-validates /api/score JSON ↔ committed scorecards (PR #101)
   e2e/
-    score.e2e.ts                    # [pending] U8 — Playwright form-submit happy path (chromium, mocked API)
-    homepage-score-live.e2e.ts      # [shipped] U7/U8 — opt-in live sandbox project (excluded from default suite); realises the planned score-live.e2e.ts surface
+    score.e2e.ts                    # U8 — Playwright form-submit happy path (chromium, mocked API)
+    homepage-score-live.e2e.ts      # U7/U8 — opt-in live sandbox project (excluded from default suite); realises the planned score-live.e2e.ts surface
 docs/
   plans/
     2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md  # this file (rewrite)
   research/
-    2026-05-04-discovery-chain-hit-rate.md  # [shipped] — Pre-Implementation Validation gate write-up
+    2026-05-04-discovery-chain-hit-rate.md  # Pre-Implementation Validation gate write-up
   runbooks/
-    live-scoring-monitoring.md      # [shipped] U9 — cost-watch, alert thresholds, common failures (PR #103)
+    live-scoring-monitoring.md      # U9 — cost-watch, alert thresholds, common failures (PR #103)
 scripts/
-  measure-discovery-hit-rate.mjs    # [shipped] — gate reproducer (local-only, not deployed)
-wrangler.jsonc                      # [pending] U3 — adds containers, durable_objects, migrations,
+  measure-discovery-hit-rate.mjs    # gate reproducer (local-only, not deployed)
+wrangler.jsonc                      # U3 — adds containers, durable_objects, migrations,
                                     #   r2_buckets, ratelimits bindings (mirror in env.staging)
 .github/workflows/
-  deploy.yml                        # [pending] U3 — image build runs inside `wrangler deploy` via
+  deploy.yml                        # U3 — image build runs inside `wrangler deploy` via
                                     #   `image: "./docker/sandbox/Dockerfile"` (no separate push step,
                                     #   no Docker Hub credentials); cache backend (buildx + type=gha
                                     #   vs none) picked by the U3 caching-measurement sub-task
-RELEASES.md                         # [shipped] U9 — adds v3 release procedure (image + migration + smoke) (PR #101)
-README.md                           # [pending] U8 — mentions /score in the user-facing surface map
+RELEASES.md                         # U9 — adds v3 release procedure (image + migration + smoke) (PR #101)
+README.md                           # U8 — mentions /score in the user-facing surface map
 ```
 
 ---
@@ -1194,35 +997,6 @@ This validation is meta to the plan: it gates the plan itself, not a unit.
 
 ## Implementation Units
 
-### Shipping Progress (last updated 2026-06-01)
-
-| Unit | Status    | Shipping refs                                                                                                                                                                                                                                                                      |
-| ---- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| U1   | [shipped] | PR [#78](https://github.com/brettdavies/agentnative-site/pull/78) — commit `82b74dd`                                                                                                                                                                                               |
-| U2   | [shipped] | PR [#79](https://github.com/brettdavies/agentnative-site/pull/79) — commit `bf14daf` (see U3-fu)                                                                                                                                                                                   |
-| U3   | [shipped] | PR [#81](https://github.com/brettdavies/agentnative-site/pull/81) (`09fe91f`) + U3-fu (PR #84)                                                                                                                                                                                     |
-| U4   | [shipped] | PR [#80](https://github.com/brettdavies/agentnative-site/pull/80) — commit `5ac59ca`                                                                                                                                                                                               |
-| U5   | [shipped] | PR [#93](https://github.com/brettdavies/agentnative-site/pull/93) — commit `8a03bcb` (2026-05-15)                                                                                                                                                                                  |
-| U6   | [shipped] | PR [#95](https://github.com/brettdavies/agentnative-site/pull/95) — commit `af9f568` (2026-05-18)                                                                                                                                                                                  |
-| U7   | [shipped] | PRs [#96](https://github.com/brettdavies/agentnative-site/pull/96) + [#97](https://github.com/brettdavies/agentnative-site/pull/97) + [#98](https://github.com/brettdavies/agentnative-site/pull/98) + [#99](https://github.com/brettdavies/agentnative-site/pull/99) — 2026-05-19 |
-| U8   | [shipped] | branch `feat/u8-homepage-form` off `dev` commit `37e5375` — head `45b66c6` (16 commits) — PR pending (2026-05-20)                                                                                                                                                                  |
-| U9   | [shipped] | PRs [#101](https://github.com/brettdavies/agentnative-site/pull/101) + [#102](https://github.com/brettdavies/agentnative-site/pull/102) + [#103](https://github.com/brettdavies/agentnative-site/pull/103) — 2026-05-20                                                            |
-| U10  | [shipped] | telemetry + AE bindings + runbook in dev pre-2026-06-01; agent-deterministic check + flip wrappers via PR [#143](https://github.com/brettdavies/agentnative-site/pull/143) — 2026-06-01. Auto-kill cron deferred to U10.1.                                                         |
-
-**Phases 1, 2, and the user-facing surface of Phase 3 are complete.** U1 through U4 land the foundation (data, image,
-parser, bindings). U5 wires `/api/score` with the abuse-mitigation stack but leaves the DO as a stub. U6 replaces the
-stub with the real Sandbox-extending DO, two-phase egress, and the `sandbox-exec.ts` orchestrator. U7 layers the R2
-cache (read on hit, write on miss) and a unified `lookupScorecard()` so curated and cached results share a single
-unmetered path. U8 ships the homepage paste-input form, invisible Turnstile + lazy-load, 2 s theater floor, three
-class-specific bounce panels, install-anc CTA, CSP allowlist, build-emitted `spec-version.gen.ts`, and the shareable
-`/score/live/<binary>` result surface (HTML + markdown twin) — with the scope expansions documented above in "Discovered
-during U8 execution (2026-05-20)". The Pre-Implementation Validation gate
-([PR #77](https://github.com/brettdavies/agentnative-site/pull/77)) ran ahead of Phase 1 and conditioned the U1, U4, U6,
-U8 specs via the F1 and F4 findings (see plan amend commit `08a9a24`). All Phase 3 work (U5 through U10) is
-squash-merged on `dev`; U10.1 (auto-kill cron) is the only remaining deferred follow-up.
-
----
-
 - [x] U1. **Build-time registry-index + discovery-hints index emission** — shipped 2026-05-04
   ([#78](https://github.com/brettdavies/agentnative-site/pull/78), `82b74dd`)
 
@@ -1314,10 +1088,8 @@ warnings on the current registry + hints; collision case caught by warning, not 
 ---
 
 - [x] U2. **v3 sandbox image (Alpine + musl, no toolchains, anc bottle baked in)** — shipped 2026-05-04
-  ([#79](https://github.com/brettdavies/agentnative-site/pull/79), `bf14daf`). Pinned to
-  `cloudflare/sandbox:0.9.2-musl@sha256:b4cb1d69…` (the `0.8.x` reference below is plan-time placeholder; the actual
-  digest is in `docker/sandbox/Dockerfile`). **Note (2026-05-14):** image source is ready; the image-publication path
-  now requires migration to the Cloudflare managed registry per U3-followup (Docker Hub deprecated post-shipment).
+  ([#79](https://github.com/brettdavies/agentnative-site/pull/79), `bf14daf`). The pinned
+  base-image digest lives in `docker/sandbox/Dockerfile`.
 
 **Goal:** Build `docker/sandbox/Dockerfile` as a strict-minimal Alpine + musl image carrying CF Sandbox 0.9.x-musl,
 package managers (apk, cargo-binstall, pip, npm, go), and a pre-built musl `anc` binary downloaded from the
@@ -1382,19 +1154,9 @@ deploy` per U3).
 
 ---
 
-- [~] U3. **wrangler.jsonc — DO + Containers + R2 + ratelimits bindings** — [partial] shipped 2026-05-09
-  ([#81](https://github.com/brettdavies/agentnative-site/pull/81), `09fe91f`). Bindings (`containers`, DO `SCORE`, R2
-  `SCORE_CACHE`, ratelimit `SCORE_LIMITER`) live on the **staging** Worker; the named-production Worker
-  (`agentnative-site`) has NOT yet deployed the bindings (last prod deploy was 2026-05-03, predates this PR). Routing
-  drift discovered 2026-05-14 means `anc.dev` is currently served by the staging Worker. The DO at
-  `src/worker/score/do.ts` is a stub returning `{error: 'sandbox_stub_until_u6'}` (real DO lands in U6). The container
-  `image:` field migrated off Docker Hub via U3-followup (PR
-  [#84](https://github.com/brettdavies/agentnative-site/pull/84)) and now pins
-  `registry.cloudflare.com/<acct>/anc-sandbox:30f61f1` on the staging block. See the dedicated U3-followup subsection
-  below for the local-build-once + staging-leads-prod workflow and the (now-shipped) experimental verifications. The
-  named-production Worker's full U3 + U3-followup deploy shipped 2026-05-15 via release PR
-  [#85](https://github.com/brettdavies/agentnative-site/pull/85) (merge SHA `e79b7ce`); DO migration v1 applied to the
-  named-prod side on that deploy.
+- [x] U3. **wrangler.jsonc — DO + Containers + R2 + ratelimits bindings** — shipped 2026-05-05 via
+  [#81](https://github.com/brettdavies/agentnative-site/pull/81) (`09fe91f`); the container `image:` pin moved to the
+  Cloudflare managed registry via U3-followup ([#84](https://github.com/brettdavies/agentnative-site/pull/84)).
 
 **Goal:** Add the first DO + Containers + R2 + ratelimits bindings the Worker has ever shipped. Pre-push wrangler
 dry-run gate must pass before push.
@@ -1485,15 +1247,6 @@ recorded.
   shipped 2026-05-14 via PR [#84](https://github.com/brettdavies/agentnative-site/pull/84); production side shipped
   2026-05-15 via release PR [#85](https://github.com/brettdavies/agentnative-site/pull/85) (merge SHA `e79b7ce`).
 
-> **Post-implementation note (2026-05-14).** Original spec said "shared-tag-pin" (both env blocks always equal). The
-> rationale ("avoids the multi-env double-build") came from the inline-Dockerfile-path pattern; with registry URIs,
-> deploys never rebuild, and the double-build penalty does not exist. The implementation reframed the default
-> workflow to **staging-leads-prod**: feat PRs to dev bump `env.staging` only, soak on the staging Worker, then a
-> release PR to main promotes the top-level pin to match. Lockstep remains available as a shortcut for low-risk
-> bumps. CI guard in `.github/workflows/ci.yml` enforces this per-PR-target (registry-existence always; equality
-> only on main-targeting PRs). See RELEASES.md § "Sandbox image releases (live-scoring)" for the canonical workflow
-> spec.
-
 **Goal:** Replace the deprecated Docker Hub digest pin (`docker.io/brettdavies/anc-sandbox@sha256:...`) with a
 Cloudflare-managed-registry tag pin produced by a single local build, then deploy each env block against its own pinned
 tag with no rebuild on deploy. Decouples build from deploy and preserves the SHA-pinning ergonomic Docker Hub gave us.
@@ -1517,7 +1270,7 @@ The two env blocks' pins can advance independently; staging leads during develop
   explicitly documented; standard Docker context rules should apply).
 - No `.github/workflows/deploy.yml` change is required for the primary path — `wrangler deploy` against a
   fully-qualified registry URI does NOT trigger a rebuild (per spike 01); the GHA fallback path continues to work for
-  the rare offline-Brett case via `cloudflare/wrangler-action@v3.14.1` (the version currently in `deploy.yml`).
+  the rare offline-Brett case via `cloudflare/wrangler-action` (pinned in `deploy.yml`).
 
 **Approach:**
 
@@ -2212,11 +1965,10 @@ first prod cut.
 
 ---
 
-- [x] U8. **Homepage live-scoring form + Turnstile + summary+top-3 render + install-anc CTA** — shipped 2026-05-20 on
-  branch `feat/u8-homepage-form` (head `45b66c6`, 16 commits off `dev`@`37e5375`). PR pending. Scope items beyond the
-  original spec are catalogued in the "Discovered during U8 execution (2026-05-20)" section above; the K-decision on
-  result presentation was resolved to option 3 (redirect to a shareable `/score/live/<binary>` subpage) with a
-  cache-key-derived URL rather than a minted session id.
+- [x] U8. **Homepage live-scoring form + Turnstile + summary+top-3 render + install-anc CTA** — shipped 2026-05-20 via
+  [#100](https://github.com/brettdavies/agentnative-site/pull/100). The K-decision on result presentation resolved to
+  option 3 (redirect to a shareable `/score/live/<binary>` subpage) with a cache-key-derived URL rather than a minted
+  session id.
 
 **Goal:** A live-scoring paste-input form embedded on the homepage (`/`, NOT a dedicated `/score` subpage) with
 invisible Turnstile gate, theater spinner, summary + top-3 issues result render, and prominent install-anc-locally CTA.

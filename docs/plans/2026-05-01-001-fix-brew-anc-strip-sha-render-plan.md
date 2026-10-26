@@ -1,7 +1,10 @@
 ---
 title: Brew-install anc in scoring image and strip commit-SHA render
 type: fix
-status: completed
+status: released
+completed: 2026-05-01
+released_in: "#73"
+prs: ["#66"]
 date: 2026-05-01
 ---
 

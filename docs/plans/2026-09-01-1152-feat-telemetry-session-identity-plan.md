@@ -5,6 +5,8 @@ execution: code
 product_contract_source: ce-plan-bootstrap
 title: "Telemetry session identity - Plan"
 type: feat
+status: blocked
+blocked_on: open questions OQ1 to OQ3 in this plan
 date: 2026-09-01
 topic: telemetry-session-identity
 ---

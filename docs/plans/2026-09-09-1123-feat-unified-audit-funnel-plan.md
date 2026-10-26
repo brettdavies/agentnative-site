@@ -2,6 +2,10 @@
 title: Unified Audit Funnel - Plan
 date: 2026-09-09
 type: feat
+status: released
+completed: 2026-09-15
+released_in: "#369"
+prs: ["#340", "#341", "#342", "#343", "#345", "#346", "#347", "#348", "#349", "#350", "#351", "#352", "#353", "#354", "#355", "#356", "#357", "#358", "#359", "#360"]
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 product_contract_source: ce-plan-bootstrap
@@ -904,9 +908,9 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
 | U9 | Unified progress page | `src/worker/audit/scoring-page.ts`, `src/client/scoring.ts` | U2, U3, U4, U5, U6 | #352 |
 | U10  | Merged leaderboard and nav simplification     | `src/build/08-scorecards-emit.mjs`, `src/build/shell.mjs`, `src/client/surface.ts`                  | U1, U7         | #354 |
 | U11  | Discovery, inventory, fix-skill move, docs    | `src/build/10-sitemap.mjs`, `09-llms-emit.mjs`, `11a-discovery-emit.mjs`, `15-web-audit-skills.mjs` | U1, U6         | #355, #356 |
-| U12  | MCP envelope adoption and WebMCP re-pointing  | `src/worker/mcp/tools/*.ts`, `src/client/webmcp-*.ts`, `content/mcp-skill.md`                       | U2, U6, U8     |             |
+| U12  | MCP envelope adoption and WebMCP re-pointing  | `src/worker/mcp/tools/*.ts`, `src/client/webmcp-*.ts`, `content/mcp-skill.md`                       | U2, U6, U8     | #357        |
 | U14 | Job Durable Object and single-flight attach | `src/worker/audit/job.ts`, `wrangler.jsonc`, `src/worker/audit/api.ts` | U4, U5, U6 | #350, #351 |
-| U13 | Retire old routes, sweep tests and scripts | `src/worker/index.ts`, `tests/**`, `scripts/**`, `RELEASES*.md` | U8 to U12, U14 |             |
+| U13 | Retire old routes, sweep tests and scripts | `src/worker/index.ts`, `tests/**`, `scripts/**`, `RELEASES*.md` | U8 to U12, U14 | #358 |
 
 ### U1. Shared route module and target classifier
 

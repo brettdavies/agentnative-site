@@ -4,9 +4,12 @@ artifact_readiness: implementation-ready
 execution: code
 product_contract_source: ce-plan-bootstrap
 type: fix
+status: released
+completed: 2026-08-03
+released_in: "#266"
+prs: ["#240"]
 title: "Web-audit cached/fresh result parity via read-time display enrichment"
 date: 2026-08-03
-status: implementation-ready
 feature: "Feature 5 of 5 — cached vs fresh web-audit result parity"
 ---
 

@@ -1,7 +1,10 @@
 ---
 title: "feat: registry + leaderboard + scorecard pages"
 type: feat
-status: complete
+status: released
+completed: 2026-04-28
+released_in: "#60"
+prs: ["#21", "#42"]
 date: 2026-04-17
 origin: docs/brainstorms/anc-100-audit-requirements.md
 ---
@@ -95,8 +98,8 @@ Not needed — the codebase has strong local patterns for every aspect of this p
   committed JSON files. The Worker stays edge-thin with no data-fetching bindings. This matches the existing site
   architecture and keeps `placement` unset for edge proximity.
 - **Registry format: YAML not TOML:** YAML is more readable for large lists with nested fields (install commands,
-  multiple binaries). `js-yaml` must be added as a direct dependency (`bun add js-yaml`) — it is currently only a
-  transitive devDependency of markdownlint-cli2. The registry is a build-time input only.
+  multiple binaries). `js-yaml` must be added as a direct dependency (`bun add js-yaml`). The registry is a build-time
+  input only.
 - **Tool name format:** Registry `name` field must match `/^[a-z0-9-]+$/` (lowercase, alphanumeric and hyphens only).
   Names are used as URL path segments (`/score/<name>`) and filenames (`scorecards/<name>.json`). `loadRegistry()`
   validates format and uniqueness at build time. Example: "Claude Code" becomes `claude-code`.
@@ -608,35 +611,3 @@ step, not the first.
 - Regression tests: `tests/regression.test.ts`
 - `anc` scorecard schema: `~/dev/agentnative/src/scorecard.rs`
 - Institutional learning: `docs/solutions/architecture-patterns/agent-native-documentation-surface-2026-04-13.md`
-
----
-
-## Completion Notes (2026-04-20)
-
-All 9 implementation units shipped across commits `49d3376` through `391e734` on `feat/registry-schema-and-expansion`
-(PR #21 into `dev`).
-
-**Final state:**
-
-- 96 tools in `registry.yaml` across three tiers (Workhorse/Agent/Notable)
-- 10 tools scored with committed JSON in `scorecards/`; remaining 86 listed as "not yet scored"
-- Leaderboard at `/scorecards` with client-side tier filtering and column sorting
-- Per-tool scorecard pages at `/score/<tool-name>` (96 tools × HTML + MD = 192 files)
-- `llms.txt`, `llms-full.txt`, and `sitemap.xml` extended with scorecard data
-- Regression tests updated (78 tests, 243 assertions, all passing)
-- Visual design pass completed via `/impeccable`
-
-**Deviations from plan:**
-
-- Registry expanded well beyond the initial "~100 tools" target — 96 tools in the seed, with versioned scorecard
-  filenames and expanded schema fields (`repo`, `url`, `version`, `scored_at`)
-- Unit 7 (nav link) correctly deferred to Plan 2 as specified
-- `agentnative.dev` references in build code replaced with `anc.dev` (`cc3cc57`) — the plan predates the domain
-  decision
-
-**What Plan 2 inherits:**
-
-- The static leaderboard and per-tool pages as the pre-computed cache layer
-- The registry schema as the tool metadata source of truth
-- The `scorecards.mjs` build module as the data loading and rendering layer
-- Nav link addition (Unit 7, deferred)

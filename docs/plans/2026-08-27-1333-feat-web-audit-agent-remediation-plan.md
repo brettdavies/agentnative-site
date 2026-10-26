@@ -5,24 +5,15 @@ execution: code
 product_contract_source: ce-plan-bootstrap
 title: "Improve web-audit agent remediation and freshness - Plan"
 type: feat
+status: released
+completed: 2026-08-31
+released_in: "#332"
+prs: ["#308"]
 date: 2026-08-27
 topic: web-audit-agent-remediation
 ---
 
 # Improve web-audit agent remediation and freshness - Plan
-
-## Shipped
-
-All five units landed in [#308](https://github.com/brettdavies/agentnative-site/pull/308) (`c04cc69`). Related work on
-the same surface: [#306](https://github.com/brettdavies/agentnative-site/pull/306) corrected the WebMCP marker set and
-split the legacy card aliases into their own MAY check, [#307](https://github.com/brettdavies/agentnative-site/pull/307)
-resolved emitted links from the serving origin, [#310](https://github.com/brettdavies/agentnative-site/pull/310) split
-the result-page renderers around one derived model, [#311](https://github.com/brettdavies/agentnative-site/pull/311)
-renamed the WebMCP output cap, and [#312](https://github.com/brettdavies/agentnative-site/pull/312) put the result-page
-suite on both engines in `deep-check`.
-
-Two decisions changed during execution, and the text below reflects the shipped values rather than the ones planned: the
-staleness window is one minute, not five, and the WebMCP output cap is named `WEBMCP_EXECUTE_MAX`.
 
 ## Goal Capsule
 

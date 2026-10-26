@@ -1,23 +1,19 @@
 ---
 title: Design System Port — Instrument Redesign - Plan
 type: feat
+status: released
+completed: 2026-07-14
+released_in: "#205"
+prs: ["#201"]
 date: 2026-07-10
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 product_contract_source: ce-plan-bootstrap
 execution: code
-status: complete
-implemented: 2026-07-13
 branch: feat/design-system-port
 ---
 
 # Design System Port — Instrument Redesign - Plan
-
-**Complete.** Implemented as 16 commits on `feat/design-system-port` (stacked on `feat/web-audit-refine-e2e`, pushed
-2026-07-13; PR pending). Full Verification Contract green locally: build + `deploy:dryrun`, 1276 unit tests, 110 e2e
-across chromium/mobile-android/mobile-ios/tablet (axe light+dark per archetype, no-JS toggle proof, 390/768/1440
-overflow sweep), lint, Lighthouse budgets, and two-run byte-identical OG regeneration. Per-unit **Shipped** notes and
-risk outcomes below record the as-built deltas.
 
 ## Goal Capsule
 
@@ -243,10 +239,6 @@ once the shell exists. U10 follows the pages it enhances. U11/U12 close out docs
   regeneration diff. Confirm the generator's own contrast assertions pass for the new tokens.
 - **Verification:** `foundation.css` contains the new tokens in `:root`, media-dark, and both `[data-theme]` blocks; the
   generator's contrast check passes; re-running is idempotent (no diff on second run).
-- **Shipped:** `HUE_BAND_LOW/MID/HIGH` plus light/dark band, `*-bar`, and `--meter-track` entries; `gray-500` retuned
-  (light 52%, dark 63%). New per-token WCAG + APCA assertions fail the run before either file is written; dark
-  `fg-muted`'s APCA floor is pinned at its shipped level (WCAG AA is the hard gate — lifting L past ~67 would collapse
-  the muted tier into `gray-600`). Regeneration is byte-idempotent.
 
 ### U2. `site.css` component layer
 
@@ -265,10 +257,6 @@ once the shell exists. U10 follows the pages it enhances. U11/U12 close out docs
 - **Test scenarios:** Test expectation: none directly — proven via U4–U8 page e2e/axe/visual checks.
 - **Verification:** the component classes render in the U4 build; no regression in the RFC-keyword or code-block
   treatment.
-- **Shipped:** spacing/radius/motion/elevation tokens plus meter (with unscored/zero/full states), band and status-chip
-  helpers, seg toggle, card, board, spec index, buttons, container, and a zero-specificity focus ring. Dark elevation
-  is token-indirected (`--shadow-card`, `--band-surface-bg`, `--seg-bg`, `--field-bg`) so the light/dark fork lives in
-  one block.
 
 ### U3. Shell: grouped nav + hamburger, provider-icon footer
 
@@ -289,11 +277,6 @@ once the shell exists. U10 follows the pages it enhances. U11/U12 close out docs
   hamburger still opens.
 - **Verification:** e2e asserts nav landmarks + footer rows in both viewports and the panel open/close keyboard path;
   axe finds no new violations.
-- **Shipped:** six grouped links with `aria-current` derived from the canonical path; the hamburger checkbox is
-  visually hidden but focusable across the 44px target (pointer + Space work JS-free); provider icons in 42px circles
-  with explicit SVG dimensions; methodology/coverage/contribute moved to the footer meta row. Deviation: the theme
-  control collapsed to the single cycle button here (theme.ts rewritten) rather than in U10, so the shell landed
-  coherent in one slice.
 
 ### U4. Homepage: hero + surface toggle + threaded board data
 
@@ -321,11 +304,6 @@ once the shell exists. U10 follows the pages it enhances. U11/U12 close out docs
   overflow at 390/768/1440.
 - **Verification:** e2e drives the toggle via the label and asserts the three panes swap; the homepage build receives
   non-empty board data; axe passes light+dark.
-- **Shipped:** proof gate passed (see KTD4). `emitScorecardSurface` and the web-seed load run before `emitHomepage`;
-  `emitWebScorecardSurface` accepts the preloaded seed. The hero proof card renders the top tool's real score and
-  principles-met count; the live-score form keeps its full client contract restyled as the board try-form; the web
-  pane form is a plain GET to /web-audit. `bandOf`/`renderMeter` live in the shared scorecard-format module. The
-  unstyled mini-TOC scaffolding left the shell; `_intro.md` carries the decided H1 + subhead.
 
 ### U5. Principle/prose reading treatment
 
@@ -344,10 +322,6 @@ once the shell exists. U10 follows the pages it enhances. U11/U12 close out docs
   groups use full borders/tints, not `border-left`.
 - **Verification:** principle-page e2e passes with updated selectors; the slug invariant assertion doesn't throw; axe
   passes.
-- **Shipped:** two-pass principle emit (the pager needs neighbor titles); crumb + tier-colored head + audit-note ahead
-  of the Requirements section; the displayed H1 drops its "P{n}:" prefix (the markdown twin keeps authored bytes and
-  the locked-slug invariant holds); `.normative` restyled as tinted full-border groups; the Definition heading is
-  visually hidden so its paragraph reads as the lede; code blocks read dark in both themes inside `.doc`.
 
 ### U6. Content subpages + audit/web-audit landings
 
@@ -368,11 +342,6 @@ once the shell exists. U10 follows the pages it enhances. U11/U12 close out docs
   `audit`/`web-audit` show the instrument hero + input; the schema pages render their content in the reading treatment.
   No page 404s from a missed registration.
 - **Verification:** sitemap and nav still list the same routes; e2e smoke-loads each subpage; axe passes.
-- **Shipped:** all twelve subpages render inside `.doc`; both landings get the `audit-hero` card — web-audit keeps its
-  live streaming form (all `data-web-audit-*` hooks intact), and the CLI landing's Score input hands off to the
-  homepage scorer via `?score=`. `/coverage` + `/skill` pulled into the doc treatment (see Deferred). Also fixed here:
-  the llms.txt e2e's expectedPages list had drifted from the subPages source of truth and was failing before this
-  branch.
 
 ### U7. CLI scorecard + ANC 100 board
 
@@ -396,11 +365,6 @@ once the shell exists. U10 follows the pages it enhances. U11/U12 close out docs
   meters and the tier filter still filters rows. Remediation `<pre>` wraps on mobile (no overflow).
 - **Verification:** scorecard/leaderboard e2e passes with updated selectors; the Worker live route renders the new
   markup; tier filter works; axe passes light+dark.
-- **Shipped:** the shared renderer emits crumb, hero (mono name, command chip, coverage/failing/warning/audit-stamp
-  chips, twin band score cells), and "Eight principles, scored" rows with composed copy-paste remediation prompts on
-  non-pass rows. Deviation: the Top Issues and Spec Coverage table sections folded into those chips/rows (the
-  now-uncalled `renderCoverageSummary` was removed). The board's score column renders band meters (sorting still reads
-  `data-sort`); the audience banner lost its side-stripe; `principleTier` moved into the shared module.
 
 ### U8. Web scorecard (build + Worker) + web board
 
@@ -422,10 +386,6 @@ once the shell exists. U10 follows the pages it enhances. U11/U12 close out docs
   band. Mobile: check rows stack, remediation wraps, no overflow.
 - **Verification:** web scorecard/leaderboard e2e passes; the Worker result-page render uses the new markup; axe passes
   light+dark.
-- **Shipped:** `/web/<domain>` renders catcards (C1–C5 id, category tier, band-colored rollup) with mark-led check
-  rows (pass ✓, missing !, broken/error ✕, n/a –) keeping the Goal/Result/Fix/Resources detail and prompt; web board
-  columns render band meters. Dead CSS from the replaced layouts (breadcrumb, summary, score badges, top-issues) was
-  pruned.
 
 ### U9. Badge hex recolor
 
@@ -441,9 +401,6 @@ once the shell exists. U10 follows the pages it enhances. U11/U12 close out docs
 - **Test scenarios:** Covers R15. `badgeColor` returns the recolored hex for representative scores at each of the six
   thresholds; the rendered SVG uses them; cohort count unchanged.
 - **Verification:** badge unit tests pass with the new colors; a sample badge reads consistently with on-site meters.
-- **Shipped:** Solid `#00792f`, Qualified `#a46400`, Critical `#b63230` — the ramp's resolved sRGB; all clear the
-  ≥4.75:1 white-text contract. Exemplary, Strong, and the below-floor orange are unchanged because their source hues
-  did not move.
 
 ### U10. Client JS: toggle enhancement, copy-prompt, hamburger close
 
@@ -463,11 +420,6 @@ once the shell exists. U10 follows the pages it enhances. U11/U12 close out docs
   is off.
 - **Verification:** e2e covers a copy interaction, a JS-off toggle path, and Escape-close; Lighthouse JS budget not
   regressed.
-- **Shipped:** a new `nav.ts` bundle (loaded from every shell) closes the open panel on Escape and refocuses the
-  hamburger; `clipboard.ts` wires `[data-copy-prompt]` and stops attaching its generic pill to remediation bodies;
-  `live-score.ts` prefills from `?score=` and `web-audit.ts` from `?url=`. Fix: `web-audit.ts` resolves chips, status,
-  and results against the audit-hero section (they became form siblings in U6). As-built note: the original commit
-  landed with `web-audit.ts` emptied by a local file-truncation fault; restored in a follow-up commit.
 
 ### U11. Design docs refresh
 
@@ -483,9 +435,6 @@ once the shell exists. U10 follows the pages it enhances. U11/U12 close out docs
 - **Patterns to follow:** existing `DESIGN.md` §4 structure; the present-state doc rules in `AGENTS.md`.
 - **Test scenarios:** Test expectation: none — documentation. Verified by review + markdownlint.
 - **Verification:** `DESIGN.md` describes the shipped tokens/components; markdownlint passes; `BRAND.md` unchanged.
-- **Shipped:** DESIGN.md §4.1 (band/meter tokens + corrected muted note), §4.11 (the shipped layout), and a new §4.15
-  documenting the instrument component layer; the preview HTML gained a band/meter section and its block-treatment
-  note describes the shipped tinted groups. `BRAND.md` untouched.
 
 ### U12. Regenerate OG + verify e2e/axe/lighthouse
 
@@ -505,12 +454,6 @@ once the shell exists. U10 follows the pages it enhances. U11/U12 close out docs
   runs.
 - **Verification:** `bun run build`, `bun test`, `bun run test:e2e`, `bun run lint`, and the Lighthouse run all pass; OG
   two-run `sha256sum` matches.
-- **Shipped:** OG card regenerated with the decided framing plus the instrument signature — a brand-row meter reading
-  anc's real self-audit (100); two-run byte-identical. The OG generator and the Playwright config honor `PW_CHANNEL`
-  (scoped to Chromium-family projects; WebKit runs managed). Mobile overflow fixes across archetypes (inline-code
-  wrap, hero shrink, fixed-layout audit tables, staged board column collapse at 900/720/560). New e2e gates: axe
-  light+dark on a CLI scorecard, a web scorecard, the board, and the web-audit landing, plus a no-overflow sweep of
-  every archetype at 390/768/1440. Full contract green; see the completion note at the top.
 
 ---
 
@@ -556,30 +499,23 @@ once the shell exists. U10 follows the pages it enhances. U11/U12 close out docs
 - **Wrong-renderer drift.** The per-tool scorecard markup lives in `src/shared/scorecard-format.mjs` (shared with the
   Worker live route) and the on-demand web result page in `src/worker/audit-web/summary-render.ts`; restyling only the
   `08-`/`14-` emit wrappers leaves those on old markup after `site.css` changes. Mitigate: U7/U8 target the
-  shared/Worker renderers explicitly. *Outcome:*
-  both shared/Worker renderers restyled in U7/U8; unit + e2e pins updated in the same commits.
+  shared/Worker renderers explicitly.
 - **`:has()` three-pane mechanism unproven.** The CSS-first, no-JS homepage toggle rests on a `:has()` fan-out the repo
   hasn't used at this complexity. Mitigate: U4 gates on a DOM proof and records a JS fallback (which would revise the
-  no-JS DoD). *Outcome:* proven; fallback unused. The proof runner is kept at
-  `docs/research/design/prove-has-toggle.mjs` and a JS-disabled e2e guards it.
+  no-JS DoD).
 - **Homepage board-data threading.** `emitHomepage` doesn't receive leaderboard data today; U4 threads it and reorders
-  the build. Real integration work, not a styling-only change. *Outcome:* landed —
-  scorecards + web seed compute first; the seed loads once and is shared.
+  the build. Real integration work, not a styling-only change.
 - **Badge is hand-maintained hex, not generated.** A future palette change won't auto-update the badge; U9 edits hex by
   hand and the badge stays out of the "regenerated from scripts" set. Collapsing its six bands to three is out of scope
-  (spec-side scoring change). *Outcome:* recolored by hand; a comment in `badge.mjs` marks the fills for re-resolution
-  on ramp changes.
+  (spec-side scoring change).
 - **Large port, staged.** Whole-site scope; land at the U1–U3 / per-archetype slice boundaries and verify each against
-  the gate suite before the next. *Outcome:* landed as unit-boundary commits on one branch, each verified before the
-  next; the commit boundaries still line up with the slice boundaries if review wants stacked PRs.
-- **iOS Safari SVG 0×0.** Inline provider/meter SVGs need explicit dimensions. Mitigate per KTD3. *Outcome:* explicit
-  width/height on every inline SVG plus an e2e bounding-box guard.
+  the gate suite before the next.
+- **iOS Safari SVG 0×0.** Inline provider/meter SVGs need explicit dimensions. Mitigate per KTD3.
 - **Vendored `BRAND.md`.** Editing it locally is overwritten on the next `sync-prose-tooling.sh`; brand-voice changes
-  are upstream. *Outcome:* untouched.
+  are upstream.
 - **Zeroed scorecard prototypes.** `cli-scorecard.html` and `web-scorecard.html` in
   `.context/design-overhaul/prototypes/` are 0 bytes; the authoritative contract for those archetypes is the surviving
-  screenshots in `prototype-shots/`. Re-export the HTML if a live reference is wanted. *Outcome:* the screenshots
-  stayed the authority; no re-export was needed.
+  screenshots in `prototype-shots/`. Re-export the HTML if a live reference is wanted.
 
 ---
 

@@ -2,6 +2,10 @@
 title: "feat: Integrate website agent-readiness audit into anc.dev"
 date: 2026-07-09
 type: feat
+status: released
+completed: 2026-07-13
+released_in: "#205"
+prs: ["#196", "#197"]
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution: code

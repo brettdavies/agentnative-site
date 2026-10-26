@@ -1,6 +1,10 @@
 ---
 title: Web-Audit Gate Parity, Scoring-Page Flow, and Prompt Dedup - Plan
 type: feat
+status: released
+completed: 2026-07-14
+released_in: "#205"
+prs: ["#202"]
 date: 2026-07-09
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
@@ -26,7 +30,7 @@ execution: code
   them once rather than fighting a parallel rebase; and the settled base is now `dev` itself. Cut a fresh stack from
   `dev` — one branch per workstream is the natural cut — squashing into an eventual PR to dev. The `WEB_AUDIT_LIMITER`
   retune and the `HOURLY_AUDIT_CEILING` 5 → 30 bump (KTD-3, KTD-4) can still be cherry-picked ahead of the rest if
-  fresh-audit debugging exhausts the current 5/hr budget (`HOURLY_AUDIT_CEILING` is still 5 on `dev`).
+  fresh-audit debugging exhausts the 5/hr budget.
 - **Stop conditions:** stop only for genuine blockers — a missing secret on an environment, a Cloudflare binding
   validation failure that the plan's binding scheme cannot satisfy, or deployed reality contradicting a plan assumption.
   Everything else is implementer judgment.
@@ -108,8 +112,7 @@ then redirects, which reads as a jarring double-experience; and the fix-skill pa
   cache-vs-kill-switch ordering and its user-facing copy change.
 - No scorecard schema change: `WEB_SCHEMA_VERSION` stays 0.2, the R2 cache key is untouched, and no cache purge is
   needed.
-- Production promotion of the web audit (setting `WEB_AUDIT_ENABLED` on prod) stays out of scope; prod currently lacks
-  the var, so the scoring page's 503 branch is the default prod experience until promotion.
+- Production promotion of the web audit (setting `WEB_AUDIT_ENABLED` on prod) stays out of scope.
 - Deferred to follow-up work: http-only target support through the browser flow. The scoring URL carries only the host;
   the page reconstructs `https://<host>/`. Rare http-only sites audit via the MCP tool (which accepts full URLs).
 

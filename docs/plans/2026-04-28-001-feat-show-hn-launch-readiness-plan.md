@@ -1,47 +1,13 @@
 ---
 title: "feat: Show HN launch readiness — agentnative-site"
 type: feat
-status: shipped
+status: released
+completed: 2026-05-01
+released_in: "#73"
+prs: ["#40", "#48", "#60"]
 date: 2026-04-28
 last-revised: 2026-06-02
-shipped_in: "Technical launch surface shipped: site live via release #60 (anc.dev v0.1, 2026-04-30); live-scoring v3 via #115 and #145. Show HN marketing event is a separate concern."
 parent: ~/.gstack/projects/brettdavies-agentnative/brett-dev-design-show-hn-launch-inversion-20260427-144756.md
----
-
-> **CORRECTION (2026-04-30 PM PT) — LAUNCH WAS HELD, NOT SHIPPED.** The Show HN post did not go up Thu 2026-04-30
-> 09:00 PT. Primary blocker: the live-scoring v2 surface is unbuilt
-> (`docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md`, `status: active`, all units `[ ]` unchecked) — the
-> "paste a repo URL → live `anc` scorecard" hook that justifies the post's anc.dev click-through doesn't exist yet.
-> Asset-only landing-page-about-an-opinionated-CLI is too thin a Show HN. The `release/<YYYY-MM-DD>-show-hn-cut` PR was
-> never cut. `main` is still at the v0 scaffold from 2026-04-14 (commit `0128e7e feat: agentnative.dev v0 scaffold`);
-> all 109 commits of launch-week work (96/96 leaderboard, badge surface, `/skill` split, scorecard schema 0.4, brand
-> OG, block-level normative rendering) sit unpromoted on `dev`. Plan flipped back to `status: active`.
->
-> **Forward plan (locked 2026-04-30 PM PT with user):**
->
-> - **Today (2026-04-30):** Run brand-OG Unit 5 visual QA via `/design-review` (gating step skipped pre-held-launch),
->   then `release/2026-04-30-<slug>` cut promoting today's `dev` to `main` — gets anc.dev off the v0 scaffold without
->   triggering the Show HN post. Spec-sync vendoring (`2026-04-23-001`) folded in if scope holds.
-> - **Weekend (Fri-Sun 2026-05-01 → 2026-05-03):** Build live scoring per `2026-04-28-002`. Target Sun PM `dev` ready.
-> - **Mon 2026-05-04 09:00 PT:** Cut `release/2026-05-04-show-hn-cut` from `dev`, deploy, cold-device verify, post.
->
-> The blocks BELOW this CORRECTION — labeled "Post-launch update," "Post-launch additive work," "Planning-doc cleanup
-> pass," and "Remaining post-launch follow-up" — describe what was *intended* / *staged on dev*, NOT what *shipped to
-> anc.dev*. Treat all `completed` / `shipped` / `clean` claims in those blocks as point-in-time records of dev-branch
-> state captured pre-mortem ahead of the planned launch, then never corrected when launch was held. The PR #52
-> scorecard schema 0.4 work + the doc-flip commits + brand-OG PRs #54/#56/#57 DID merge to `dev` — that part is
-> accurate; only the "shipped to production" framing is wrong.
->
-> **Sibling plans incorrectly flipped to `status: completed` in the 2026-04-30 cleanup pass need their own correction
-> pass** — `2026-04-29-002` (scorecard schema 0.4), `2026-04-27-001` (skill-distribution Units 2–5), `2026-04-24-001`
-> (skill-distribution master), `2026-04-23-002` (badge surface). They report dev-state-at-cleanup-time as if it were
-> production-state. Address in a follow-on `docs(plans):` correction commit.
->
-> **Branch-name convention update:** every `release/launch` token in this plan body has been globally renamed to the
-> CalVer placeholder `release/<YYYY-MM-DD>-show-hn-cut` per `RELEASES.md` § Branches (CalVer date prefix is mandatory
-> for `release/*` branches). When the actual cut happens, substitute the real date (e.g. `release/2026-05-04-show-hn-
-> cut`).
-
 ---
 
 > **Parent:** `~/.gstack/projects/brettdavies-agentnative/brett-dev-design-show-hn-launch-inversion-20260427-144756.md`
@@ -54,73 +20,6 @@ parent: ~/.gstack/projects/brettdavies-agentnative/brett-dev-design-show-hn-laun
 > is **step 6**. Hard-blocked on steps 1–3b (spec v0.3.0, CLI v0.2.0 + tap, skill v0.2.0). Slip → push launch 24h.
 
 # feat: Show HN launch readiness — agentnative-site
-
-> **[HISTORICAL — see CORRECTION above; launch did NOT ship.] Post-launch update (2026-04-30):** Launch shipped Thu
-> 2026-04-30 09:00 PT on schedule. Site cuts (steps 4–6 of the launch wave per the central tracker) completed clean:
-> `release/<YYYY-MM-DD>-show-hn-cut` → `main` deployed to anc.dev, skill-distribution cutover ops ran clean, and the
-> cold-device prod smoke passed before the post went up. Plan flipped `active → completed`.
->
-> ---
->
-> **Post-launch additive work — NOT scoped in the original plan.** PR #52 ("scorecard schema 0.4 + scorecard-driven
-> discovery with registry editorial join") merged to `dev` 2026-04-30 morning (commit `ab6e7e3`, 108 files, +3970/-451).
-> Eight implementation units (U1–U8) inverted the build pipeline to read scorecards-first and join the registry as the
-> editorial layer, regenerated all 95 scorecards to schema 0.4, surfaced v0.4 audit metadata in per-tool Details, added
-> 11 binary-name redirects with collision invariants, and shipped CI annotations for orphan warnings. Authoritative plan:
-> [`2026-04-29-002-feat-scorecard-schema-0.4-pipeline-inversion-plan.md`](2026-04-29-002-feat-scorecard-schema-0.4-pipeline-inversion-plan.md)
-> (`status: completed`).
->
-> ---
->
-> **Planning-doc cleanup pass (2026-04-30, dev commits `ac3cf41` + `2afc8b1` + `1c89b1d`):** four sibling plans flipped
-> to `status: completed` with post-shipment update blocks recording what actually shipped vs. the original plan body —
-> `2026-04-29-002` (scorecard schema 0.4 / PR #52), `2026-04-27-001` (skill-distribution Units 2–5 / PRs #36–#39),
-> `2026-04-24-001` (skill-distribution master), `2026-04-23-002` (badge surface / PRs #49–#51). One plan stays `active`:
-> [`2026-04-23-001-feat-sync-spec-plan.md`](2026-04-23-001-feat-sync-spec-plan.md) — annotated as UNSTARTED on `dev`,
-> remains the post-launch v0.4.x track for CLI-feeds-site coverage-matrix vendoring.
->
-> ---
->
-> **Remaining post-launch follow-up:** the `dev → main` release covering everything since 2026-04-28 (PR #52 plus the
-> doc-flip commits and any `dev`-only fixes accumulated during launch week) still needs to ship in a `release/*` PR per
-> `RELEASES.md`. No user-visible regression — `main` is at the launch-cut HEAD and serving anc.dev cleanly — but `dev` is
-> the post-launch v0.4.x integration line and should not be left to drift indefinitely.
-
-## Status snapshot (2026-04-29 PT, late evening)
-
-Today: 2026-04-29 PT. Post lands Thu 2026-04-30 09:00 PT (~16h out).
-
-- **U1 ✅ shipped** — `scripts/sync-coverage-matrix.sh` rename drift fixed via commit `2467e5c`. Todo `014` is
-  `complete`.
-- **U2 ✅ moot — full coverage** — Registry holds 96 entries; `scorecards/` holds 96 JSON files. Effective audit decision
-  is "(a) full batch-scoring already done"; no gap to fill.
-- **U3 ✅ shipped — no fallback rows needed** — `dist/scorecards.html` renders 96 `<tr>` rows from 96 scorecards via
-  `d710ade feat(scoring): full anc100 leaderboard (96/96 clean) via patched docker pipeline (#40)`. The
-  `.leaderboard-row--skipped` class was never written because zero rows are skipped — the U3 contingency design is
-  retired.
-- **U4 ✅ shipped — site-copy red-team pass (Gate 11)** — PR #48 squash `a71767a`, merged 2026-04-29 20:35 UTC. 8
-  parallel adversarial reviewers across 7 principle pages + 1 supporting-pages dispatch; 12 files; +191/-117. Tier 3
-  deferrals captured in the Red-Team Log subsection of this plan.
-- **U5 — cold-device smoke (Gate 12):**
-- Pre-cut staging pass: ✅ confirmed on phone (SVG icons render correctly in iOS Safari, theme toggle works, nav links
-  resolve). Did not block on the missing-icon regression that PR #46 fixed.
-- Post-cut prod pass: pending — runs Thu morning before 09:00 PT after `release/<YYYY-MM-DD>-show-hn-cut` deploys.
-- **U6 — `release/<YYYY-MM-DD>-show-hn-cut` PR cut + cutover ops:** still blocked, but on a narrower chain. Central
-  tracker as of 2026-04-29 evening: step 1 (spec v0.3.0) ✅ done; step 3a (skill v0.2.0 PR-merge) ✅ done at 16:38 PT
-  (squash `2b10c84`); step 3b (skill v0.2.0 tag + GitHub Release) ✅ done at 22:16 UTC (tag `054c249`). **Only step 2
-  (CLI v0.2.0) remains.** The earlier `src/data/skill.json` re-pin requirement is retired per the central tracker's
-  step-4 entry — skill v0.2.0 ships `bin/check-update` (PR #8) for consumer-side staleness detection, replacing
-  per-release SHA pinning.
-- **Launch-coupled side-quest ✅ shipped** — Badge surface for agent-native conformance landed on `dev` 2026-04-29
-  evening. Plan: [`docs/plans/2026-04-23-002-feat-badge-surface-plan.md`](2026-04-23-002-feat-badge-surface-plan.md).
-  PRs: [#49](https://github.com/brettdavies/agentnative-site/pull/49) (build-time SVGs via `badge-maker` + `/badge`
-  convention page + scorecard embed snippet + leaderboard callout),
-  [#50](https://github.com/brettdavies/agentnative-site/pull/50) (dark-mode contrast fix on the leaderboard callout),
-  [#51](https://github.com/brettdavies/agentnative-site/pull/51) (visual-fidelity gates documented in AGENTS.md). Rides
-  the `release/<YYYY-MM-DD>-show-hn-cut` cherry-pick automatically (scope is "all of `dev`"). Surface #4 of the badge
-  plan (spec `docs/badge.md`) deferred post-launch; the `/badge` page is the doctrinal copy at launch.
-- **Gate 9 — issue templates on `main`:** still passive-clear via U6's full-`dev` cherry-pick. Confirmed
-  `.github/ISSUE_TEMPLATE/{config.yml,site-bug.yml}` exist on `dev` and not on `main`.
 
 ## Overview
 
@@ -380,8 +279,6 @@ A post-launch retro (per the central tracker's Distribution Plan section) compou
 **Goal:** Default invocation works on the post-rename layout. `bash scripts/sync-coverage-matrix.sh` (no env vars) syncs
 the coverage matrix from `~/dev/agentnative-cli/coverage/matrix.json` cleanly.
 
-**Status:** `not-started`
-
 **Requirements:** P0 todo `014`. Indirect dependency for Gate 8 (post-CLI-launch coverage-matrix re-sync).
 
 **Dependencies:** None. Can run any time.
@@ -419,8 +316,6 @@ agentnative-cli)`
 
 **Goal:** Know how many of the 100 registry entries have scorecards today, what the gap looks like (which tools, which
 tiers), and pick the right mix of batch-scoring vs. fallback rows.
-
-**Status:** `not-started`
 
 **Requirements:** Gate 8.
 
@@ -470,8 +365,6 @@ tiers), and pick the right mix of batch-scoring vs. fallback rows.
 
 **Goal:** `/scorecards` renders 100 rows. Each row is either a real scored row or a clearly-marked skipped row with a
 one-line reason. No blank rows. The leaderboard reads as a credible full-registry render, not a partial sample.
-
-**Status:** `not-started`
 
 **Requirements:** Gate 8. Inherits the U2 audit decision.
 
@@ -529,8 +422,6 @@ one-line reason. No blank rows. The leaderboard reads as a credible full-registr
 
 **Goal:** Every visible string on every public-facing page survives an adversarial reading. No "but X exists," "that's
 overclaiming," or "the spec contradicts itself at Y" comments land in the public HN thread.
-
-**Status:** `not-started`
 
 **Requirements:** Gate 11.
 
@@ -636,13 +527,11 @@ before 09:00 AM PT for prod) and confirms green. Failures escalate per the failu
 
 ---
 
-- [ ] **U6. Pre-launch release PR cut + post-deploy cutover ops**
+- [x] **U6. Pre-launch release PR cut + post-deploy cutover ops**
 
 **Goal:** Cut `release/<YYYY-MM-DD>-show-hn-cut` from `origin/main`, full diff from `dev`. Squash-merge to `main` after
 CI green. Production deploys to anc.dev. Run skill-distribution cutover ops (cache-purge + probe seed). Verify
 everything live.
-
-**Status:** `not-started`
 
 **Requirements:** Gates 8, 9, 11, 12 all `done` or `on-dev-pending`. P0 todo 014 done. Skill-distribution Units 2–5
 already on `dev`.
@@ -654,8 +543,7 @@ correct on launch morning). Spec `v0.3.0` tag must be live (CLI's U1.5 hard-bloc
 
 - Branch operation: `git checkout -b release/<YYYY-MM-DD>-show-hn-cut origin/main` then path-filter the dev diff per
   `RELEASES.md`.
-- Modify (during cut): `CHANGELOG.md` if the project keeps one — site CHANGELOG generation is not currently wired (no
-  `cliff.toml` in the site repo per the CLI plan's cross-repo recon). Skip if no CHANGELOG infrastructure exists.
+- Modify (during cut): `CHANGELOG.md` if the project keeps one. Skip if no CHANGELOG infrastructure exists.
 - Reference: `RELEASES.md` `## Releasing dev to main` for the full procedure.
 
 **Approach (Tuesday 2026-04-28 PT evening, after spec + CLI + skill tags clear):**

@@ -1,48 +1,17 @@
 ---
 title: "feat: Split /install into /install (CLI) + /skill (skill bundle)"
 type: feat
-status: complete
-date: 2026-04-28
+status: released
 completed: 2026-04-29
-shipped_in:
-  - "PR #44 (commit 8b20047) — merged 2026-04-29"
+released_in: "#60"
+prs: ["#44"]
+date: 2026-04-28
 related_plans:
   - docs/plans/2026-04-24-001-feat-skill-distribution-endpoint-plan.md
   - docs/plans/2026-04-27-001-feat-skill-distribution-site-plan.md
 ---
 
 # feat: Split `/install` into `/install` (CLI) + `/skill` (skill bundle)
-
-## Outcome (2026-04-29)
-
-Status: **complete**. Shipped as a single squash-merge — PR #44 (commit `8b20047`, `refactor(skill): split /install into
-/install (CLI) + /skill (skill bundle)`), merged 2026-04-29 17:12 UTC. All ten acceptance requirements verified against
-the post-merge tree on `dev`:
-
-- **R1 ✓** `dist/install.html` rendered from a new content-driven `content/install.md`. Single canonical install copy:
-  the brew/cargo command lines now live only in `content/install.md` (verified by `grep -rE 'brew install
-  brettdavies/tap/agentnative|cargo install agentnative' src/ content/` returning that one file).
-- **R2 ✓** `dist/install.md` twin emitted via the standard `subPages` pipeline.
-- **R3 ✓** `dist/install.json` does NOT exist post-build. Asset-absent 404 contract upheld.
-- **R4 ✓** `dist/skill.html` emitted; data-driven render unchanged from prior `/install` HTML.
-- **R5 ✓** `dist/skill.json` emitted; `src/data/skill.json` carries `skill_page_html: "https://anc.dev/skill"` and
-  `schema_version: 1`. Field rename landed.
-- **R6 ✓** `dist/skill.md` emitted.
-- **R7 ✓** Worker stays slug-agnostic. `src/worker/headers.ts` and `src/worker/index.ts` doc-comments updated; no
-  branching on `/install` or `/skill` path prefix.
-- **R8 ✓** Doc sweep landed across `README.md` (line 29), `RELEASES.md` (line 221), `docs/DESIGN.md` (line 480 carries
-  `skill_page_html`; §3.9 + §3.10 carry the new vocabulary), and the workflow comments in
-  `.github/workflows/skill-availability.yml`. The remaining `/install.json` references in `RELEASES.md:219` and
-  `docs/DESIGN.md:524,527,529` are intentional cutover/contract documentation, not stale references.
-- **R9 ✓** `bun run lint && bun run build && bun test` green on the post-merge tree (134 tests pass; build emits 110
-  HTML pages + 110 MD pages + the skill triple + the new `install` twin). Pre-push hook gated each commit per repo
-  policy.
-- **R10 ✓** `tests/e2e/skill.e2e.ts` exists; `playwright.config.ts` carries the renamed `skill` project.
-
-Three units merged in PR #44; all checkboxes ticked below.
-
-**Follow-up filed** per the plan's "Deferred to Separate Tasks" callout: `/compound` entry covering both the original
-triple-emit pattern and what made the split clean. Not yet written; track as a P3 chore.
 
 ## Overview
 
@@ -51,7 +20,7 @@ skill bundle. The CLI tool itself has no dedicated install URL; its install comm
 plan splits the surface so each artefact has a focused home:
 
 - **`/install`** becomes the agentnative **CLI** install page. HTML + markdown twin only — no `/install.json`. Built
-  from a new `content/install.md` extracted from the install section currently embedded in `content/audit.md`.
+  from a new `content/install.md` extracted from the install section of `content/audit.md`.
 - **`/skill`** becomes the **skill** distribution endpoint. Direct migration of today's `/install` triple-emit:
   `/skill.html` + `/skill.json` + `/skill.md`. Same data, same renderer, new URL prefix.
 

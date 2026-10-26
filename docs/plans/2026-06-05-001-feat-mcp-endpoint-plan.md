@@ -1,8 +1,10 @@
 ---
 title: 'feat: MCP server at POST /mcp on anc.dev'
-status: completed
-created: 2026-06-05
+status: released
 completed: 2026-06-05
+released_in: "#177"
+prs: ["#164", "#165", "#166", "#168", "#169", "#170", "#171"]
+created: 2026-06-05
 plan_type: feat
 depth: deep
 related_repos:

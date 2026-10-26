@@ -5,6 +5,8 @@ execution: code
 product_contract_source: ce-plan-bootstrap
 title: "Toolchain and asset-integrity gates - Plan"
 type: fix
+status: active
+prs: ["#323", "#324", "#325"]
 date: 2026-08-31
 topic: toolchain-and-asset-integrity-gates
 ---

@@ -1,13 +1,13 @@
 ---
 title: "feat: Implement spec governance model across three repos"
 type: feat
-status: complete
+status: released
+completed: 2026-04-27
+released_in: "#60"
+prs: ["#23", "brettdavies/agentnative#1", "brettdavies/agentnative-cli#29"]
 date: 2026-04-20
 deepened: 2026-04-20
-completed_date: 2026-04-22
 origin: docs/brainstorms/spec-governance-requirements.md
-superseded_by:
-  - units 4, 5, 7 → docs/plans/2026-04-23-001-feat-sync-spec-plan.md
 ---
 
 # feat: Implement spec governance model across three repos
@@ -64,7 +64,7 @@ the policy layer. (see origin: `docs/brainstorms/spec-governance-requirements.md
   content/*.md)
 - `src/build/render.mjs` — markdown renderer via unified (remark-parse, remark-gfm, rehype-slug, shikijs), extracts
   title from H1 only, does NOT strip frontmatter (no remark-frontmatter plugin)
-- `src/build/shell.mjs` — HTML page wrapper, footer currently hardcodes version string
+- `src/build/shell.mjs` — HTML page wrapper that renders the footer version string
 - `.github/ISSUE_TEMPLATE/` — YAML-based form templates (pressure-test, grade-a-cli, false-positive as redirect,
   config.yml)
 - `content/about.md` — contributing section with deep-linked issue template URLs pointing at `brettdavies/agentnative`
@@ -186,7 +186,7 @@ graph LR
 
 ## Implementation Units
 
-- [ ] **Unit 1: Rename tool repo and update cross-repo references**
+- [x] **Unit 1: Rename tool repo and update cross-repo references**
 
 **Goal:** Rename the GitHub repo, update crate metadata, and fix all cross-repo URL references to close the broken-link
 window before the new spec repo claims the `agentnative` name.
@@ -239,7 +239,7 @@ window before the new spec repo claims the `agentnative` name.
 
 ---
 
-- [ ] **Unit 2: Create spec repo (agentnative) with governance structure**
+- [x] **Unit 2: Create spec repo (agentnative) with governance structure**
 
 **Goal:** Create the new `agentnative` repo with canonical principle text, governance docs, and proper structure.
 
@@ -472,7 +472,7 @@ pages.
 
 ---
 
-- [ ] **Unit 6: Migrate issue templates and update routing**
+- [x] **Unit 6: Migrate issue templates and update routing**
 
 **Goal:** Move spec-governance templates to spec repo, scope remaining templates, add AI disclosure fields, update
 cross-repo routing across all three repos.
@@ -561,7 +561,7 @@ the site footer.
 **Patterns to follow:**
 
 - Existing changelog page rendering (commit `407ee18`)
-- Existing footer version display in `shell.mjs` (currently hardcoded — change to parameterized)
+- Footer version display in `shell.mjs` (parameterized from the build)
 
 **Test scenarios:**
 
@@ -627,42 +627,3 @@ the site footer.
 - Related solutions: `cross-repo-artifact-sync-commit-over-fetch`, `norm-vs-mechanism-blind-spot`,
   `calver-pin-for-per-repo-config-drift-detection`, `calver-changelog-as-committed-artifact`
 - External docs: CC BY 4.0 license text, GitHub issue template YAML form spec
-
-## Closeout (2026-04-22)
-
-This plan shipped its architectural objectives (Units 1, 2, 6) and re-homed the site-consumption work (Units 4, 5, 7)
-into [`2026-04-23-001-feat-sync-spec-plan.md`](./2026-04-23-001-feat-sync-spec-plan.md), which now owns the sync
-mechanism end-to-end. The original plan bundled an architectural shift (split into three repos) with a site-consumption
-layer (sync, frontmatter, dynamic version). The shift moved fast; the consumption layer turned out to be its own
-multi-step concern with cross-repo timing nuances. Splitting was the right call.
-
-### Unit-by-unit fate
-
-- **Unit 1 — Rename + cross-repo refs.** Shipped. `brettdavies/agentnative-cli` exists (created 2026-03-31);
-  `brettdavies/agentnative` is THE SPEC (re-purposed 2026-04-21). All site references resolve correctly to spec / CLI /
-  site repos.
-- **Unit 2 — Spec repo with governance.** Shipped. `brettdavies/agentnative` carries CC BY 4.0 license, principles with
-  `last-revised: 2026-04-22` frontmatter, `CONTRIBUTING.md`, `.github/ISSUE_TEMPLATE/` (config + grade-a-cli +
-  pressure-test + spec-question), PR template, `VERSION` (currently `0.3.0`), `CHANGELOG.md`. Dual-license additions
-  (`LICENSE-APACHE`, `LICENSE-MIT`) and `cliff.toml` were added beyond original scope.
-- **Unit 3 — Per-check calver in tool repo.** Partial. `SPEC_VERSION` is plumbed through `agentnative-cli`'s
-  `src/scorecard/mod.rs` (line 290) and the scorecard schema bumped to `"0.3"`. R5.1 and R5.4 met. Per-check
-  `last_revised` metadata (R5.2, R5.3) was NOT implemented — scorecard JSON `results[]` carries no `check_last_revised`
-  field. Left as a small follow-up; open a dedicated todo if/when actually wanted, otherwise let it lapse.
-- **Unit 4 — Site frontmatter parsing.** Re-homed to sync-spec plan. The format exists upstream (spec repo principles
-  carry frontmatter); the site parsing + revision-date rendering moves to the sync plan where it sits adjacent to the
-  script that brings frontmatter into `content/principles/`.
-- **Unit 5 — `sync-spec.sh`.** Re-homed to sync-spec plan. That plan now owns the script, vendoring policy, `--check`
-  mode, CI integration end-to-end.
-- **Unit 6 — Issue templates + routing.** Shipped. Site has only `config.yml` + `site-bug.yml`; `config.yml` routes
-  governance to the spec repo and auditor bugs to the CLI repo. Spec repo carries the governance templates; CLI repo
-  carries CLI-scoped templates (`false-positive`, `feature-request`, `scoring-bug`). The CLI repo also still carries
-  some governance templates as a transitional artifact — cleanup is cosmetic, not blocking.
-- **Unit 7 — Changelog page + dynamic footer version.** Re-homed to sync-spec plan. The footer's `v0.1.0` stub in
-  `shell.mjs` waits for the sync-spec plan to land `content/VERSION`; the dynamic-read change is a one-liner once that
-  file exists.
-
-### Recorded follow-ups
-
-- Per-check `last_revised` in `agentnative-cli` (R5.2, R5.3) — not currently scheduled.
-- CLI-repo governance template cleanup — cosmetic.

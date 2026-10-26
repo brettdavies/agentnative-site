@@ -1,6 +1,10 @@
 ---
 date: 2026-06-12
 type: feat
+status: released
+completed: 2026-06-13
+released_in: "#191"
+prs: ["#187"]
 origin: docs/brainstorms/2026-06-12-brew-v6-live-scoring-spike-requirements.md
 ---
 

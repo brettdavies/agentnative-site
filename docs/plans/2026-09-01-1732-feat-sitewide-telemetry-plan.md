@@ -5,6 +5,8 @@ execution: code
 product_contract_source: ce-brainstorm
 title: "Sitewide telemetry - Plan"
 type: feat
+status: active
+prs: ["#322", "#330", "#331"]
 date: 2026-09-01
 topic: sitewide-telemetry
 ---
@@ -29,7 +31,7 @@ topic: sitewide-telemetry
   staging-first; its two audits gate production. Three proofs are live-surface and post-deploy, not suite-green.
 - **Stop conditions:** stop and ask if any record or export would carry a client IP or raw User-Agent (R5), if the
   staging audit finds identifying data in the trace-event envelope, or if lake usage leaves the included billing tiers.
-- **Open blockers:** none. The session plan's four open questions block its work, not this contract.
+- **Open blockers:** none. The session plan's open questions block its work, not this contract.
 - **Tail ownership:** ends when the Definition of Done table is green, the runbook reproduces every dashboard-side
   artifact, and the thesis query returns production rows.
 
@@ -576,32 +578,3 @@ built output and CLI object reads are not evidence.
 | U4   | Page and twin emitted, registered in all three build locations, reachable from the footer, verified over HTTP.                        |
 | U5   | Beacon observed on both cache states of the served response; Web Analytics and the R3 Custom Dashboard populated; retention recorded. |
 | U6   | Runbook alone suffices to re-create every dashboard-side artifact; lint green.                                                        |
-
----
-
-## Shipped state (2026-09-04)
-
-PR [#322](https://github.com/brettdavies/agentnative-site/pull/322), squash-merged to `dev` as `8e4d3fe`, carries the
-repo-side implementation, and staging runs it with the whole family (`dev` at `50571ae`). Production carries none of the
-family: `main` at `94d8eda` (release [#333](https://github.com/brettdavies/agentnative-site/pull/333), 2026-09-04) and
-its predecessor [#332](https://github.com/brettdavies/agentnative-site/pull/332) (`38f6e33`) cherry-picked around
-`8e4d3fe`, `77814f9`, and `fbeff01`, so `main` has no `src/worker/telemetry/`, no `content/privacy.md`, no `logpush`
-opt-in, no `TELEMETRY_LAKE` binding, and no analytics runbook. Per unit:
-
-| Unit | State                                                                                                                                     |
-| ---- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| U1   | Config half shipped in #322: binding pair, logpush opt-in, guards, `RELEASES.md` catalog records, runbook with the field-selection audit. Buckets created 2026-09-02. Open: catalog enablement (the API token lacks the R2 Data Catalog permission and Logpush job read, so `wrangler r2 bucket catalog get` and the Logpush jobs API both answer auth 10000), the Pipelines sink and staging Logpush job (`wrangler pipelines list` is empty), export audit, sink-layout record. |
-| U2   | Not started. Blocked on U1's gates. The emitter plan's page record is on `dev` (#330 `77814f9`, #331 `fbeff01`, 2026-09-03) and waits with the rest of that track for U1's gates before its production deploy, so the seven-day coupling window has not opened. |
-| U3   | Code shipped in #322, including review hardening: the check fails closed while `LAKE_INGEST_PREFIX` is unscoped, and a production listing failure alerts via `telemetry-lake-check-failed`. Its status line emits through the central emitter (#331). Open: the forced-stale staging observation (needs the staging lake live). |
-| U4   | Shipped to `dev` in #322: page, twin, three registrations, footer link, build and e2e tests; browser-verified light and dark. Follow-up commits on the same PR ground the closing note in the code and add the controller/lawful-basis/processor section. Not on `main`: releases #332 and #333 did not carry `8e4d3fe`, and nothing in this plan gates it (Alignment item 10 gates the emitter's page record only), so its production deploy is an open release decision. |
-| U5   | Not started as a unit. The account's Web Analytics site list holds an entry for the anc.dev zone (automatic setup, injection ruleset enabled, created 2026-04-17), yet the served production HTML carries no beacon script (checked 2026-09-04 on `/`, cache HIT and MISS; `Cache-Control` is `public, max-age=0, must-revalidate`, so the documented `no-transform` injection blocker does not apply). Cause unestablished. The runbook's Web Analytics record, the beacon live check, and the Custom Dashboard are all open. Needs U4 on `main`. |
-| U6   | Runbook created in #322 (`docs/runbooks/sitewide-analytics.md`); accretes as the dashboard-side records land.                              |
-
-The operator steps above are recorded with their commands and reserved slots in the runbook; the freshness check arms
-via the one-line prefix change after the sink layout is recorded.
-
-The emitter track (`docs/plans/2026-09-01-0042-refactor-structured-log-emitter-plan.md`, its own Shipped state) is
-merged to `dev` in #330 and #331: R2, R9's emission half, R11's emit path, R12, and R14's spike are carried. The U1 export
-audit gains a recorded input from that track's U6: the platform's invocation records hold the client IP and raw
-User-Agent in the live layer, and the `Event` envelope's exclusion from the Logpush allowlist is what keeps them out of
-the lake.

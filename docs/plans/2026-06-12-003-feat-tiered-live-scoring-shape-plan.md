@@ -2,6 +2,7 @@
 title: 'feat: Tiered live-scoring shape — brew install fallback after resolveBrewFallback bounce'
 date: 2026-06-12
 type: feat
+status: proposed
 depth: deep
 related:
   - docs/research/2026-06-12-brew-v6-anc100/report.md

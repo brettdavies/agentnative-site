@@ -5,6 +5,10 @@ execution: code
 product_contract_source: ce-plan-bootstrap
 title: "MCP surface baseline v1 adoption - Plan"
 type: feat
+status: released
+completed: 2026-08-27
+released_in: "#298"
+prs: ["#277", "#284", "#287", "#288", "#289", "#290", "#291", "#292", "#294", "#295", "#296", "#297"]
 date: 2026-08-26
 topic: mcp-baseline-adoption
 ---

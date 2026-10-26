@@ -2,8 +2,10 @@
 title: "feat: Web-audit refinements implementation — fairness scoring, applicability, CF-style remediation"
 date: 2026-07-09
 type: feat
-status: completed
+status: released
 completed: 2026-07-13
+released_in: "#205"
+prs: ["#198", "#199"]
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution: code
@@ -17,17 +19,14 @@ related:
 
 ## Summary
 
-Turn the settled refinements design (`docs/plans/2026-07-09-002`) into shipped code. The base in-Worker web audit
-(plan-001, U1-U17) is implemented on stacked branches and deployed to staging; this plan implements the seven
-refinements it does not yet carry: a fairness-driven two-score scorer, a tri-state outcome model (absent vs broken vs
-n_a), antecedent-gated applicability driven by declared site type and dependency-ordered probe reuse, two new checks
-(`auth-md`, `webmcp`), CF-style remediation with copy-paste prompts and per-check skills at content URLs, 301 redirects
-for the MCP-card aliases, and a display rework that groups by visible category while keeping the P1-P8 principles
-internal.
+Turn the settled refinements design (`docs/plans/2026-07-09-002`) into shipped code. On top of the base in-Worker web
+audit (plan-001, U1-U17), this plan implements seven refinements: a fairness-driven two-score scorer, a tri-state
+outcome model (absent vs broken vs n_a), antecedent-gated applicability driven by declared site type and
+dependency-ordered probe reuse, two new checks (`auth-md`, `webmcp`), CF-style remediation with copy-paste prompts and
+per-check skills at content URLs, 301 redirects for the MCP-card aliases, and a display rework that groups by visible
+category while keeping the P1-P8 principles internal.
 
-**Target repo:** agentnative-site. Shipped to `dev` on 2026-07-13: Phases A-B (U1-U8) via #198 (`32452fd`), Phases C-F
-(U9-U17) via #199 (`3123dac`). The stack was re-sliced from its original `feat/web-audit-refinements` branch series into
-those two deployment PRs by the landing sequence in `docs/plans/2026-07-13-001-feat-web-audit-rebrand-landing-plan.md`.
+**Target repo:** agentnative-site.
 
 ---
 
@@ -206,8 +205,6 @@ tests/
 
 ### Phase A — Scoring foundation
 
-*Shipped to `dev` in #198 (`32452fd`), 2026-07-13.*
-
 #### U1. Registry applicability model (data + types + build) [shipped]
 
 - **Goal:** Replace the single `applies_to` field with the full applicability model: `tier` (MUST/SHOULD/MAY keyword
@@ -313,8 +310,6 @@ tests/
 
 ### Phase B — Applicability + new checks
 
-*Shipped to `dev` in #198 (`32452fd`), 2026-07-13.*
-
 #### U5. canonical-plus-redirect-aliases eval rule (scoring side) [shipped]
 
 - **Goal:** Implement the reusable conditional and wire it to `well-known-mcp-card`.
@@ -393,8 +388,6 @@ tests/
 
 ### Phase C — Redirects + skills
 
-*Shipped to `dev` in #199 (`3123dac`), 2026-07-13.*
-
 #### U9. MCP-card alias 301 redirects [shipped]
 
 - **Goal:** Serve 301s at the aliases instead of duplicate bodies.
@@ -446,8 +439,6 @@ tests/
 
 ### Phase D — Remediation
 
-*Shipped to `dev` in #199 (`3123dac`), 2026-07-13.*
-
 #### U12. remediation.yaml restructure + prompt/result assembly [shipped]
 
 - **Goal:** Restructure remediation to `title/goal/fix/resources` and assemble the copy-paste prompt + Result line at
@@ -491,8 +482,6 @@ tests/
 ---
 
 ### Phase E — Display + schema
-
-*Shipped to `dev` in #199 (`3123dac`), 2026-07-13.*
 
 #### U14. Result page + summary-render rework [shipped]
 
@@ -567,8 +556,6 @@ tests/
 ---
 
 ### Phase F — End-to-end coverage
-
-*Shipped to `dev` in #199 (`3123dac`), 2026-07-13.*
 
 #### U17. E2E across the new surfaces [shipped]
 

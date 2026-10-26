@@ -1,11 +1,12 @@
 ---
 title: "refactor: Align build modules with SRP and DRY"
 type: refactor
-status: complete
+status: released
+completed: 2026-04-22
+released_in: "#60"
+prs: ["#26"]
 date: 2026-04-21
 deepened: 2026-04-21
-shipped: 2026-04-21
-pr: 26
 ---
 
 # refactor: Align build modules with SRP and DRY
@@ -15,8 +16,6 @@ pr: 26
 Four `src/build/` modules exceeded the 200-LOC refactor trigger with genuine SRP violations — mixed responsibilities
 that made the code harder to navigate and maintain. Three DRY violations repeated constants and helper patterns across
 modules. This plan addressed both by extracting concerns into focused modules without over-splitting.
-
-Shipped in PR #26 (squash-merged to dev). Build output byte-identical across all 230 dist/ files. 78 tests passing.
 
 ## Problem Frame
 

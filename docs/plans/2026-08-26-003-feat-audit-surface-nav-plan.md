@@ -2,6 +2,10 @@
 title: "feat: Audit surface nav (header + Probe A)"
 date: 2026-08-26
 type: feat
+status: released
+completed: 2026-08-26
+released_in: "#298"
+prs: ["#278"]
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 product_contract_source: ce-plan-bootstrap
@@ -303,13 +307,13 @@ Local gate order per `AGENTS.md`: `bun run build` then `bun test`.
 
 ## Definition of Done
 
-- [ ] `bindSurfaceProbe` serves board and audit; no standalone `bindAuditProbe` / `bindBoardProbe`
-- [ ] `renderDualSurfaceNav` serves Leaderboards and Audit; no duplicated nav HTML strings
-- [ ] `renderSurfaceSeg` serves all three probe locations; board markup refactored, not forked
-- [ ] CSS uses grouped selectors; Audit flip rules are not a copy-pasted second block
-- [ ] Header Audit + Probe A behave per R1–R7; contextual in-page links untouched (R8)
-- [ ] Tests extend existing files/describes; nav 8/7; board e2e still green
-- [ ] CONCEPTS updated; browser-verify complete for CSS/HTML touch
+- [x] `bindSurfaceProbe` serves board and audit; no standalone `bindAuditProbe` / `bindBoardProbe`
+- [x] `renderDualSurfaceNav` serves Leaderboards and Audit; no duplicated nav HTML strings
+- [x] `renderSurfaceSeg` serves all three probe locations; board markup refactored, not forked
+- [x] CSS uses grouped selectors; Audit flip rules are not a copy-pasted second block
+- [x] Header Audit + Probe A behave per R1–R7; contextual in-page links untouched (R8)
+- [x] Tests extend existing files/describes; nav 8/7; board e2e still green
+- [x] CONCEPTS updated; browser-verify complete for CSS/HTML touch
 
 ---
 

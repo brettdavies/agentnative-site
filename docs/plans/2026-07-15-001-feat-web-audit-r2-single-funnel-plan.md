@@ -1,8 +1,10 @@
 ---
 title: "feat: Web-audit R2 single-funnel (dynamic leaderboard + weekly rescore)"
+status: released
+completed: 2026-07-15
+released_in: "#228"
+prs: ["#222", "#223"]
 date: 2026-07-15
-status: completed
-completed: 2026-07-16
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution: code
@@ -187,8 +189,7 @@ fallback, homepage server-side inject, and cutover/tests/verification.
 ## Prerequisites
 
 - **Cloudflare Workflows is enabled on the account.** The `web-rescore` (production) and `web-rescore-staging` bindings
-  deploy cleanly and the staging instance runs to completion (`load-seed` → `audit:<domain>` → `rebuild-aggregate`), so
-  the Queues fallback in KTD1 is not needed.
+  deploy cleanly and the staging instance runs to completion, so the Queues fallback in KTD1 is not needed.
 
 ---
 
@@ -499,24 +500,14 @@ seeds, so the board is never sourced from a deleted file mid-migration.
 
 ## Execution decisions
 
-- **Cron + top-N.** The weekly schedule is `0 6 * * 1` (Mondays 06:00 UTC) on both envs; the frontpage aggregate is the
-  top 5 (`FRONTPAGE_TOP_N` in `aggregate.ts`). Both are one-line tunables.
+- **Cron + top-N.** The weekly schedule is `0 9 * * SUN` (Sundays 09:00 UTC) on both envs; the frontpage aggregate is
+  the top 5 (`FRONTPAGE_TOP_N` in `aggregate.ts`). Both are one-line tunables.
 - **On-demand rebuild.** The U2 batch rebuild is extracted into a shared `rebuildWebAggregates(env, spec)`; the
   on-demand paths call a thin `rebuildAggregatesIfSeeded(env, domain, spec)` wrapper inline (seed-membership check +
   best-effort rebuild that never fails the audit response), not the Workflow's final step directly.
 - **Homepage injection.** `06-homepage.mjs` emits a `{{WEB_BOARD_ROWS}}` placeholder in the web-board pane; the Worker's
   `/` branch in `index.ts` fills it from the `leaderboard-frontpage` aggregate alongside the existing
   `{{TURNSTILE_SITEKEY}}` substitution (empty-state copy when the aggregate is absent).
-
-## Delivery notes
-
-- Shipped as one branch (`feat/web-audit-r2-single-funnel`, U1-U8 as SRP commits) in PR #222 to `dev`; the deploy-hook
-  propagation retry landed as follow-up PR #223. Staging runs the full funnel end-to-end (board == `.md` twin ==
-  homepage pane == `list_website_audits` == `get_website_audit`); production serves it at the next release to `main`.
-- `canonicalTargetOf` moved from `route.ts` to `cache.ts` (re-exported from `route.ts`) so the new `aggregate.ts` /
-  `rescore-workflow.ts` modules key R2 without importing the route layer.
-- U8's "update preflight/postflight web assertions" is a no-op: `scripts/release/{preflight,postflight}.sh` carry no
-  web-surface gates to change.
 
 ---
 

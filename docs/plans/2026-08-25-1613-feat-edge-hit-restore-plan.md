@@ -7,32 +7,16 @@ origin: docs/brainstorms/2026-08-25-edge-hit-restore.md
 deepened: 2026-08-25
 title: "Restore edge HIT on negotiated HTML and markdown - Plan"
 type: feat
+status: released
+completed: 2026-08-26
+released_in: "#298"
+prs: ["#270", "#271"]
 date: 2026-08-25
 topic: edge-hit-restore
-status: completed
 last-revised: 2026-08-26
-shipped_in: "PR #270 squash-merged to `dev` 2026-08-26 as `f150f83`; canary discriminator PR #271 as `92a0d24`. Not yet on `main` / anc.dev."
 ---
 
 # Restore edge HIT on negotiated HTML and markdown - Plan
-
-> **Implementation status (2026-08-26): SHIPPED to `dev` via PR #270 (`f150f83`).** U1-U6 landed. Staging skip-Worker
-> HIT (`Cf-Cache-Status: HIT` plus `Age` plus `Vary: Accept, User-Agent`) passed twice after the #270 deploy. PR #271
-> (`92a0d24`) retargeted the HIT-min vs HIT-1d canary onto browser `Cache-Control`, because a skip-Worker HIT does not
-> replay `Cloudflare-CDN-Cache-Control`. Not yet on `main` / `anc.dev`.
->
-> **Units shipped (commits on `feat/edge-hit-restore` before squash):**
->
-> - **U1** (`de8fbc2`) — wrangler `^4.124.0`; `cache.enabled` plus `exports` map (`default` uncached, `Cached` cached,
->   `ContainerProxy` opted out); `cross_version_cache` unset; types regen.
-> - **U2** (`bccfb77`) — `classifyGatewayRequest`; uncached default loops into `ctx.exports.Cached.fetch`.
-> - **U3** (`cb42233`) — `/` and `/index.md` inject CLI table plus R2 web pane; form-silence.
-> - **U4** (`970a8b5`) — HIT-1d / HIT-min / MISS in `applyHeaders`; `DESIGN.md` §3.4 P4.
-> - **U5** (`72f712a`) — `Cached.purgeHitMinTags` RPC; coalesced tag purge after successful R2 writes.
-> - **U6** (`8beed46`) — opt-in `tests/e2e/edge-hit.e2e.ts`; `markdown-vary` stays on `GET /`.
-> - **Simplify** (`44724fc`) — shared HIT-min tag constructors; single homepage inject.
-> - **Review follow-up** (`3582d87`) — Vary on GET `/mcp` JSON 301 and live-score 200s; curl GET `/mcp` markdown class;
->   strip homepage ETag/Last-Modified; `status >= 400` MISS; `/api/score` CDN `no-store` plus `Vary: Accept`.
 
 ## Goal Capsule
 
@@ -621,10 +605,6 @@ reprices formerly-free asset and `ctx.exports` requests and adds a loopback hop 
   Assets (Worker still ran). Missing `Cf-Cache-Status` means wrangler ignored `cache`. Skip-Worker HIT does not replay
   `Cloudflare-CDN-Cache-Control`; HIT-min vs HIT-1d on the client is browser `Cache-Control` (HIT-min: `max-age=0,
   must-revalidate`; HIT-1d: `max-age=300` without `s-maxage`).
-- **Staging proof (2026-08-26):** Access service-token headers (not `Authorization`). After the #270 staging deploy,
-  `bun x playwright test --project=edge-hit` passed twice (negotiated `/` and `/about` HIT + Age + Vary; `/index.md`
-  HIT-min; `/about.md` HIT-1d; `/web/scoring*` and never-audited `/web/<host>` 404 not HIT). Board-write miss-then-HIT
-  (`/` and `/web` miss, `/about.md` stays) remains an operator check. There is no `/_canary/purge`.
 - **STOP:** Vary missing or only `Accept-Encoding` plus `User-Agent`; HTML/markdown cross-serve; board-less homepage
   HIT; 404 HIT; `/_canary/purge` not 404; zone Cache Rule back.
 - **Rollback:** `wrangler rollback` to the recorded version. `cache.enabled` rolls back with it. Do not purge after
@@ -633,26 +613,8 @@ reprices formerly-free asset and `ctx.exports` requests and adds a loopback hop 
 
 ---
 
-## Shipped vs plan
-
-These landed in #270 and are the working contract. They are not open product questions.
-
-- **R12** is every Worker `status >= 400`, not only 404.
-- **GET `/mcp`** with a markdown-class UA and no type preference stays markdown. `detectMcpGetFormat` still defaults
-  `*/*` to HTML for browsers; the gateway maps that HTML default onto the site class when UA is already markdown. JSON
-  301 stays a distinct object (KTD8) and emits `Vary: Accept, User-Agent`.
-- **Live-score 200s** on extensionless `/score/live/<binary>` emit `Vary: Accept, User-Agent` and keep a ~300s TTL.
-  Explicit `.md` has no Vary. They do not go through HIT-1d `applyHeaders` (that would stamp CDN `max-age=86400`).
-- **`/api/score` cache-hit** keeps browser `Cache-Control: public, max-age=300` and sets `Cloudflare-CDN-Cache-Control:
-  no-store` plus `Vary: Accept` so Workers Caching does not store the Accept-varied body.
-- **Homepage inject** deletes `ETag` and `Last-Modified` on the rewritten body so HIT-min `must-revalidate` cannot 304
-  the bake-at-build asset and skip board inject.
-- **Purge** is `Cached.purgeHitMinTags` RPC only. There is no gateway `ctx.cache.purge` fallback and no self service
-  binding. Workflow calls `invokeCachedPurge(this.ctx)`. Purge failure logs and relies on the 300s HIT-min TTL (KTD7).
-
 ## Deferred to Follow-Up Work
 
-- Production cut: `release/*` → `main`. Record the current production version-id before enabling cache on `anc.dev`.
 - Operator check: after a board write, `/` and `/web` miss then re-HIT; `/about.md` stays.
 - R2 get/list I/O failure still HIT-min an empty board for up to 300s (`getAggregate` returns null).
 - Missing `ctx.exports.Cached` silently loopbacks in-process (correct bodies, no skip-Worker HIT). Detector is the

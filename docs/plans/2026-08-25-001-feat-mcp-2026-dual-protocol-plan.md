@@ -8,6 +8,10 @@ doc_review: 2026-08-25
 incorporated: 2026-08-25
 title: "MCP 2026-07-28 dual-protocol migration - Plan"
 type: feat
+status: released
+completed: 2026-08-27
+released_in: "#298"
+prs: ["#272", "#274", "#285"]
 date: 2026-08-25
 topic: mcp-2026-dual-protocol
 ---

@@ -1,6 +1,6 @@
 ---
 title: 'feat: MCP registry submissions strategy + per-registry templates'
-status: active
+status: proposed
 created: 2026-06-12
 plan_type: feat
 depth: standard
@@ -29,11 +29,12 @@ The plan mirrors the structure of `streamsgrp:docs/plans/2026-06-05-001-feat-mcp
 
 ## Problem Frame
 
-`anc.dev` exposes a public, no-auth MCP server at `POST /mcp` carrying nine tools across four surfaces (CLI registry,
-ten agent-native principles, vendored spec, scorecard) and five resources. The MCP wire contract, discoverability set
-(`/.well-known/mcp`, `/.well-known/ai.txt`, `llms.txt` Programmatic Access, `/mcp-docs/`), and operator runbook are all
-shipped. The next compounding-leverage step is getting the server discovered by MCP-consuming agents — which means
-listing it in the MCP registries where those agents (and the humans configuring them) look.
+`anc.dev` exposes a public, no-auth MCP server at `POST /mcp` carrying thirteen tools across five surfaces (CLI
+registry, eight agent-native principles, vendored spec, CLI scorecards, website audits) and five resources. The MCP wire
+contract, discoverability set (`/.well-known/mcp`, `/.well-known/ai.txt`, `llms.txt` Programmatic Access, `/mcp-docs/`),
+and operator runbook are all shipped. The next compounding-leverage step is getting the server discovered by
+MCP-consuming agents — which means listing it in the MCP registries where those agents (and the humans configuring them)
+look.
 
 The submissions surface has known structure but no consolidated artifact:
 
@@ -85,7 +86,7 @@ documents.
 
 | ID  | Requirement                                                                                                                                                                                                                                                                                 | Source                     |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
-| R11 | `AGENTS.md` gains a `### Registry listings` subsection under `## MCP server` (line 73) pointing at the strategy doc, the four template files, the canonical registry URLs, and the per-registry contact addresses                                                                           | KTD-7                      |
+| R11 | `AGENTS.md` gains a `### Registry listings` subsection under `## MCP server` pointing at the strategy doc, the four template files, the canonical registry URLs, and the per-registry contact addresses                                                                                     | KTD-7                      |
 | R12 | The strategy doc carries a cross-reference to `streamsgrp:docs/plans/2026-06-05-001-feat-mcp-registry-submissions-strategy-plan.md` annotated as cross-repo prior art (anc.dev's plan was authored independently rather than depending on streamsgrp's, but the structural shape is shared) | KTD-1                      |
 | R13 | The MCP endpoint plan `docs/plans/2026-06-05-001-feat-mcp-endpoint-plan.md` is cross-referenced from the strategy doc's `## Sources` and from each template's voice-anchor section as the canonical reference for tool inventory, surface taxonomy, and wire-contract details               | Discoverability discipline |
 
@@ -169,7 +170,7 @@ Each template's `## Example fill (voice anchor)` section cites specific line ran
 - From `PRODUCT.md`: channel-specific bans, the markdown-source-of-truth principle
 - From `docs/research/VOICE.md`: opinionated/precise/inviting trio, the third-person rule, sentence-rhythm guidance
 
-Examples are anc.dev-flavored for concreteness (the 9 tools / 5 resources surface of the existing MCP server) but
+Examples are anc.dev-flavored for concreteness (the 13 tools / 5 resources surface of the existing MCP server) but
 explicitly framed as illustrative — future authors override the example fills with their own values for that submission
 cycle, not invent the voice from scratch.
 
@@ -207,7 +208,7 @@ holds, and the prereq surface is honestly disclosed up front rather than ambushi
 **Alternative considered (rejected):** Acknowledge prereqs inline in the Problem Frame. Loses the cadence-claim's
 editorial value; the cleaner separation lets both stand.
 
-### KTD-7: AGENTS.md gets a new `### Registry listings` subsection under `## MCP server` (line 73)
+### KTD-7: AGENTS.md gets a new `### Registry listings` subsection under `## MCP server`
 
 `AGENTS.md ## MCP server` is the canonical home for MCP-related disclosure on `anc.dev`. Registry listings are
 author-facing planning content rather than wire-contract surface, but they belong adjacent to the wire-contract
@@ -304,7 +305,7 @@ section order to confirm the planned shape before content lands.
 
 **Approach:**
 
-- Problem Frame (~4 paragraphs): cites `anc.dev`'s shipped MCP surface (9 tools / 5 resources / wire contract per
+- Problem Frame (~4 paragraphs): cites `anc.dev`'s shipped MCP surface (13 tools / 5 resources / wire contract per
   `docs/plans/2026-06-05-001-feat-mcp-endpoint-plan.md`); names the four registries; describes the
   recurring-not-one-shot nature; names the voice-consistency stake.
 - Forcing-function paragraph (R3): one paragraph naming the signal *shape* (agent-evaluation traffic patterns; the
@@ -462,10 +463,10 @@ and two sample tool descriptions drawn from anc.dev's actual MCP surface, anchor
 - Each template's `## Example fill (voice anchor)` carries:
 - **Sample tagline** (~15 words) — third-person, opinionated, RFC 2119 where applicable, no marketing copy. Cited from
     `docs/research/VOICE.md` (opinionated/precise/inviting trio + third-person rule).
-- **Sample description** (~60 words) — names the tool surface in concrete terms (9 tools / 5 resources / four surfaces —
-    registry, principles, vendored spec, scorecard), cites `docs/plans/2026-06-05-001-feat-mcp-endpoint-plan.md` for
-    tool inventory. Anchored to `PRODUCT.md` channel-delta phrases (audience narrowing, the markdown-source-of-truth
-    principle) and to `BRAND.md` universal voice phrases.
+- **Sample description** (~60 words) — names the tool surface in concrete terms (13 tools / 5 resources / five
+    surfaces — registry, principles, vendored spec, CLI scorecards, website audits), cites
+    `docs/plans/2026-06-05-001-feat-mcp-endpoint-plan.md` for tool inventory. Anchored to `PRODUCT.md` channel-delta
+    phrases (audience narrowing, the markdown-source-of-truth principle) and to `BRAND.md` universal voice phrases.
 - **Two sample tool descriptions** — `list_tools` and `get_scorecard`, written in anc.dev's voice (numbers, exit codes,
     concrete artifacts; no hedging; one-sentence-paragraphs where the sentence deserves the frame). Cited from
     `docs/research/VOICE.md` sentence-rhythm guidance.
@@ -511,7 +512,7 @@ cross-references the strategy doc + templates need.
 
 **Approach:**
 
-- `AGENTS.md` `## MCP server` (line 73) gets a new `### Registry listings` subsection. Contents:
+- `AGENTS.md` `## MCP server` gets a new `### Registry listings` subsection. Contents:
 - One paragraph naming the strategy doc and the four templates by path
 - Bulleted list of the four registries with canonical URLs and per-registry contact addresses
 - One sentence on the order-of-operations recommendation (Official MCP Registry first)
@@ -526,8 +527,8 @@ cross-references the strategy doc + templates need.
 - Strategy doc `status:` flips from `draft` → `published` (decoupled from this plan's own `status: active → completed`
   lifecycle).
 
-**Patterns to follow:** Existing AGENTS.md disclosure pattern under `## MCP server` (lines 73-140 carry the
-wire-contract subsection structure to mirror).
+**Patterns to follow:** Existing AGENTS.md disclosure pattern under `## MCP server` (its wire-contract
+subsections carry the structure to mirror).
 
 **Test scenarios:**
 
@@ -636,7 +637,7 @@ and the strategy doc notes the as-of date.
   and its discoverability set are the asset to be submitted.
 - `PRODUCT.md`, `docs/research/VOICE.md`, and the `BRAND.md` vendored mirror — voice anchor files cited by every
   template's example fill.
-- `AGENTS.md` (in particular `## MCP server` at line 73) — disclosure target for the new `### Registry listings`
+- `AGENTS.md` (in particular `## MCP server`) — disclosure target for the new `### Registry listings`
   subsection.
 - `markdownlint-cli2` + `.markdownlint-cli2.yaml` — lint gate for new artifacts.
 - The four registries' submission docs (external) — the per-registry deep dives in U3 cite these as authoritative
@@ -664,13 +665,13 @@ and the strategy doc notes the as-of date.
 - `streamsgrp:docs/plans/2026-06-05-001-feat-mcp-registry-submissions-strategy-plan.md` — the source plan this plan is
   structured against. Authored independently rather than as a dependency; structural shape (Requirements, KTDs, U1-U7)
   follows the source for consistency across the two repos' submission strategies.
-- `docs/plans/2026-06-05-001-feat-mcp-endpoint-plan.md` (`status: completed`) — anc.dev's shipped MCP server: 9 tools
-  across four surfaces, 5 resources, wire contract, rate limits, discoverability set. The asset to be submitted.
+- `docs/plans/2026-06-05-001-feat-mcp-endpoint-plan.md` (`status: completed`) — anc.dev's shipped MCP server: 13 tools
+  across five surfaces, 5 resources, wire contract, rate limits, discoverability set. The asset to be submitted.
 - `PRODUCT.md` (109 lines) — channel-delta voice anchor for the site channel.
 - `docs/research/VOICE.md` — register-split voice anchor (opinionated/precise/inviting; third-person; sentence-rhythm
   guidance).
 - `BRAND.md` (in `agentnative-spec`, vendored mirror on `dev` branch of this repo) — universal voice anchor.
-- `AGENTS.md ## MCP server` (line 73) — disclosure pattern for MCP-adjacent author-facing surfaces.
+- `AGENTS.md ## MCP server` — disclosure pattern for MCP-adjacent author-facing surfaces.
 - `docs/research/2026-04-28-cloudflare-live-scoring-v2.md` and `docs/research/2026-05-04-discovery-chain-hit-rate.md` —
   existing `docs/research/` entries; pattern source for the strategy doc's frontmatter shape.
 - Registry official docs (external; cited verbatim in U3):

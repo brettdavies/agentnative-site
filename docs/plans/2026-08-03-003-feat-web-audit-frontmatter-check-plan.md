@@ -4,6 +4,10 @@ artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution: code
 type: feat
+status: released
+completed: 2026-08-03
+released_in: "#266"
+prs: ["#243"]
 created: 2026-08-03
 product_contract_source: ce-plan-bootstrap
 plan_depth: standard

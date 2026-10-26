@@ -1,5 +1,9 @@
 ---
 title: "refactor: split the web-audit MCP & API category into separate API and MCP categories"
+status: released
+completed: 2026-07-17
+released_in: "#228"
+prs: ["#225"]
 date: 2026-07-17
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready

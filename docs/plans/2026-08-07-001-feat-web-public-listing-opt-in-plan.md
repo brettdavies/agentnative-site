@@ -5,8 +5,11 @@ execution: code
 product_contract_source: ce-plan-bootstrap
 title: "feat: Opt-in public_listing gate for the web leaderboard"
 type: feat
+status: released
+completed: 2026-08-10
+released_in: "#266"
+prs: ["#247"]
 date: 2026-08-07
-status: ready
 scope: web
 ---
 

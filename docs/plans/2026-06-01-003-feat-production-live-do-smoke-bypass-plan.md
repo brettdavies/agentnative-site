@@ -4,7 +4,6 @@ type: feat
 status: proposed
 date: 2026-06-01
 origin: 'post-release retro on the 2026-06-01 live-scoring v3 + audit rename + spec/principles v0.5.0 release (PR #145, squash `08958bc`). Cache-purge step ran cleanly; the production live-DO smoke step in RELEASES-PREFLIGHT.md is structurally unfollowable with curl because production Turnstile validates real tokens. Manual browser submission is the only operator path today.'
-pr: TBD
 related:
   - 'RELEASES-PREFLIGHT.md (post-tag verification block)'
   - 'src/worker/score/handler.ts (gate ordering)'

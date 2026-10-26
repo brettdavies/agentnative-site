@@ -5,6 +5,8 @@ execution: code
 product_contract_source: ce-plan-bootstrap
 title: "Theme mechanism collapse to light-dark() - Plan"
 type: refactor
+status: blocked
+blocked_on: light-dark() reaching Baseline Widely available on 2026-11-13
 date: 2026-08-31
 topic: theme-mechanism-light-dark
 ---

@@ -1,7 +1,10 @@
 ---
 title: "feat: P0 — evaluate skill PR #25 release-flow hardening for site applicability"
 type: feat
-status: proposed
+status: released
+completed: 2026-09-08
+released_in: "#339"
+prs: ["#336"]
 priority: P0
 date: 2026-06-01
 origin: "cross-repo mirror of brettdavies/agentnative-skill PR #25 (merged 2026-06-01); this repo has neither script the PR touches, so the task is an applicability evaluation"
@@ -12,9 +15,8 @@ origin: "cross-repo mirror of brettdavies/agentnative-skill PR #25 (merged 2026-
 ## Summary
 
 `agentnative-skill` PR #25 hardened its release flow with two changes to `scripts/sync-dev-after-release.sh` and two
-changes to `scripts/generate-changelog.sh`. **This repo has neither script.** `RELEASES.md` notes a future
-`CHANGELOG.md` flow as still-to-come ("Future generated changelog (if a `CHANGELOG.md` flow lands here).") and the site
-deploys continuously via Cloudflare on push-to-main rather than via versioned releases with backport commits.
+changes to `scripts/generate-changelog.sh`. The site deploys continuously via Cloudflare on push-to-main rather than
+via versioned releases with backport commits.
 
 This plan is therefore an **applicability evaluation** rather than a direct mirror. Decide whether either script
 belongs here at all; if yes, add it with the items from PR #25 and the follow-up

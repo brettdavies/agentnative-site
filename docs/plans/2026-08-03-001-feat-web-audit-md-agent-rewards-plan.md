@@ -1,5 +1,9 @@
 ---
 title: "feat: reward markdown-to-agents web-audit checks (MAY, gated by a markdown-twin antecedent)"
+status: released
+completed: 2026-08-03
+released_in: "#266"
+prs: ["#239"]
 date: 2026-08-03
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready

@@ -1,75 +1,21 @@
 ---
 title: "feat: Badge surface for agent-native-standard conformance"
 type: feat
-status: completed
+status: released
+completed: 2026-05-04
+released_in: "#60"
+prs: ["#49", "#50", "brettdavies/agentnative#18", "brettdavies/agentnative-cli#36"]
 date: 2026-04-23
 last-revised: 2026-04-30
-shipped_in: site-side units U3–U7 merged to `dev` 2026-04-29 (PRs #49 + #50 + #51). Live on staging at /badge + /badge/<tool>.svg; NOT YET on `main`/anc.dev — see CORRECTION block below. Surface #5 (CLI post-pass hint + schema 0.5 `badge` block) DID ship in `agentnative-cli` PR #36 (independent repo).
 parents:
   - docs/plans/2026-04-28-001-feat-show-hn-launch-readiness-plan.md
 ---
 
-> **CORRECTION (2026-04-30 PM PT) — DEV/STAGING-LIVE, NOT PRODUCTION-LIVE.** Site-side units U3–U7 (PRs #49, #50, #51)
-> landed on `dev` and the badge surface IS live on the staging Worker. CLI Surface #5 (PR #36 with schema 0.5 `badge`
-> block) DID ship in the CLI repo — that part is genuinely complete. However, the `dev → main` release that would have
-> promoted the site-side badge surface to anc.dev was never cut — Show HN launch was HELD; see
-> [`2026-04-28-001-feat-show-hn-launch-readiness-plan.md`](2026-04-28-001-feat-show-hn-launch-readiness-plan.md)
-> § CORRECTION. The "Post-launch update" block below incorrectly cites `https://anc.dev/badge` and
-> `https://anc.dev/badge/<tool>.svg` as `200 OK`; both return 404 today (anc.dev still serves the v0 scaffold from
-> 2026-04-14). The same surfaces ARE 200 OK on the staging Worker — read every "production" / `anc.dev` claim below
-> as "staging" / `agentnative-site-staging.<subdomain>.workers.dev` until the dev → main release lands.
-
 # feat: Badge surface for agent-native-standard conformance
-
-> **[HISTORICAL — see CORRECTION above; production claims below are wrong.] Post-launch update (2026-04-30):** All
-> site-side units (U3–U7) shipped and live in production:
->
-> - `https://anc.dev/badge` — convention page (200 OK)
-> - `https://anc.dev/badge/<tool>.svg` — per-tool live-score SVGs (200 OK; 96 SVGs emitted by current build)
-> - Per-tool scorecard pages render the embed snippet above the eligibility floor and the gap-hint below
-> - Leaderboard callout at `/scorecards` cites the eligible-vs-total count and links to `/badge`
->
-> **Surface #5 update (2026-04-30):** CLI post-pass hint shipped in `agentnative-cli` PR
-> [#36](https://github.com/brettdavies/agentnative-cli/pull/36) on `feat/badge-embed-hint`. After a passing
-> `anc audit .`, the CLI prints the embed snippet for the running tool. Scorecard `schema_version` bumped `0.4` → `0.5`
-> with a new top-level `badge` block (`eligible`, `score_pct`, `embed_markdown`, `scorecard_url`, `badge_url`,
-> `convention_url`). Eligibility floor (`80`) and base URL (`https://anc.dev`) are duplicated as named consts in the
-> CLI (`BADGE_ELIGIBILITY_FLOOR_PCT`, `BADGE_BASE_URL` in `src/scorecard/mod.rs`); authority remains `content/badge.md`
-> in this repo until the spec convention merges off `agentnative-spec` `feat/badge-claim-convention`.
->
-> **Site renderer simplification opportunity (post-PR #36 follow-up):** When ingesting a `schema_version >= 0.5`
-> scorecard, `src/build/scorecards-render.mjs` can read `scorecard.badge.embed_markdown` directly instead of calling
-> `buildEmbedMarkdown(tool.name)`, and `scorecard.badge.eligible` instead of `score >= BADGE_FLOOR`. Pre-`0.5`
-> scorecards still need the local computation as a fallback. Not a blocker — it's an additive simplification, no
-> functional change. Filed as a follow-up; pick up when next iterating on `scorecards-render.mjs`.
->
-> **Out-of-repo work still pending** (intentional — separate repos, separate lifecycles):
->
-> - **U1 + U2 (spec-side surface #4):** `agentnative-spec/docs/badge.md` and `README.md` cross-references are
->   not yet created (`gh api repos/brettdavies/agentnative-spec/contents/docs/badge.md` → 404 as of 2026-04-30).
->   The site `/badge` page is the canonical author-facing surface for now.
->
-> Status flipped to `completed` because every unit owned by this repo (U3–U7) is shipped, and surface #5 (CLI) shipped
-> on 2026-04-30. The remaining pending piece (U1, U2 in agentnative-spec) is tracked in that repo's planning surfaces,
-> not here.
-
----
 
 > **Origin: filed 2026-04-23 in `agentnative-spec` as `docs/plans/2026-04-23-001-feat-badge-surface-plan.md`; moved to
 > `agentnative-site` on 2026-04-29 (same date as the launch-eve design pass) to consolidate ownership in the
 > launch-coupled hub repo. Three of the four launch-wave surfaces ship from this repo, so the coordinator lives here.**
->
-> **Status: all five surfaces merged into their owning repos' `dev` branches; site U3–U7 live on staging Worker.
-> Production releases pending — Show HN was held, so neither site `dev → main` nor spec `dev → main` has been cut
-> yet, and `anc.dev` plus the next spec tag still serve pre-badge content.** Site-side surfaces #1–#3 plus the
-> build-time SVG render (`badge-maker`) and the worker `image/svg+xml` content-type wiring landed on
-> `feat/badge-surface` and merged into this repo's `dev` ahead of the Show HN launch wave (Thu 2026-04-30 09:00 PT).
-> Surface #5 (CLI post-pass hint) shipped 2026-04-30 in
-> [agentnative-cli PR #36](https://github.com/brettdavies/agentnative-cli/pull/36) — independent repo, already on
-> `agentnative-cli` `dev`. Surface #4 (spec `docs/badge.md` doctrinal convention) shipped 2026-05-04 in
-> [agentnative-spec PR #18](https://github.com/brettdavies/agentnative/pull/18) onto spec `dev`; promotion to spec
-> `main` still pending. Completes U1+U2 with the four formerly-TBD product decisions transcribed verbatim from the
-> locked-decisions block below.
 >
 > **Decisions confirmed during the 2026-04-29 design pass:**
 >
@@ -87,8 +33,8 @@ parents:
 >
 > **Decisions locked during 2026-04-29 implementation (resolving the four formerly TBD items):**
 >
-> - **Eligibility floor: ≥80% pass-rate.** Captures the top quartile of the 96-tool launch corpus (24 tools currently
->   eligible). Above the 70% median so the badge means "upper segment"; below 90% so the embed snippet appears on a
+> - **Eligibility floor: ≥80% pass-rate.** Captures the top quartile of the 96-tool launch corpus. Above the 70% median
+>   so the badge means "upper segment"; below 90% so the embed snippet appears on a
 >   meaningful portion of pages. Single gate — no second principle-count gate, since 80% pass-rate already implies most
 >   principles are met.
 > - **Score-text format: `XX%`** (rounded percent). Matches the leaderboard's score column. `91/100` and
@@ -149,20 +95,13 @@ surfaces 1, 2, and 3; CLI owns surface 5.
 | 4   | `docs/badge.md` doctrinal convention  | `agentnative-spec` (this plan, U1+U2) | **no** — post-launch | ✅ merged to spec `dev` 2026-05-04 (PR #18)    |
 | 5   | `anc audit` post-pass embed hint      | `agentnative-cli` (todo #017)         | **no** — post-launch | ✅ shipped 2026-04-30 (CLI PR #36, schema 0.5) |
 
-> Site-side units U3–U7 (added during the 2026-04-29 implementation) cover surfaces 1–3 plus the build-time SVG render
-> (`badge-maker`) and the worker `image/svg+xml` content-type wiring. Spec-side U1+U2 shipped 2026-05-04 in
-> [agentnative-spec PR #18](https://github.com/brettdavies/agentnative/pull/18) — `docs/badge.md` is now the
-> authoritative doctrinal text; the `/badge` page (surface #3) cross-links to it.
-
-This plan tracks U1+U2 (surface 4) explicitly; surfaces 1–3 are site-owned and tracked by additional units (or a
-separate site-side companion plan, depending on how the work is sliced when the launch-eve PR pair is cut). Surface 5
-shipped 2026-04-30 in CLI PR [#36](https://github.com/brettdavies/agentnative-cli/pull/36); todo flipped to
-`017-completed-p1-agent-native-badge-hint-on-passing-check.md` (local-only per project convention; not committed).
+U1+U2 cover surface 4. U3–U7 cover the site-owned surfaces 1–3 plus the build-time SVG render and the Worker SVG
+content-type wiring. Surface 5 ships from `agentnative-cli`.
 
 ## Scope Boundaries
 
 - Badge SVG rendering (the `dist/badge/<tool>.svg` build step using `badge-maker`) — owned by this repo
-  (`agentnative-site`); will be filed as additional units in this plan or a sibling plan when the launch-eve PR is cut.
+  (`agentnative-site`), U3.
 - Leaderboard UX — separate concern on the site.
 - Any changes to the `anc` CLI scoring itself — out of scope; the spec defines what the badge means, the CLI already
   scores.
@@ -244,8 +183,7 @@ shipped 2026-04-30 in CLI PR [#36](https://github.com/brettdavies/agentnative-cl
 ## Implementation Units
 
 > **Note:** U1 and U2 below describe surface 4 (spec-side doctrinal convention). They ship from `agentnative-spec`,
-> not from this repo. Site-side surfaces 1–3 will be added as additional units (or a sibling plan) when the launch-eve
-> PR pair is cut.
+> not from this repo. U3–U7 cover the site-side surfaces 1–3.
 
 - [x] U1. **Draft badge-claim convention** *(shipped 2026-05-04 in
   [agentnative-spec PR #18](https://github.com/brettdavies/agentnative/pull/18))*
@@ -402,7 +340,7 @@ the standard short cache so re-scored tools' badge colors flip within a TTL of t
   defined in U1. When U1 writes the contract, keep the renderer in mind — the prose should be specific enough that the
   `badge-maker` parameter set can be constructed directly from the convention without re-interpretation.
 - **Unchanged invariants:** Principle files, requirement IDs, publish workflow, CHANGELOG convention — none touched by
-  U1+U2. Site-side render units (when filed) will touch `src/build/` only.
+  U1+U2. Site-side render units touch `src/build/` and the Worker SVG headers (U7).
 
 ---
 
@@ -421,7 +359,7 @@ the standard short cache so re-scored tools' badge colors flip within a TTL of t
 
 - When U1+U2 land in `agentnative-spec`, that repo's `CHANGELOG.md` gets a release-PR entry (spec-side convention is
   doc-only; no VERSION bump unless the convention touches a requirement's MUST/SHOULD/MAY).
-- Site-side render units, when filed, follow this repo's standard release flow.
+- Site-side render units follow this repo's standard release flow.
 - The two repos coordinate under the coupled-release protocol (`agentnative-spec:CONTRIBUTING.md`).
 
 ## Sources & References

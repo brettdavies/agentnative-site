@@ -1,52 +1,18 @@
 ---
 title: "feat: sync-spec.sh — commit-a-copy vendoring of principles + VERSION + CHANGELOG"
 type: feat
-status: completed
+status: released
+completed: 2026-05-01
+released_in: "#73"
+prs: ["#64"]
 date: 2026-04-23
 last-revised: 2026-05-01
-shipped_in: PR #64 squash-merged to `dev` 2026-05-01 06:58 UTC as commit `bdf0c91`. NOT YET on `main`/anc.dev — pending the next `release/<YYYY-MM-DD>-<slug>` cut.
 parents:
   - https://github.com/brettdavies/agentnative/blob/dev/docs/plans/2026-04-22-002-post-frontmatter-roadmap.md
 roadmap-item: 5 (spec-repo roadmap 002, item 4)
 ---
 
 # feat: sync-spec.sh — commit-a-copy vendoring of principles + VERSION + CHANGELOG
-
-> **Implementation status (2026-05-01): SHIPPED to `dev` via PR #64 (`bdf0c91`).** All four units landed; the design
-> shifted mid-execution from "one SPEC_VERSION feeding all surfaces" to a **three-source spec-version model** that
-> separates vendoring (we got a snapshot) from scoring (anc was compiled against this spec) from site reconciliation
-> (the prose has been updated to match). The shipped surface map:
->
-> | Surface             | Source                                                 | Constant / file                                                              |
-> | ------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------- |
-> | Site footer         | site reconciliation marker                             | `SITE_SPEC_VERSION` ← `content/principles/VERSION` (manual bump)             |
-> | Per-tool badge SVGs | scoring context                                        | each scorecard's own `spec_version` field (passed to `renderBadgeSvg`)       |
-> | OG card             | anc's compiled-in spec                                 | `scripts/og/generate.ts` reads `anc-v*.json`'s `spec_version`                |
-> | (no surface)        | vendored snapshot — reference / diff target only       | `SPEC_VERSION` ← `src/data/spec/VERSION` (auto-bumped by `sync-spec.sh`)     |
->
-> Units shipped (commits on `feat/sync-spec` before squash):
->
-> - **U1 + U2** (commit `51021f2`) — `scripts/sync-spec.sh` (cli reference impl mirror; remote-first; AGENTS.md
->   filter; shellcheck-clean) + initial vendored `src/data/spec/{VERSION=0.3.0, CHANGELOG.md, principles/p1..p7.md}`
->   - `src/data/spec/README.md` + lint exclusion + regression-test fix.
-> - **U3** (commit `11eca00`) — AGENTS.md paragraph + `scripts/SYNCS.md` (mermaid map; docker-image scoring as the
->   canonical source-of-truth; runtime-distribution section dropped per scope decision).
-> - **U4** (commit `7e5765d`) — `util.mjs` exports `SPEC_VERSION` + `SITE_SPEC_VERSION`; `shell.mjs:190` footer reads
->   `SITE_SPEC_VERSION`; `build.mjs:377` passes `scorecard.spec_version` per badge call; `scripts/og/generate.ts`
->   reads anc's self-scorecard's `spec_version` (drops the regex-from-shell.mjs hack); `content/principles/VERSION`
->   created at `0.3.0`; `tests/build.test.ts` footer-renders-vendored-version assertion; OG image regenerated.
->
-> Cross-repo doc updates landed in parallel: `solutions-docs/best-practices/agentnative-version-model-2026-05-01.md`
-> (commits `bf83c71` initial, `47c84b2` mermaid, `7201181` three-source refresh). Sibling SYNCS docs in
-> `agentnative-{spec,cli,skill}` got mermaid additions but stay locally untracked per the do-not-commit directive.
->
-> **Promotion to `anc.dev`** is pending the next `release/<YYYY-MM-DD>-<slug>` cut per RELEASES.md. Until then,
-> `bdf0c91` is on dev / staging Worker only.
->
-> **Follow-up captured**: P0 todo `019-pending-p0-remove-skill-sha-pinning.md` (gitignored under
-> `.context/compound-engineering/todos/`) — agentnative-skill PR #11 (commit `3c3ebb6`, 2026-04-29) deprecated
-> SHA-pinning across the skill repo's shipping content; this site repo is the lagging consumer (still validates
-> `source.commit` in `src/build/skill.mjs`).
 
 ## Overview
 
@@ -258,7 +224,7 @@ agentnative-site/
 
 ## Implementation Units
 
-- [ ] U1. **Author `scripts/sync-spec.sh`**
+- [x] U1. **Author `scripts/sync-spec.sh`**
 
 **Goal:** Write the script that vendors three artifacts from the spec repo into this repo.
 
@@ -341,7 +307,7 @@ this repo's local stylistic conventions (header comment voice, repo-root resolut
 
 ---
 
-- [ ] U2. **Initial commit of vendored artifacts at v0.3.0**
+- [x] U2. **Initial commit of vendored artifacts at v0.3.0**
 
 **Goal:** Run the script against the v0.3.0 spec ref and commit the resulting vendored state.
 
@@ -391,7 +357,7 @@ this repo's local stylistic conventions (header comment voice, repo-root resolut
 
 ---
 
-- [ ] U3. **Document the sync workflow**
+- [x] U3. **Document the sync workflow**
 
 **Goal:** Readers of this repo know when and how to resync; cross-repo version model is discoverable.
 
@@ -403,9 +369,8 @@ this repo's local stylistic conventions (header comment voice, repo-root resolut
 
 - Modify: `scripts/sync-spec.sh` header comment — same shape as cli's reference impl; explicitly call out the three
   artifacts and the spec-side release-notification workflow.
-- Modify: `scripts/SYNCS.md` (currently untracked from the 2026-05-01 cross-repo sync-doc audit; to be committed as part
-  of this PR) — add a row for `sync-spec.sh` in the Upstream table; update the SPEC_VERSION drift-check column now that
-  the hardcode is gone; cross-link the version-model solution doc.
+- Modify: `scripts/SYNCS.md` — add a row for `sync-spec.sh` in the Upstream table; update the SPEC_VERSION drift-check
+  column now that the hardcode is gone; cross-link the version-model solution doc.
 - Modify: `AGENTS.md` — the existing block about `content/principles/` being manually-authored gets a sibling paragraph
   pointing at `src/data/spec/` as the vendored, machine-readable mirror used for build-time derivatives. Clarifies that
   the two paths coexist intentionally and points at the version-model doc.
@@ -471,7 +436,7 @@ this repo's local stylistic conventions (header comment voice, repo-root resolut
 
 ---
 
-- [ ] U4. **Wire `SPEC_VERSION` to vendored read; fix footer + OG card staleness**
+- [x] U4. **Wire `SPEC_VERSION` to vendored read; fix footer + OG card staleness**
 
 **Goal:** Eliminate the v0.1.0-on-prod footer drift by making `SPEC_VERSION` read from the vendored `VERSION` file and
 threading it through the footer + OG card. Source-of-truth for the site's spec version is now exactly one file:
@@ -524,8 +489,8 @@ threading it through the footer + OG card. Source-of-truth for the site's spec v
   literal in the footer template string. No other shell.mjs changes — the OG card alt text and JSON-LD don't reference
   the version.
 
-- **OG generator refactor**: `scripts/og/generate.ts` currently reads shell.mjs source via `readFile` + regex match.
-  Replace with a direct import of `SPEC_VERSION` from util.mjs. Drop the `readVersion()` function and `SHELL_MJS`
+- **OG generator refactor**: replace the `readFile` + regex read of shell.mjs source in `scripts/og/generate.ts`
+  with a direct import of `SPEC_VERSION` from util.mjs. Drop the `readVersion()` function and `SHELL_MJS`
   constant entirely. The OG HTML's `data-version` injection still happens (Playwright `page.evaluate`); only the source
   of the version string changes.
 

@@ -1,6 +1,9 @@
 ---
 title: 'refactor: handler.ts + score_cli adopt shared lookupOnly orchestrator (read-tier symmetry)'
-status: completed
+status: released
+completed: 2026-06-06
+released_in: "#177"
+prs: ["#173"]
 created: 2026-06-05
 plan_type: refactor
 depth: lightweight

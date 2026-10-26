@@ -1,6 +1,10 @@
 ---
 title: Meum Sites Hardening Adoption - Plan
 type: feat
+status: released
+completed: 2026-09-02
+released_in: "#339"
+prs: ["#323", "#324", "#325", "#326", "#327", "#328"]
 date: 2026-09-02
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready

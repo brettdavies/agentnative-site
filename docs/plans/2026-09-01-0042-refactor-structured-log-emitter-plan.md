@@ -5,6 +5,10 @@ execution: code
 product_contract_source: ce-plan-bootstrap
 title: "Central structured-log emitter - Plan"
 type: fix
+status: released
+completed: 2026-09-03
+released_in: "#332"
+prs: ["#330", "#331"]
 date: 2026-09-01
 topic: structured-log-emitter
 ---
@@ -14,9 +18,7 @@ topic: structured-log-emitter
 ## Goal Capsule
 
 - **Objective:** Every field the Worker logs becomes something an operator can filter, group, and chart in the
-  Cloudflare dashboard, and a served page becomes a thing that leaves a record at all. Today neither holds: the
-  Observability API indexes 116 keys for this Worker and exactly two are ours — `message` and `level` — while `scope`,
-  `tier`, `event`, and `client_name` are invisible, and no scope anywhere records a page being served.
+  Cloudflare dashboard, and a served page becomes a thing that leaves a record at all.
 - **Means:** One module owns the log envelope, the scope vocabulary, and the field caps; call sites pass an object and
   nothing else (KTD1, KTD2). One new record at the gateway captures page serving, including cache hits (KTD11).
 - **Authority:** R-IDs win on required behavior. KTDs win on mechanism. Units override neither.
@@ -45,7 +47,7 @@ fields; the Query Builder gains every one as a dimension.
 
 ### Problem Frame
 
-Cloudflare's documentation names this exact anti-pattern:
+Cloudflare's documentation recommends structured records:
 
 | Logging code                     | What gets indexed           |
 | -------------------------------- | --------------------------- |
@@ -54,9 +56,10 @@ Cloudflare's documentation names this exact anti-pattern:
 
 > "Workers Logs automatically extracts the fields and indexes them intelligently… In scenario 1, the `user_id` is embedded within a message. To find all logs relating to a particular user_id, you would have to run a text match."
 
-`JSON.stringify` produces a string, so every emit site here is scenario 1. Verified against the live account on
-2026-09-01: the keys endpoint returns 116 indexed keys, of which the only non-platform entries are `message` and
-`level`.
+Workers Logs also parses a JSON-string console line into a structured record and indexes its keys. The keys endpoint
+samples recent records, so a window that holds none of this Worker's lines lists only the invocation records' `message`
+and `level`. The case for one emitter is ownership: one envelope, one scope vocabulary, one set of caps, and the
+request-scoped ambient fields on every record, emitted on the documented object contract.
 
 It silently breaks procedures already written down. `docs/runbooks/live-scoring-monitoring.md:61,87,91` instruct an
 operator to filter `scope:"score.tier"` and group by `tier` in the Workers Logs dashboard. Neither field is indexed, so
@@ -155,7 +158,7 @@ even with indexing fixed, the site's main surface stays unmeasured.
   `public-listing-backfill.ts:70` emits the `BACKFILL_SCOPE` constant. Twenty-three scope values exist.
 - `src/worker/audit-web/audit-log.ts` wraps `console.log(JSON.stringify(...))` behind a local helper for the four
   `web-audit.*` scopes — two console call sites (the helper and `logAuditError`) serving four scope values — and its
-  header comment claims the stringified fields are indexed; they index as `message` only. `src/worker/notify.ts` emits
+  header comment describes how the stringified fields index. `src/worker/notify.ts` emits
   `notify.send_failed` the same way.
 - Emit-site inventory: 40 sites — 35 ordinary (U3) and five contract-bearing or multi-line (U4).
 - `tests/worker-mcp-dispatch.test.ts:175` guards on `typeof s.args[0] !== 'string'`; `tests/score-do.test.ts:168` types
@@ -360,7 +363,7 @@ item 10), so the lake sink can always be enabled inside the seven-day coupling w
   line, which U4 owns.
 - **Approach:** Mechanical, copying field sets verbatim except the two KTD6 exceptions. Trace scope values that reach an
   emit through a parameter or constant to their callers — reading the emit line alone misses three. In `audit-log.ts`,
-  also delete the header comment's claim that stringified fields are indexed — they index as `message` only — and route
+  also delete the header comment's account of how stringified fields index, and route
   its `WEB_AUDIT_DEBUG` gate through the emitter's debug tier (KTD16).
 - **Test scenarios:**
   - Happy path: existing tests still pass.
@@ -504,11 +507,11 @@ item 10), so the lake sink can always be enabled inside the seven-day coupling w
   (`webmcp-home.ts`'s `form.submit()`) surfaces server-side and whether that signal generalizes; whether tool name,
   arguments, and outcome are available at that seam without touching argument *content*; whether the agent identity is
   knowable client-side at all, or only that *an* agent acted; what an ingest endpoint would cost, given the site has no
-  public write surface today — `/api/web-rescore` and `/api/web-audit-backfill` are the only `/api/` POST routes and
-  neither is an open beacon, so an unauthenticated ingest is a new abuse surface needing its own rate-limit and
-  Turnstile posture; and what the privacy surface looks like, since a beacon reports what an agent did on a page a human
-  is also viewing. Record what is observable, what is not, and what each option would cost. **Recommend a backend shape;
-  do not build one.**
+  open write surface today (`/api/score` is Turnstile-gated, `/api/web-rescore` and `/api/web-audit-backfill` are
+  secret-gated, and none of the three is an open beacon), so an unauthenticated ingest is a new abuse surface needing
+  its own rate-limit and Turnstile posture; and what the privacy surface looks like, since a beacon reports what an
+  agent did on a page a human is also viewing. Record what is observable, what is not, and what each option would cost.
+  **Recommend a backend shape; do not build one.**
 - **Execution note:** Runs first in the sequence. It blocks nothing, and its findings shape work that has not been
   specced yet — which is the whole reason it comes early rather than late.
 - **Test scenarios:**
@@ -537,8 +540,8 @@ item 10), so the lake sink can always be enabled inside the seven-day coupling w
 - **Files:** `docs/runbooks/live-scoring-monitoring.md`, `AGENTS.md`.
 - **Approach:** The runbook's `scope:"score.tier"` filters need no rewriting — they were correct and simply could not be
   executed. Note that they now work, and record the keys-API check as the way to confirm a new field is queryable. Add
-  the convention to `AGENTS.md`: log through the emitter, pass an object, never `JSON.stringify`, because stringifying
-  collapses every field into `message`. Do not edit the `mcp.request` posture sentence.
+  the convention to `AGENTS.md`: log through the emitter, pass an object, never `JSON.stringify`, because the emitter
+  owns the envelope, the caps and the ambient fields. Do not edit the `mcp.request` posture sentence.
 - **Test scenarios:**
   - Test expectation: none — documentation.
 - **Verification:** `bun run lint`, plus a read-through confirming no runbook filter changed.
@@ -592,49 +595,3 @@ gates everything after it.
 | U10  | One record per served page including cache HITs, with a real client class and the R11 browser/agent fields; API and asset paths excluded. U3 does not start until U10 is merged and deployed (parent Alignment item 9). |
 | U6   | Keys API lists every expected dimension; before/after counts and the platform-IP answer recorded.                                                                                                                       |
 | U7   | Runbook filters annotated as working, not rewritten; `AGENTS.md` carries the convention.                                                                                                                                |
-
----
-
-## Shipped state (2026-09-03)
-
-Two PRs carry the implementation, both squash-merged to `dev`:
-[#330](https://github.com/brettdavies/agentnative-site/pull/330) as `77814f9` (the mechanism and the page record) and
-[#331](https://github.com/brettdavies/agentnative-site/pull/331) as `fbeff01` (the migration, the indexing check, and
-the docs). Per unit:
-
-| Unit | State                                                                                                                                       |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| U13  | Shipped in #330: `docs/research/2026-09-webmcp-observability-spike.md` answers the five questions and recommends an allowlisted-event beacon. It records two corrections to this plan's text: the `page.request` record carries the path only, never the query string, and the `/api/` POST-route inventory in U13's approach undercounts by two. |
-| U0   | Shipped in #330: `src/worker/telemetry/request-context.ts`, entered inside `Cached.fetch`. Forced-interleave leak contrast and the loopback placement check (with the null negative control) both observed and quoted. |
-| U1   | Shipped in #330: `src/worker/telemetry/log.ts`, injectable sink, throwing-sink path observed. `LogFields` and `AmbientFields` exclude `scope` and `event` at the type level; the runtime spread order is unchanged. |
-| U2   | Shipped in #330; the cap helpers live in `src/worker/telemetry/caps.ts` (#331) so the emitter and the MCP telemetry module no longer import each other. |
-| U5   | Shipped in #330: `tests/helpers/log-capture.ts` on the sink; the old mcp-dispatch helper observed reporting zero lines against the temporary object-emission patch. Four helpers moved (the plan listed three; `tests/web-audit-cache.test.ts` was the fourth). #331 removes the console bridge and adds `tests/telemetry-no-raw-console.test.ts`. |
-| U9   | Shipped in #330: `web-audit.discovery` canary, staging deploy run 33712954881; `scope`, `target`, and `evidence.0` through `evidence.7` sub-keys listed by the keys endpoint. |
-| U11  | Shipped in #330: `src/worker/telemetry/user-agent.ts`, hints first, iOS wrappers to WebKit at the device version, Safari 17.4 and 17.5 distinct, Brave's limit pinned. |
-| U12  | Shipped in #330: `src/worker/telemetry/client-class.ts`, six classes, canonical names as a closed union.                                    |
-| U10  | Shipped in #330 at the gateway; staging deploy run 33713988705 showed HIT and MISS records. Review additions: `path` capped at 256 with `path_truncated`, and `cache_age_present` beside `cache_status` because a Static Assets hit returns through the Worker with no `Age` header. |
-| U3   | Shipped in #331: 37 sites (the two `#322` additions included), `score.outbound` on the two Sandbox diagnostics, `writeAuditObject`'s scope narrowed to the union. |
-| U4   | Shipped in #331: all five records captured before and after through the sink and identical, `mcp.request` in key order; `rg -U` clean across `src/worker/`. |
-| U6   | Recorded in `docs/runbooks/sitewide-analytics.md` § Live-layer field index: 177 keys, 63 from this Worker's records, every expected dimension present, against a pre-emitter production baseline of two. The platform-IP answer: the platform's invocation records index and populate `cf-connecting-ip`, `x-real-ip`, `x-forwarded-for`, `user-agent`, and the `cf` geolocation fields; the Worker's console records carry none of them. |
-| U7   | Shipped in #331: runbook filters annotated as working with the keys-endpoint recipe; `AGENTS.md` carries the convention; the `mcp.request` posture sentence unchanged. |
-
-Premise correction recorded against this plan's Problem Frame: Workers Logs already parses a JSON-string console
-line into a structured record and indexes its keys, and the keys endpoint samples recent records, so the "116 keys,
-only `message` and `level`" observation reproduces whenever the sampled window holds no line of ours; `level` and
-`message` there belong to the invocation records. The migration ships on the documented object contract, one owner for
-the envelope and vocabulary, boundary caps, the ambient seam, and the sink-based test seam. The keys-API proof (R8) and
-Success Criteria hold on the live surface; `$metadata.level` stays null on object records as it did on string records.
-
-Open, with blockers:
-
-- Production deploy of the page record waits on the parent plan's staging-lake field-shape and export gates (parent
-  Alignment item 10); the next release branch must not cherry-pick `77814f9` or `fbeff01` before those are recorded.
-  `main` at `94d8eda` (release #333, 2026-09-04) carries neither, and its `src/worker/audit-web/audit-log.ts`,
-  `src/worker/notify.ts`, and `src/shared/user-agents.ts` are the pre-emitter versions (`console.*` plus
-  `JSON.stringify`), so the release branch that carries `fbeff01` resolves those three files toward the emitter
-  versions.
-- Two design notes left as they are, recorded in #330's review notes: the emitter caps `client_name`, `method`, and
-  `name` by field name across every scope (R3, KTD4), and a dispatch that throws before a response exists leaves no
-  `page.request` record.
-- The session identity plan's platform-key question is answered in the negative direction (above); its derivation must
-  never join a session key to an invocation record by request id.

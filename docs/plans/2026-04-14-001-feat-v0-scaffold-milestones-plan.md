@@ -1,7 +1,10 @@
 ---
 title: agentnative-site v0 scaffold — ordered milestone commits
 type: feat
-status: complete
+status: released
+completed: 2026-04-14
+released_in: "#19"
+prs: ["#1", "#2", "#3", "#4", "#5", "#6", "#7", "#8"]
 date: 2026-04-14
 origin: /home/brett/.gstack/projects/brettdavies-agentnative-site/brett-main-build-plan-20260414-130000.md
 ---
@@ -32,8 +35,7 @@ agent does not re-litigate it:
   supersedes: the shell lives as `src/build/shell.mjs` (a JS emitter, not a static template), and the Worker lives under
   `src/worker/{index,accept,headers}.ts`. Build plan wins; eng-review entries are early shorthand for the same surfaces.
 
-No other contradictions surfaced. The eng review's §12 edit list to docs/DESIGN.md has **not** been applied yet (verified
-2026-04-14 — no "copied from repo-root" string and no shell.mjs reference present in docs/DESIGN.md). §12 edits land in M1.
+No other contradictions surfaced. The eng review's §12 edit list to docs/DESIGN.md lands in M1.
 
 ## Scope boundaries
 
@@ -366,22 +368,3 @@ Run `/ce-work` against this plan. Start at M1 and proceed sequentially until M2/
 M5, then M6, then M8. Each milestone is one commit.
 
 Do NOT start /ce-work from this file — Brett reviews the milestone list first.
-
----
-
-## Completion Notes (2026-04-20)
-
-All 8 milestones shipped. The site is live on `anc.dev` (production custom domain) with staging at
-`agentnative-site.workers.dev`.
-
-**Post-plan changes of note:**
-
-- Production domain attached as `anc.dev` (not `agentnative.dev`/`.io`/`.org` — the plan left this open).
-- `wrangler.jsonc` uses `routes: [{ "pattern": "anc.dev", "custom_domain": true }]` for production;
-  staging environment uses `workers.dev` subdomain only.
-- Staging/production deploy split via wrangler environments (`dbe3908`).
-- Homepage redesigned as hero + principle listing (`b3a855c`).
-- All hardcoded `agentnative.dev` references replaced with `anc.dev` (`cc3cc57`).
-- `docs/TODOS.md` migrated to `.context/compound-engineering/todos/` and deleted.
-
-**Remaining post-v0 work** tracked in `.context/compound-engineering/todos/` (001–011).

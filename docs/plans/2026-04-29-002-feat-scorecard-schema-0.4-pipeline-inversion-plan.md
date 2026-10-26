@@ -1,18 +1,14 @@
 ---
 title: "feat: Adopt scorecard schema 0.4 + scorecard-driven discovery with registry editorial join"
 type: feat
-status: completed
+status: released
+completed: 2026-04-30
+released_in: "#60"
+prs: ["#52"]
 date: 2026-04-29
-shipped_in: PR #52 merged to `dev` 2026-04-30 morning. NOT YET on `main`/anc.dev — see CORRECTION block below.
 ---
 
 # feat: Adopt scorecard schema 0.4 + scorecard-driven discovery with registry editorial join
-
-> **CORRECTION (2026-04-30 PM PT) — DEV-MERGED, NOT PRODUCTION-SHIPPED.** PR #52 landed on `dev` as claimed; the
-> `dev → main` release that would have promoted it to anc.dev was never cut. Show HN launch was HELD; see
-> [`2026-04-28-001-feat-show-hn-launch-readiness-plan.md`](2026-04-28-001-feat-show-hn-launch-readiness-plan.md)
-> § CORRECTION for the full story. `status: completed` here means the implementation work landed on the `dev` branch
-> as scoped; production deployment is pending the next `release/<YYYY-MM-DD>-<slug>` cut.
 
 ## Overview
 
@@ -22,8 +18,8 @@ self-reported version), `anc` (the `anc` build that produced this scorecard, wit
 (invocation, started_at RFC 3339, duration_ms, platform os/arch), and `target` (kind = project | binary | command, plus
 path or command).
 
-The site currently reads `version` and `scored_at` from `registry.yaml` to render per-tool pages and to drive the regen
-pipeline's filename + state-tracking. With v0.4, the scorecard is self-describing: those fields move to the scorecard,
+With v0.4, the scorecard is self-describing: `version` and `scored_at`, which the site reads from `registry.yaml` to
+render per-tool pages and to drive the regen pipeline's filename + state-tracking, move to the scorecard,
 the registry shrinks, and the build can flip from registry-iterating-then-looking-up-scorecards to
 **scorecard-iterating-then-joining-registry-for-editorial-metadata**. That inversion is what the user asked for in the
 prompt phrasing "rely on the existence of a scorecard without even checking the registry."
@@ -310,7 +306,7 @@ After registry join:
 
 ## Implementation Units
 
-- [ ] **U1. Regenerate 95 scorecards to v0.4; grandfather anc-v0.1.3.json at v0.3 until CLI v0.2.0 ships**
+- [x] **U1. Regenerate 95 scorecards to v0.4; grandfather anc-v0.1.3.json at v0.3 until CLI v0.2.0 ships**
 
 **Goal:** Every file under `scorecards/*.json` carries `schema_version: "0.4"` *except* `scorecards/anc-v0.1.3.json`,
 which stays at v0.3 (its current state) — the user-locked product position is "anc must always appear on the leaderboard
@@ -393,7 +389,7 @@ pipeline at it, commit the resulting scorecards).
 
 ---
 
-- [ ] **U2. Adopt schema 0.4 in the loader + add build-time invariants**
+- [x] **U2. Adopt schema 0.4 in the loader + add build-time invariants**
 
 **Goal:** `src/build/scorecards.mjs` parses v0.4 metadata blocks, exposes them downstream, and the build refuses to ship
 if any committed scorecard violates the v0.4 contract.
@@ -467,7 +463,7 @@ production code is in place; the test failure is the "this is what the new invar
 
 ---
 
-- [ ] **U3. Switch the build to scorecard-driven discovery + registry editorial join**
+- [x] **U3. Switch the build to scorecard-driven discovery + registry editorial join**
 
 **Goal:** Build iterates `scorecards/*.json` first; joins registry by name for editorial metadata. Symmetric warnings:
 (i) scorecard without a registry entry → stderr warning with offending filename + missing name + scorecard excluded;
@@ -573,7 +569,7 @@ test depends on it before deleting the code.
 
 ---
 
-- [ ] **U4. Drop `version` and `scored_at` from `registry.yaml`; refresh registry header docs**
+- [x] **U4. Drop `version` and `scored_at` from `registry.yaml`; refresh registry header docs**
 
 **Goal:** The 96 registry entries no longer carry `version` or `scored_at`. Registry header comment block reflects the
 new field set. Regen scripts no longer write `scored_at` back into the registry.
@@ -638,7 +634,7 @@ the registry as the primary source).
 
 ---
 
-- [ ] **U5. Surface the new metadata on per-tool pages, leaderboard, and reproduce-locally CTA**
+- [x] **U5. Surface the new metadata on per-tool pages, leaderboard, and reproduce-locally CTA**
 
 **Goal:** Per-tool page renders `anc.version` + `anc.commit`, `run.started_at`, `run.duration_ms`,
 `run.platform.{os,arch}`, `target.kind`, and uses `run.invocation` verbatim as the reproduce command for command-mode
@@ -732,7 +728,7 @@ scorecards.
 
 ---
 
-- [ ] **U6. Update v0.4 docs across schema page, CONTRIBUTING.md, and registry header**
+- [x] **U6. Update v0.4 docs across schema page, CONTRIBUTING.md, and registry header**
 
 **Goal:** Three doc surfaces updated together so contributors arriving from any angle (registry editor, PR reviewer,
 schema-curious reader) see the new contract. The schema page describes the v0.4 fields with null-state semantics and PII
@@ -788,7 +784,7 @@ registry header).
 
 ---
 
-- [ ] **U7. (P3) Binary-name → registry-name redirects on `/score/<binary>`** *(refined from doc-review per Q1)*
+- [x] **U7. (P3) Binary-name → registry-name redirects on `/score/<binary>`** *(refined from doc-review per Q1)*
 
 **Goal:** A reader who lands on `/score/rg`, `/score/sg`, `/score/btm` (or any of the other 8 binary-named slugs) gets
 redirected to `/score/ripgrep`, `/score/ast-grep`, `/score/bottom`, etc. Closes the URL-fragmentation gap that falls out
@@ -856,7 +852,7 @@ invariant question.
 
 ---
 
-- [ ] **U8. CI surfaces the warning counts as a PR-comment annotation** *(refined from doc-review pass 2 per Q-CI)*
+- [x] **U8. CI surfaces the warning counts as a PR-comment annotation** *(refined from doc-review pass 2 per Q-CI)*
 
 **Goal:** When U3's symmetric warnings fire (scorecard-without-registry or registry-without-scorecard), CI posts a
 structured PR comment naming the offending entries so reviewers see the integrity drift without grepping logs. Build

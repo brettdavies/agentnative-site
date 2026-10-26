@@ -2,13 +2,15 @@
 title: "feat: Web-audit refinements — standalone display, site-type applicability, CF-style remediation"
 date: 2026-07-09
 type: feat
-status: proposed
+status: released
+completed: 2026-07-13
+released_in: "#205"
+prs: ["#198", "#199"]
 supersedes-parts-of: docs/plans/2026-07-09-001-feat-web-audit-integration-plan.md
 ---
 
-Proposed design for the web-audit refinements. Everything here is PROPOSED — redline any cell. It reshapes the display,
-scoring, applicability, and remediation of the web audit shipped by plan 2026-07-09-001; the engine, cache, route, and
-MCP plumbing are unchanged except where noted.
+Design for the web-audit refinements. It reshapes the display, scoring, applicability, and remediation of the web audit
+shipped by plan 2026-07-09-001; the engine, cache, route, and MCP plumbing are unchanged except where noted.
 
 ## Decisions locked (from the design chat)
 
@@ -102,7 +104,7 @@ always evaluated when found regardless of the declared type. A check that doesn'
 3. **informational-by-site-type.** The check runs and is displayed but does not affect the score when the site type
    doesn't match (CF's commerce treatment). E.g. commerce checks on a non-commerce site.
 
-## The check matrix (PROPOSED — redline any row)
+## The check matrix
 
 `Tier` is the RFC 2119 obligation = the severity of a **miss** (per the binary scoring above): a met requirement of any
 tier is a full-credit `pass`; a missed `MUST` is a `fail`, a missed `SHOULD`/`MAY` is a `warn`; `n_a` when the

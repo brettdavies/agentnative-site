@@ -1,6 +1,7 @@
 ---
 title: Web Bot Auth Probe Signing - Plan
 type: feat
+status: proposed
 date: 2026-09-01
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready

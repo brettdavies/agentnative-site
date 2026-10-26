@@ -1,6 +1,7 @@
 ---
 title: "fix: Restore the live-scoring Sandbox DO two-phase egress lockdown"
 type: fix
+status: proposed
 date: 2026-07-14
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready

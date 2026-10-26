@@ -1,6 +1,10 @@
 ---
 title: Declared-Host Evaluation, SEP-2127 Cards, and Spec-Drift Poll - Plan
 type: feat
+status: released
+completed: 2026-10-05
+released_in: "#449"
+prs: ["#389", "#390", "#392", "#393", "#394", "#395", "#396", "#397", "#401", "#403", "#407", "#408", "#410", "#412", "#413", "#418", "#424", "#427"]
 date: 2026-09-10
 deepened: 2026-09-10
 topic: declared-host-evaluation-spec-drift
@@ -2747,68 +2751,68 @@ Critical gaps: 0. The only silent row (`SCORE_KV` missing) has deliberate handli
 Synthesized from this review's findings. Each task derives from a specific finding above. Run with Claude Code or
 Codex; checkbox as you ship.
 
-- [ ] **T1 (P1, human: ~30min / CC: ~5min)** - follow - pin reciprocity to the endpoint host's own catalog
+- [x] **T1 (P1, human: ~30min / CC: ~5min)** - follow - pin reciprocity to the endpoint host's own catalog
   - Surfaced by: Architecture A1, R1 (D2)
   - Files: `src/worker/audit-web/follow.ts`, `tests/web-audit-follow.test.ts`
   - Verify: `bun test tests/web-audit-follow.test.ts`; the audited-site-catalog case sends zero POST or OPTIONS
-- [ ] **T2 (P1, human: ~1h / CC: ~10min)** - follow - apply the echo differential to metadata admission
+- [x] **T2 (P1, human: ~1h / CC: ~10min)** - follow - apply the echo differential to metadata admission
   - Surfaced by: Architecture A2, R2 (D3)
   - Files: `src/worker/audit-web/follow.ts`, `tests/web-audit-follow.test.ts`
   - Verify: echoing-gateway fixture collapses; root-path admit sends no differential GET
-- [ ] **T3 (P1, human: ~2h / CC: ~15min)** - corpus - add the committed `scores.json` regression index
+- [x] **T3 (P1, human: ~2h / CC: ~15min)** - corpus - add the committed `scores.json` regression index
   - Surfaced by: Test T1, R11 (D12)
   - Files: `scripts/web-audit/gen-fixtures.ts`, `tests/fixtures/web-audit-conformance/scores.json`,
     `tests/web-audit-conformance-corpus.test.ts`
   - Verify: `bun scripts/web-audit/gen-fixtures.ts && bun test tests/web-audit-conformance-corpus.test.ts`, landed
     before U1's schema bump
-- [ ] **T4 (P2, human: ~3h / CC: ~20min)** - discovery, engine - merge the POST passes and overlap them with follow
+- [x] **T4 (P2, human: ~3h / CC: ~20min)** - discovery, engine - merge the POST passes and overlap them with follow
   - Surfaced by: Performance Perf-2, R14 (D15)
   - Files: `src/worker/audit-web/discovery.ts`, `src/worker/audit-web/engine.ts`, `tests/web-audit-discovery.test.ts`,
     `tests/web-audit-follow.test.ts`
   - Verify: injected-clock test shows the longer phase, not the sum; two generations byte-identical
-- [ ] **T5 (P2, human: ~3h / CC: ~20min)** - discovery, MCP - OAuth-protected MCP on the audited site's own origin
+- [x] **T5 (P2, human: ~3h / CC: ~20min)** - discovery, MCP - OAuth-protected MCP on the audited site's own origin
   - Surfaced by: Architecture A3, R3 (D4)
   - Files: `src/worker/audit-web/discovery.ts`, `src/worker/audit-web/handlers/mcp.ts`, `tests/web-audit-auth-aware.test.ts`
   - Verify: the three same-origin fixtures pass
-- [ ] **T6 (P2, human: ~1.5h / CC: ~15min)** - MCP antecedents - encode the per-check auth classification
+- [x] **T6 (P2, human: ~1.5h / CC: ~15min)** - MCP antecedents - encode the per-check auth classification
   - Surfaced by: Code Quality Q1, R8 (D9)
   - Files: `src/data/web-audit/registry.yaml`, `src/worker/audit-web/antecedents/mcp.ts`, `tests/web-audit-antecedents-mcp.test.ts`
   - Verify: registry-walk test pins each row; resource rows read auth-required on a protected fixture
-- [ ] **T7 (P2, human: ~1.5h / CC: ~15min)** - SSRF guard - cap every document and report truncation
+- [x] **T7 (P2, human: ~1.5h / CC: ~15min)** - SSRF guard - cap every document and report truncation
   - Surfaced by: Code Quality Q2, R9 (D10)
   - Files: `src/worker/audit-web/ssrf.ts`, `src/worker/audit-web/assert.ts`, `src/worker/audit-web/discovery.ts`,
     `tests/web-audit-ssrf.test.ts`
   - Verify: the 2 MiB catalog reads to 256 KiB and is flagged truncated
-- [ ] **T8 (P2, human: ~30min / CC: ~5min)** - API antecedent - catalog anchors add hosts, existing signals stay
+- [x] **T8 (P2, human: ~30min / CC: ~5min)** - API antecedent - catalog anchors add hosts, existing signals stay
   - Surfaced by: Architecture A4, R4 (D5)
   - Files: `src/worker/audit-web/antecedents/api.ts`, `tests/web-audit-antecedents-api.test.ts`
   - Verify: an MCP-only catalog beside `/openapi.json` evaluates the API category at the audited origin
-- [ ] **T9 (P2, human: ~20min / CC: ~5min)** - limiter - one budget unit per declared domain per audit
+- [x] **T9 (P2, human: ~20min / CC: ~5min)** - limiter - one budget unit per declared domain per audit
   - Surfaced by: Architecture A5, R5 (D6)
   - Files: `src/worker/audit-web/limiter.ts`, `src/worker/audit-web/follow.ts`, `tests/web-audit-follow.test.ts`
   - Verify: one KV write per domain per audit; refusal before the first request
-- [ ] **T10 (P2, human: ~1h / CC: ~10min)** - rescore - return a deferred outcome for domain-budget skips
+- [x] **T10 (P2, human: ~1h / CC: ~10min)** - rescore - return a deferred outcome for domain-budget skips
   - Surfaced by: Architecture A6, R6 (D7)
   - Files: `src/worker/audit-web/rescore-workflow.ts`, `tests/web-audit-rescore-workflow.test.ts`,
     `docs/runbooks/web-audit-operations.md`
   - Verify: a deferred seed runs exactly one audit
-- [ ] **T11 (P2, human: ~45min / CC: ~10min)** - engine, progress page - emit the discovery event after follow
+- [x] **T11 (P2, human: ~45min / CC: ~10min)** - engine, progress page - emit the discovery event after follow
   - Surfaced by: Architecture A7, R7 (D8)
   - Files: `src/worker/audit-web/engine.ts`, `tests/web-audit-follow.test.ts`, `tests/e2e/scoring.e2e.ts`
   - Verify: the stripe-shaped fixture's discovery event carries the followed endpoint; e2e prints it
-- [ ] **T12 (P2, human: ~2h / CC: ~15min)** - MCP tool - claim the job and mark flags for `audit_website` runs
+- [x] **T12 (P2, human: ~2h / CC: ~15min)** - MCP tool - claim the job and mark flags for `audit_website` runs
   - Surfaced by: TODO proposal, R15 (D16)
   - Files: `src/worker/mcp/tools/web-audit.ts`, `tests/audit-job-attach.test.ts`, `tests/web-audit-mcp-tools.test.ts`
   - Verify: a transact request and a second `audit_website` call mid-run both attach
-- [ ] **T13 (P3, human: ~2h / CC: ~10min)** - registry build - derive the card's required fields from the vendored schema
+- [x] **T13 (P3, human: ~2h / CC: ~10min)** - registry build - derive the card's required fields from the vendored schema
   - Surfaced by: Scope Challenge structure, D1
   - Files: `src/build/13-web-audit-registry.mjs`, `src/worker/audit-web/handlers/server-card.ts`, `tests/web-audit-skills.test.ts`
   - Verify: the built lists equal the vendored `required` arrays; the build fails without the vendored file
-- [ ] **T14 (P3, human: ~20min / CC: ~5min)** - follow - drop the own-account `workers.dev` branch
+- [x] **T14 (P3, human: ~20min / CC: ~5min)** - follow - drop the own-account `workers.dev` branch
   - Surfaced by: Code Quality Q4, R10 (D11)
   - Files: `src/worker/audit-web/follow.ts`, `tests/web-audit-follow.test.ts`
   - Verify: an edge-failed `workers.dev` host produces no broken row
-- [ ] **T15 (P3, human: ~30min / CC: ~5min)** - write path - test the first-ever domain-budget write
+- [x] **T15 (P3, human: ~30min / CC: ~5min)** - write path - test the first-ever domain-budget write
   - Surfaced by: Test T2, R12 (D13)
   - Files: `tests/audit-api.test.ts`
   - Verify: written, served inside 60 s, re-audited after
@@ -2975,46 +2979,46 @@ None proposed: every approved fix is implementation work inside U1, U2, U5, U6, 
 
 ### Design Implementation Tasks
 
-- [ ] **DT1 (P1, human: ~45min / CC: ~10min)** - `/audit` form - disable listing and omit `public_listing` when follow
+- [x] **DT1 (P1, human: ~45min / CC: ~10min)** - `/audit` form - disable listing and omit `public_listing` when follow
   is unticked; label and help line
   - Surfaced by: Pass 3, D25 (opt-out returned 400 on listed sites), D26
   - Files: `src/build/audit-form.mjs`, `src/client/audit-entry.ts`, `tests/audit-form.test.ts`, `tests/audit-stash.test.ts`
   - Verify: an opt-out on a listed domain with the listing box untouched runs; keyboard and screen-reader pass
-- [ ] **DT2 (P2, human: ~6h / CC: ~40min)** - result page - MCP lane blocks and phone row layout (U14)
+- [x] **DT2 (P2, human: ~6h / CC: ~40min)** - result page - MCP lane blocks and phone row layout (U14)
   - Surfaced by: Pass 1, D8 to D11; D35
   - Files: `src/data/web-audit/registry.yaml`, `src/build/13-web-audit-registry.mjs`, `src/worker/audit-web/summary-*.ts`,
     `src/styles/site.css`
   - Verify: four blocks with counts; 390 px labels span the row; both themes against the combined reference
-- [ ] **DT3 (P2, human: ~8h / CC: ~1h)** - result page - provenance, not-run groups, Declared hosts section, score and
+- [x] **DT3 (P2, human: ~8h / CC: ~1h)** - result page - provenance, not-run groups, Declared hosts section, score and
   category copy (U6)
   - Surfaced by: Passes 1, 2, 4, 5, 6: D5, D6, D7, D12, D13, D17 to D20, D27 to D30
   - Files: `src/worker/audit-web/summary-model.ts`, `summary-render.ts`, `summary-markdown.ts`, `src/styles/site.css`
   - Verify: stripe-shaped fixture matches the combined reference in both themes and at 390 px; findingRows reads grouped
     rows
-- [ ] **DT4 (P2, human: ~1h / CC: ~10min)** - `/scoring` - discovery line with "declared by", exception-only host
+- [x] **DT4 (P2, human: ~1h / CC: ~10min)** - `/scoring` - discovery line with "declared by", exception-only host
   phrases, waiting copy (U6)
   - Surfaced by: D15, D24
   - Files: `src/client/scoring.ts`, `src/client/scoring-view.ts`, `src/shared/scoring-copy.ts`, `tests/e2e/scoring.e2e.ts`
   - Verify: stripe-shaped run shows the waiting line, then "MCP endpoint found at ..., declared by stripe.dev."
-- [ ] **DT5 (P2, human: ~1.5h / CC: ~15min)** - transient result - reason-specific summary and web subline (U5, KTD23)
+- [x] **DT5 (P2, human: ~1.5h / CC: ~15min)** - transient result - reason-specific summary and web subline (U5, KTD23)
   - Surfaced by: D22
   - Files: `src/worker/audit-web/summary-render.ts`, `src/shared/audit-envelope.ts`, `src/client/scoring.ts`
   - Verify: opt-out and budget cases render their reason lines; no "control above" note; no curated-tool sentence
-- [ ] **DT6 (P2, human: ~30min / CC: ~5min)** - phrase table - five "Not evaluated" phrases with host (U1)
+- [x] **DT6 (P2, human: ~30min / CC: ~5min)** - phrase table - five "Not evaluated" phrases with host (U1)
   - Surfaced by: D16
   - Files: `src/shared/web-audit-findings.ts`, `src/worker/audit-web/remediation.ts`
   - Verify: registry-walk test covers every reason; live and final pages print the same words
-- [ ] **DT7 (P2, human: ~1.5h / CC: ~15min)** - card rows - advisory field, caption, open-when-advisory; retired rows
+- [x] **DT7 (P2, human: ~1.5h / CC: ~15min)** - card rows - advisory field, caption, open-when-advisory; retired rows
   (U8)
   - Surfaced by: D21, D23, D34
   - Files: `src/worker/audit-web/display.ts`, `summary-render.ts`, `summary-markdown.ts`, `content/web-scorecard-schema.md`
   - Verify: superseded pass row renders open with the caption; retired row keeps its chip and caption; assembler omits
     both
-- [ ] **DT8 (P2, human: ~45min / CC: ~10min)** - trail - `admitted_by` recorded at admission and rendered (U2, U6)
+- [x] **DT8 (P2, human: ~45min / CC: ~10min)** - trail - `admitted_by` recorded at admission and rendered (U2, U6)
   - Surfaced by: D32
   - Files: `src/worker/audit-web/follow.ts`, `summary-render.ts`, `content/web-scorecard-schema.md`
   - Verify: evaluated MCP entries read "confirmed by ..." matching the admission route
-- [ ] **DT9 (P3, human: ~20min / CC: ~5min)** - result page - registry caption instead of the freshness-line hash (U12)
+- [x] **DT9 (P3, human: ~20min / CC: ~5min)** - result page - registry caption instead of the freshness-line hash (U12)
   - Surfaced by: D14
   - Files: `src/worker/audit-web/summary-render.ts`, `summary-freshness.ts`
   - Verify: HTML freshness sentence unchanged; caption present; markdown carries the prefix

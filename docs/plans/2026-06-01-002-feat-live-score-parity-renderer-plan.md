@@ -1,20 +1,15 @@
 ---
 title: 'feat: /score/live parity with /score/<slug> + curated-tool redirect'
 type: feat
-status: shipped
+status: released
+completed: 2026-06-01
+released_in: "#163"
+prs: ["#139"]
 date: 2026-06-01
-shipped: 2026-06-01
 origin: 'pre-release polish session, 2026-06-01 — review of the live-scored share-URL surface found it rendered a thin summary while the static path rendered the full scorecard. Documented retroactively for the historical record of the release-readiness work.'
-pr: 'brettdavies/agentnative-site#139 (squash merge `3e886c8`)'
 ---
 
 # feat: /score/live parity with /score/&lt;slug&gt; + curated-tool redirect
-
-> **Retrospective plan.** This document was written after the work shipped (PR #139, merged 2026-06-01 to `dev`).
-> The Implementation Units below describe the change as it landed, not as a forward-looking proposal. Each unit
-> cites the specific commit on the merged branch and the files actually touched. The intent is to preserve the
-> reasoning behind the change alongside the other plans in `docs/plans/` so future scorecard-surface work has the
-> same shared context that brainstorm-sourced plans carry.
 
 ---
 
@@ -28,7 +23,7 @@ underlying JSON shape; two divergent renderers.
 Three changes shipped under one squash-merged PR:
 
 1. Collapse the two renderers into one body builder and one markdown builder in `src/shared/scorecard-format.mjs`. Both
-   `/score/<slug>` (build-emitted static page) and `/score/live/<binary>` (Worker route) now call the same function. The
+   `/score/<slug>` (build-emitted static page) and `/score/live/<binary>` (Worker route) call the same function. The
    `live` URL segment is informational about where the scorecard came from (R2 cache vs committed
    `scorecards/<slug>.json`), not a different render shape.
 2. Split the live header so the binary/anc/spec/freshness line renders as a small meta paragraph below the h1 instead of
@@ -138,7 +133,7 @@ Success criteria:
 
 ### Deferred to follow-up work
 
-- Per-scorecard `spec_version` rendering. Today the live page reads `scorecard.spec_version ?? SPEC_VERSION` and
+- Per-scorecard `spec_version` rendering. The live page reads `scorecard.spec_version ?? SPEC_VERSION` and
   surfaces whichever value is set. A future cleanup could lift the spec version into the cached envelope alongside
   `anc_version` and `tool_version` for explicit reads.
 - Badge SVG generation for non-registry binaries. The live page suppresses the `scorecard-embed__preview` image because
