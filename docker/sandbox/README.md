@@ -116,7 +116,7 @@ Each external asset baked into the image is pinned by sha256 inside the Dockerfi
 
 | Asset                                              | Pinned at                                             |
 | -------------------------------------------------- | ----------------------------------------------------- |
-| `cloudflare/sandbox:0.9.4`                         | image digest from Docker Hub                          |
+| `cloudflare/sandbox:0.9.2`                         | image digest from Docker Hub                          |
 | `debian:trixie-slim`                               | multi-arch index digest from Docker Hub               |
 | `cargo-binstall-x86_64-unknown-linux-gnu.full.tgz` | sha256 of the GitHub release asset (computed locally) |
 | `agentnative-x86_64-unknown-linux-gnu.tar.gz`      | sha256 from the release's `sha256sum.txt`             |

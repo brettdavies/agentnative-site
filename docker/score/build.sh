@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Build the anc-scorer image and (optionally) run it.
 #
-# Default mode: brew-install anc from brettdavies/tap/agentnative inside
-# the image (Dockerfile §"The anc binary", ANC_SOURCE=brew). The image
-# always uses a published release; no local cargo build, no operator-state
-# coupling.
+# Default mode: install the agentnative-cli release that src/data/anc/VERSION
+# names, from its archive checked against a pinned sha256 (Dockerfile §"The
+# anc binary", ANC_SOURCE=release). No local cargo build, no operator-state
+# coupling, and no drift when a newer anc is published.
 #
 # Inject mode: `--from-source <path-to-agentnative-cli>` cargo-builds anc
 # from that repo (release profile), copies the resulting binary into
 # docker/score/inject/anc, and builds the image with ANC_SOURCE=inject
-# so the Dockerfile bypasses brew install and uses the injected binary.
+# so the Dockerfile uses the injected binary instead of the release archive.
 # Use this to score the registry against an unreleased anc (feature
 # branch, pre-tag dev work) without waiting on a tap formula bump.
 #
@@ -99,7 +99,7 @@ if [[ -n "$ANC_SRC" ]]; then
 
   export ANC_SOURCE=inject
 else
-  export ANC_SOURCE=brew
+  export ANC_SOURCE=release
 fi
 
 echo "==> Building anc-scorer image (ANC_SOURCE=$ANC_SOURCE)..."

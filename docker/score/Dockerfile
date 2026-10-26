@@ -141,31 +141,35 @@ RUN --mount=type=cache,target=/home/runner/.cache/Homebrew,uid=1000,gid=1000 \
 # ---- The anc binary ---------------------------------------------------------
 # Sits AFTER install-tools so cargo-rebuilds (--from-source) only invalidate
 # this layer, not the heavy install-tools layer above. Two modes, selected
-# by build arg ANC_SOURCE (default: brew):
+# by build arg ANC_SOURCE (default: release):
 #
-#   ANC_SOURCE=brew   — brew-install from brettdavies/tap/agentnative. Same
-#                        install path users get on macOS / Linux; the brewed
-#                        binary lives in /home/linuxbrew/.linuxbrew/bin and
-#                        resolves to a release tag's bottle.
-#   ANC_SOURCE=inject — copy a host-built binary from docker/score/inject/anc
-#                        into /home/runner/.local/bin/anc, which is first in
-#                        PATH. Bypasses brew install entirely. Use for
-#                        testing an unreleased anc (feature branch in
-#                        agentnative-cli) without waiting on a tag + bottle.
-#                        docker/score/build.sh --from-source <path-to-cli-repo>
-#                        orchestrates the cargo build + image build in one step.
+#   ANC_SOURCE=release — download the agentnative-cli release archive that
+#                        src/data/anc/VERSION names, checked against its
+#                        sha256. It is the archive docker/sandbox/Dockerfile
+#                        bakes, so a leaderboard rescore and a live score run
+#                        the same auditor; tests/sandbox-anc-version.test.ts
+#                        holds both Dockerfiles to VERSION.
+#   ANC_SOURCE=inject  — copy a host-built binary from docker/score/inject/anc.
+#                        Use for an unreleased anc (a feature branch in
+#                        agentnative-cli). docker/score/build.sh
+#                        --from-source <path-to-cli-repo> orchestrates the
+#                        cargo build + image build in one step.
 #
-# Inject lands at /home/runner/.local/bin/anc because install-tools.sh above
-# may have brewed the registry's `anc` entry, leaving /home/linuxbrew/...bin/anc.
-# /home/runner/.local/bin sits first in PATH, so the inject binary wins.
-ARG ANC_SOURCE=brew
+# Either way the auditor lands at /home/runner/.local/bin/anc, first in PATH,
+# ahead of the registry's own `anc` entry that install-tools.sh brews into
+# /home/linuxbrew/.linuxbrew/bin as an audit target.
+ARG ANC_SOURCE=release
 
 COPY --chown=runner:runner docker/score/inject/ /tmp/anc-inject/
 
-RUN --mount=type=cache,target=/home/runner/.cache/Homebrew,uid=1000,gid=1000 \
-    case "$ANC_SOURCE" in \
-      brew) \
-        brew install brettdavies/tap/agentnative ;; \
+RUN case "$ANC_SOURCE" in \
+      release) \
+        curl -fsSL -o /tmp/anc.tgz \
+          https://github.com/brettdavies/agentnative-cli/releases/download/v0.6.0/agentnative-x86_64-unknown-linux-gnu.tar.gz && \
+        echo '76c12e80b25a4da15ffad8bda086ae7b88703dd25d09754549d97a7229de2831  /tmp/anc.tgz' | sha256sum -c - && \
+        tar xzf /tmp/anc.tgz -C /tmp/ && \
+        install -m 0755 /tmp/agentnative-x86_64-unknown-linux-gnu/anc /home/runner/.local/bin/anc && \
+        rm -rf /tmp/anc.tgz /tmp/agentnative-x86_64-unknown-linux-gnu ;; \
       inject) \
         if [ ! -f /tmp/anc-inject/anc ]; then \
           echo "error: ANC_SOURCE=inject but docker/score/inject/anc is missing in build context" >&2; \
@@ -174,7 +178,7 @@ RUN --mount=type=cache,target=/home/runner/.cache/Homebrew,uid=1000,gid=1000 \
         fi && \
         install -m 0755 /tmp/anc-inject/anc /home/runner/.local/bin/anc ;; \
       *) \
-        echo "error: ANC_SOURCE must be 'brew' or 'inject' (got: $ANC_SOURCE)" >&2; \
+        echo "error: ANC_SOURCE must be 'release' or 'inject' (got: $ANC_SOURCE)" >&2; \
         exit 1 ;; \
     esac && \
     anc --version
