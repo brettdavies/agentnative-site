@@ -369,9 +369,9 @@ engine against a public URL) and for operating the web-board rescore (weekly cro
   `src/worker/telemetry/log.ts`: a call site names its `scope` (a closed union; adding a scope means adding it there)
   and its fields, and nothing else. The emitter merges the request-scoped ambient fields, caps client-supplied names,
   buckets durations, drops undefined fields, and hands the object to `console` unserialized. Never
-  `console.log(JSON.stringify(...))` in Worker code: a pre-serialized string arrives as one text `message`, so its
-  fields cannot be filtered or grouped in Workers Logs, and the emitter's caps and swallow posture are bypassed. Tests
-  capture records through the emitter's sink (`tests/helpers/log-capture.ts`), never by patching `console`.
+  `console.log(JSON.stringify(...))` in Worker code: a hand-built record skips the emitter's envelope, closed scope
+  vocabulary, ambient fields, caps and swallow posture. Tests capture records through the emitter's sink
+  (`tests/helpers/log-capture.ts`), never by patching `console`.
 - **PRs:** Squash merge. PR title becomes commit title; PR body becomes commit body (repo setting:
   `squashMergeCommitMessage: PR_BODY`).
 - **Rulesets:** `.github/rulesets/protect-main.json` and `protect-dev.json` are the source of truth for branch
