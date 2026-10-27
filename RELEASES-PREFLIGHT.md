@@ -112,7 +112,9 @@ Dependabot raises the same fix again.
   `missing`). A `.github/` path `dev` holds and `main` lacks is what the release delivers, not drift; a path `dev`
   deleted counts as delivered while `main` still has the anchor's copy.
 - [ ] No lockfile package resolves newer on `main` than on `dev` (gate 3). The gate reads this repo's `bun.lock` one
-  line per package name, strips its trailing commas before parsing, and fails when it parses zero packages.
+  line per package name, strips its trailing commas before parsing, and fails when it parses zero packages. Only
+  resolved versions compare: a `file:`, `workspace:`, `link:`, or git spec is left out, and a copy `main` nests under a
+  package `dev` no longer carries is not counted.
 - [ ] `dev`-newer packages are the routine updates this release ships; the gate counts them and does not list them.
 
 ### Cross-repo coordination
