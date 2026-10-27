@@ -2,8 +2,10 @@
 //
 // Order: apple-touch-icon, PNG/SVG icon, og:image, then the conventional
 // /apple-touch-icon.png and /favicon.svg paths. A fetch that exceeds the
-// budget, returns a non-image, or fails the SSRF check is skipped. When
-// nothing usable comes back, the card draws a wordmark tile.
+// budget, returns a non-image, fails the SSRF check, or is a raster smaller
+// than MIN_RASTER_PX on either side is skipped: the card draws the tile at
+// 112px, and a 32px favicon scaled up reads as a blur. ./find-logo.ts falls
+// back to the brand's published logo when nothing here qualifies.
 //
 // SVG logos are rasterized before they enter the card. ICO and WebP are
 // skipped: resvg embeds PNG and JPEG only, and a failed embed must not
@@ -19,6 +21,8 @@ const HTML_CAP = 200_000;
 const IMAGE_CAP = 512 * 1024;
 const MAX_CANDIDATES = 4;
 const MAX_REDIRECTS = 3;
+/** Smallest raster side the card's logo tile accepts. */
+export const MIN_RASTER_PX = 128;
 
 /** The subset of `fetch` the logo lookup calls. Narrower than `typeof fetch`, which carries runtime-only extras. */
 export type LogoFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -59,6 +63,18 @@ export async function resolveLogo(input: ResolveLogoInput): Promise<ScoreOgLogo 
     }
   }
   return null;
+}
+
+/** One image URL through the same guarded fetch, as a card-ready logo or null. */
+export async function logoFromUrl(
+  url: string,
+  fonts: ScoreOgFonts,
+  fetchImpl: LogoFetch,
+  timeoutMs: number,
+): Promise<ScoreOgLogo | null> {
+  const file = await fetchBytes(url, fetchImpl, timeoutMs);
+  if (!file) return null;
+  return logoFromBytes(file.bytes, file.contentType, fonts);
 }
 
 function remaining(deadline: number, now: () => number): number {
@@ -197,12 +213,40 @@ async function readCap(response: Response, cap: number, truncate: boolean): Prom
 }
 
 async function logoFromBytes(bytes: Uint8Array, contentType: string, fonts: ScoreOgFonts): Promise<ScoreOgLogo | null> {
-  if (isPng(bytes) || contentType.includes('image/png')) return isPng(bytes) ? { mime: 'image/png', bytes } : null;
-  if (isJpeg(bytes) || contentType.includes('image/jpeg')) return isJpeg(bytes) ? { mime: 'image/jpeg', bytes } : null;
+  if (isPng(bytes) || contentType.includes('image/png')) {
+    return isPng(bytes) && largeEnough(rasterSize(bytes)) ? { mime: 'image/png', bytes } : null;
+  }
+  if (isJpeg(bytes) || contentType.includes('image/jpeg')) {
+    return isJpeg(bytes) && largeEnough(rasterSize(bytes)) ? { mime: 'image/jpeg', bytes } : null;
+  }
   if (contentType.includes('image/svg') || looksLikeSvg(bytes)) {
     const text = new TextDecoder().decode(bytes);
     if (!text.includes('<svg')) return null;
     return rasterizeSvgLogo(text, fonts);
+  }
+  return null;
+}
+
+function largeEnough(size: { width: number; height: number } | null): boolean {
+  return size !== null && size.width >= MIN_RASTER_PX && size.height >= MIN_RASTER_PX;
+}
+
+/** Pixel size from a PNG's IHDR or a JPEG's start-of-frame marker; null when the header cannot be read. */
+export function rasterSize(bytes: Uint8Array): { width: number; height: number } | null {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (isPng(bytes)) {
+    if (bytes.length < 24) return null;
+    return { width: view.getUint32(16), height: view.getUint32(20) };
+  }
+  if (!isJpeg(bytes)) return null;
+  let offset = 2;
+  while (offset + 9 < bytes.length) {
+    if (bytes[offset] !== 0xff) return null;
+    const marker = bytes[offset + 1];
+    const length = view.getUint16(offset + 2);
+    const isStartOfFrame = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+    if (isStartOfFrame) return { width: view.getUint16(offset + 7), height: view.getUint16(offset + 5) };
+    offset += 2 + length;
   }
   return null;
 }

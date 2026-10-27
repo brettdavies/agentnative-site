@@ -209,6 +209,7 @@ export interface Env {
   // don't exercise the rescore path can stub a minimal env.
   WEB_RESCORE_WORKFLOW?: WebRescoreWorkflowBinding;
   WEB_RESCORE_SECRET?: string;
+  CONTEXT_DEV_API_KEY?: string;
   // Telemetry-lake freshness bindings. TELEMETRY_LAKE is the lake bucket
   // the daily cron lists for stall detection; TELEMETRY_ENVIRONMENT names
   // the deploy environment so the stall alert emails only from production

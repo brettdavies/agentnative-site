@@ -101,6 +101,11 @@ function makeEnv(overrides: Overrides = {}) {
   };
 }
 
+/** Stored card objects only; the logo lookup stores its own results beside them. */
+function cardKeys(env: ReturnType<typeof makeEnv>): string[] {
+  return [...env.objects.keys()].filter((key) => key.startsWith('og/score/'));
+}
+
 function request(path: string, method = 'GET'): Request {
   return new Request(`${ORIGIN}${path}`, { method });
 }
@@ -230,7 +235,7 @@ describe('scorecard OG route', () => {
       fetchImpl: async () => new Response('no', { status: 404 }),
     });
     const drawnBytes = new Uint8Array(await drawn.arrayBuffer());
-    const stored = [...env.objects.keys()];
+    const stored = cardKeys(env);
     expect(stored).toHaveLength(1);
     expect(stored[0]).toMatch(new RegExp(`^og/score/[0-9a-f]{64}/s64-v${SPEC_VERSION.replaceAll('.', '\\.')}\\.png$`));
     const read = await handleScoreOg(request(path), env as never, {
@@ -247,12 +252,12 @@ describe('scorecard OG route', () => {
     const env = makeEnv({ cache: { [await webKeyFor('https://anc.dev/', SPEC_VERSION)]: WEB_RECORD } });
     const deps = { fonts: await fonts(), fetchImpl: async () => new Response('no', { status: 404 }) };
     await handleScoreOg(request(`/og/score/anc.dev/s64-v${SPEC_VERSION}.png`), env as never, deps);
-    const [first] = [...env.objects.keys()];
+    const [first] = cardKeys(env);
     const prefix = first.slice(0, first.lastIndexOf('/') + 1);
     env.objects.set(`${prefix}s51-v${SPEC_VERSION}.png`, new Uint8Array([1]));
     env.objects.delete(first);
     await handleScoreOg(request(`/og/score/anc.dev/s64-v${SPEC_VERSION}.png`), env as never, deps);
-    expect([...env.objects.keys()]).toEqual([first]);
+    expect(cardKeys(env)).toEqual([first]);
   });
 
   test('a pending card is not stored', async () => {
@@ -266,7 +271,7 @@ describe('scorecard OG route', () => {
       fetchImpl: async () => new Response('no', { status: 404 }),
     });
     expect(res.status).toBe(200);
-    expect(env.objects.size).toBe(0);
+    expect(cardKeys(env)).toEqual([]);
   });
 
   test('POST is rejected', async () => {

@@ -19,8 +19,9 @@ import {
 } from '../../shared/score-og';
 import { applyHeaders, type CacheClassSpec } from '../headers';
 import { emitLog } from '../telemetry/log';
+import { findLogo } from './find-logo';
 import { loadScoreOgFonts } from './fonts';
-import { type LogoFetch, resolveLogo } from './logo';
+import type { LogoFetch } from './logo';
 import { renderScoreOgPng, type ScoreOgFonts } from './render';
 import { readStoredCard, storeCard } from './store';
 import { loadScoreOgSubject, type ScoreOgEnv } from './subject';
@@ -102,12 +103,15 @@ export async function handleScoreOg(request: Request, env: ScoreOgEnv, deps: Sco
     const logo =
       subject.pages.length === 0
         ? null
-        : await resolveLogo({
+        : await findLogo({
             pages: subject.pages,
             fonts,
+            bucket: env.SCORE_CACHE,
+            brandApiKey: env.CONTEXT_DEV_API_KEY,
             fetchImpl: deps.fetchImpl,
             budgetMs: deps.budgetMs,
             now: deps.now,
+            waitUntil: deps.waitUntil,
           });
     const png = await renderScoreOgPng({ ...subject.card, logo }, fonts);
     log('ok', started, undefined, subject.card.lane, logo ? 'image' : 'wordmark');

@@ -263,8 +263,8 @@ shape); a 4xx/5xx or an always-MISS path is MISS regardless.
   a day-long edge key. Explicit `.md` and `/md` twins and `/json` still have no `Vary`.
 - **MISS** — every-request `Cache-Control: no-store` plus `Cloudflare-CDN-Cache-Control: no-store`, untagged.
   `/scoring*`, `GET` and `POST /mcp` (the protocol endpoint sets `no-store` itself and never enters the cached
-  entrypoint), `/api/score`, a `/score/<target>?v=` fetch, the 202 in-progress `/json`, and every Worker
-  4xx/5xx (including a never-audited `/score/<target>`). A stored 5xx would otherwise become a skip-Worker HIT.
+  entrypoint), `/api/score`, a `/score/<target>?v=` fetch, the 202 in-progress `/json`, and every Worker 4xx/5xx
+  (including a never-audited `/score/<target>`). A stored 5xx would otherwise become a skip-Worker HIT.
 
 Hashed immutable assets (fonts at `/fonts/*`, the content-hashed `/og-image.png`) carry
 `Cache-Control: public, max-age=31536000, immutable`.
@@ -1140,10 +1140,13 @@ The card design landed on 2026-04-30 via a `/design-shotgun` → `/impeccable` �
 other page. The key is `s<rounded>-v<spec>` (`s80-v0.6.0`), or `pending` / `unscored`. A rescore mints a new URL, so an
 immutable edge cache of the previous PNG does not have to be purged. A key that is not the stored score 301s to the key
 that is. The Worker draws one fixed SVG (ANC mark, ANC × brand lockup, the percent, a meter) and rasterizes it with
-resvg-wasm. The brand tile is the homepage's apple-touch icon, PNG/SVG icon, or `og:image`, fetched over https inside a
-two-second budget and the web-audit host check; a miss, a timeout, an SVG that will not draw, or no homepage is a
-two-letter wordmark. Playwright remains the generator for the site-wide card only: it cannot run inside the Worker, and
-a website scorecard is not known at build time. A finished card is stored in the `SCORE_CACHE` R2 bucket under
+resvg-wasm. The brand tile is the homepage's apple-touch icon, PNG/SVG icon, or `og:image` when it is SVG or at least
+128px on each side, fetched over https inside a two-second budget and the web-audit host check; otherwise the brand's
+published logo from context.dev's brand endpoint for the registrable domain (skipped for code hosts such as
+`github.com`). The result, a logo or a miss, is stored in `SCORE_CACHE` under `og/logo/<sha256(domain)>`, so each domain
+is looked up once until the `og-30day-ttl` rule expires it. Only when both sources come up empty is the tile a wordmark.
+Playwright remains the generator for the site-wide card only: it cannot run inside the Worker, and a website scorecard
+is not known at build time. A finished card is stored in the `SCORE_CACHE` R2 bucket under
 `og/score/<sha256(target)>/<key>.png`, so an edge miss reads it instead of drawing again; storing a key deletes the
 target's other cards, and the `og-30day-ttl` lifecycle rule bounds the rest. Pending and unscored cards are not stored.
 

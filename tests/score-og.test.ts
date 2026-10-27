@@ -2,6 +2,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
+import sharp from 'sharp';
 import {
   brandName,
   cliOgIdentity,
@@ -15,7 +16,7 @@ import {
   scoreOgUrl,
   wordmarkInitials,
 } from '../src/shared/score-og';
-import { resolveLogo } from '../src/worker/og/logo';
+import { MIN_RASTER_PX, rasterSize, resolveLogo } from '../src/worker/og/logo';
 import { rasterizeSvgLogo, renderScoreOgPng, type ScoreOgFonts } from '../src/worker/og/render';
 
 const FONT_DIR = new URL('../src/worker/og/fonts/', import.meta.url);
@@ -110,8 +111,17 @@ const TINY_PNG = Uint8Array.from(
   (char) => char.charCodeAt(0),
 );
 
+/** A real PNG of the given square size. */
+async function iconPng(size: number): Promise<Uint8Array<ArrayBuffer>> {
+  const buffer = await sharp({ create: { width: size, height: size, channels: 4, background: '#2f6fed' } })
+    .png()
+    .toBuffer();
+  return Uint8Array.from(buffer);
+}
+
 describe('logo fetch', () => {
   test('a homepage larger than the read cap still yields the icon in its head', async () => {
+    const icon = await iconPng(MIN_RASTER_PX);
     const html = `<html><head><link rel="apple-touch-icon" href="/apple.png"></head><body>${'x'.repeat(250_000)}</body></html>`;
     const logo = await resolveLogo({
       pages: ['https://example.com/'],
@@ -124,13 +134,27 @@ describe('logo fetch', () => {
           });
         }
         if (target === 'https://example.com/apple.png') {
-          return new Response(TINY_PNG, { headers: { 'content-type': 'image/png' } });
+          return new Response(icon, { headers: { 'content-type': 'image/png' } });
         }
         return new Response('no', { status: 404 });
       },
     });
     expect(logo?.mime).toBe('image/png');
-    expect(logo?.bytes.byteLength).toBe(TINY_PNG.byteLength);
+    expect(logo?.bytes.byteLength).toBe(icon.byteLength);
+  });
+
+  test('an icon smaller than the tile on either side is skipped', async () => {
+    const html = '<html><head><link rel="apple-touch-icon" href="/apple.png"></head></html>';
+    const fetchImpl = async (url: string | URL | Request) => {
+      const target = String(url);
+      if (target === 'https://example.com/') return new Response(html, { headers: { 'content-type': 'text/html' } });
+      if (target === 'https://example.com/apple.png') {
+        return new Response(TINY_PNG, { headers: { 'content-type': 'image/png' } });
+      }
+      return new Response('no', { status: 404 });
+    };
+    expect(rasterSize(TINY_PNG)).toEqual({ width: 1, height: 1 });
+    expect(await resolveLogo({ pages: ['https://example.com/'], fonts: await fonts(), fetchImpl })).toBeNull();
   });
 });
 

@@ -502,8 +502,11 @@ bun x wrangler r2 bucket lifecycle add anc-score-cache og-30day-ttl og/ --expire
 bun x wrangler r2 bucket lifecycle add anc-score-cache-staging og-30day-ttl og/ --expire-days 30 -y
 ```
 
-`og/` holds the scorecard social cards the Worker draws. Storing a card deletes the target's older cards, so the 30-day
-rule only bounds cards whose target stopped being requested; an expired card is drawn again on its next request.
+`og/` holds the scorecard social cards the Worker draws and the brand logos it found for them (`og/logo/`, including
+stored misses). Storing a card deletes the target's older cards, so the 30-day rule only bounds cards whose target
+stopped being requested; an expired card is drawn again on its next request. The brand-logo fallback reads
+`CONTEXT_DEV_API_KEY`, a `wrangler secret put` value on both Workers (1Password item `Context.dev API Key`, field
+`credential`); unset, cards skip that lookup and use the homepage's icon or the wordmark.
 
 Verify:
 
