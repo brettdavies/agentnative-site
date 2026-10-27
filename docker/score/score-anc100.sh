@@ -148,12 +148,10 @@ extract_version() {
 # no upgrade path (OS-bundled, etc.). Exits non-zero if the install method
 # is unrecognized.
 #
-# Special case: the registry's `anc` entry resolves via PATH to whatever's
-# baked into the image (brew in ANC_SOURCE=brew, inject in ANC_SOURCE=inject).
-# In inject mode we explicitly do NOT upgrade anc — the inject binary is the
-# whole point of the run and we must not let brew silently replace it. The
-# scoring loop checks PATH and skips upgrade when the active anc is the
-# inject-mode binary.
+# Special case: the registry's `anc` entry resolves via PATH to the auditor
+# the image bakes at /home/runner/.local/bin/anc (the pinned release, or an
+# injected build). That binary is the linter for the whole run, so the
+# scoring loop never upgrades it.
 derive_upgrade() {
   local install=$1
   case "$install" in
@@ -179,16 +177,13 @@ derive_upgrade() {
   esac
 }
 
-# In inject mode, the inject anc lives at /home/runner/.local/bin/anc.
-# When scoring the registry's `anc` entry we must not let `brew upgrade`
-# touch the brew-installed anc and shadow the inject binary (it can't, since
-# /home/runner/.local/bin sits ahead of brew bin in PATH, but the upgrade is
-# pure churn in that case). Detect inject mode by checking which path `anc`
-# resolves to.
-ANC_INJECT_PATH=/home/runner/.local/bin/anc
-ANC_IS_INJECT=0
-if [[ "$(command -v anc)" == "$ANC_INJECT_PATH" ]]; then
-  ANC_IS_INJECT=1
+# The image's auditor lives at /home/runner/.local/bin/anc, ahead of brew's
+# bin in PATH. Upgrading the registry's brew-installed `anc` entry could not
+# shadow it, so the upgrade is skipped as churn.
+ANC_AUDITOR_PATH=/home/runner/.local/bin/anc
+ANC_IS_AUDITOR=0
+if [[ "$(command -v anc)" == "$ANC_AUDITOR_PATH" ]]; then
+  ANC_IS_AUDITOR=1
 fi
 
 for line in "${entries[@]}"; do
@@ -206,8 +201,8 @@ for line in "${entries[@]}"; do
   echo "----- $name ($binary) -----"
 
   if [[ $DO_UPDATE -eq 1 && -n "$install" ]]; then
-    if [[ "$name" == "anc" && $ANC_IS_INJECT -eq 1 ]]; then
-      echo "  [update] skip — inject anc is the linter, do not replace"
+    if [[ "$name" == "anc" && $ANC_IS_AUDITOR -eq 1 ]]; then
+      echo "  [update] skip: the image's anc is the linter, do not replace"
       update_skipped=$((update_skipped + 1))
     else
       upgrade_cmd="$(derive_upgrade "$install" 2>/dev/null || echo UNRECOGNIZED)"
