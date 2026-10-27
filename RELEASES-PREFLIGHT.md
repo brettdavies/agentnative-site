@@ -42,7 +42,7 @@ Sub-commands let you re-run one section in isolation:
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | `drift`     | Commits on `main` whose changes `dev` lacks, `.github/` parity, lockfile packages `main` resolves newer                                        | `scripts/release/drift.sh`                                                   |
 | `surface`   | Commits + diff vs the last `v*` tag, breaking markers (SKIPs while the repo has no `v*` tag)                                                   | `git log`, `git diff`                                                        |
-| `coord`     | Vendored spec / anc / principles VERSIONs, skill.json upstream version, Dockerfile anc URL + sha, both pins' baked anc, staging anc vocabulary | `cat`, `gh api`, `curl -I`, `docker run`                                     |
+| `coord`     | Vendored spec / anc / principles `VERSION` files, skill.json upstream version, Dockerfile anc URL + sha, both pins' baked anc, staging anc vocabulary | `cat`, `gh api`, `curl -I`, `docker run`                                     |
 | `build`     | `bun run build` exit, scorecard corpus orphans, badge SVG coverage, markdown twin coverage                                                     | `bun run build`                                                              |
 | `do-smoke`  | Live `/api/score` smoke against the `--env` target (fresh non-registry github URL)                                                             | `curl` + `~/.claude/skills/1password` (staging mode)                         |
 | `mcp`       | Delegates to `scripts/release/mcp-smoke.sh` against the `--env` target                                                                         | `scripts/release/mcp-smoke.sh` + `~/.claude/skills/1password` (staging mode) |
@@ -131,7 +131,7 @@ Driven by `scripts/release/preflight.sh coord`.
   MUST pass before the cut. Before the cut, the production pin fails whenever the Dockerfile's anc has moved past the
   production image; it MUST pass on the release branch, after the promotion commit, at step 8 of
   [`RELEASES.md` § Releasing dev to main](./RELEASES.md#releasing-dev-to-main). The gate skips when docker is absent or
-  an image is neither local nor pullable.
+  an image is neither local nor available to pull.
 
   ```bash
   bun -e 'const c = Bun.JSONC.parse(await Bun.file("wrangler.jsonc").text()); console.log(c.containers[0].image); console.log(c.env.staging.containers[0].image)'
