@@ -100,6 +100,7 @@ Two constraints shape the work. A cold render takes 10 to 12 s, above Discord's 
 - KTD1. **A separate render Worker owns all drawing.** `anc-og-render` (staging `anc-og-render-staging`) draws the PNG, looks up the logo, renders frames, encodes the GIF, and calls the binding. The site Worker keeps data loading, card keys, public routes, page tags, and queue jobs. (session-settled: user-directed, chosen over a queue consumer inside the site Worker. One isolate serves concurrent requests on a single thread and shares 128 MB, so seconds of rendering there would stall page requests: https://developers.cloudflare.com/workers/reference/how-workers-works/ and https://developers.cloudflare.com/workers/platform/limits/#memory.) The `CONTEXT_DEV_API_KEY` secret, resvg-wasm, and the card fonts leave the site Worker.
 - KTD2. **Two queues and one service binding, with no cycle.**
   - The site produces to `og-render`, and the render Worker consumes it.
+  - Queues are account-wide and named once, so staging uses `og-render-staging` and `og-rendered-staging` while production uses `og-render` and `og-rendered`. The per-environment render Workers (`anc-og-render`, `anc-og-render-staging`) do not isolate a queue they both name.
   - The render Worker produces to `og-rendered`, and the site consumes it to purge page tags. Purge only works inside the site's `Cached` entrypoint (`src/worker/audit-web/hit-min-purge.ts`).
   - The site calls the render Worker over a service binding only to draw an on-demand PNG. That RPC applies the same template-version check as the queue: on a mismatch it returns a typed skew outcome, which the PNG route serves as its existing `503` without storing.
 
@@ -114,7 +115,7 @@ Two constraints shape the work. A cold render takes 10 to 12 s, above Discord's 
   One shared function computes the key, and the page, both routes, the render pass, and the build all call it. This replaces #461's `s<pct>-v<spec>`. #461 is unreleased, so only staging objects carry old keys, and the lifecycle rule clears them.
 - KTD5. **Clips get their own prefix, and pruning never deletes newer work.**
   - PNGs stay at `og/score/<sha256(target)>/<key>.png`. Clips go to `og/clip/<sha256(target)>/<key>.mp4`.
-  - Both carry `customMetadata` `{target, key, scored_at, template}`.
+  - Both carry `customMetadata` `{target, key, scored_at, template, logo}`, where `logo` is the logo source (`homepage`, `brand`, or `tile`). A stored-card response emits it as `x-anc-card-logo`, so a stored card says where its logo came from.
   - A store prunes only siblings whose `scored_at` is older than its own. Two renders finishing out of order then cannot delete the newer card (#461's `storeCard` deletes every other key).
   - One render job writes the PNG and the clip together.
 - KTD6. **A logo lookup that timed out is not stored as a miss.** Only a definitive miss is stored. Otherwise a slow homepage locks the fallback tile in for 30 days (`src/worker/og/find-logo.ts`). The render path also gets a longer budget than #461's crawler path, since it is off the request path. An on-demand PNG whose logo lookup timed out is served with the short `hit-min` cache class and is not stored. Only a PNG drawn after a definitive logo outcome is stored and served immutable, so a crawler can never pin the tile under a URL the clip draws with a logo.
@@ -326,6 +327,7 @@ on og-render message:
   2. Ack each message on success or skip. Let the queue retry on a binding or R2 error.
   3. The RPC entrypoint draws one PNG from card inputs and returns its bytes with its logo outcome. It stores the PNG only after a definitive logo outcome, and it returns a typed skew outcome when the inputs' template version differs from its own.
   4. Fonts and resvg-wasm bundle into this Worker and leave the site's.
+  5. Its config carries `compatibility_flags` `nodejs_compat` (the log emitter's request context imports `node:async_hooks`) and `global_fetch_strictly_public` (the logo fetches run under it in the site today).
 - **Patterns to follow:**
   - #461's `findLogo` / `storeCard` for R2 access.
   - The og-cards fixture Worker's config for a second Worker in this repo.
@@ -363,15 +365,16 @@ on og-render message:
   - `tests/og-enqueue.test.ts`
   - `tests/wrangler-config.test.ts`
 - **Approach:**
-  1. The PNG route reads the stored card, else calls the render Worker's RPC. The 301, 404, and 503 behaviour is unchanged.
+  1. The PNG route reads the stored card, else calls the render Worker's RPC. Preserved behaviour: 301 to the canonical key, alias target, and query-free path; 404 on a malformed path, unknown key grammar, or missing subject; 503 with `retry-after: 30` when R2 cannot be read; pending and unscored served `hit-min` and never stored; finished keys immutable; `x-robots-tag: noindex` on every PNG; `x-anc-card` on every PNG response, with `x-anc-card-logo` on drawn and stored cards alike. When the RPC fails or times out, the route serves the site default card (`/og-image.png` from `ASSETS`) with the `hit-min` cache class, stores nothing, and logs a distinct `score.og` outcome.
   2. The clip route follows KTD11.
   3. The enqueue helper builds the message from `loadScoreOgSubject` and sends it only for finished keys with the switch on.
   4. The `queue()` handler purges the target's page tag through the `Cached` entrypoint.
   5. Add to `wrangler.jsonc` in both environments: the `og-render` producer, the `og-rendered` consumer, and the `RENDER` service binding. Remove `CONTEXT_DEV_API_KEY` from the site's types.
 - **Test scenarios:**
-  - The PNG route serves a stored card without an RPC call.
+  - The PNG route serves a stored card without an RPC call, with `x-anc-card: stored` and `x-anc-card-logo` read from its metadata.
+  - Every preserved behaviour in step 1 keeps a test, rewritten against an RPC fake: the 301 cases, the 404 cases, the 503 with `retry-after`, pending and unscored never stored, and immutable finished keys.
   - A missing card calls the RPC once, and the response is immutable.
-  - An RPC failure yields 500 with the existing log outcome.
+  - An RPC failure or timeout serves the default card from `ASSETS` with `hit-min`, stores nothing, and logs the fallback outcome.
   - An RPC skew outcome yields 503 and stores nothing.
   - An on-demand draw whose logo lookup timed out is served `hit-min` and is not stored.
   - A clip `GET` returns 200 `video/mp4` with `accept-ranges: bytes` and the full body, including when the request carries `Range`.
@@ -392,6 +395,7 @@ on og-render message:
   - `src/worker/audit-web/core.ts`
   - `src/worker/audit-web/hit-min-purge.ts`
   - `src/worker/audit-web/rescore-workflow.ts`
+  - `src/worker/audit-web/rescore-trigger.ts`
   - `src/worker/score/do.ts`
   - `src/worker/og/curated-pass.ts`
   - `src/worker/index.ts`
@@ -404,7 +408,7 @@ on og-render message:
   2. The rescore Workflow adds a step after a saved audit.
   3. The Sandbox DO enqueues after `wrote`; its env type gains the producer binding.
   4. The curated pass reads `registry-index.json` and the seeds, computes each key, and heads each clip. It sends the missing and stale ones in `sendBatch` calls of at most 100 messages and 256 KB each.
-  5. The pass is served at a secret-authed endpoint reusing `requireRescoreAuth`. It is called from `scheduled()` on the weekly cron and from a new `deploy.yml` step after the rescore trigger in both jobs, with the same retry and Access-header shape.
+  5. The pass is served at a secret-authed endpoint reusing `requireRescoreAuth`, which `src/worker/audit-web/rescore-trigger.ts` exports for it (it is module-private today). It is called from `scheduled()` on the weekly cron and from a new `deploy.yml` step after the rescore trigger in both jobs, with the same retry and Access-header shape.
 - **Test scenarios:**
   - A completed web audit through the endpoint enqueues once. A held or incomplete run enqueues nothing.
   - MCP `audit_website` enqueues through the same hook.
@@ -458,7 +462,7 @@ on og-render message:
 - **Approach:**
   1. `deploy.yml` deploys the render Worker before the site in both jobs.
   2. `RELEASES.md` gains:
-     - the one-time `wrangler queues create` commands for both environments;
+     - the one-time `wrangler queues create` commands for both environments, run before the stacked PR merges, since the first `dev` deploy after the merge fails without them;
      - the one-time secret commands: `wrangler secret put CONTEXT_DEV_API_KEY` against the render Worker's config for production and `--env staging`, sourced from the 1Password item `Context.dev API Key` and run after the render Worker's first deploy, then `wrangler secret delete CONTEXT_DEV_API_KEY` on the site Worker in both environments;
     - the existing line that calls the key a secret on both Workers, rewritten to name the render Worker only;
      - the switch flip;
@@ -471,6 +475,7 @@ on og-render message:
   - The render Worker config's staging block sets `routes: []`, `triggers.crons: []`, and `workers_dev: false`.
   - Both blocks declare `media`, `SCORE_CACHE`, and both queues.
   - The site config's `RENDER` binding names the matching render Worker per environment.
+  - Staging and production name different queues in both configs, and each queue has exactly one consumer.
 - **Verification:** Config tests pass. A staging deploy from `dev` shows both Workers' `triggers` blocks with no custom domains on the render Worker.
 
 ### U9. Live verification
@@ -483,10 +488,10 @@ on og-render message:
   - `scripts/og/smoke.sh`
   - `RELEASES-PREFLIGHT.md`
 - **Approach:**
-  1. After the PNG assertions, poll the page (`Accept: text/html`, at most 60 s) until `og:video` appears.
+  1. The first card fetch accepts `x-anc-card` `drawn` or `stored` and still asserts the fixture's logo tier through `x-anc-card-logo`. After the PNG assertions, poll the page (`Accept: text/html`, at most 60 s) until `og:video` appears.
   2. Then fetch the clip by path from the base under test. Staging pages advertise anc.dev URLs, so the path is taken from the tag and the host from the base.
   3. Local runs skip the clip assertions, because the binding has no local mode.
-  4. Record two staging measurements in the PR: on-demand PNG latency for a request issued while a render is in flight, and the render Worker's memory per invocation from Workers metrics.
+  4. Record three staging measurements in the PR: on-demand PNG latency for a request issued while a render is in flight, the same latency for the first on-demand draw after the render Worker deploys (cold start), and the render Worker's memory per invocation from Workers metrics.
 - **Test scenarios:**
   - The page names `og:video` within 60 s of the audit.
   - The clip returns 200 `video/mp4`.
@@ -517,3 +522,388 @@ on og-render message:
 - `wrangler secret list` shows `CONTEXT_DEV_API_KEY` on both render Worker environments and on neither site Worker environment.
 - PR #461 carries U1 and U2. The stacked PR carries U3 to U9. Neither body leaves follow-up items.
 - No experimental or abandoned code from the build remains in either diff.
+
+---
+
+## Eng review (2026-10-27)
+
+Target: this plan at `7d92626` on `dev`, checked against the PR #461 branch (`unverified/scorecard-og-images-bb05`, `63d71f4`).
+
+### Scope record
+
+feature answers: none proposed, every unit maps to a settled requirement; structure: A, Original arrangement (D1, answered 2026-10-27); accepted scope: U1 to U9 as written; pending remedies: none.
+
+## Decision ledger
+
+### F1: `requireRescoreAuth` is module-private
+
+Finding: 1, INFORMATIONAL, confidence 9/10, `src/worker/audit-web/rescore-trigger.ts:77` (`async function requireRescoreAuth(request: Request, secret: string | undefined)`), eng review.
+Plan baseline: U6 step 5 reused `requireRescoreAuth` with no export step.
+Runtime evidence: the function is declared without `export`.
+Correction: U6 step 5 now says the module exports it, and U6 lists `src/worker/audit-web/rescore-trigger.ts`. Factual correction, no behavior change, so no question.
+State: approved
+Actual answer: none needed (factual correction)
+Accepted scope: export `requireRescoreAuth` for the curated-pass endpoint.
+History: none.
+
+### F3: queue creation precedes the stacked PR's merge
+
+Finding: 3, INFORMATIONAL, confidence 7/10, plan KTD2 ("Deploy order: create the queues once, deploy the render Worker, then deploy the site Worker"), eng review.
+Plan baseline: U8 listed the queue-create commands without saying when they run.
+Runtime evidence: `wrangler deploy` rejects a config whose queue binding names a queue that does not exist (consumer and producer bindings resolve at deploy).
+Correction: U8 now says the commands run before the stacked PR merges. Ordering clarification of KTD2, no behavior change, so no question.
+State: approved
+Actual answer: none needed (factual correction)
+Accepted scope: run the one-time queue creation before merging the stacked PR.
+History: none.
+
+### R2: per-environment queue names
+
+Finding: 1, CRITICAL, confidence 9/10, plan KTD2 (`og-render`, `og-rendered`) and U8 ("the one-time `wrangler queues create` commands for both environments"), eng review.
+Plan baseline: KTD2 names two queues with no environment suffix; U8 creates queues "for both environments".
+Runtime evidence: a Cloudflare queue has exactly one consumer Worker (https://developers.cloudflare.com/queues/get-started/); `wrangler.jsonc` keeps staging bindings in `env.staging` with suffixed resource names (`anc-score-cache-staging`).
+Comparison grid:
+
+| Choice | Current | A | B |
+| --- | --- | --- | --- |
+| R2 staging queue names | unspecified | `og-render-staging`, `og-rendered-staging`; config test asserts the two envs differ | unchanged (unsuffixed names in both envs) |
+| R3 on-demand PNG fallback | pending | pending | pending |
+| R4 PNG route and smoke regression contract | pending | pending | pending |
+
+Question D2:
+D2 (eng review): give staging its own queue names
+Project/branch/task: agentnative-site og:video plan (dev), stacked on #461.
+ELI10: The plan names two queues, og-render and og-rendered, but never says staging gets its own. A queue has exactly one consumer Worker. If staging and production share a queue name, staging audits would be rendered by production's Worker, or the deploys would fight over who consumes it. Every other staging resource in wrangler.jsonc already carries a -staging suffix.
+Stakes if we pick wrong: staging renders leak into production storage and logs, or a deploy fails with a consumer conflict.
+Recommendation: A because it matches the existing -staging convention and a config test keeps the two apart.
+Completeness: A=10/10, B=3/10
+Pros / cons:
+A) Suffixed staging queues (recommended)
+  ✅ og-render-staging and og-rendered-staging mirror anc-score-cache-staging
+  ✅ A wrangler-config test fails if the two environments ever share a queue
+  ❌ Four queues to create once instead of two (two extra wrangler commands)
+B) Leave as written
+  ✅ No change to the plan text or the config tests
+  ❌ Leaves the cross-environment collision to whoever writes the config
+Net: two extra one-time commands buy hard separation between staging and production.
+Header: Queue names
+Options:
+A) Suffixed staging queues (Recommended)
+Staging uses og-render-staging and og-rendered-staging, production og-render and og-rendered. tests/wrangler-config.test.ts asserts the two environments name different queues. (human: ~10 min / CC: ~2 min)
+B) Leave as written
+Keep the unsuffixed names in KTD2 and U8 and leave per-environment naming to implementation. (human: none / CC: none)
+
+State: approved
+Actual answer: A, Suffixed staging queues (D2, answered 2026-10-27, "1"; asked whether per-environment render Workers already isolate the queues: they do not, because queues are account-wide and named once)
+Accepted scope: KTD2 names `og-render-staging` and `og-rendered-staging` for staging and `og-render` and `og-rendered` for production; U8 adds a config test that the environments name different queues with one consumer each.
+History: none.
+
+### R3: on-demand PNG when the render Worker fails
+
+Finding: 2, INFORMATIONAL, confidence 8/10, plan U5 test scenario ("An RPC failure yields 500 with the existing log outcome") and `src/worker/og/route.ts:131` (`return text(request, 500, 'scorecard image failed\n');`), eng review.
+Plan baseline: U5 keeps #461's 500 on a drawing failure, but drawing moves out of the site into the render Worker (KTD1).
+Runtime evidence: #461 draws in the site isolate, so its 500 only follows a local render error. After KTD1 the same 500 follows any render Worker outage or RPC error, for every card that is not yet stored. The site already ships a default card at `/og-image.png` (`src/shared/og-card.ts:5`, `public/og-image.png`).
+Comparison grid:
+
+| Choice | Current | A | B |
+| --- | --- | --- | --- |
+| R2 staging queue names | approved (D2: A) | approved (D2: A) | approved (D2: A) |
+| R3 PNG route on RPC failure | 500, not stored | serve the site default card from `ASSETS` with `hit-min`, not stored, logged as its own outcome | 500, not stored (as planned) |
+| R4 PNG route and smoke regression contract | pending | pending | pending |
+
+Question D3:
+D3 (eng review): what a crawler gets when the render Worker is down
+Project/branch/task: agentnative-site og:video plan (dev), stacked on #461.
+ELI10: Today #461 draws cards inside the site, so a missing card only fails if drawing itself breaks. The plan moves drawing to the render Worker. If that Worker is down or errors, every scorecard whose card is not stored yet returns a 500 for its og:image, and the link preview shows no picture. The site already has a default card image it could serve instead, with a short cache, so the real card replaces it once drawing works again.
+Stakes if we pick wrong: during a render Worker outage, shared links show a broken or missing image instead of the generic anc.dev card.
+Recommendation: A because a short-cached default card keeps previews intact during an outage and never pins a wrong image.
+Completeness: A=9/10, B=6/10
+Pros / cons:
+A) Default card fallback (recommended)
+  ✅ Link previews still show the anc.dev card while the render Worker is unavailable
+  ✅ hit-min caching and no store mean the real card takes over within five minutes of recovery
+  ❌ One more branch in the PNG route plus its test and log outcome
+B) Keep the 500
+  ✅ No new code path; failures stay loud in the route's error log
+  ❌ Previews shared during an outage have no image, and crawlers cache that miss their own way
+Net: a small fallback trades a few lines for previews that degrade to a generic card instead of breaking.
+Header: PNG fallback
+Options:
+A) Default card fallback (Recommended)
+On an RPC failure or timeout, the PNG route serves /og-image.png from ASSETS with the hit-min cache class, stores nothing, and logs a distinct score.og outcome. U5 gains a test for it. (human: ~1 hour / CC: ~10 min)
+B) Keep the 500
+Leave U5 as written: an RPC failure returns 500 and stores nothing. (human: none / CC: none)
+
+State: approved
+Actual answer: A, Default card fallback (D3, answered 2026-10-27)
+Accepted scope: U5 step 1 serves `/og-image.png` from `ASSETS` with `hit-min`, stores nothing, and logs a distinct `score.og` outcome when the render RPC fails or times out; the U5 test scenario covers it.
+History: none.
+
+### F4: render Worker compatibility flags
+
+Finding: 4, INFORMATIONAL, confidence 9/10, `src/worker/telemetry/request-context.ts:7` (`import { AsyncLocalStorage } from 'node:async_hooks';`) and `wrangler.jsonc:21` (`"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public", "enable_request_signal"]`), eng review.
+Plan baseline: U4 named the render Worker's config file without its compatibility flags.
+Runtime evidence: the emitter the render Worker imports needs `nodejs_compat`; the logo fetches it takes over run under `global_fetch_strictly_public` in the site.
+Correction: U4 step 5 sets both flags. Factual correction, no behavior choice, so no question.
+State: approved
+Actual answer: none needed (factual correction)
+Accepted scope: the render Worker config carries `nodejs_compat` and `global_fetch_strictly_public`.
+History: none.
+
+### R4: PNG route and live smoke regression contract
+
+Finding: 5, CRITICAL (regression rule), confidence 9/10, `tests/e2e/og-cards.e2e.ts:70-71` (`expect(first.headers()['x-anc-card']).toBe('drawn');` and `expect(first.headers()['x-anc-card-logo']).toBe(EXPECTED_LOGO[kind]);`) with `src/worker/og/store.ts:26` (`customMetadata: { target, key }`), eng review.
+Plan baseline: U5 keeps the route's 301, 404 and 503 behaviour; U9 extends the og-cards smoke with clip assertions. Neither says what happens to the smoke's first-fetch assertions.
+Runtime evidence: once the render job stores the PNG right after an audit (U4, U6), the smoke's first card fetch usually reads `x-anc-card: stored`, and stored responses carry no `x-anc-card-logo`, so the D17 logo-tier check fails or can no longer run.
+Comparison grid:
+
+| Choice | Current | A | B |
+| --- | --- | --- | --- |
+| R2 staging queue names | approved (D2: A) | approved (D2: A) | approved (D2: A) |
+| R3 PNG route on RPC failure | approved (D3: A) | approved (D3: A) | approved (D3: A) |
+| R4 logo tier on stored cards | absent | stored card metadata records the logo source and stored responses emit `x-anc-card-logo` | absent |
+| R4 smoke first-fetch assertion | `drawn` only | `drawn` or `stored`, logo tier still asserted | `drawn` or `stored`, logo tier assertion dropped |
+| R4 preserved route behaviour | U5 partial list | full list below, tests rewritten against an RPC fake | full list below, tests rewritten against an RPC fake |
+
+Preserved route behaviour in both options: 301 to the canonical key, alias target, and query-free path; 404 on a malformed path, unknown key grammar, or missing subject; 503 with `retry-after: 30` when R2 cannot be read; pending and unscored served `hit-min` and never stored; finished keys immutable; `x-robots-tag: noindex` on every PNG; `x-anc-card` on every PNG response.
+
+Question D4:
+D4 (eng review): keep the live smoke's logo check working after pre-rendering
+Project/branch/task: agentnative-site og:video plan (dev), stacked on #461.
+ELI10: The live smoke you approved (D17) checks that the first card fetch was freshly drawn and names the logo it used: the homepage icon, context.dev's brand logo, or the tile. With og:video, the render job draws and stores the card seconds after the audit, so the smoke's first fetch usually gets the stored copy. Stored copies don't say which logo they used, so the logo check would fail or have to go. Recording the logo source on the stored card keeps the check alive.
+Stakes if we pick wrong: the release preflight goes red on every run, or the check that proves the logo fallback works quietly disappears.
+Recommendation: A because one metadata field keeps the D17 logo proof and makes stored cards self-describing.
+Completeness: A=10/10, B=6/10
+Pros / cons:
+A) Logo source on stored cards (recommended)
+  ✅ The smoke still proves the homepage, brand and tile tiers on every release
+  ✅ Any stored card can be inspected for where its logo came from via one response header
+  ❌ One more metadata field written at store time and read on the stored path
+B) Drop the logo-tier check
+  ✅ No change to stored metadata or response headers
+  ❌ The live proof that the brand fallback works is gone, leaving only unit tests with fakes
+Net: one metadata field preserves the only live proof of the logo fallback.
+Header: Smoke contract
+Options:
+A) Logo source on stored cards (Recommended)
+Stored PNGs record the logo source in customMetadata and stored responses emit x-anc-card-logo. The smoke accepts drawn or stored on the first fetch and still asserts the tier. Route tests are rewritten against an RPC fake for the full preserved behaviour list. (human: ~2 hours / CC: ~15 min)
+B) Drop the logo-tier check
+The smoke accepts drawn or stored and no longer asserts the logo tier. Route tests are rewritten against an RPC fake for the same preserved behaviour list. (human: ~1 hour / CC: ~10 min)
+
+State: approved
+Actual answer: A, Logo source on stored cards (D4, answered 2026-10-27)
+Accepted scope: KTD5 stored metadata adds `logo`; stored responses emit `x-anc-card-logo`; U5 step 1 lists the preserved route behaviour and its tests are rewritten against an RPC fake; U9's first fetch accepts `drawn` or `stored` and still asserts the logo tier.
+History: none.
+
+### R5: measure on-demand PNG latency from a cold render Worker
+
+Finding: 6, INFORMATIONAL, confidence 8/10, plan U9 step 4 ("on-demand PNG latency for a request issued while a render is in flight") and the spike's measured cold cost (wasm on a fresh isolate adds 3 to 4 s of CPU on the first one or two requests), eng review.
+Plan baseline: U9 measures on-demand latency only while a render is in flight.
+Runtime evidence: #461 draws in the site's warm isolates; after KTD1 the on-demand draw lands on render Worker isolates, which carry less traffic and start cold more often. Cold latency is unmeasured.
+Comparison grid:
+
+| Choice | Current | A | B |
+| --- | --- | --- | --- |
+| R2 staging queue names | approved (D2: A) | approved (D2: A) | approved (D2: A) |
+| R3 PNG route on RPC failure | approved (D3: A) | approved (D3: A) | approved (D3: A) |
+| R4 PNG route and smoke contract | approved (D4: A) | approved (D4: A) | approved (D4: A) |
+| R5 on-demand latency measurement | during a render only | during a render, plus the first on-demand draw after a render Worker deploy | during a render only |
+
+Question D5:
+D5 (eng review): also measure the on-demand card from a cold render Worker
+Project/branch/task: agentnative-site og:video plan (dev), stacked on #461.
+ELI10: When a crawler asks for a card that isn't stored yet, the site asks the render Worker to draw it. The render Worker gets little traffic, so it often starts cold, and the spike measured 3 to 4 s of extra work on a cold start to load the image renderer. Discord gives a whole preview about 10 s. The plan measures this path only while another render is running. One more fetch right after a deploy would show the cold case.
+Stakes if we pick wrong: a slow cold path goes unnoticed until crawlers time out on cards that were not pre-rendered.
+Recommendation: A because one extra timed fetch after the staging deploy settles the cold-start question with real numbers.
+Completeness: A=9/10, B=7/10
+Pros / cons:
+A) Measure the cold case too (recommended)
+  ✅ The PR records cold and warm on-demand latency side by side, from staging
+  ✅ If the cold case nears the crawler budget, it shows before production enables
+  ❌ One more measurement step in U9 and one more number in the PR body
+B) Warm case only
+  ✅ U9 stays as written, with one latency number to record
+  ❌ The likeliest slow case, a cold render Worker, stays unmeasured
+Net: one extra fetch after a deploy turns an estimate into a measurement.
+Header: Cold start
+Options:
+A) Measure the cold case too (Recommended)
+U9 step 4 also records the first on-demand draw after the render Worker deploys to staging, next to the in-flight-render number. (human: ~15 min / CC: ~2 min)
+B) Warm case only
+Keep U9 step 4 as written: measure on-demand latency only while a render is in flight. (human: none / CC: none)
+
+State: approved
+Actual answer: A, Measure the cold case too (D5, answered 2026-10-27)
+Accepted scope: U9 step 4 records the first on-demand draw after a render Worker deploy alongside the in-flight-render latency and memory.
+History: none.
+
+Approval readiness: PASS. Checked F1, F3, F4 (factual corrections, no question needed), R2 (D2: A), R3 (D3: A), R4 (D4: A), R5 (D5: A); structure D1: A.
+
+## Eng review output
+
+### NOT in scope
+
+- X player card (`twitter:player`): needs per-domain approval and an iframe page; no priority platform plays `og:video` through it.
+- Audio, animated GIF previews, an animated `og:image`: no priority platform plays them.
+- Clips on pages other than scorecards: the request covers scorecards only.
+- A dead-letter queue: failed renders recover on the next audit or curated pass and every failure is logged.
+- Queue-level dedupe: the render checks for a fresh clip before any binding call.
+- A sweep that re-renders every stored audit before expiry: settled by the owner (R6).
+- The www and apex fold: its own plan, coordinated with the CLI port (owner decision D25).
+- Applying the design shortlist: arrives as a template-version bump once the owner picks layout, color and digits.
+
+### What already exists
+
+| Need | Existing piece | Reuse or rebuild |
+| --- | --- | --- |
+| Card drawing, fonts, resvg-wasm | PR #461 `src/worker/og/render.ts`, `fonts.ts`, `resvg-wasm-module.ts` | Reused; moved into the render Worker's module graph |
+| Logo lookup and its R2 cache | PR #461 `find-logo.ts`, `logo.ts`, `brand-logo.ts` | Reused; timeout handling fixed (U2) |
+| Card store and prune | PR #461 `store.ts` | Reused; prune narrowed to older `scored_at` (U2) |
+| Subject loading per lane | PR #461 `subject.ts` | Reused by the enqueue helper (KTD3) |
+| Page cache purge | `src/worker/audit-web/hit-min-purge.ts` through the `Cached` entrypoint | Reused by the `og-rendered` consumer |
+| Post-deploy hook and weekly cron | `deploy.yml` rescore step, `scheduled()` in `src/worker/index.ts` | Pattern reused for the curated pass; not coupled to the rescore Workflow (KTD8) |
+| Secret-authed trigger | `requireRescoreAuth` in `rescore-trigger.ts` | Reused once exported (F1) |
+| Default card | `public/og-image.png` (`SITE_OG_IMAGE_PATH`) | Reused as the RPC failure fallback (D3) |
+| Live card smoke | `scripts/og/smoke.sh`, `tests/e2e/og-cards.e2e.ts`, `preflight.sh e2e` | Extended with clip assertions (U9, D4) |
+| Range requests | Workers Caching on the `Cached` entrypoint | Reused instead of Worker-built 206s (KTD11) |
+
+### Diagrams
+
+```text
+audit finishes ─────┐                      ┌──────────── deploy hook + weekly cron
+ (web core, rescore │                      │              curated pass: R2 head per target,
+  step, Sandbox DO) │                      │              missing or older than 21 days
+                    ▼                      ▼
+              enqueue helper ──► [ og-render(-staging) queue ] (sendBatch <= 100)
+              (site: subject,                │
+               key, switch)                  ▼
+                                   anc-og-render(-staging) queue job
+                                   ├─ skip: template differs | clip fresh
+                                   ├─ logo: stored > homepage > brand (no timeout miss)
+                                   ├─ PNG + 105 frames (yield per frame) > GIF > Media binding
+                                   └─ R2: og/score PNG + og/clip MP4 {scored_at, template, logo}
+                                              │
+                                              ▼
+                                   [ og-rendered(-staging) queue ] ─► site consumer: purge page tag
+
+crawler ─► /og/score/.../<key>.png ─► stored? ─yes─► 200 immutable, x-anc-card: stored, x-anc-card-logo
+                                        │no
+                                        ▼
+                                   RPC drawCard ─ok, logo definitive─► store + 200 immutable (drawn)
+                                        ├─ logo timed out ─► 200 hit-min, not stored
+                                        ├─ template skew ─► 503, not stored
+                                        └─ RPC fails ─► /og-image.png, hit-min, not stored
+
+page ─► R2 head og/clip/<sha>/<key>.mp4 ─found─► og:video block    clip route ─► 200 full; edge slices Range to 206
+```
+
+Per target and key: `finished -> queued -> stored -> superseded (new key) | expired (30 days, curated pass re-renders)`, with `queued -> png-only` on a binding failure and `queued -> skipped` on a fresh clip or template skew. Inline diagram worth adding in code: the render job's skip and store order in `src/og-render/render-job.ts`.
+
+### Failure modes
+
+| New path | Realistic failure | Handling and test | User sees |
+| --- | --- | --- | --- |
+| Queue job | Media binding error or beta outage | PNG stored, clip skipped, retried then logged `og.render` (U4 test) | Still card, no error |
+| Queue job | Retries exhausted | Message dropped, logged; next audit or pass retries | Still card |
+| On-demand PNG | Render Worker down | Default card, `hit-min`, not stored (D3, U5 test) | Generic anc.dev card |
+| On-demand PNG | Logo lookup timeout | `hit-min`, not stored (U2/U5 tests) | Tile card briefly |
+| Deploy skew | Template versions differ | Job skipped, RPC 503 not stored, logged (U4/U5 tests) | Still card or no image briefly |
+| Clip-ready purge | Purge call fails | Page refreshes at its TTL (300 s live, 1 day curated); success path tested (U5) | `og:video` appears late |
+| Curated pass | Over 100 messages | Chunked `sendBatch` (U6 test) | none |
+| Curated pass | Endpoint fails in CI | `curl -sSf --retry` fails the deploy step | Red deploy run |
+| Clip route | Cold-cache Range | Edge cache slices the full 200 (U9 e2e) | none |
+| Queues | Staging and production share a name | Suffixed names, config test (D2, U8) | none |
+
+Critical gaps (no test, no handling, silent): 0.
+
+### Worktree parallelization strategy
+
+| Step | Modules touched | Depends on |
+| --- | --- | --- |
+| U1 card key and edition | `src/shared`, `src/worker/og`, `src/build`, `src/worker/audit` | none |
+| U2 logo timeout, safe prune | `src/worker/og` | U1 |
+| U3 motion frames | `src/shared` | U1 |
+| U4 render Worker | `src/og-render`, `src/worker/og` (moved), `src/worker/telemetry` | U1, U2, U3 |
+| U5 site wiring | `src/worker/og`, `src/worker`, config | U4 |
+| U6 triggers | `src/worker/audit-web`, `src/worker/score`, `src/worker/og`, `.github/workflows` | U5 |
+| U7 page tags | `src/build`, `src/worker/audit`, `src/worker` | U5 |
+| U8 deploy, config, docs | config, `.github/workflows`, docs | U4, U5, U6 |
+| U9 live verification | `tests/e2e`, `scripts/og`, docs | U4 to U8 |
+
+Lane A: U1 then U2 (PR #461). Lane B: U3, parallel with U2 after U1. Lane C: U4, U5, then U6 and U7 in parallel, then U8, then U9 (stacked PR). Execution order: U1; launch U2 and U3; merge; U4; U5; launch U6 and U7; merge; U8; U9. Conflict flags: `src/worker/og` is shared by U2, U4 and U5, so those run in sequence; U6 and U7 both touch `src/worker/index.ts` and need a coordinated merge.
+
+## Implementation Tasks
+
+Synthesized from this review's findings. Each task derives from a specific finding above.
+
+- [ ] **T1 (P1, human: ~1h / CC: ~5min)**: config: name staging queues `og-render-staging` and `og-rendered-staging`, assert env separation
+  - Surfaced by: Architecture, finding 1 (R2, D2)
+  - Files: `wrangler.jsonc`, `src/og-render/wrangler.jsonc`, `tests/wrangler-config.test.ts`
+  - Verify: `bun test tests/wrangler-config.test.ts`
+- [ ] **T2 (P1, human: ~3h / CC: ~15min)**: og store and route: record the logo source on stored cards, emit it on stored responses, rewrite route tests on an RPC fake, keep the smoke's tier check
+  - Surfaced by: Tests, regression rule (R4, D4)
+  - Files: `src/worker/og/store.ts`, `src/worker/og/route.ts`, `src/og-render/render-job.ts`, `tests/score-og-route.test.ts`, `tests/e2e/og-cards.e2e.ts`
+  - Verify: `bun test tests/score-og-route.test.ts`; `scripts/release/preflight.sh e2e` on staging
+- [ ] **T3 (P2, human: ~1h / CC: ~10min)**: PNG route: serve the default card on RPC failure
+  - Surfaced by: Architecture, finding 2 (R3, D3)
+  - Files: `src/worker/og/route.ts`, `tests/score-og-route.test.ts`
+  - Verify: `bun test tests/score-og-route.test.ts`
+- [ ] **T4 (P2, human: ~20min / CC: ~2min)**: live verification: record cold-start on-demand latency
+  - Surfaced by: Performance, finding 1 (R5, D5)
+  - Files: `tests/e2e/og-cards.e2e.ts`, PR body
+  - Verify: the PR records cold and warm latency from staging
+- [ ] **T5 (P2, human: ~10min / CC: ~1min)**: audit-web: export `requireRescoreAuth`
+  - Surfaced by: Scope Challenge (F1)
+  - Files: `src/worker/audit-web/rescore-trigger.ts`
+  - Verify: `bun run typecheck`
+- [ ] **T6 (P2, human: ~10min / CC: ~1min)**: render Worker config: `nodejs_compat` and `global_fetch_strictly_public`
+  - Surfaced by: Code Quality, finding 1 (F4)
+  - Files: `src/og-render/wrangler.jsonc`
+  - Verify: `bunx wrangler deploy --dry-run --config src/og-render/wrangler.jsonc`
+- [ ] **T7 (P2, human: ~10min / CC: ~1min)**: RELEASES.md: create the queues before the stacked PR merges
+  - Surfaced by: Architecture, finding 3 (F3)
+  - Files: `RELEASES.md`
+  - Verify: the queue-create step precedes the merge in the release notes
+
+Effort assumption: features about 30x and tests about 50x faster with CC than a human team.
+
+### Unresolved decisions
+
+None.
+
+### Completion summary
+
+- Step 0: Scope Challenge: scope accepted as-is (no cuts proposed; structure D1: A)
+- Reality rows: 7/7 applicable rows emitted (`PLAN_REALITY: phase=eng rows=7/7 missing=none unverified=1 verdict=complete`), 1 unverified premise (binding GIF input and 1200x630 output, proven by the spike and asserted live in U9)
+- Architecture Review: 3 issues found
+- Code Quality Review: 2 issues found
+- Test Review: diagram produced, 1 gap identified (regression contract, resolved by D4)
+- Performance Review: 3 issues found
+- NOT in scope: written
+- What already exists: written
+- TODOS.md updates: 0 items proposed (the two follow-ups are the www/apex plan and the design shortlist, both already tracked)
+- Failure modes: 0 critical gaps flagged
+- Unresolved decisions: 0 in this review
+- Outside voice: codex, disabled (`codex_reviews` is disabled in gstack config)
+- Parallelization: 3 lanes, 2 parallel points (U2 with U3, U6 with U7) / 6 sequential steps
+- Lake Score: 2/4 (D2 and D4 picked the 10/10 option; D3 and D5 picked 9/10 options, the highest offered)
+
+### Suppressed findings
+
+- (confidence 4/10) A permanently failing binding input is retried up to the queue's retry count. Bounded by the deferred retry setting; failed operations are likely unbilled. No change.
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | not run | none |
+| Outside Review | codex via `/plan-eng-review` | Independent 2nd opinion | 1 | disabled | none (`codex_reviews` disabled) |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 6 | issues_open | 9 issues, 0 critical gaps |
+| Design Review | `/plan-design-review` | UI/UX gaps | 2 | stale (other plans, 2026-09) | none for this plan |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | not run | none |
+
+- **OUTSIDE COVERAGE:** codex, plan-review phase, disabled by gstack config; no outside findings.
+- **VERDICT:** Eng Review ISSUES OPEN in name only: all 9 issues are resolved in the plan (D2 to D5 and three factual corrections), 0 unresolved, 0 critical gaps. Ready to implement after the DX review.
+
+NO UNRESOLVED DECISIONS
+
