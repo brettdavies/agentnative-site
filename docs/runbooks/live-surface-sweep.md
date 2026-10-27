@@ -14,9 +14,13 @@ rescore operations).
 | `production-smoke` job | `.github/workflows/deploy.yml`    | after every production deploy | no (`continue-on-error`, burn-in) |
 
 Each sweep leg runs the core MCP checks (`scripts/release/mcp-smoke.sh --core-only`) plus one homepage HTML probe
-(explicit `Accept: text/html`, HTTP 200, `hero__title` marker in a captured body). The staging leg first preflights the
-CF Access service token so credential rot is diagnosed as credentials, not as a broken surface. The production smoke
-adds `scripts/smoke-api-score.sh https://anc.dev` (registry fast-path) after a propagation-settle retry loop.
+(explicit `Accept: text/html`, HTTP 200, `hero__title` marker in a captured body). The production leg also runs
+`scripts/release/ua-ban-probe.sh`, which sends the default User-Agent of Python's `urllib` and Perl's LWP to `/llms.txt`
+and `POST /mcp` and requires HTTP 200. Cloudflare Browser Integrity Check refuses those signatures at the edge, where
+neither Workers Logs nor the self-identifying probes can see it. The staging leg skips it: BIC on `*.workers.dev` cannot
+be turned off. The staging leg first preflights the CF Access service token so credential rot is diagnosed as
+credentials, not as a broken surface. The production smoke adds `scripts/smoke-api-score.sh https://anc.dev` (registry
+fast-path) after a propagation-settle retry loop.
 
 The sweep legs carry no `continue-on-error`: they gate nothing downstream, so a red leg simply shows red in the Actions
 tab and emails the run owner. The production smoke is the one governed soft-fail, and the contract below is what makes
@@ -60,6 +64,9 @@ Start from these signatures before treating a red run as a broken deploy:
   re-run.
 - **`sweep-staging` red immediately after a push to `dev`**: likely a mid-deploy flip; the leg probed the staging Worker
   while `deploy.yml` was replacing it. Re-run the sweep once; escalate only if it stays red.
+- **`Probe stdlib User-Agents` red with error 1010 on `sweep-production`**: Browser Integrity Check is on for the
+  `anc.dev` zone. Turn it off in the dashboard (Security > Settings, **DDoS attacks** filter, **Browser integrity
+  check**) or with `PATCH /zones/<zone-id>/settings/browser_check` and `{"value":"off"}`, then re-run the sweep.
 - Anything else: the smoke scripts print per-check failures and their response-capture directory; read the job log
   before touching infrastructure.
 
