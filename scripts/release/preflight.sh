@@ -36,7 +36,10 @@
 #             so they validate the PREVIOUS release unless a release runs them itself. Staging mode
 #             stages CF Access from 1Password into the env vars the specs read. SKIPs in local mode:
 #             the specs target a deployed Worker, and edge-hit asserts skip-Worker cache classes
-#             wrangler dev cannot produce.
+#             wrangler dev cannot produce. After them, the og-cards smoke (scripts/og/smoke.sh)
+#             deploys a fixture Worker on fresh og-*.anc.dev hosts, audits each one, and checks the
+#             scorecard card the target draws for it; it needs wrangler logged in with Workers
+#             write on the anc.dev zone.
 #   mechanics Release mechanics sanity: leak check (no guarded paths in the diff vs origin/main),
 #             unguarded docs the release adds to main, diff-B against origin/dev filtered by the
 #             guarded set. Not env-dependent.
@@ -92,7 +95,7 @@ STAGING_URL="$DEFAULT_STAGING_URL"
 LOCAL_URL="$DEFAULT_LOCAL_URL"
 
 usage() {
-  sed -n '2,49p' "$0" | sed 's/^# \?//'
+  sed -n '2,/^[^#]/{/^#/p}' "$0" | sed 's/^# \?//'
   exit 2
 }
 
@@ -675,10 +678,41 @@ gate_e2e() {
 
   if [[ "$status" -eq 0 && -n "$passed" && "$passed" -gt 0 ]]; then
     gate_pass "${#E2E_PROJECTS[@]} live projects, $passed tests passing (${E2E_PROJECTS[*]})"
+  else
+    gate_fail "live e2e suites" "passed=${passed:-0} failed=${failed:-0} exit=$status"
+    printf '%s\n' "$out" | tail -25 | sed 's/^/    /'
+  fi
+
+  gate_og_cards "$cid" "$csec"
+}
+
+# The og-cards project audits hosts that exist for one run only, so it runs
+# through scripts/og/smoke.sh, which deploys them first and deletes them after.
+gate_og_cards() {
+  local cid="$1" csec="$2"
+
+  if ! (cd "$REPO_ROOT" && bun x wrangler whoami 2>/dev/null | grep -q 'You are logged in'); then
+    gate_skip "og-cards smoke" "wrangler is not logged in; the smoke deploys a fixture Worker on anc.dev"
     return
   fi
 
-  gate_fail "live e2e suites" "passed=${passed:-0} failed=${failed:-0} exit=$status"
+  local out status=0
+  out=$(
+    ANC_STAGING_ACCESS_CLIENT_ID="$cid" \
+      ANC_STAGING_ACCESS_CLIENT_SECRET="$csec" \
+      "$REPO_ROOT/scripts/og/smoke.sh" "$ENV_URL" 2>&1
+  ) || status=$?
+
+  local passed failed
+  passed=$(printf '%s' "$out" | grep -oE '[0-9]+ passed' | tail -1 | grep -oE '[0-9]+' || true)
+  failed=$(printf '%s' "$out" | grep -oE '[0-9]+ failed' | tail -1 | grep -oE '[0-9]+' || true)
+
+  if [[ "$status" -eq 0 && -n "$passed" && "$passed" -gt 0 ]]; then
+    gate_pass "og-cards smoke: $passed fixture cards drawn, logo tiers as expected, served twice"
+    return
+  fi
+
+  gate_fail "og-cards smoke" "passed=${passed:-0} failed=${failed:-0} exit=$status"
   printf '%s\n' "$out" | tail -25 | sed 's/^/    /'
 }
 

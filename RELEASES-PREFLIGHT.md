@@ -531,6 +531,13 @@ HIT, so `edge-hit` has no local equivalent and the gate SKIPs in local mode; run
   fails any post-deploy smoke the release itself changed. A green `Deploy to staging` step under a red job is this: the
   Worker published and a stale smoke rejected it.
 - [ ] `staging-mcp`, `edge-hit`, `web-audit`, and `web-audit-webkit` all pass, with a non-zero test count for each.
+- [ ] The `og-cards smoke` sub-gate passes with three tests. `scripts/og/smoke.sh` deploys the `anc-og-fixtures` Worker
+  on three fresh `og-<kind>-<run>.anc.dev` custom domains, audits each over MCP, and follows the scorecard's `og:image`.
+  Each card must come back a 1200x630 immutable PNG with `x-anc-card: drawn`, and the same bytes on a second request.
+  `x-anc-card-logo` must name the tier the fixture forces: `homepage` for the 512px icon, `brand` for the 32px favicon
+  and for the undecodable data URI. A `tile` there usually means the target has no `CONTEXT_DEV_API_KEY` secret. The
+  script deletes the fixture Worker and its domains on exit. If it is killed first, run
+  `bun x wrangler delete --config tests/e2e/og-cards-fixture/wrangler.jsonc --force`.
 
 **A zero count is a failure, not a pass.** Playwright refuses an entire project on a configuration error — a duplicate
 test title is the one that has actually happened — and reports it as a non-zero exit with no failing test. The gate

@@ -94,15 +94,15 @@ export async function handleScoreOg(request: Request, env: ScoreOgEnv, deps: Sco
     const stored = await readStoredCard(env.SCORE_CACHE, subject.target, key).catch(() => null);
     if (stored) {
       log('stored', started, undefined, subject.card.lane);
-      return pngResponse(request, url.pathname, stored, immutable);
+      return pngResponse(request, url.pathname, stored, immutable, { 'x-anc-card': 'stored' });
     }
   }
 
   try {
     const fonts = deps.fonts ?? (await loadScoreOgFonts(env));
-    const logo =
+    const found =
       subject.pages.length === 0
-        ? null
+        ? { logo: null, source: 'tile' as const }
         : await findLogo({
             pages: subject.pages,
             fonts,
@@ -113,8 +113,8 @@ export async function handleScoreOg(request: Request, env: ScoreOgEnv, deps: Sco
             now: deps.now,
             waitUntil: deps.waitUntil,
           });
-    const png = await renderScoreOgPng({ ...subject.card, logo }, fonts);
-    log('ok', started, undefined, subject.card.lane, logo ? 'image' : 'wordmark');
+    const png = await renderScoreOgPng({ ...subject.card, logo: found.logo }, fonts);
+    log('ok', started, undefined, subject.card.lane, found.source);
     if (immutable) {
       const store = storeCard(env.SCORE_CACHE, subject.target, key, png).catch((err: unknown) =>
         log('store-error', started, err, subject.card.lane),
@@ -122,20 +122,35 @@ export async function handleScoreOg(request: Request, env: ScoreOgEnv, deps: Sco
       if (deps.waitUntil) deps.waitUntil(store);
       else await store;
     }
-    return pngResponse(request, url.pathname, png, immutable);
+    return pngResponse(request, url.pathname, png, immutable, {
+      'x-anc-card': 'drawn',
+      'x-anc-card-logo': found.source,
+    });
   } catch (err) {
     log('error', started, err, subject.card.lane);
     return text(request, 500, 'scorecard image failed\n');
   }
 }
 
-function pngResponse(request: Request, pathname: string, png: Uint8Array, immutable: boolean): Response {
+/**
+ * `x-anc-card` says whether this response drew the card or read it from R2, and `x-anc-card-logo` which source the
+ * drawn logo came from, so a live smoke can tell the paths apart. An edge hit replays the headers of the response it
+ * cached.
+ */
+function pngResponse(
+  request: Request,
+  pathname: string,
+  png: Uint8Array,
+  immutable: boolean,
+  diagnostics: Record<string, string>,
+): Response {
   const body = new ArrayBuffer(png.byteLength);
   new Uint8Array(body).set(png);
   const headers = new Headers({
     'content-type': 'image/png',
     'content-length': String(png.byteLength),
     'x-robots-tag': 'noindex',
+    ...diagnostics,
   });
   return applyHeaders(new Response(body, { status: 200, headers }), {
     request,

@@ -170,8 +170,8 @@ gh run watch <run-id> --exit-status
 bun x wrangler containers list                                  # STATE = ready
 
 # 8. Run every gate against the deployed release build. `all` includes `e2e`,
-#    the four live Playwright projects; nothing else exercises a browser or the
-#    edge cache classes.
+#    the four live Playwright projects plus the og-cards smoke; nothing else
+#    exercises a browser, the edge cache classes, or a drawn social card.
 scripts/release/preflight.sh all
 
 # 9. Open the PR. Scrub body in /tmp/ first.

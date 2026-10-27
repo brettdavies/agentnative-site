@@ -234,6 +234,8 @@ describe('scorecard OG route', () => {
       fonts: await fonts(),
       fetchImpl: async () => new Response('no', { status: 404 }),
     });
+    expect(drawn.headers.get('x-anc-card')).toBe('drawn');
+    expect(drawn.headers.get('x-anc-card-logo')).toBe('tile');
     const drawnBytes = new Uint8Array(await drawn.arrayBuffer());
     const stored = cardKeys(env);
     expect(stored).toHaveLength(1);
@@ -245,6 +247,7 @@ describe('scorecard OG route', () => {
     });
     expect(read.status).toBe(200);
     expect(read.headers.get('cache-control')).toContain('immutable');
+    expect(read.headers.get('x-anc-card')).toBe('stored');
     expect(new Uint8Array(await read.arrayBuffer())).toEqual(drawnBytes);
   });
 

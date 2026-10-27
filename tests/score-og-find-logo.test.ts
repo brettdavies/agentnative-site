@@ -72,8 +72,8 @@ function stub(routes: Record<string, () => Promise<Response> | Response>) {
   return { sent, fetchImpl };
 }
 
-async function logoKey(domain: string): Promise<string> {
-  return `og/logo/${await sha256Hex(domain)}`;
+async function logoKey(host: string): Promise<string> {
+  return `og/logo/${await sha256Hex(host)}`;
 }
 
 describe('findLogo', () => {
@@ -91,9 +91,12 @@ describe('findLogo', () => {
       brandApiKey: 'k',
       fetchImpl,
     });
-    expect(logo?.bytes).toEqual(icon);
+    expect(logo.logo?.bytes).toEqual(icon);
+    expect(logo.source).toBe('homepage');
     expect(sent.some((s) => s.url === BRAND_ENDPOINT)).toBe(false);
-    expect(objects.get(await logoKey('example.com'))?.contentType).toBe('image/png');
+    const stored = objects.get(await logoKey('www.example.com'));
+    expect(stored?.contentType).toBe('image/png');
+    expect(stored?.meta.source).toBe('homepage');
   });
 
   test("a favicon below 128px falls through to the brand's logo, looked up by registrable domain", async () => {
@@ -131,11 +134,12 @@ describe('findLogo', () => {
       brandApiKey: 'secret-key',
       fetchImpl,
     });
-    expect(logo?.bytes).toEqual(brandIcon);
+    expect(logo.logo?.bytes).toEqual(brandIcon);
+    expect(logo.source).toBe('brand');
     const call = sent.find((s) => s.url === BRAND_ENDPOINT);
     expect(JSON.parse(String(call?.init?.body))).toEqual({ type: 'by_domain', domain: 'example.com' });
     expect(new Headers(call?.init?.headers).get('authorization')).toBe('Bearer secret-key');
-    expect(objects.has(await logoKey('example.com'))).toBe(true);
+    expect(objects.get(await logoKey('www.example.com'))?.meta.source).toBe('brand');
   });
 
   test('a stored logo or a stored miss answers without any request', async () => {
@@ -162,8 +166,8 @@ describe('findLogo', () => {
       brandApiKey: 'k',
       fetchImpl,
     });
-    expect(hit?.bytes).toEqual(icon);
-    expect(miss).toBeNull();
+    expect(hit).toEqual({ logo: { mime: 'image/png', bytes: icon }, source: 'stored' });
+    expect(miss).toEqual({ logo: null, source: 'tile' });
     expect(sent).toEqual([]);
   });
 
@@ -178,10 +182,11 @@ describe('findLogo', () => {
         brandApiKey: 'k',
         fetchImpl,
       }),
-    ).toBeNull();
-    expect(
-      await findLogo({ pages: ['https://tool.example/'], fonts: await fonts(), bucket: r2, fetchImpl }),
-    ).toBeNull();
+    ).toEqual({ logo: null, source: 'tile' });
+    expect(await findLogo({ pages: ['https://tool.example/'], fonts: await fonts(), bucket: r2, fetchImpl })).toEqual({
+      logo: null,
+      source: 'tile',
+    });
     expect(sent.some((s) => s.url === BRAND_ENDPOINT)).toBe(false);
     expect(objects.get(await logoKey('github.com'))?.meta.miss).toBe('1');
     expect(objects.get(await logoKey('tool.example'))?.meta.miss).toBe('1');
