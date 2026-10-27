@@ -38,7 +38,9 @@
 #      package.json, a dependency entry counts as present when base declares
 #      it in the same section at the same or a newer lower bound. Lockfiles
 #      are handled by gate 3.
-#   2. .github/ matches exactly between base and head.
+#   2. .github/ paths head carries that base does not contain. A path
+#      base holds and head does not is what the release delivers, not
+#      drift, so only the head-ahead direction fails.
 #   3. For each lockfile head carries (package-lock.json, bun.lock,
 #      Cargo.lock): every
 #      package head resolves newer than base, one line per package name so
@@ -65,7 +67,7 @@ DO_FETCH=1
 RESULT_FILE=""
 
 usage() {
-  sed -n '2,44p' "$0" | sed 's/^# \?//'
+  print_usage_header
   exit 2
 }
 
@@ -207,7 +209,8 @@ blob_at() {
 }
 
 # Classifies PATH as "contained", "differs", or "missing": whether base
-# already holds everything head changed in it since the anchor. First a
+# already holds everything head changed in it since the anchor. A path base
+# deleted counts as contained when head's copy is still the anchor's. First a
 # three-way merge of head's change onto base's copy; a clean merge that leaves
 # base's copy untouched is contained. When base has also edited nearby lines
 # the merge cannot answer, so the fallback checks head's change line by line:
@@ -227,7 +230,15 @@ classify_file_at() {
   anchor_blob=""
   [[ -n "$anchor_ref" ]] && anchor_blob=$(blob_at "$anchor_ref" "$path")
   if [[ -z "$base_blob" ]]; then
-    echo missing
+    # Base deleted a path head has not touched since the anchor: head carries
+    # nothing base never received, and the deletion is base's own change for
+    # the release to deliver. Only a head-side change since the anchor is
+    # missing from base.
+    if [[ -n "$anchor_blob" && "$head_blob" == "$anchor_blob" ]]; then
+      echo contained
+    else
+      echo missing
+    fi
     return
   fi
   if [[ "$head_blob" == "$base_blob" ]]; then
@@ -362,14 +373,31 @@ gate_head_commits() {
 
 gate_github_dir() {
   header ".github/ parity"
-  local diff
-  diff=$(git diff --name-status "$BASE_REF" "$HEAD_REF" -- .github/ || true)
-  if [[ -z "$diff" ]]; then
+  local paths path verdict count
+  local -a flagged=()
+  paths=$(git diff --name-only "$BASE_REF" "$HEAD_REF" -- .github/ || true)
+  if [[ -z "$paths" ]]; then
     gate_pass ".github/ identical on $BASE_REF and $HEAD_REF"
     return
   fi
-  gate_fail ".github/ differs between $BASE_REF and $HEAD_REF" "$(printf '%s\n' "$diff" | wc -l | tr -d ' ') paths"
-  printf '%s\n' "$diff" | sed 's/^/    /'
+  count=$(printf '%s\n' "$paths" | wc -l | tr -d ' ')
+  # Only the head-ahead direction is drift. Config that reached base and not
+  # head is what the release delivers, and failing on it would turn this gate
+  # red on every release that touches a workflow. `classify_file` is gate 1's
+  # containment test: whether base already holds everything head changed.
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    # Absent on head: base-only, so head cannot be carrying anything here.
+    [[ -n "$(blob_at "$HEAD_REF" "$path")" ]] || continue
+    verdict=$(classify_file "$path")
+    [[ "$verdict" == contained ]] || flagged+=("$verdict $path")
+  done <<<"$paths"
+  if [[ ${#flagged[@]} -eq 0 ]]; then
+    gate_pass ".github/: $BASE_REF contains every change $HEAD_REF carries ($count paths the release delivers)"
+    return
+  fi
+  gate_fail ".github/ on $HEAD_REF holds changes $BASE_REF never received" "${#flagged[@]} of $count paths"
+  printf '%s\n' "${flagged[@]}" | sed 's/^/    /'
 }
 
 # Gate 3: lockfile resolution ------------------------------------------------
