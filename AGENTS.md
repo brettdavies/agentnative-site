@@ -171,15 +171,18 @@ no `env.production` block. Per-flag shapes, flip verbs, and the `--var` hazards:
 the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error envelopes at HTTP 200
 (`-32099` for rate-limit breach at either limiter; `-32022` with `data.supported: ["2026-07-28"]` when the disabled
 legacy lane rejects a request) or at HTTP 400 (`-32700` for malformed JSON with `id: null`; `-32600` for an invalid
-batch; `-32020` for a header mismatch; `-32022` with `data.requested` for an unsupported version claim). The
+batch; `-32020` for a header mismatch; `-32022` with `data.requested` for an unsupported version claim) or at HTTP 403
+(`-32000` with `id: null` for a non-localhost `Origin` header or a `Host` outside the allowlist). The
 `405 Method Not Allowed` for any method but POST and the `406 Not Acceptable` Accept-header rejection are the transport
 errors that bypass the JSON-RPC envelope. **Cache state is data, not failure**: a `get_scorecard` miss is
 `isError: false` with `found: false, next_tool`, and a `score_cli` hit is `isError: false` with
 `audited: false, next_tool`.
 
 **Origin posture: server-to-agent, no CORS.** `POST /mcp` returns no `Access-Control-Allow-Origin` header. MCP clients
-are agent runtimes (Claude Code, Codex, Cursor, custom CLIs) that do not issue CORS preflights. Browser-origin POSTs
-fail the browser's same-origin check and are blocked client-side. This is the deliberate posture, because a
+are agent runtimes (Claude Code, Codex, Cursor, custom CLIs) that do not issue CORS preflights and send no `Origin`. A
+POST carrying any non-localhost `Origin`, the site's own included, is rejected server-side with HTTP 403 and `-32000` on
+every deployment, which also refuses a CORS-simple cross-site POST that skips preflight. The allowlist is
+`localhostAllowedOrigins()`, passed explicitly in `src/worker/mcp/server.ts`. This is the deliberate posture, because a
 browser-reachable `/mcp` would let any malicious web page trigger `score_cli` runs charged against the visitor's
 `cf-connecting-ip`. A future use case needing browser access gets its own KTD revision, an explicit allow-list, and a
 rate-limit policy designed for browser traffic.

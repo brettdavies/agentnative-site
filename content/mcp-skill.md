@@ -409,6 +409,7 @@ Two error layers. The discriminator is whether the JSON-RPC envelope itself succ
 | JSON-RPC envelope with `error.code: -32099`            | Transport    | Rate limit. Back off per the policy below; either limiter can trip this.                                                       |
 | `error.code: -32022` at HTTP 200, no `data.requested`  | Transport    | The legacy lane is disabled. `error.data.supported` lists the served revision (`2026-07-28`); resend as a modern request.      |
 | `error.code: -32022` at HTTP 400 with `data.requested` | Transport    | Your claimed protocol version is unsupported. Resend claiming a version from `error.data.supported`.                           |
+| `error.code: -32000` at HTTP 403                       | Transport    | A non-localhost `Origin` header (a browser context) or a `Host` the server does not serve. Resend with no `Origin`.            |
 | JSON-RPC envelope with `error.code: -32020`            | Transport    | Header mismatch. `Mcp-Method` and `Mcp-Name` must mirror the JSON-RPC body (`Mcp-Name` mirrors the tool name or resource URI). |
 | JSON-RPC envelope with `error.code: -32600`            | Transport    | Invalid request at HTTP 400: an empty batch, a non-JSON-RPC object, or a batch mixing modern-envelope elements.                |
 | JSON-RPC envelope with `error.code: -32601`            | Transport    | Unknown method. Check the method name against the wire reference below.                                                        |
