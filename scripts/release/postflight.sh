@@ -362,10 +362,13 @@ RETIRED_PATHS=(
 # one path; the website result is a rule over every audited host, and the row
 # below is one live sample of it rather than the whole set. The gate pins each
 # destination so a redirect cannot quietly become a 404 or start pointing
-# somewhere else.
+# somewhere else. Every row of RETIRED_REDIRECTS in src/shared/audit-routes.ts
+# appears here; tests/postflight-retired.test.ts fails when one is missing.
 RETIRED_REDIRECTS=(
   "/web-audit|/audit?lane=web"
   "/web-audit.md|/audit.md"
+  "/mcp.md|/mcp-docs.md"
+  "/mcp.html|/mcp-docs"
   "/web/sounding.brettdavies.workers.dev|/score/sounding.brettdavies.workers.dev"
 )
 
