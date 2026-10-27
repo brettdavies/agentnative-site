@@ -320,14 +320,16 @@ Driven by `scripts/release/preflight.sh do-smoke`. The fresh-binary picker is th
 - [ ] **The result page renders the full scorecard.** Confirm the `scorecard_url` the smoke just minted renders:
 
   ```bash
-  curl -fSsL -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+  curl -fSsL -H 'Accept: text/html' \
+    -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
     -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
     https://agentnative-site-staging.brettdavies.workers.dev/score/${BINARY} \
-    | grep -E 'scorecard-(summary|audits|meta|embed)'
+    | grep -oE 'class="scorecard-(audits|meta|embed|cta)' | sort -u
   ```
 
-  At least four classes (`scorecard-summary`, `scorecard-audits`, `scorecard-meta`, `scorecard-embed`) should appear,
-  proving the shared renderer is producing parity sections.
+  All four sections (`scorecard-audits`, `scorecard-meta`, `scorecard-embed`, `scorecard-cta`) should appear, the same
+  set a curated `/score/<slug>` page renders, proving the shared renderer is producing parity sections. The `Accept`
+  header is required: without it the URL negotiates the markdown twin, which carries no classes.
 - [ ] **A curated tool's binary alias still 301s to its slug.** One tool owns one page, so the binary name redirects
   rather than rendering a second copy. Pick any registry binary whose name differs from its slug (`rg` for `ripgrep`):
 

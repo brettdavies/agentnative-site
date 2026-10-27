@@ -167,8 +167,8 @@ SKIP with a pointer to the manual recipe below. See the deferred-bypass plan at
 
 - **Manual (operator-only path).** Open `https://anc.dev/` in a browser, paste the same fresh non-registry binary picked
   for staging into the form (e.g., `npm install -g cowsay`), submit, watch the live run complete, then visit the
-  resulting `/score/<binary>` page and confirm the four scorecard classes render (`scorecard-summary`,
-  `scorecard-audits`, `scorecard-meta`, `scorecard-embed`).
+  resulting `/score/<binary>` page and confirm the four scorecard sections render (`scorecard-audits`, `scorecard-meta`,
+  `scorecard-embed`, `scorecard-cta`).
 - **Service-token (CI / scripted path).** Once the service-token bypass lands per the plan at
   [`docs/plans/2026-06-01-003-feat-production-live-do-smoke-bypass-plan.md`](./docs/plans/2026-06-01-003-feat-production-live-do-smoke-bypass-plan.md),
   re-use the staging smoke recipe with an added `X-Anc-Smoke-Token: ${SMOKE_SERVICE_TOKEN}` header. The bypass skips
