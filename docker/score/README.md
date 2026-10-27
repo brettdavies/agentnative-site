@@ -29,7 +29,8 @@ docker/score/
   setup-host.sh script handles this if a host GPU is detected. Without it, `nvidia-smi` falls back to `install-missing`
   and the other 99 tools still score.
 
-`anc` is brew-installed inside the image from `brettdavies/tap/agentnative`. No local CLI checkout required.
+`anc` is the release `src/data/anc/VERSION` names, installed inside the image from its sha256-pinned archive. No local
+CLI checkout required.
 
 ## One-time host setup
 
@@ -212,9 +213,10 @@ Layer order:
 3. Linuxbrew (the heaviest single layer; cached aggressively).
 4. Other package managers: `uv`, `bun`, `cargo-binstall`. All installed via brew, so they're prebuilt + cached.
 5. Tooling for the runner: `yq`, `jaq`.
-6. The `anc` binary, installed via one of two modes selected by the `ANC_SOURCE` build argument: `brew` (default;
-   installs from `brettdavies/tap/agentnative`, same path users get on macOS / Linux) or `inject` (copies a host-built
-   binary from `docker/score/inject/anc`, used by `build.sh --from-source`).
+6. The `anc` binary, installed via one of two modes selected by the `ANC_SOURCE` build argument: `release` (default; the
+   release archive `src/data/anc/VERSION` names, checked against a pinned sha256, the same archive the live-scoring
+   image bakes) or `inject` (copies a host-built binary from `docker/score/inject/anc`, used by
+   `build.sh --from-source`).
 7. `install-tools.sh` runs once at image build time, reading the build-time registry baked at `/build/registry.yaml` and
    installing every entry. Failures are logged to `/build/install-log.txt` but do NOT abort the build. Tools that fail
    to install end up missing from PATH and the runner records them as `install-missing`.

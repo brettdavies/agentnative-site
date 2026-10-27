@@ -165,6 +165,20 @@ describe('mcp-sweep.yml probes the live surfaces daily, ungated and hard-failing
       );
     }
   });
+
+  test('only the production leg probes stdlib User-Agents', () => {
+    // Browser Integrity Check refuses stdlib client signatures before the
+    // Worker runs, so only a probe that sends them sees the ban. BIC on
+    // *.workers.dev cannot be turned off, so the staging leg would red daily.
+    expect(
+      jobBlock(sweepYml, 'sweep-production'),
+      'sweep-production must run scripts/release/ua-ban-probe.sh against $SWEEP_BASE_URL; no other probe sends a stdlib User-Agent',
+    ).toContain('scripts/release/ua-ban-probe.sh "$SWEEP_BASE_URL"');
+    expect(
+      jobBlock(sweepYml, 'sweep-staging'),
+      'sweep-staging must not run ua-ban-probe.sh; Cloudflare refuses stdlib User-Agents on *.workers.dev by design',
+    ).not.toContain('ua-ban-probe.sh');
+  });
 });
 
 describe('deep-check-crash-retry.yml reruns a crashed deep-check once, from outside the run', () => {

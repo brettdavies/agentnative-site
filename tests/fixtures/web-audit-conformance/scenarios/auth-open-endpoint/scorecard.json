@@ -866,7 +866,7 @@
     },
     {
       "id": "markdown-vary",
-      "label": "Negotiated responses carry Vary Accept, User-Agent",
+      "label": "Negotiated responses carry Vary Accept",
       "category": "content-for-agents",
       "group": "P2",
       "layer": "web",

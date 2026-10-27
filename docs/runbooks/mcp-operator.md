@@ -112,8 +112,9 @@ bun x wrangler deploy --env staging   # or `bun x wrangler deploy` for productio
 `POST /mcp` returns no `Access-Control-Allow-Origin` header. This is deliberate, not an oversight.
 
 The endpoint is server-to-agent JSON-RPC, not browser-to-server. MCP clients are agent runtimes (Claude Code, Codex,
-Cursor, custom CLIs) that do not issue CORS preflights. Browser-origin POSTs fail the browser's same-origin check and
-are blocked client-side.
+Cursor, custom CLIs) that do not issue CORS preflights and send no `Origin` header. A POST carrying any non-localhost
+`Origin`, the site's own included, is rejected server-side with HTTP 403 and a JSON-RPC `-32000` envelope on every
+deployment. That refusal also covers a CORS-simple cross-site POST, which a browser sends without a preflight.
 
 The threat that drives this posture: a browser-reachable `/mcp` would let any malicious web page trigger `score_cli`
 runs charged against the visitor's `cf-connecting-ip` rather than the attacker's. The visitor would burn their own audit
@@ -143,12 +144,13 @@ A wrong allowlist is a total MCP outage, so watch that filter after any edit to 
 bun x wrangler tail --env staging --format json | rg 'error_code.:-32000'
 ```
 
-**`-32000` is shared, so a line carrying it is not proof of a Host rejection.** `allowedOriginHostnames` is left unset,
-which is a localhost-only Origin gate rather than Origin checking turned off, and the SDK answers that rejection with
-the same 403 and the same `-32000`. A browser POST carrying any non-localhost `Origin` lands on a log line the Host
-rejection cannot be told apart from, because `mcp.request` records the request `host` from the URL and never the header
-or the Origin. To separate them, reproduce the call and read `error.message`: the Host path reports `Invalid Host:
-<hostname>` or `Missing Host header`, the Origin path reports `Invalid Origin: <hostname>`.
+**`-32000` is shared, so a line carrying it is not proof of a Host rejection.** `allowedOriginHostnames` is set to the
+SDK's `localhostAllowedOrigins()`, and the SDK answers an Origin rejection with the same 403 and the same `-32000`. The
+list is passed explicitly because the wrapper's default adds the request's own hostname on `*.workers.dev` only, which
+would let staging admit a same-origin POST that production rejects. A browser POST carrying any non-localhost `Origin`
+lands on a log line the Host rejection cannot be told apart from, because `mcp.request` records the request `host` from
+the URL and never the header or the Origin. To separate them, reproduce the call and read `error.message`: the Host path
+reports `Invalid Host: <hostname>` or `Missing Host header`, the Origin path reports `Invalid Origin: <hostname>`.
 
 ## Structured logging (`mcp.request`)
 

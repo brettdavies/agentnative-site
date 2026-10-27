@@ -155,7 +155,16 @@ export function phaseBudget(
   };
 }
 
-const MARKDOWN_HREF_RE = /\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+// CommonMark lets a destination sit in angle brackets (`[x](<a b.md>)`) so it can hold
+// spaces or parentheses; the brackets are syntax, not part of the URL.
+const MARKDOWN_LINK_RE = /\]\((?:<([^<>\n]+)>|([^)\s]+))(?:\s+"[^"]*")?\)/g;
+
+/** Every inline-link destination in a markdown body, in document order, as written. */
+export function* markdownHrefs(body: string): Generator<string> {
+  for (const match of body.matchAll(MARKDOWN_LINK_RE)) {
+    yield match[1] ?? match[2];
+  }
+}
 
 function isRecoveryPath(pathname: string): boolean {
   return (
@@ -177,10 +186,10 @@ export function sameOriginRecoveryLink(body: string, base: string): { ok: boolea
   } catch {
     return { ok: false, why: 'unparseable audit origin' };
   }
-  for (const match of body.matchAll(MARKDOWN_HREF_RE)) {
+  for (const raw of markdownHrefs(body)) {
     let url: URL;
     try {
-      url = new URL(match[1], base);
+      url = new URL(raw, base);
     } catch {
       continue;
     }

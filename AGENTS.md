@@ -83,10 +83,12 @@ render step. Deploy via `wrangler`.
 
 `POST https://anc.dev/mcp` exposes the catalog over a streamable HTTP MCP server on spec revision `2026-07-28`, with SDK
 v2 dual-stack support for legacy (`initialize` → `tools/call`) and modern (SEP-2243 headers + `_meta` in params, no
-`initialize`) clients on one endpoint. The client integration guide is [`content/mcp-skill.md`](content/mcp-skill.md)
-(served at `/mcp-skill.md` and `/mcp-skill/`); operator-facing material lives in
-[`docs/runbooks/mcp-operator.md`](docs/runbooks/mcp-operator.md) and is not published. This section is the
-agent-onboarding summary: enough to know what the surface is, what it costs, and how it fails.
+`initialize`) clients on one endpoint. `GET /mcp` returns 405 (`Allow: POST`, `Cache-Control: no-store`, a
+`rel="service-doc"` link to `/mcp-docs`) for every Accept value, and `/mcp/` is a 308 to `/mcp` for every method but
+OPTIONS; the endpoint description is [`content/mcp-docs.md`](content/mcp-docs.md) (served at `/mcp-docs`). The client
+integration guide is [`content/mcp-skill.md`](content/mcp-skill.md) (served at `/mcp-skill.md` and `/mcp-skill/`);
+operator-facing material lives in [`docs/runbooks/mcp-operator.md`](docs/runbooks/mcp-operator.md) and is not published.
+This section is the agent-onboarding summary: enough to know what the surface is, what it costs, and how it fails.
 [`docs/runbooks/mcp-wire-protocol.md`](docs/runbooks/mcp-wire-protocol.md) is the wire-level reference behind it: the
 per-lane error-code table with the producing layer and delivery for each code, the SEP-2243 header mirror, the `_meta`
 envelope, cache-hint scope, and the GET posture. Read it before changing anything on the wire or bumping the revision.
@@ -169,14 +171,18 @@ no `env.production` block. Per-flag shapes, flip verbs, and the `--var` hazards:
 the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error envelopes at HTTP 200
 (`-32099` for rate-limit breach at either limiter; `-32022` with `data.supported: ["2026-07-28"]` when the disabled
 legacy lane rejects a request) or at HTTP 400 (`-32700` for malformed JSON with `id: null`; `-32600` for an invalid
-batch; `-32020` for a header mismatch; `-32022` with `data.requested` for an unsupported version claim). The
-`406 Not Acceptable` Accept-header rejection is the one transport error that bypasses the JSON-RPC envelope. **Cache
-state is data, not failure**: a `get_scorecard` miss is `isError: false` with `found: false, next_tool`, and a
-`score_cli` hit is `isError: false` with `audited: false, next_tool`.
+batch; `-32020` for a header mismatch; `-32022` with `data.requested` for an unsupported version claim) or at HTTP 403
+(`-32000` with `id: null` for a non-localhost `Origin` header or a `Host` outside the allowlist). The
+`405 Method Not Allowed` for any method but POST and the `406 Not Acceptable` Accept-header rejection are the transport
+errors that bypass the JSON-RPC envelope. **Cache state is data, not failure**: a `get_scorecard` miss is
+`isError: false` with `found: false, next_tool`, and a `score_cli` hit is `isError: false` with
+`audited: false, next_tool`.
 
 **Origin posture: server-to-agent, no CORS.** `POST /mcp` returns no `Access-Control-Allow-Origin` header. MCP clients
-are agent runtimes (Claude Code, Codex, Cursor, custom CLIs) that do not issue CORS preflights. Browser-origin POSTs
-fail the browser's same-origin check and are blocked client-side. This is the deliberate posture, because a
+are agent runtimes (Claude Code, Codex, Cursor, custom CLIs) that do not issue CORS preflights and send no `Origin`. A
+POST carrying any non-localhost `Origin`, the site's own included, is rejected server-side with HTTP 403 and `-32000` on
+every deployment, which also refuses a CORS-simple cross-site POST that skips preflight. The allowlist is
+`localhostAllowedOrigins()`, passed explicitly in `src/worker/mcp/server.ts`. This is the deliberate posture, because a
 browser-reachable `/mcp` would let any malicious web page trigger `score_cli` runs charged against the visitor's
 `cf-connecting-ip`. A future use case needing browser access gets its own KTD revision, an explicit allow-list, and a
 rate-limit policy designed for browser traffic.
@@ -366,9 +372,9 @@ engine against a public URL) and for operating the web-board rescore (weekly cro
   `src/worker/telemetry/log.ts`: a call site names its `scope` (a closed union; adding a scope means adding it there)
   and its fields, and nothing else. The emitter merges the request-scoped ambient fields, caps client-supplied names,
   buckets durations, drops undefined fields, and hands the object to `console` unserialized. Never
-  `console.log(JSON.stringify(...))` in Worker code: a pre-serialized string arrives as one text `message`, so its
-  fields cannot be filtered or grouped in Workers Logs, and the emitter's caps and swallow posture are bypassed. Tests
-  capture records through the emitter's sink (`tests/helpers/log-capture.ts`), never by patching `console`.
+  `console.log(JSON.stringify(...))` in Worker code: a hand-built record skips the emitter's envelope, closed scope
+  vocabulary, ambient fields, caps and swallow posture. Tests capture records through the emitter's sink
+  (`tests/helpers/log-capture.ts`), never by patching `console`.
 - **PRs:** Squash merge. PR title becomes commit title; PR body becomes commit body (repo setting:
   `squashMergeCommitMessage: PR_BODY`).
 - **Rulesets:** `.github/rulesets/protect-main.json` and `protect-dev.json` are the source of truth for branch

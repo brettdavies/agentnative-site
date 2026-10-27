@@ -73,6 +73,9 @@ export function buildLlmsIndex({
     );
     lines.push('');
     lines.push(`Full recipes: [MCP client skill](${base}/mcp-skill.md).`);
+    lines.push(
+      `GET \`${base}/mcp\` returns 405 Method Not Allowed. Endpoint description: [MCP endpoint docs](${base}/mcp-docs.md).`,
+    );
     lines.push('');
   }
   lines.push('## Principles');

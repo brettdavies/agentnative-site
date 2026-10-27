@@ -28,6 +28,10 @@
         "required_status_checks": [
           {
             "context": "lint · build · test · wrangler"
+          },
+          {
+            "context": "lint / actionlint",
+            "integration_id": 15368
           }
         ]
       }

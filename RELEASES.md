@@ -449,16 +449,17 @@ A `paths-ignore` filter on the `push` trigger skips deploy when a commit only to
 #### Image bump (feat PR to dev)
 
 Every anc release starts an image bump. The PR that bumps `src/data/anc/VERSION` (`scripts/sync-cli-version.sh`) also
-points the tarball URL in `docker/sandbox/Dockerfile` at the new release, sets the digest on its `sha256sum -c` line
-from the release's `sha256sum.txt`, and carries the new staging pin:
+points the tarball URL in `docker/sandbox/Dockerfile` and `docker/score/Dockerfile` at the new release, sets the digest
+on each `sha256sum -c` line from the release's `sha256sum.txt`, and carries the new staging pin:
 
 ```bash
 gh release download v<version> -R brettdavies/agentnative-cli -p sha256sum.txt -O - \
   | grep x86_64-unknown-linux-gnu.tar.gz
 ```
 
-`tests/sandbox-anc-version.test.ts` fails the PR gate while the Dockerfile's anc differs from `src/data/anc/VERSION`.
-`scripts/release/preflight.sh coord` fails while a pinned image bakes a different anc than the Dockerfile.
+`tests/sandbox-anc-version.test.ts` fails the PR gate while either Dockerfile's anc differs from `src/data/anc/VERSION`
+or the two pin different archives. `scripts/release/preflight.sh coord` fails while a pinned image bakes a different anc
+than the Dockerfile.
 
 ```bash
 # from a clean working tree on dev

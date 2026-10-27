@@ -5,8 +5,10 @@
 # MCP kill switch gets flipped, an edge config drifts. The sweep probes
 # both deployments every day regardless of repo activity: the core MCP
 # checks (scripts/release/mcp-smoke.sh --core-only) plus one homepage
-# HTML probe per leg. Heavy suites (Playwright, Lighthouse, the metered
-# audit gates) stay commit-gated in deep-check and the release scripts.
+# HTML probe per leg, and on production a stdlib User-Agent probe
+# (scripts/release/ua-ban-probe.sh). Heavy suites (Playwright,
+# Lighthouse, the metered audit gates) stay commit-gated in deep-check
+# and the release scripts.
 #
 # The legs are separate jobs so each surface reds independently — a
 # staging credential failure must not mask a production outage or vice
@@ -43,12 +45,6 @@ permissions:
 concurrency:
   group: mcp-sweep
   cancel-in-progress: false
-
-# Opt into Node.js 24 runtime for JS actions before June 2nd, 2026 when
-# GitHub forces the switch anyway. Kills the Node 20 deprecation warnings
-# and catches any incompatibilities now instead of the day of the cutover.
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   sweep-staging:
@@ -162,3 +158,10 @@ jobs:
             exit 1
           fi
           echo "production homepage OK (HTTP 200 + hero__title)"
+
+      # Cloudflare Browser Integrity Check refuses the default User-Agent
+      # of Python's urllib and Perl's LWP with a 1010 before the Worker
+      # runs, which neither the MCP smoke nor Workers Logs can see. This
+      # leg only: BIC on *.workers.dev cannot be turned off.
+      - name: Probe stdlib User-Agents
+        run: scripts/release/ua-ban-probe.sh "$SWEEP_BASE_URL"

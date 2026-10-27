@@ -409,6 +409,7 @@ Two error layers. The discriminator is whether the JSON-RPC envelope itself succ
 | JSON-RPC envelope with `error.code: -32099`            | Transport    | Rate limit. Back off per the policy below; either limiter can trip this.                                                       |
 | `error.code: -32022` at HTTP 200, no `data.requested`  | Transport    | The legacy lane is disabled. `error.data.supported` lists the served revision (`2026-07-28`); resend as a modern request.      |
 | `error.code: -32022` at HTTP 400 with `data.requested` | Transport    | Your claimed protocol version is unsupported. Resend claiming a version from `error.data.supported`.                           |
+| `error.code: -32000` at HTTP 403                       | Transport    | A non-localhost `Origin` header (a browser context) or a `Host` the server does not serve. Resend with no `Origin`.            |
 | JSON-RPC envelope with `error.code: -32020`            | Transport    | Header mismatch. `Mcp-Method` and `Mcp-Name` must mirror the JSON-RPC body (`Mcp-Name` mirrors the tool name or resource URI). |
 | JSON-RPC envelope with `error.code: -32600`            | Transport    | Invalid request at HTTP 400: an empty batch, a non-JSON-RPC object, or a batch mixing modern-envelope elements.                |
 | JSON-RPC envelope with `error.code: -32601`            | Transport    | Unknown method. Check the method name against the wire reference below.                                                        |
@@ -460,9 +461,9 @@ roll. Both ceilings are pre-data placeholders sized from parity with sister depl
 
 For clients that need the protocol details.
 
-**Endpoint.** `POST https://anc.dev/mcp`. `GET` is also serviceable: it returns the human landing page, or a permanent
-redirect to the SEP-1649 server card under a JSON `Accept`. Every other method returns `405 Method Not Allowed`
-advertising `Allow: GET, POST`. No authentication.
+**Endpoint.** `POST https://anc.dev/mcp`. `GET` returns `405 Method Not Allowed` with `Allow: POST` and
+`Cache-Control: no-store`, for every `Accept` value. The human-readable description is [/mcp-docs](/mcp-docs). Every
+other method returns `405` advertising `Allow: POST`. `OPTIONS` is not handled. No authentication.
 
 **Transport.** Streamable HTTP per MCP spec revision `2026-07-28`. Legacy clients send `initialize` with client
 `protocolVersion=2025-06-18`; modern clients use `MCP-Protocol-Version: 2026-07-28`, `Mcp-Method`, optional `Mcp-Name`

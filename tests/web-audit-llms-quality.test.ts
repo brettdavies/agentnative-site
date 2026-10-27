@@ -349,6 +349,37 @@ describe('llms.txt quality trio', () => {
     });
   });
 
+  test('an angle-bracketed link destination is fetched without its brackets', async () => {
+    const body = `# Site
+
+> Summary
+
+- [Guide with spaces](<https://example.com/guide with spaces.md>)
+- [Regular](https://example.com/regular.md)
+- [Parens](<https://example.com/page(1).md>)
+`;
+    const sent: string[] = [];
+    const fetchImpl = stubFetch((url) => {
+      sent.push(url);
+      if (url.endsWith('/llms.txt')) return new Response(body, { status: 200 });
+      return new Response('ok', { status: 200 });
+    });
+    const events = await collect(
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf(CHECKS),
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
+    );
+    const row = resultsOf(events).find((r) => r.id === 'llms-txt-links');
+    expect(row?.status).toBe('pass');
+    expect(sent).toContain('https://example.com/guide%20with%20spaces.md');
+    expect(sent).toContain('https://example.com/regular.md');
+    expect(sent).toContain('https://example.com/page(1).md');
+    expect(sent.some((u) => u.includes('<') || u.includes('>'))).toBe(false);
+  });
+
   test('a handler that overruns the audit deadline marks the run incomplete', async () => {
     const fetchImpl = (async () => {
       await new Promise((resolve) => setTimeout(resolve, 40));
