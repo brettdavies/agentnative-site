@@ -128,14 +128,20 @@ SHOW_WARNINGS=0
 RUN_VALE=1
 RUN_LT=1
 
-while (( $# )); do
+while (($#)); do
   case "$1" in
     --changed-only) CHANGED_ONLY=1 ;;
     --warnings) SHOW_WARNINGS=1 ;;
     --vale-only) RUN_LT=0 ;;
     --lt-only) RUN_VALE=0 ;;
-    -h|--help) sed -n '3,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "prose-check: unknown flag '$1'" >&2; exit 2 ;;
+    -h | --help)
+      sed -n '3,28p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *)
+      echo "prose-check: unknown flag '$1'" >&2
+      exit 2
+      ;;
   esac
   shift
 done
@@ -167,7 +173,7 @@ done
 # `agentnative-spec/.context/compound-engineering/todos/010-pending-p0-prose-check-consumer-exclusion-config.md`.
 # Re-apply after sync; `git diff scripts/prose-check.sh` surfaces the regression.
 # ==========================================================================
-if (( CHANGED_ONLY )); then
+if ((CHANGED_ONLY)); then
   mapfile -t MD_FILES < <(
     git diff --name-only --diff-filter=ACM "$PROSE_CHECK_BASE"...HEAD -- '*.md' \
       | grep -v -E '^(docs/(brainstorms|plans|research|solutions)/|styles/(proselint|write-good|\.vale-config)/|scripts/__fixtures__/|src/data/spec/|content/principles/|dist/|\.claude/)|(^|/)(AGENTS|CHANGELOG)\.md$|(^|/)node_modules/' \
@@ -199,7 +205,7 @@ else
   )
 fi
 
-if (( ${#MD_FILES[@]} == 0 )); then
+if ((${#MD_FILES[@]} == 0)); then
   echo "prose-check: 0 markdown files in scope; nothing to check"
   exit 0
 fi
@@ -210,18 +216,18 @@ OUT_FILE="$(mktemp)"
 trap 'rm -f "$OUT_FILE"' EXIT
 
 # --- Vale stage ---
-if (( RUN_VALE )); then
+if ((RUN_VALE)); then
   VALE_JSON="$(vale --no-global --output=JSON --minAlertLevel=warning "${MD_FILES[@]}" 2>/dev/null || true)"
   if [[ -n "$VALE_JSON" && "$VALE_JSON" != "{}" ]]; then
     while IFS=$'\t' read -r file line col sev rule msg; do
       [[ -z "$file" ]] && continue
       if [[ "$sev" == "error" ]]; then
         BLOCKING=$((BLOCKING + 1))
-        printf '%s:%s:%s:%s: %s\n' "$file" "$line" "$col" "$rule" "$msg" >> "$OUT_FILE"
+        printf '%s:%s:%s:%s: %s\n' "$file" "$line" "$col" "$rule" "$msg" >>"$OUT_FILE"
       else
         WARNING=$((WARNING + 1))
-        if (( SHOW_WARNINGS )); then
-          printf '[warn] %s:%s:%s:%s: %s\n' "$file" "$line" "$col" "$rule" "$msg" >> "$OUT_FILE"
+        if ((SHOW_WARNINGS)); then
+          printf '[warn] %s:%s:%s:%s: %s\n' "$file" "$line" "$col" "$rule" "$msg" >>"$OUT_FILE"
         fi
       fi
     done < <(jaq -r 'to_entries[] | .key as $f | .value[] | [$f, .Line, .Span[0], .Severity, .Check, .Message] | @tsv' <<<"$VALE_JSON")
@@ -229,26 +235,29 @@ if (( RUN_VALE )); then
 fi
 
 # --- LanguageTool stage ---
-if (( RUN_LT )); then
+if ((RUN_LT)); then
   LT_OUT="$(mktemp)"
   trap 'rm -f "$OUT_FILE" "$LT_OUT"' EXIT
   LT_RC=0
-  lt_check "${MD_FILES[@]}" > "$LT_OUT" || LT_RC=$?
+  lt_check "${MD_FILES[@]}" >"$LT_OUT" || LT_RC=$?
   case "$LT_RC" in
-    0|1) ;;  # findings (if any) are in LT_OUT
+    0 | 1) ;; # findings (if any) are in LT_OUT
     2) echo "prose-check: skipping grammar check (see lt_check notice above)" >&2 ;;
-    *) echo "prose-check: lt_check returned unexpected exit $LT_RC" >&2; exit 2 ;;
+    *)
+      echo "prose-check: lt_check returned unexpected exit $LT_RC" >&2
+      exit 2
+      ;;
   esac
   while IFS= read -r ln; do
     [[ -z "$ln" ]] && continue
     if [[ "$ln" == "[warn] "* ]]; then
       WARNING=$((WARNING + 1))
-      (( SHOW_WARNINGS )) && printf '%s\n' "$ln" >> "$OUT_FILE"
+      ((SHOW_WARNINGS)) && printf '%s\n' "$ln" >>"$OUT_FILE"
     else
       BLOCKING=$((BLOCKING + 1))
-      printf '%s\n' "$ln" >> "$OUT_FILE"
+      printf '%s\n' "$ln" >>"$OUT_FILE"
     fi
-  done < "$LT_OUT"
+  done <"$LT_OUT"
 fi
 
 # Print findings sorted by file then line
@@ -257,5 +266,5 @@ if [[ -s "$OUT_FILE" ]]; then
 fi
 
 echo "prose-check: $BLOCKING blocking, $WARNING warning"
-(( BLOCKING > 0 )) && exit 1
+((BLOCKING > 0)) && exit 1
 exit 0
