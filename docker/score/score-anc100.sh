@@ -247,17 +247,19 @@ for line in "${entries[@]}"; do
   profile_flag=""
   if [[ -n "$profile" ]]; then profile_flag="--audit-profile $profile"; fi
 
-  # `anc audit` exit-code contract:
-  #   0 — every check passed
-  #   1 — at most warn-severity results (no failures)
-  #   2 — at least one fail-severity result (JSON is still well-formed)
-  #   >=3 — anc itself errored (panic, missing binary, malformed args)
-  # Treat 0/1/2 as scoreable; let JSON validation below catch missing/empty
-  # output even on rc <= 2.
+  # `anc audit` exits by the table it shares with `anc web`:
+  #   0: clean
+  #   1: warnings only
+  #   2: failures present, or a usage error (which writes no scorecard)
+  #   3: could not check, because an audit errored or none applied; the
+  #      scorecard is still written
+  # A higher code is anc itself failing (a panic exits 101). Codes 0 to 3 are
+  # scoreable, and the JSON validation below catches a missing or empty
+  # scorecard on any of them.
   # shellcheck disable=SC2086 # profile_flag must word-split on the space
   anc audit --command "$binary" $profile_flag --output json >"$out" 2>/dev/null
   rc=$?
-  if (( rc > 2 )); then
+  if (( rc > 3 )); then
     echo "  [fail] anc audit exited $rc"
     echo "$name anc-check-error-rc=$rc" >> "$FAILURES"
     rm -f "$out"
