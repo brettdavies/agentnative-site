@@ -79,6 +79,7 @@ Two constraints shape the work. A cold render takes 10 to 12 s, above Discord's 
 - Audio, animated GIF previews, and an animated `og:image`: no platform in the priority list plays them. Not built.
 - Clips on pages other than scorecards. Not built.
 - Considered and not built: a dead-letter queue. A failed render recovers on the next audit (live) or the next pass (curated), and every failure is logged. A sustained failure rate in the `og.render` logs would change this call.
+- Considered and not built: re-rendering live-audited sites when the template version changes (DX D14 kept R6). Curated cards re-render through the curated pass the same day; a live site gets a clip in the new design on its next audit. A spread of live links losing video after a design change would revisit this.
 - Considered and not built: queue-level dedupe. The render checks for a fresh clip before any binding call, so a duplicate message costs one R2 `head`.
 
 #### Deferred to Follow-Up Work
@@ -99,12 +100,13 @@ Two constraints shape the work. A cold render takes 10 to 12 s, above Discord's 
 
 - KTD1. **A separate render Worker owns all drawing.** `anc-og-render` (staging `anc-og-render-staging`) draws the PNG, looks up the logo, renders frames, encodes the GIF, and calls the binding. The site Worker keeps data loading, card keys, public routes, page tags, and queue jobs. (session-settled: user-directed, chosen over a queue consumer inside the site Worker. One isolate serves concurrent requests on a single thread and shares 128 MB, so seconds of rendering there would stall page requests: https://developers.cloudflare.com/workers/reference/how-workers-works/ and https://developers.cloudflare.com/workers/platform/limits/#memory.) The `CONTEXT_DEV_API_KEY` secret, resvg-wasm, and the card fonts leave the site Worker.
 - KTD2. **Two queues and one service binding, with no cycle.**
-  - The site produces to `og-render`, and the render Worker consumes it.
+  - The site asks for a render with `RENDER.request(target, inputs)` over the service binding. The render Worker claims the card's `RenderJob` (KTD13) and sends to `og-render` only on a new claim; it is both the producer and the consumer of that queue.
+  - `og-render` consumers run with `max_batch_size` 1 and no `max_concurrency` cap, so each render starts as soon as its message lands and Cloudflare scales consumers to the backlog (a deploy's curated pass, a viral spike). `og-rendered` also runs with `max_batch_size` 1 so the purge lands right after the clip.
   - Queues are account-wide and named once, so staging uses `og-render-staging` and `og-rendered-staging` while production uses `og-render` and `og-rendered`. The per-environment render Workers (`anc-og-render`, `anc-og-render-staging`) do not isolate a queue they both name.
   - The render Worker produces to `og-rendered`, and the site consumes it to purge page tags. Purge only works inside the site's `Cached` entrypoint (`src/worker/audit-web/hit-min-purge.ts`).
-  - The site calls the render Worker over a service binding only to draw an on-demand PNG. That RPC applies the same template-version check as the queue: on a mismatch it returns a typed skew outcome, which the PNG route serves as its existing `503` without storing.
+  - The site also calls the render Worker to draw an on-demand PNG. That RPC applies the same template-version check as the queue: on a mismatch it returns a typed skew outcome, which the PNG route serves as its existing `503` without storing.
 
-  Deploy order: create the queues once, deploy the render Worker, then deploy the site Worker (https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/#deployment).
+  Deploy order: create the queues once (`scripts/og/setup.sh`, KTD14), deploy the render Worker, then deploy the site Worker (https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/#deployment).
 - KTD3. **Card inputs travel in the message.** The site builds them with `loadScoreOgSubject` at enqueue time, because it holds `ASSETS`, the registry, and the records. The message carries the target, lane, card key, card fields, logo pages, and scored-at instant. The render Worker never reads site records.
 - KTD4. **Card key grammar: `s<pct>-v<spec>-<edition>-r<template>`.**
   - The edition is `d<YYYYMMDD>` for web (UTC, from `scored_at`).
@@ -140,7 +142,15 @@ Two constraints shape the work. A cold render takes 10 to 12 s, above Discord's 
   - Curated CLI pages are static assets. The Worker injects the block when serving them, and they gain a `Cache-Tag: cli:<slug>` so the `og-rendered` consumer can purge them.
   - The clip URL uses the same base as `og:image` (`CANONICAL_SITE_URL`).
 - KTD11. **The clip route serves R2 directly and never renders.** `/og/clip/<target>/<key>.mp4` answers `GET` and `HEAD` with the whole object as a `200`. It sends `content-type: video/mp4`, `accept-ranges: bytes`, `x-robots-tag: noindex`, and the PNG's immutable cache class. A missing clip is a `404`. A stale key gets a `301` to the current key only when that clip exists. Range requests are answered by Workers Caching on the `Cached` entrypoint: it strips `Range`, stores the full `200`, and returns `206` or `416` itself, cold cache included. A `206` built by the Worker would be uncacheable (https://developers.cloudflare.com/workers/cache/configuration/#range-requests). An MP4 whose `moov` box sits after `mdat` needs that `206`, which the live smoke asserts.
-- KTD12. **Telemetry goes through the emitter.** The render Worker logs through `src/worker/telemetry/log.ts` under a new `og.render` scope: outcome, lane, logo source, duration bucket, and binding error code. Nothing render-related enters the scorecard.
+- KTD12. **Telemetry goes through the emitter.** The render Worker logs through `src/worker/telemetry/log.ts` under a new `og.render` scope: outcome, lane, logo source, duration bucket, binding error code, the `RenderJob` run id, and the card key (which carries no host name). The same run id rides `x-anc-clip-run` on scorecard responses whose `x-anc-clip` is `queued`, `rendering` or `failed`, and `status.sh` prints it (`value.run_id` in `--json`), so a failure matches its log line directly (DX D16). Nothing render-related enters the scorecard.
+- KTD13. **A `RenderJob` Durable Object single-flights each card, the way `AuditJob` single-flights each audit.** (session-settled: user-directed, chosen over a KV in-flight flag: KV lags across locations, so duplicate renders would slip through and nothing could attach.) It lives in the render Worker under `idFromName('<target>:<key>')`.
+  - `request()` claims the job and enqueues; a job already queued or rendering inside its deadline is not enqueued again, and the caller gets its state (`queued`, `rendering`, `done`, `failed`) instead. A claim past the deadline takes over with a new run id, as `AuditJob` does.
+  - `status()` reads the state; `wait(deadline)` resolves when the job reaches a terminal state or the deadline passes. The on-demand PNG RPC waits briefly on a running job's PNG before drawing its own; status tooling and the smoke watch through these.
+  - The queue job marks `rendering` and then `done` or `failed`; an alarm deletes the job's storage after the terminal state plus a grace period, so no state outlives it.
+  - Different cards claim different objects, so they render in parallel; one card renders once however many triggers ask for it.
+- KTD14. **One idempotent command sets og:video up and checks it.** (session-settled: user-directed, chosen over a hand-run RELEASES.md command list.) `scripts/og/setup.sh <staging|production>` creates either queue that is missing, sets `CONTEXT_DEV_API_KEY` on the render Worker from the 1Password item `Context.dev API Key` without echoing it, deletes the key from the site Worker, then verifies queues, secrets and the switch and prints what is left. `--check` verifies without changing anything, and the release preflight runs it before the og-cards smoke. Before the render Worker's first deploy, the secret steps cannot run: the script reports them as pending with the instruction to rerun after the deploy and exits non-zero, and `--check` reports the same, so a half-finished setup never reads as done.
+- KTD15. **The og scripts speak the agent-ready error contract.** (session-settled: user-directed, chosen over prose-only output with `--help`.) `scripts/og/setup.sh` and `scripts/og/status.sh` print prose by default and, with `--json`, one object `{reason, exit_code, message, value, next_step: {action, command, docs}}`. `reason` comes from a closed set (`ok`, `render-worker-missing`, `queue-missing`, `secret-missing`, `site-secret-present`, `switch-off`, `clip-missing`, `clip-rendering`, `clip-failed`, `card-fallback`), each failure class has its own non-zero exit, `next_step.command` is safe to run unattended, and no secret value appears in either form. Both scripts carry a `--help` usage header.
+- KTD16. **Local dev runs the whole clip pipeline with a stand-in for the binding.** (session-settled: user-directed, chosen over staging-only clips.) The video binding has no local simulation, so when `LOCAL_MEDIA_STANDIN` is `'true'` the render job skips the binding and stores a committed sample MP4; the queue, `RenderJob`, R2 writes, purge, page tag, `x-anc-clip` and `status.sh` all run as in production. The var lives only in the render Worker's local `.dev.vars`, never in a `vars` block, and a config test fails if any deployed environment declares it. Real encoding is proven by the staging smoke.
 
 ### High-Level Technical Design
 
@@ -148,8 +158,9 @@ Components and data flow:
 
 ```mermaid
 flowchart TB
-  A[Audit finishes: web core, rescore step, Sandbox DO] -->|enqueue: target, card inputs, key| Q1[(og-render queue)]
-  P[Curated pass: deploy hook + weekly cron] -->|missing or older than 21 days| Q1
+  A[Audit finishes: web core, rescore step, Sandbox DO] -->|RENDER.request: target, card inputs, key| J[RenderJob claim per target and key]
+  P[Curated pass: deploy hook + weekly cron] -->|requestMany: missing or older than 21 days| J
+  J -->|new claim only; duplicates attach| Q1[(og-render queue)]
   Q1 --> R[anc-og-render: queue consumer]
   R --> L[Logo lookup with R2 cache]
   R --> F[Frames, per-frame GIF, Media binding]
@@ -181,7 +192,8 @@ stateDiagram-v2
 Render job, in order (directional):
 
 ```text
-on og-render message:
+on og-render message (sent only by a new RenderJob claim):
+  mark the RenderJob rendering
   if message.key template != this Worker's template: ack, skip   # deploy skew
   if clip(message.key) exists and uploaded < 21 days ago: ack, skip
   logo  = stored logo, else homepage icon, else brand logo (longer budget; no stored miss on timeout)
@@ -189,6 +201,7 @@ on og-render message:
   gif   = for each frame state in scoreOgFrames(card, motion): draw, quantize, append
   mp4   = media.input(gif).transform(1200x630).output(video, no audio)
   store png and mp4 with scored_at metadata; prune only older siblings
+  mark the RenderJob done (failed on error)
   send og-rendered {target, lane, key}
 ```
 
@@ -302,18 +315,22 @@ on og-render message:
 ### U4. Render Worker
 
 - **Goal:** `anc-og-render` turns queued card inputs into a stored PNG and clip, and draws one PNG on request.
-- **Requirements:** R1, R2, R4; KTD1, KTD2, KTD3, KTD5, KTD6, KTD7, KTD12.
+- **Requirements:** R1, R2, R4; KTD1, KTD2, KTD3, KTD5, KTD6, KTD7, KTD12, KTD13.
 - **Dependencies:** U1, U2, U3.
 - **Files:**
   - `src/og-render/index.ts` (queue handler and RPC entrypoint)
   - `src/og-render/render-job.ts`
   - `src/og-render/gif.ts`
+  - `src/og-render/render-job-do.ts`
   - `src/og-render/wrangler.jsonc`
+  - `tsconfig.worker.json` (include `src/og-render/**/*.ts`, which the current `src/worker` and `src/shared` globs miss)
   - `src/worker/og/render.ts`, `src/worker/og/fonts.ts`, `src/worker/og/logo.ts`, `src/worker/og/brand-logo.ts`, `src/worker/og/find-logo.ts`, `src/worker/og/resvg-wasm-module.ts`, `src/worker/og/fonts/*` (moved into the render Worker's module graph)
   - `src/worker/telemetry/log.ts`
   - `package.json`
   - `tests/og-render-job.test.ts`
   - `tests/og-render-gif.test.ts`
+  - `tests/og-render-job-do.test.ts`
+  - `src/og-render/fixtures/standin.mp4`
 - **Approach:**
   1. Queue handler, per message:
      - skip on a template-version mismatch;
@@ -325,9 +342,10 @@ on og-render message:
      - store both objects with metadata;
      - send `og-rendered`.
   2. Ack each message on success or skip. Let the queue retry on a binding or R2 error.
-  3. The RPC entrypoint draws one PNG from card inputs and returns its bytes with its logo outcome. It stores the PNG only after a definitive logo outcome, and it returns a typed skew outcome when the inputs' template version differs from its own.
-  4. Fonts and resvg-wasm bundle into this Worker and leave the site's.
-  5. Its config carries `compatibility_flags` `nodejs_compat` (the log emitter's request context imports `node:async_hooks`) and `global_fetch_strictly_public` (the logo fetches run under it in the site today).
+  3. `RenderJob` (KTD13) with its `request`, `status` and `wait` RPCs, its alarm cleanup, and a Durable Object migration (`new_sqlite_classes`) in both environments of the render Worker's config. The queue job marks the job `rendering`, then `done` or `failed`.
+  4. The RPC entrypoint draws one PNG from card inputs and returns its bytes with its logo outcome. It stores the PNG only after a definitive logo outcome, and it returns a typed skew outcome when the inputs' template version differs from its own.
+  5. Fonts and resvg-wasm bundle into this Worker and leave the site's. Under `LOCAL_MEDIA_STANDIN` (KTD16) the job stores `src/og-render/fixtures/standin.mp4` instead of calling the binding.
+  6. Its config carries `compatibility_flags` `nodejs_compat` (the log emitter's request context imports `node:async_hooks`) and `global_fetch_strictly_public` (the logo fetches run under it in the site today).
 - **Patterns to follow:**
   - #461's `findLogo` / `storeCard` for R2 access.
   - The og-cards fixture Worker's config for a second Worker in this repo.
@@ -344,7 +362,13 @@ on og-render message:
   - The RPC entrypoint returns PNG bytes for card inputs and stores them under the card key.
   - The RPC entrypoint does not store a PNG whose logo lookup timed out, and reports that outcome.
   - The RPC entrypoint returns the skew outcome for inputs carrying another template version, and logs it under its own `og.render` outcome.
-  - Every outcome emits one `og.render` record through the emitter.
+  - Every outcome emits one `og.render` record through the emitter, carrying the run id and card key and no host name.
+  - With `LOCAL_MEDIA_STANDIN` set, the job stores the stand-in MP4 and never calls the binding; without it, the stand-in path never runs.
+  - Two `request()` calls for the same target and key enqueue once; the second returns `queued` or `rendering`.
+  - Requests for two different cards both enqueue.
+  - A claim past the running deadline takes over with a new run id, and the stale run cannot mark the new run `done`.
+  - `wait()` resolves on `done` and on its own deadline; the alarm deletes the job's storage after terminal plus grace.
+  - The on-demand PNG RPC returns the running job's PNG when it lands within the wait, and draws its own otherwise.
 - **Verification:** Unit tests pass with fakes, and `wrangler deploy --dry-run` succeeds for both environments of the render Worker's config.
 
 ### U5. Site Worker wiring
@@ -365,23 +389,23 @@ on og-render message:
   - `tests/og-enqueue.test.ts`
   - `tests/wrangler-config.test.ts`
 - **Approach:**
-  1. The PNG route reads the stored card, else calls the render Worker's RPC. Preserved behaviour: 301 to the canonical key, alias target, and query-free path; 404 on a malformed path, unknown key grammar, or missing subject; 503 with `retry-after: 30` when R2 cannot be read; pending and unscored served `hit-min` and never stored; finished keys immutable; `x-robots-tag: noindex` on every PNG; `x-anc-card` on every PNG response, with `x-anc-card-logo` on drawn and stored cards alike. When the RPC fails or times out, the route serves the site default card (`/og-image.png` from `ASSETS`) with the `hit-min` cache class, stores nothing, and logs a distinct `score.og` outcome.
+  1. The PNG route reads the stored card, else calls the render Worker's RPC. Preserved behaviour: 301 to the canonical key, alias target, and query-free path; 404 on a malformed path, unknown key grammar, or missing subject; 503 with `retry-after: 30` when R2 cannot be read; pending and unscored served `hit-min` and never stored; finished keys immutable; `x-robots-tag: noindex` on every PNG; `x-anc-card` on every PNG response, with `x-anc-card-logo` on drawn and stored cards alike. When the RPC fails or times out, the route serves the site default card (`/og-image.png` from `ASSETS`) with the `hit-min` cache class and `x-anc-card: fallback`, stores nothing, and logs a distinct `score.og` outcome.
   2. The clip route follows KTD11.
-  3. The enqueue helper builds the message from `loadScoreOgSubject` and sends it only for finished keys with the switch on.
+  3. The request helper builds the card inputs from `loadScoreOgSubject` and calls `RENDER.request` only for finished keys with the switch on.
   4. The `queue()` handler purges the target's page tag through the `Cached` entrypoint.
-  5. Add to `wrangler.jsonc` in both environments: the `og-render` producer, the `og-rendered` consumer, and the `RENDER` service binding. Remove `CONTEXT_DEV_API_KEY` from the site's types.
+  5. Add to `wrangler.jsonc` in both environments: the `og-rendered` consumer and the `RENDER` service binding. The site does not bind `og-render`. Remove `CONTEXT_DEV_API_KEY` from the site's types.
 - **Test scenarios:**
   - The PNG route serves a stored card without an RPC call, with `x-anc-card: stored` and `x-anc-card-logo` read from its metadata.
   - Every preserved behaviour in step 1 keeps a test, rewritten against an RPC fake: the 301 cases, the 404 cases, the 503 with `retry-after`, pending and unscored never stored, and immutable finished keys.
   - A missing card calls the RPC once, and the response is immutable.
-  - An RPC failure or timeout serves the default card from `ASSETS` with `hit-min`, stores nothing, and logs the fallback outcome.
+  - An RPC failure or timeout serves the default card from `ASSETS` with `hit-min` and `x-anc-card: fallback`, stores nothing, and logs the fallback outcome.
   - An RPC skew outcome yields 503 and stores nothing.
   - An on-demand draw whose logo lookup timed out is served `hit-min` and is not stored.
   - A clip `GET` returns 200 `video/mp4` with `accept-ranges: bytes` and the full body, including when the request carries `Range`.
   - A clip `HEAD` returns headers without a body.
   - A missing clip returns 404 and is not edge-cached.
   - A stale key returns 301 when the current key's clip exists, and 404 otherwise.
-  - With `OG_VIDEO_ENABLED` unset, no message is sent. With `'true'`, one message is sent for a finished key and none for a pending one.
+  - With `OG_VIDEO_ENABLED` unset, no render is requested. With `'true'`, one `RENDER.request` call goes out for a finished key and none for a pending one.
   - An `og-rendered` message purges `web:<host>` for a web target and `cli:<slug>` for a CLI target.
   - Config parity: both envs declare the queues and the service binding. `OG_VIDEO_ENABLED` appears in no `vars` block.
 - **Verification:** The site bundle no longer contains resvg-wasm or the card fonts. The route and config tests pass.
@@ -407,7 +431,7 @@ on og-render message:
   1. Request-time web audits queue a render beside `queueHitMinPurge` and flush it with the purge.
   2. The rescore Workflow adds a step after a saved audit.
   3. The Sandbox DO enqueues after `wrote`; its env type gains the producer binding.
-  4. The curated pass reads `registry-index.json` and the seeds, computes each key, and heads each clip. It sends the missing and stale ones in `sendBatch` calls of at most 100 messages and 256 KB each.
+  4. The curated pass reads `registry-index.json` and the seeds, computes each key, and heads each clip. It passes the missing and stale ones to `RENDER.requestMany`, which claims each `RenderJob` and sends the new claims in `sendBatch` calls of at most 100 messages and 256 KB each.
   5. The pass is served at a secret-authed endpoint reusing `requireRescoreAuth`, which `src/worker/audit-web/rescore-trigger.ts` exports for it (it is module-private today). It is called from `scheduled()` on the weekly cron and from a new `deploy.yml` step after the rescore trigger in both jobs, with the same retry and Access-header shape.
 - **Test scenarios:**
   - A completed web audit through the endpoint enqueues once. A held or incomplete run enqueues nothing.
@@ -436,18 +460,21 @@ on og-render message:
   1. Add `og:video` placeholders to the live shell, filled only when the clip head succeeds.
   2. For curated pages, inject the same block into the asset HTML after the head, and add `Cache-Tag: cli:<slug>` to their responses.
   3. R2 trouble during the head omits the block and never fails the page.
+  4. Scorecard pages send `x-anc-clip`: `present` when the clip exists; otherwise the RenderJob's state (`queued`, `rendering`, `failed`), `off` when `OG_VIDEO_ENABLED` is not `'true'`, or `none` when no job exists. The `RENDER.status` call runs only when the clip is absent, so it is bounded by the page cache.
 - **Test scenarios:**
   - A web page with a stored clip emits all five `og:video` tags with the clip URL on the canonical base. Without the clip it emits none and keeps `og:image`.
   - A curated page gains the block when the clip exists, and its response carries `Cache-Tag: cli:<slug>`.
   - Pending and unscored pages never emit the block.
   - An R2 error during the head yields a 200 page with no block.
   - `og:type` stays `article`.
+  - `x-anc-clip` reads `present` with a stored clip, the job state when one exists, `off` with the switch unset, and `none` otherwise; a `RENDER.status` failure yields `none` and never fails the page.
+  - A `queued`, `rendering` or `failed` state also sends `x-anc-clip-run` with the job's run id.
 - **Verification:** Page tests pass. A staging fetch with `Accept: text/html` shows the block once the clip renders.
 
 ### U8. Deploy, config, and docs
 
 - **Goal:** Both Workers deploy in the right order with the right bindings, and the docs describe the result.
-- **Requirements:** R5, R6; KTD1, KTD2, KTD9.
+- **Requirements:** R5, R6; KTD1, KTD2, KTD9, KTD14.
 - **Dependencies:** U4, U5, U6.
 - **Files:**
   - `.github/workflows/deploy.yml`
@@ -458,24 +485,29 @@ on og-render message:
   - `knip.json`
   - `package.json`
   - `scripts/og/smoke.sh`
+  - `scripts/og/setup.sh`
+  - `tests/og-setup-script.test.ts`
+  - `scripts/release/preflight.sh`
   - `tests/wrangler-config.test.ts`
 - **Approach:**
   1. `deploy.yml` deploys the render Worker before the site in both jobs.
-  2. `RELEASES.md` gains:
-     - the one-time `wrangler queues create` commands for both environments, run before the stacked PR merges, since the first `dev` deploy after the merge fails without them;
-     - the one-time secret commands: `wrangler secret put CONTEXT_DEV_API_KEY` against the render Worker's config for production and `--env staging`, sourced from the 1Password item `Context.dev API Key` and run after the render Worker's first deploy, then `wrangler secret delete CONTEXT_DEV_API_KEY` on the site Worker in both environments;
+  2. `scripts/og/setup.sh <staging|production> [--check]` (KTD14), with a `bun test` (`tests/og-setup-script.test.ts`, stubbing `wrangler` and the 1Password reader on `PATH`, as `tests/workflow-gates.test.ts` drives shell) for its create, verify, pending and check-only paths, in prose and `--json` (KTD15). `scripts/release/preflight.sh e2e` runs it with `--check` before the og-cards smoke.
+  3. `RELEASES.md` gains:
+     - `scripts/og/setup.sh staging` and `scripts/og/setup.sh production` as the one-time setup, run before the stacked PR merges, since the first `dev` deploy after the merge fails without the queues; the script sets the render Worker's key after its first deploy and deletes the site's copy;
     - the existing line that calls the key a secret on both Workers, rewritten to name the render Worker only;
      - the switch flip;
-     - a note that the `og/` lifecycle rule now also covers clips.
-  3. `AGENTS.md` lists six kill switches.
-  4. `DESIGN.md` §4.13 covers the clip, the key grammar, and the render Worker.
-  5. `knip.json` lists the render Worker entry.
-  6. The `dev` script in `package.json` runs both configs in one session (`wrangler dev -c wrangler.jsonc -c src/og-render/wrangler.jsonc --env staging --local --port 8787`), so the site's service binding resolves locally. The local `CONTEXT_DEV_API_KEY` moves to the render Worker's staging `.dev.vars`, and `scripts/og/smoke.sh` and the Local dev section of `AGENTS.md` say so.
+     - a note that the `og/` lifecycle rule now also covers clips;
+     - a line in the cost-watch hand-off: render volume is the count of `og.render` records with a `rendered` outcome in Workers Logs, about $0.002 each once the binding's beta ends.
+  4. `AGENTS.md` lists six kill switches and gains a short og:video section in the shape of its MCP section: the two Workers and what each owns, the two queues per environment, the `RenderJob` gate, the switch, the `x-anc-card` and `x-anc-clip` headers, and the setup, smoke and status commands. Its Local dev section says the video binding has no local simulation and `--local` turns remote bindings off, so local runs set `OG_VIDEO_ENABLED` and `LOCAL_MEDIA_STANDIN` in `.dev.vars` and get the sample clip (KTD16); real encoding is checked on staging.
+  5. `DESIGN.md` §4.13 covers the clip, the key grammar, and the render Worker, and states the bump rule: any change to the card face or the motion bumps the template version, the curated pass re-renders curated cards the same day, and live sites re-render on their next audit (DX D14).
+  6. `knip.json` lists the render Worker entry.
+  7. The `dev` script in `package.json` runs both configs in one session (`wrangler dev -c wrangler.jsonc -c src/og-render/wrangler.jsonc --env staging --local --port 8787`), so the site's service binding resolves locally. The local `CONTEXT_DEV_API_KEY` moves to the render Worker's staging `.dev.vars`, and `scripts/og/smoke.sh` and the Local dev section of `AGENTS.md` say so.
 - **Test scenarios:**
   - The render Worker config's staging block sets `routes: []`, `triggers.crons: []`, and `workers_dev: false`.
   - Both blocks declare `media`, `SCORE_CACHE`, and both queues.
   - The site config's `RENDER` binding names the matching render Worker per environment.
   - Staging and production name different queues in both configs, and each queue has exactly one consumer.
+  - `LOCAL_MEDIA_STANDIN` appears in no `vars` block of either Worker's config, in any environment.
 - **Verification:** Config tests pass. A staging deploy from `dev` shows both Workers' `triggers` blocks with no custom domains on the render Worker.
 
 ### U9. Live verification
@@ -486,12 +518,17 @@ on og-render message:
 - **Files:**
   - `tests/e2e/og-cards.e2e.ts`
   - `scripts/og/smoke.sh`
-  - `RELEASES-PREFLIGHT.md`
+  - `scripts/og/status.sh`
+  - `tests/og-status-script.test.ts`
+  - `RELEASES-PREFLIGHT.md` (a reason-code table for KTD15, the anchor `next_step.docs` links to)
 - **Approach:**
   1. The first card fetch accepts `x-anc-card` `drawn` or `stored` and still asserts the fixture's logo tier through `x-anc-card-logo`. After the PNG assertions, poll the page (`Accept: text/html`, at most 60 s) until `og:video` appears.
   2. Then fetch the clip by path from the base under test. Staging pages advertise anc.dev URLs, so the path is taken from the tag and the host from the base.
-  3. Local runs skip the clip assertions, because the binding has no local mode.
-  4. Record three staging measurements in the PR: on-demand PNG latency for a request issued while a render is in flight, the same latency for the first on-demand draw after the render Worker deploys (cold start), and the render Worker's memory per invocation from Workers metrics.
+  3. Local runs assert `og:video`, `x-anc-clip` and the clip route against the stand-in clip (KTD16) and skip only the Range and track-size checks, which depend on the edge cache and real encoding.
+  4. Record four staging measurements in the PR: on-demand PNG latency for a request issued while a render is in flight, the same latency for the first on-demand draw after the render Worker deploys (cold start), the render Worker's memory per invocation from Workers metrics, and the first-run wall clock from the first `scripts/og/setup.sh staging` to the green `preflight.sh e2e`, split into setup, deploy wait, rerun and preflight, against the about-5-minute target (DX D6, D18).
+  5. The smoke ends with one result line per fixture: host, logo tier, `x-anc-card` (`drawn` or `stored`), seconds from audit finish to `og:video` named, Range `206` ok, and the clip URL. These are the numbers step 4 records in the PR.
+  6. When `og:video` does not appear within 60 s, the smoke fails with the page's last `x-anc-clip` value and its next command: `off` names `scripts/og/setup.sh <env> --check`; `failed` names `bunx wrangler tail anc-og-render-staging --format json` and the `og.render` outcome to look for; `queued` or `rendering` names the queue backlog check; `none` names the `score.og` request log.
+  7. `scripts/og/status.sh <base-url> <target>` prints one line for any scorecard from public routes (Access headers when set): card key, `x-anc-card` and logo tier, `x-anc-clip`, whether the page names `og:video`, and the next command when something is missing. It shares the header parsing the smoke uses; `RELEASES-PREFLIGHT.md` names it for debugging a missing clip.
 - **Test scenarios:**
   - The page names `og:video` within 60 s of the audit.
   - The clip returns 200 `video/mp4`.
@@ -892,18 +929,237 @@ None.
 
 - (confidence 4/10) A permanently failing binding input is retried up to the queue's retry count. Bounded by the deferred retry setting; failed operations are likely unbilled. No change.
 
+---
+
+## DX review (2026-10-27)
+
+Target: this plan at `85b9c52` on `dev`. Product type: Platform, operator and contributor audience (DX D1). Mode: DX expansion (DX D8).
+
+### Target developer persona
+
+```text
+TARGET DEVELOPER PERSONA
+========================
+Who:       an AI coding agent operating releases (DX D2)
+Context:   opens the repo fresh to ship or debug og:video; follows AGENTS.md, RELEASES.md and preflight.sh literally
+Tolerance: cannot ask mid-run; retries blindly; every unexplained failure costs a full re-run and tokens
+Expects:   one command per step, a check after each, and errors that name the next command
+```
+
+### Developer perspective
+
+I'm an agent opening agentnative-site to ship og:video. AGENTS.md tells me `bun run dev` is the only valid preview and lists the kill switches; the plan adds `OG_VIDEO_ENABLED` as the sixth. I run `bun run dev`, which now starts both Workers. If I set `OG_VIDEO_ENABLED=true` locally to see a clip, the render Worker's video binding errors, because Cloudflare documents no local simulation for it and `--local` turns remote bindings off. For the first deploy, RELEASES.md gives me queue-create, secret put, secret delete and lifecycle notes as a list, and nothing tells me how to confirm each worked. On staging I set the switch, audit a site and run `preflight.sh e2e`. If `og:video` never appears, the smoke fails after 60 s without saying whether the switch is off, the queue is stuck or the binding failed, so I have to already know to tail `anc-og-render-staging` and fetch the clip route myself. (Confirmed by the owner, DX D3.)
+
+### Competitive benchmark
+
+Clock: an agent opening the repo with the task "ship og:video to staging", ending when the release preflight is green with a clip named on the page.
+
+| Tool | Start to result | Time and evidence | DX choice | Source |
+| --- | --- | --- | --- | --- |
+| Vercel OG | install to a PNG at `localhost:3000/api/og` | minutes, reported | local preview of the card at a URL, same code path as production | https://vercel.com/docs/og-image-generation |
+| Remotion Lambda | install to first cloud video render | about 30 min, reported by a third-party guide | one CLI command per setup step, `policies validate`, deploy safe to re-run | https://www.remotion.dev/docs/lambda/setup |
+| This plan, as written | fresh repo to green staging smoke with a clip | about 20 to 30 min, estimated | about 10 hand-run one-time steps with no checks; smoke failure is a bare 60 s timeout | this plan |
+| This plan, after the DX review | same clock | about 5 min, estimated until measured (DX D18) | `setup.sh` with `--check`, smoke result lines, named failure causes, `status.sh`, local stand-in | this plan |
+
+Times are not measured the same way; the comparison is about the DX choices.
+
+Target (DX D6, after D4 was re-asked with the clock clarified): about 5 minutes for an agent's first verified run on staging, less for repeats.
+
+Curated rendering stays in the render Worker (DX D5 kept D22): after the beta a full curated re-render costs about $0.30 (151 clips at about $0.002 each), nothing during the beta, and Cloudflare's 5,000 free monthly transforms cover about 1,250 clips.
+
+### DX decision ledger
+
+| ID | Decision | Answer | Plan change |
+| --- | --- | --- | --- |
+| DX D1 | Product type | Platform, operator and contributor | none |
+| DX D2 | Persona | AI coding agent operator | none |
+| DX D3 | Empathy narrative | accurate | Developer perspective section |
+| DX D4, D6 | Setup time target | about 5 minutes (D4 re-asked as D6 once the clock was clarified) | none yet; remedies decided below |
+| DX D5 | Curated rendering in CI | keep D22: render Worker | none |
+| DX D7 | Magical moment vehicle | smoke prints a result line per fixture | U9 step 5 |
+| DX D8 | Review mode | DX expansion | none |
+| DX D9 | One-time setup | `scripts/og/setup.sh` with `--check` | KTD14, U8 steps 2 and 3 |
+| DX D10 | Single-flight and parallel renders (owner requirement) | `RenderJob` Durable Object, like `AuditJob` | KTD2, KTD13, U4, U5, U6 |
+| DX D11 | Render start latency | resolved by D10: `max_batch_size` 1 delivers each message at once | KTD2 |
+| DX D12 | Smoke failure causes | `x-anc-clip` header and a named cause with its next command | U7 step 4, U9 step 6 |
+| DX D13 | Per-target debugging | `scripts/og/status.sh <base> <target>` | U9 step 7 |
+| DX D14 | Live clips after a template bump | keep R6: re-render on next audit | Scope Boundaries (considered, not built) |
+| DX D15 | Script output for agents | `--json` with a closed reason set and next_step | KTD15 |
+| DX D16 | Correlating a failed clip with its log | run id and card key on `og.render`, `x-anc-clip-run`, `status.sh` | KTD12, U4 and U7 tests |
+| DX D17 | Local pipeline iteration | stand-in MP4 under `LOCAL_MEDIA_STANDIN` | KTD16, U4, U8, U9 step 3 |
+| DX D18 | Measuring the setup clock | record the first-run time once in the stacked PR | U9 step 4 |
+| routine | Discover, local dev, cost watch | docs within U8's existing scope | U8 steps 3 and 4 |
+| routine | Typecheck coverage, script tests, fallback header, bump rule | factual corrections and D4 follow-through | U4 files, U8, U5 step 1, U8 step 5 |
+
+### Developer journey
+
+```text
+STAGE           | AGENT DOES                                        | FRICTION POINTS                            | STATUS
+----------------|---------------------------------------------------|--------------------------------------------|--------
+1. Discover     | reads AGENTS.md og:video section                  | no pipeline overview (routine fix)         | fixed
+2. Install      | scripts/og/setup.sh staging, then --check         | 10 hand-run steps, no checks (D9)          | fixed
+3. Hello World  | preflight.sh e2e -> result line per fixture       | bare 60 s timeout, no numbers (D7, D12)    | fixed
+4. Real Usage   | audits request renders; RenderJob gates duplicates| batching delay, duplicate renders (D10)    | fixed
+5. Debug        | scripts/og/status.sh <base> <target>              | five manual requests per target (D13)      | fixed
+6. Upgrade      | template bump re-renders curated via the pass     | live sites wait for re-audit (D14 kept R6) | ok, by decision
+   Local dev    | bun run dev, both Workers, switch unset           | binding errors under --local (routine)     | fixed
+```
+
+### First-time developer report
+
+```text
+Persona: AI coding agent operator
+T+0:00  Reads the AGENTS.md og:video section; knows the two Workers, the queues, the switch and the commands.
+T+0:30  Runs scripts/og/setup.sh staging before merging: queues created; the render Worker does not exist yet,
+        so the secret steps report pending with the rerun instruction and the script exits non-zero.
+T+2:00  Merges; deploy.yml deploys the render Worker, then the site.
+T+3:00  Reruns setup.sh staging: key set on the render Worker, site copy deleted, switch reported off with
+        the exact flip command. Flips it.
+T+4:00  preflight.sh e2e: setup --check passes; the smoke prints a result line per fixture.
+T+5:00  Pastes the result lines and the measurements into the PR. Near the about-5-minute target.
+```
+
+### Magical moment
+
+Vehicle (DX D7): the og-cards smoke ends with one line per fixture, for example `og-hires-<run>.anc.dev  logo=homepage  card=drawn  clip=named 8.4s after audit  range=206  https://<base>/og/clip/<target>/<key>.mp4`. Requirements: the line prints on success and on failure; on failure it names the `x-anc-clip` value and the next command (DX D12); the numbers are the ones U9 step 4 records in the PR.
+
+### NOT in scope (DX)
+
+- A recurring TTHW measurement or a telemetry pipeline for setup time: one recorded first run (DX D18) is the baseline; a later `/devex-review` re-measures.
+- Re-rendering live audits after a template bump: DX D14 kept R6.
+- CI pre-rendering of curated cards: DX D5 kept D22 (about $0.30 a month after the beta).
+- Community channels: private, single-maintainer repo with no public extension surface.
+
+### What already exists (DX)
+
+| Need | Existing piece | Reuse |
+| --- | --- | --- |
+| Single-flight with attach | `AuditJob` Durable Object and KV in-flight hints (`src/worker/audit/job.ts`, `inflight.ts`) | `RenderJob` mirrors it per target and key (DX D10) |
+| Diagnostic headers | `x-anc-card`, `x-anc-card-logo` from PR #461 | `x-anc-clip` and `x-anc-clip-run` follow the same `x-anc-*` naming |
+| Release gate | `scripts/release/preflight.sh e2e` with the og-cards smoke | runs `setup.sh --check` first and prints the result lines |
+| Secret reads | the 1Password skill's `read_field.sh` | `setup.sh` pipes the key without echoing it |
+| Shell script tests | `bun test` driving shell (`tests/workflow-gates.test.ts`) | `tests/og-setup-script.test.ts`, `tests/og-status-script.test.ts` |
+| Error contract | the global agent-ready contract (`reason`, `exit_code`, `message`, `value`, `next_step`) | KTD15 |
+
+### First-time developer report, addressed
+
+- Setup looked complete before the render Worker existed: addressed (KTD14 pending step, non-zero exit, `--check`).
+- Smoke timeout without a cause: addressed (DX D12).
+- Local clip errors: addressed (DX D17 stand-in).
+- No per-target view: addressed (DX D13).
+
+### DX implementation checklist
+
+```text
+DX IMPLEMENTATION CHECKLIST
+============================
+[ ] First verified staging run in about 5 minutes, measured once (D6, D18)
+[ ] One-time setup is one idempotent command with --check (D9, KTD14)
+[ ] The smoke prints a result line per fixture (D7)
+[ ] Every og error path meets the agent-ready contract: setup.sh, status.sh, smoke, PNG fallback, render job (Pass 3)
+[ ] x-anc-card on every PNG response, including fallback; x-anc-clip and x-anc-clip-run on scorecard pages
+[ ] --json with a closed reason set and next_step for setup.sh and status.sh (D15)
+[ ] RenderJob single-flights each card; different cards render in parallel (D10)
+[ ] Local dev runs the full pipeline with the stand-in clip; LOCAL_MEDIA_STANDIN in no deployed env (D17)
+[ ] AGENTS.md og:video section, RELEASES.md setup and cost watch, RELEASES-PREFLIGHT.md reason codes, DESIGN.md bump rule
+[ ] tsconfig.worker.json covers src/og-render
+[ ] Changelog and community items: not applicable (private repo; changelog comes from the PR body)
+```
+
+## DX Review Scorecard
+
+```text
++====================================================================+
+|              DX PLAN REVIEW - SCORECARD                             |
++====================================================================+
+| Dimension            | Score  | Prior  | Trend  |
+|----------------------|--------|--------|--------|
+| Getting Started      |  8/10  |  3/10  |  up    |
+| API/CLI/SDK          |  8/10  |  5/10  |  up    |
+| Error Messages       |  9/10  |  4/10  |  up    |
+| Documentation        |  8/10  |  5/10  |  up    |
+| Upgrade Path         |  8/10  |  6/10  |  up    |
+| Dev Environment      |  9/10  |  4/10  |  up    |
+| Community            |  n/a   |  n/a   |  -     |
+| DX Measurement       |  8/10  |  2/10  |  up    |
++--------------------------------------------------------------------+
+| TTHW                 | ~5 min | 20-30  |  down  |
+| Competitive Rank     | Competitive (estimated; measured by D18)     |
+| Magical Moment       | designed via smoke result lines (D7)         |
+| Product Type         | Platform, operator and contributor audience  |
+| Mode                 | EXPANSION                                    |
+| Overall DX           |  8/10  |  4/10  |  up    |
++====================================================================+
+| DX PRINCIPLE COVERAGE                                               |
+| Zero Friction      | covered (setup.sh, two-phase by deploy order)  |
+| Learn by Doing     | covered (status.sh, local stand-in)            |
+| Fight Uncertainty  | covered (x-anc-clip causes, --json)            |
+| Opinionated + Escape Hatches | covered (switch, --check, stand-in) |
+| Code in Context    | covered (AGENTS.md og:video section)           |
+| Magical Moments    | covered (result lines)                         |
+| Agents Are Users   | covered (agent-ready contract, run ids)        |
++====================================================================+
+```
+
+Every scored pass is at 8 or above: the DX plan is solid for an agent operator. The scores are planned, not measured; DX D18 records the first measured run.
+
+Note: DX D10 (RenderJob), D12, D16 and D17 change the architecture after the eng review at `85b9c52`; the eng review's findings still apply, but it did not see these changes.
+
+### Unresolved decisions (DX)
+
+None.
+
+## Implementation Tasks (DX review)
+
+- [ ] **T1 (P1, human: ~2 days / CC: ~1 hour)**: render Worker: `RenderJob` Durable Object with `request`, `status`, `wait`, alarm cleanup and migration; queues at `max_batch_size` 1, no concurrency cap
+  - Surfaced by: owner requirement (DX D10)
+  - Files: `src/og-render/render-job-do.ts`, `src/og-render/index.ts`, `src/og-render/wrangler.jsonc`, `tests/og-render-job-do.test.ts`
+  - Verify: `bun test tests/og-render-job-do.test.ts`; duplicate requests enqueue once on staging
+- [ ] **T2 (P1, human: ~3 hours / CC: ~20 min)**: `scripts/og/setup.sh` with `--check`, pending step and `--json`
+  - Surfaced by: Install friction (DX D9, D15)
+  - Files: `scripts/og/setup.sh`, `tests/og-setup-script.test.ts`, `scripts/release/preflight.sh`
+  - Verify: `bun test tests/og-setup-script.test.ts`; `scripts/og/setup.sh staging --check`
+- [ ] **T3 (P1, human: ~3 hours / CC: ~15 min)**: `x-anc-clip` and `x-anc-clip-run` on scorecard pages; smoke failures name the cause
+  - Surfaced by: Hello World friction, Pass 3 (DX D12, D16)
+  - Files: `src/worker/audit/result.ts`, `tests/audit-result-route.test.ts`, `tests/e2e/og-cards.e2e.ts`
+  - Verify: `bun test tests/audit-result-route.test.ts`; a smoke run with the switch off fails naming `setup.sh --check`
+- [ ] **T4 (P1, human: ~20 min / CC: ~2 min)**: `x-anc-card: fallback` on the default-card response; typecheck covers `src/og-render`
+  - Surfaced by: Pass 3 CAP4:png-fallback:channel; Pass 6
+  - Files: `src/worker/og/route.ts`, `tsconfig.worker.json`
+  - Verify: `bun test tests/score-og-route.test.ts`; `bun run typecheck`
+- [ ] **T5 (P2, human: ~2 hours / CC: ~10 min)**: `scripts/og/status.sh` with `--json`
+  - Surfaced by: Debug friction (DX D13, D15)
+  - Files: `scripts/og/status.sh`, `tests/og-status-script.test.ts`
+  - Verify: `bun test tests/og-status-script.test.ts`
+- [ ] **T6 (P2, human: ~1 hour / CC: ~5 min)**: smoke result line per fixture
+  - Surfaced by: magical moment (DX D7)
+  - Files: `tests/e2e/og-cards.e2e.ts`, `scripts/og/smoke.sh`
+  - Verify: `scripts/release/preflight.sh e2e` prints three result lines
+- [ ] **T7 (P2, human: ~3 hours / CC: ~15 min)**: local stand-in clip under `LOCAL_MEDIA_STANDIN`, with its config guard
+  - Surfaced by: Pass 6 (DX D17)
+  - Files: `src/og-render/render-job.ts`, `src/og-render/fixtures/standin.mp4`, `tests/wrangler-config.test.ts`
+  - Verify: `bun run dev` then the local og-cards smoke asserts `og:video`
+- [ ] **T8 (P2, human: ~2 hours / CC: ~10 min)**: docs: `AGENTS.md` og:video section and local dev, `RELEASES.md` setup and cost watch, `RELEASES-PREFLIGHT.md` reason codes, `DESIGN.md` bump rule
+  - Surfaced by: Discover, Upgrade, Pass 4
+  - Files: `AGENTS.md`, `RELEASES.md`, `RELEASES-PREFLIGHT.md`, `DESIGN.md`
+  - Verify: `bun run lint` (markdownlint)
+- [ ] **T9 (P3, human: ~10 min / CC: ~1 min)**: record the first-run wall clock in the stacked PR
+  - Surfaced by: Pass 8 (DX D18)
+  - Files: PR body
+  - Verify: the PR shows setup, deploy wait, rerun and preflight times
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |
 |--------|---------|-----|------|--------|----------|
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | not run | none |
-| Outside Review | codex via `/plan-eng-review` | Independent 2nd opinion | 1 | disabled | none (`codex_reviews` disabled) |
-| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 6 | issues_open | 9 issues, 0 critical gaps |
+| Outside Review | codex via `/plan-eng-review` and `/plan-devex-review` | Independent 2nd opinion | 2 | disabled | none (`codex_reviews` disabled) |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 6 | issues_open (stale: predates DX D10, D12, D16, D17) | 9 issues, 0 critical gaps, all resolved |
 | Design Review | `/plan-design-review` | UI/UX gaps | 2 | stale (other plans, 2026-09) | none for this plan |
-| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | not run | none |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 1 | clean | score: 4/10 to 8/10, TTHW: 20-30 min to ~5 min |
 
-- **OUTSIDE COVERAGE:** codex, plan-review phase, disabled by gstack config; no outside findings.
-- **VERDICT:** Eng Review ISSUES OPEN in name only: all 9 issues are resolved in the plan (D2 to D5 and three factual corrections), 0 unresolved, 0 critical gaps. Ready to implement after the DX review.
+- **OUTSIDE COVERAGE:** codex, plan-review phase, disabled by gstack config for both reviews; no outside findings.
+- **VERDICT:** DX CLEARED. Eng review is not cleared for the current plan: it found 9 issues, all resolved, but it predates the RenderJob gate (DX D10) and the D12, D16 and D17 changes, so a re-run is recommended before implementation.
 
 NO UNRESOLVED DECISIONS
 
