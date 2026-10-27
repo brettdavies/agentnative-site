@@ -8,6 +8,7 @@ import { keyFor as webKeyFor } from '../src/worker/audit-web/cache';
 import type { LogoFetch } from '../src/worker/og/logo';
 import type { ScoreOgFonts } from '../src/worker/og/render';
 import { handleScoreOg } from '../src/worker/og/route';
+import { keyFor as cliKeyFor } from '../src/worker/score/cache';
 import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 
@@ -26,10 +27,13 @@ async function fonts(): Promise<ScoreOgFonts> {
   return fontBuffers;
 }
 
+const SCORED_AT = '2026-10-26T10:00:00.000Z';
+
 const WEB_RECORD = {
   spec_version: SPEC_VERSION,
   target_url: 'https://anc.dev/',
   scorecard: { score_pct: 64, score: { relative: 64, global: 40 } },
+  scored_at: SCORED_AT,
 };
 
 const REGISTRY = {
@@ -53,6 +57,7 @@ const CURATED_JSON = JSON.stringify({
     spec_version: SPEC_VERSION,
     tool: { name: 'rg', binary: 'rg' },
     badge: { score_pct: 92 },
+    run: { started_at: '2026-10-05T18:42:23.480Z' },
   },
 });
 
@@ -61,7 +66,7 @@ type Overrides = { cache?: Record<string, unknown>; kv?: Record<string, string>;
 function makeEnv(overrides: Overrides = {}) {
   const cache = new Map(Object.entries(overrides.cache ?? {}).map(([key, value]) => [key, JSON.stringify(value)]));
   const kv = new Map(Object.entries(overrides.kv ?? {}));
-  const objects = new Map<string, Uint8Array>();
+  const objects = new Map<string, { bytes: Uint8Array; meta: Record<string, string> }>();
   return {
     ASSETS: {
       async fetch(req: Request) {
@@ -77,17 +82,22 @@ function makeEnv(overrides: Overrides = {}) {
     objects,
     SCORE_CACHE: {
       async get(key: string) {
-        const bytes = objects.get(key);
-        if (bytes) return { arrayBuffer: async () => bytes.slice().buffer };
+        const object = objects.get(key);
+        if (object) return { customMetadata: object.meta, arrayBuffer: async () => object.bytes.slice().buffer };
         const raw = cache.get(key);
         if (raw === undefined) return null;
         return { json: async () => JSON.parse(raw) };
       },
-      async put(key: string, value: Uint8Array) {
-        objects.set(key, new Uint8Array(value));
+      async put(key: string, value: Uint8Array, opts: { customMetadata?: Record<string, string> } = {}) {
+        objects.set(key, { bytes: new Uint8Array(value), meta: opts.customMetadata ?? {} });
       },
-      async list({ prefix }: { prefix: string }) {
-        return { objects: [...objects.keys()].filter((key) => key.startsWith(prefix)).map((key) => ({ key })) };
+      async list({ prefix, include }: { prefix: string; include?: string[] }) {
+        const withMeta = include?.includes('customMetadata') ?? false;
+        return {
+          objects: [...objects.entries()]
+            .filter(([key]) => key.startsWith(prefix))
+            .map(([key, object]) => (withMeta ? { key, customMetadata: object.meta } : { key })),
+        };
       },
       async delete(keys: string | string[]) {
         for (const key of Array.isArray(keys) ? keys : [keys]) objects.delete(key);
@@ -193,7 +203,7 @@ describe('scorecard OG route', () => {
     png(new Uint8Array(await res.arrayBuffer()));
   });
 
-  test('a logo fetch that never returns still produces a wordmark PNG', async () => {
+  test('a logo fetch that never returns draws the tile on the short cache and stores no card', async () => {
     const env = makeEnv({ cache: { [await webKeyFor('https://anc.dev/', SPEC_VERSION)]: WEB_RECORD } });
     const fetchImpl: LogoFetch = (_url, init) =>
       new Promise<Response>((_resolve, reject) => {
@@ -206,7 +216,11 @@ describe('scorecard OG route', () => {
     });
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('image/png');
+    expect(res.headers.get('cache-control')).not.toContain('immutable');
+    expect(res.headers.get('x-anc-card')).toBe('drawn');
+    expect(res.headers.get('x-anc-card-logo')).toBe('tile');
     png(new Uint8Array(await res.arrayBuffer()));
+    expect(cardKeys(env)).toEqual([]);
   });
 
   test.each([
@@ -240,6 +254,12 @@ describe('scorecard OG route', () => {
     const stored = cardKeys(env);
     expect(stored).toHaveLength(1);
     expect(stored[0]).toMatch(new RegExp(`^og/score/[0-9a-f]{64}/s64-v${SPEC_VERSION.replaceAll('.', '\\.')}\\.png$`));
+    expect(env.objects.get(stored[0])?.meta).toEqual({
+      target: 'anc.dev',
+      key: `s64-v${SPEC_VERSION}`,
+      logo: 'tile',
+      scored_at: SCORED_AT,
+    });
     const read = await handleScoreOg(request(path), env as never, {
       fetchImpl: async () => {
         throw new Error('a stored card is not drawn again');
@@ -248,6 +268,7 @@ describe('scorecard OG route', () => {
     expect(read.status).toBe(200);
     expect(read.headers.get('cache-control')).toContain('immutable');
     expect(read.headers.get('x-anc-card')).toBe('stored');
+    expect(read.headers.get('x-anc-card-logo')).toBe('tile');
     expect(new Uint8Array(await read.arrayBuffer())).toEqual(drawnBytes);
   });
 
@@ -257,10 +278,37 @@ describe('scorecard OG route', () => {
     await handleScoreOg(request(`/og/score/anc.dev/s64-v${SPEC_VERSION}.png`), env as never, deps);
     const [first] = cardKeys(env);
     const prefix = first.slice(0, first.lastIndexOf('/') + 1);
-    env.objects.set(`${prefix}s51-v${SPEC_VERSION}.png`, new Uint8Array([1]));
+    env.objects.set(`${prefix}s51-v${SPEC_VERSION}.png`, { bytes: new Uint8Array([1]), meta: {} });
     env.objects.delete(first);
     await handleScoreOg(request(`/og/score/anc.dev/s64-v${SPEC_VERSION}.png`), env as never, deps);
     expect(cardKeys(env)).toEqual([first]);
+  });
+
+  test.each([
+    ['a curated CLI card', '/og/score/ripgrep', `s92-v${SPEC_VERSION}`, {}, '2026-10-05T18:42:23.480Z'],
+    [
+      'a live CLI card',
+      '/og/score/livetool',
+      `s70-v${SPEC_VERSION}`,
+      {
+        [cliKeyFor('livetool', SPEC_VERSION)]: {
+          spec_version: SPEC_VERSION,
+          anc_version: ANC_VERSION,
+          tool_version: '1.0.0',
+          scorecard: { badge: { score_pct: 70 }, run: { started_at: '2026-10-20T09:00:00.000Z' } },
+        },
+      },
+      '2026-10-20T09:00:00.000Z',
+    ],
+  ])('%s is stored with the time its scorecard ran', async (_label, base, key, cache, scoredAt) => {
+    const env = makeEnv({ cache });
+    const res = await handleScoreOg(request(`${base}/${key}.png`), env as never, {
+      fonts: await fonts(),
+      fetchImpl: async () => new Response('no', { status: 404 }),
+    });
+    expect(res.status).toBe(200);
+    const [stored] = cardKeys(env);
+    expect(env.objects.get(stored)?.meta.scored_at).toBe(scoredAt);
   });
 
   test('a pending card is not stored', async () => {

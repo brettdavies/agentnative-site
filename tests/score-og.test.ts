@@ -139,8 +139,9 @@ describe('logo fetch', () => {
         return new Response('no', { status: 404 });
       },
     });
-    expect(logo?.mime).toBe('image/png');
-    expect(logo?.bytes.byteLength).toBe(icon.byteLength);
+    expect(logo.logo?.mime).toBe('image/png');
+    expect(logo.logo?.bytes.byteLength).toBe(icon.byteLength);
+    expect(logo.cutShort).toBe(false);
   });
 
   test('an icon smaller than the tile on either side is skipped', async () => {
@@ -154,7 +155,10 @@ describe('logo fetch', () => {
       return new Response('no', { status: 404 });
     };
     expect(rasterSize(TINY_PNG)).toEqual({ width: 1, height: 1 });
-    expect(await resolveLogo({ pages: ['https://example.com/'], fonts: await fonts(), fetchImpl })).toBeNull();
+    expect(await resolveLogo({ pages: ['https://example.com/'], fonts: await fonts(), fetchImpl })).toEqual({
+      logo: null,
+      cutShort: false,
+    });
   });
 });
 

@@ -32,7 +32,7 @@ async function writeCard(name: string, card: ScoreOgCard, face: ScoreOgFonts): P
 
 async function logoFor(page: string | null, face: ScoreOgFonts): Promise<ScoreOgCard['logo']> {
   if (!page) return null;
-  return resolveLogo({ pages: [page], fonts: face, budgetMs: 8_000 });
+  return (await resolveLogo({ pages: [page], fonts: face, budgetMs: 8_000 })).logo;
 }
 
 type CliFile = { spec_version?: string; badge?: { score_pct?: number }; tool?: { name?: string; binary?: string } };

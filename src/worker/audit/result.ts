@@ -37,6 +37,7 @@
 import {
   type AuditEnvelope,
   buildCliEnvelope,
+  cliScoredAt,
   curatedEntryForBinary,
   hasScorecard,
   type RegistryEntryLike,
@@ -417,12 +418,6 @@ async function registryOrNull(env: ResultEnv): Promise<RegistryIndex | null> {
   } catch {
     return null;
   }
-}
-
-function cliScoredAt(record: { scored_at?: unknown; scorecard: unknown }): string | null {
-  if (typeof record.scored_at === 'string') return record.scored_at;
-  const started = (record.scorecard as { run?: { started_at?: unknown } } | null)?.run?.started_at;
-  return typeof started === 'string' ? started : null;
 }
 
 /** A curated slug serves the build-emitted asset; anything but a 200 is not a hit. */

@@ -166,8 +166,8 @@ describe('findLogo', () => {
       brandApiKey: 'k',
       fetchImpl,
     });
-    expect(hit).toEqual({ logo: { mime: 'image/png', bytes: icon }, source: 'stored' });
-    expect(miss).toEqual({ logo: null, source: 'tile' });
+    expect(hit).toEqual({ logo: { mime: 'image/png', bytes: icon }, source: 'stored', settled: true });
+    expect(miss).toEqual({ logo: null, source: 'tile', settled: true });
     expect(sent).toEqual([]);
   });
 
@@ -182,14 +182,106 @@ describe('findLogo', () => {
         brandApiKey: 'k',
         fetchImpl,
       }),
-    ).toEqual({ logo: null, source: 'tile' });
+    ).toEqual({ logo: null, source: 'tile', settled: true });
     expect(await findLogo({ pages: ['https://tool.example/'], fonts: await fonts(), bucket: r2, fetchImpl })).toEqual({
       logo: null,
       source: 'tile',
+      settled: true,
     });
     expect(sent.some((s) => s.url === BRAND_ENDPOINT)).toBe(false);
     expect(objects.get(await logoKey('github.com'))?.meta.miss).toBe('1');
     expect(objects.get(await logoKey('tool.example'))?.meta.miss).toBe('1');
+  });
+
+  test('a homepage lookup cut short by its budget yields the tile and stores nothing', async () => {
+    const { objects, r2 } = bucket();
+    const fetchImpl: LogoFetch = (_url, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      });
+    const found = await findLogo({
+      pages: ['https://slow.example/'],
+      fonts: await fonts(),
+      bucket: r2,
+      fetchImpl,
+      budgetMs: 30,
+    });
+    expect(found).toEqual({ logo: null, source: 'tile', settled: false });
+    expect(objects.size).toBe(0);
+  });
+
+  test('a brand lookup the API could not answer stores no miss', async () => {
+    const { objects, r2 } = bucket();
+    const { fetchImpl } = stub({
+      'https://www.example.com/': () => new Response(homepage(null), { headers: { 'content-type': 'text/html' } }),
+      [BRAND_ENDPOINT]: () => new Response('busy', { status: 503 }),
+    });
+    const found = await findLogo({
+      pages: ['https://www.example.com/'],
+      fonts: await fonts(),
+      bucket: r2,
+      brandApiKey: 'k',
+      fetchImpl,
+    });
+    expect(found).toEqual({ logo: null, source: 'tile', settled: false });
+    expect(objects.size).toBe(0);
+  });
+
+  test.each([
+    ['a network error', () => Promise.reject(new TypeError('connection reset'))],
+    ['a 503', () => Promise.resolve(new Response('busy', { status: 503 }))],
+    ['a 429', () => Promise.resolve(new Response('slow down', { status: 429 }))],
+  ])('a homepage that answers with %s stores nothing', async (_label, answer) => {
+    const { objects, r2 } = bucket();
+    const fetchImpl: LogoFetch = () => answer();
+    const found = await findLogo({ pages: ['https://down.example/'], fonts: await fonts(), bucket: r2, fetchImpl });
+    expect(found).toEqual({ logo: null, source: 'tile', settled: false });
+    expect(objects.size).toBe(0);
+  });
+
+  test('a settled brand answer is stored, so a slow homepage does not repeat the paid lookup', async () => {
+    const { objects, r2 } = bucket();
+    let brandCalls = 0;
+    const fetchImpl: LogoFetch = (input, init) => {
+      if (String(input) === BRAND_ENDPOINT) {
+        brandCalls += 1;
+        return Promise.resolve(Response.json({ brand: { logos: [] } }));
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      });
+    };
+    const face = await fonts();
+    const lookup = () =>
+      findLogo({
+        pages: ['https://www.slow.example/'],
+        fonts: face,
+        bucket: r2,
+        brandApiKey: 'k',
+        fetchImpl,
+        budgetMs: 30,
+      });
+    expect(await lookup()).toEqual({ logo: null, source: 'tile', settled: false });
+    expect(await lookup()).toEqual({ logo: null, source: 'tile', settled: false });
+    expect(brandCalls).toBe(1);
+    expect(objects.has(await logoKey('www.slow.example'))).toBe(false);
+  });
+
+  test('a brand answer with no logos stores a miss', async () => {
+    const { objects, r2 } = bucket();
+    const { fetchImpl } = stub({
+      'https://www.example.com/': () => new Response(homepage(null), { headers: { 'content-type': 'text/html' } }),
+      [BRAND_ENDPOINT]: () => Response.json({ brand: { logos: [] } }),
+    });
+    const found = await findLogo({
+      pages: ['https://www.example.com/'],
+      fonts: await fonts(),
+      bucket: r2,
+      brandApiKey: 'k',
+      fetchImpl,
+    });
+    expect(found).toEqual({ logo: null, source: 'tile', settled: true });
+    expect(objects.get(await logoKey('www.example.com'))?.meta.miss).toBe('1');
   });
 });
 
@@ -208,12 +300,34 @@ describe('brandLogoUrls', () => {
           },
         }),
     });
-    expect(await brandLogoUrls('example.com', 'k', fetchImpl, 1_000)).toEqual([
-      'https://media.brand.dev/big-icon.png',
-      'https://media.brand.dev/small-icon.png',
-      'https://media.brand.dev/wordmark.svg',
-    ]);
+    expect(await brandLogoUrls('example.com', 'k', fetchImpl, 1_000)).toEqual({
+      urls: [
+        'https://media.brand.dev/big-icon.png',
+        'https://media.brand.dev/small-icon.png',
+        'https://media.brand.dev/wordmark.svg',
+      ],
+      settled: true,
+    });
     const down = stub({ [BRAND_ENDPOINT]: () => new Response('err', { status: 500 }) });
-    expect(await brandLogoUrls('example.com', 'k', down.fetchImpl, 1_000)).toEqual([]);
+    expect(await brandLogoUrls('example.com', 'k', down.fetchImpl, 1_000)).toEqual({ urls: [], settled: false });
+  });
+
+  test.each([
+    [404, true],
+    [400, true],
+    [401, false],
+    [402, false],
+    [403, false],
+    [408, false],
+    [429, false],
+    [503, false],
+  ])('an HTTP %i answer settles the lookup: %p', async (status, settled) => {
+    const { fetchImpl } = stub({ [BRAND_ENDPOINT]: () => new Response('no', { status }) });
+    expect(await brandLogoUrls('example.com', 'k', fetchImpl, 1_000)).toEqual({ urls: [], settled });
+  });
+
+  test('a brand request that fails without an answer leaves the lookup unsettled', async () => {
+    const { fetchImpl } = stub({ [BRAND_ENDPOINT]: () => Promise.reject(new TypeError('connection reset')) });
+    expect(await brandLogoUrls('example.com', 'k', fetchImpl, 1_000)).toEqual({ urls: [], settled: false });
   });
 });

@@ -13,6 +13,7 @@
 
 import { logoCandidatesFromHtml, type ScoreOgLogo } from '../../shared/score-og';
 import { AUDIT_USER_AGENT } from '../../shared/user-agents';
+import { RETRY_SHAPED_STATUSES } from '../audit-web/handlers/shared';
 import { validatePublicUrl } from '../audit-web/ssrf';
 import { rasterizeSvgLogo, type ScoreOgFonts } from './render';
 
@@ -36,33 +37,51 @@ export type ResolveLogoInput = {
   now?: () => number;
 };
 
+/**
+ * `cutShort` is true when the lookup ended without an answer: the budget ran out, a request failed, or a server
+ * answered 5xx, 408 or 429. A null logo is then not a definitive miss.
+ */
+export type LogoLookup = { logo: ScoreOgLogo | null; cutShort: boolean };
+
+const CUT_SHORT = Symbol('cut-short');
+
 /** The first logo that draws, or null when the budget or the candidates run out. */
-export async function resolveLogo(input: ResolveLogoInput): Promise<ScoreOgLogo | null> {
+export async function resolveLogo(input: ResolveLogoInput): Promise<LogoLookup> {
   const fetchImpl = input.fetchImpl ?? fetch;
   const budgetMs = input.budgetMs ?? BUDGET_MS;
   const now = input.now ?? Date.now;
   const deadline = now() + budgetMs;
+  let cutShort = false;
   for (const page of input.pages) {
-    if (now() >= deadline) return null;
+    if (now() >= deadline) return { logo: null, cutShort: true };
     const html = await fetchText(page, fetchImpl, remaining(deadline, now));
+    if (html === CUT_SHORT) {
+      cutShort = true;
+      continue;
+    }
     if (html === null) continue;
     const candidates = logoCandidatesFromHtml(html.body, html.finalUrl).slice(0, MAX_CANDIDATES + 2);
     let tried = 0;
     for (const candidate of candidates) {
-      if (tried >= MAX_CANDIDATES || now() >= deadline) return null;
+      if (now() >= deadline) return { logo: null, cutShort: true };
+      if (tried >= MAX_CANDIDATES) return { logo: null, cutShort };
       if (candidate.startsWith('data:')) {
         const embedded = await logoFromDataUri(candidate, input.fonts);
-        if (embedded) return embedded;
+        if (embedded) return { logo: embedded, cutShort: false };
         continue;
       }
       tried += 1;
       const file = await fetchBytes(candidate, fetchImpl, remaining(deadline, now));
+      if (file === CUT_SHORT) {
+        cutShort = true;
+        continue;
+      }
       if (!file) continue;
       const logo = await logoFromBytes(file.bytes, file.contentType, input.fonts);
-      if (logo) return logo;
+      if (logo) return { logo, cutShort: false };
     }
   }
-  return null;
+  return { logo: null, cutShort };
 }
 
 /** One image URL through the same guarded fetch, as a card-ready logo or null. */
@@ -71,10 +90,11 @@ export async function logoFromUrl(
   fonts: ScoreOgFonts,
   fetchImpl: LogoFetch,
   timeoutMs: number,
-): Promise<ScoreOgLogo | null> {
+): Promise<LogoLookup> {
   const file = await fetchBytes(url, fetchImpl, timeoutMs);
-  if (!file) return null;
-  return logoFromBytes(file.bytes, file.contentType, fonts);
+  if (file === CUT_SHORT) return { logo: null, cutShort: true };
+  if (!file) return { logo: null, cutShort: false };
+  return { logo: await logoFromBytes(file.bytes, file.contentType, fonts), cutShort: false };
 }
 
 function remaining(deadline: number, now: () => number): number {
@@ -83,11 +103,15 @@ function remaining(deadline: number, now: () => number): number {
 
 type TextBody = { body: string; finalUrl: string };
 
-async function fetchText(rawUrl: string, fetchImpl: LogoFetch, timeoutMs: number): Promise<TextBody | null> {
+async function fetchText(
+  rawUrl: string,
+  fetchImpl: LogoFetch,
+  timeoutMs: number,
+): Promise<TextBody | null | typeof CUT_SHORT> {
   // Keep the first slice when the homepage is larger than the cap. Icon
   // links live in the head, and discarding the whole document drops them.
   const result = await fetchLimited(rawUrl, fetchImpl, timeoutMs, HTML_CAP, true);
-  if (!result) return null;
+  if (!result || result === CUT_SHORT) return result;
   const type = result.contentType;
   if (type && !type.includes('text/html') && !type.includes('application/xhtml') && !type.includes('text/plain')) {
     return null;
@@ -99,9 +123,9 @@ async function fetchBytes(
   rawUrl: string,
   fetchImpl: LogoFetch,
   timeoutMs: number,
-): Promise<{ bytes: Uint8Array; contentType: string } | null> {
+): Promise<{ bytes: Uint8Array; contentType: string } | null | typeof CUT_SHORT> {
   const result = await fetchLimited(rawUrl, fetchImpl, timeoutMs, IMAGE_CAP);
-  if (!result) return null;
+  if (!result || result === CUT_SHORT) return result;
   return { bytes: result.bytes, contentType: result.contentType };
 }
 
@@ -110,7 +134,7 @@ type Limited = { bytes: Uint8Array; contentType: string; finalUrl: string };
 /**
  * HTTPS GET through the same host check the web audit uses. Redirects are
  * followed by hand and re-checked. http is never requested. The body is
- * capped; a timeout aborts the socket.
+ * capped; a timeout aborts the socket and reports the request as timed out.
  */
 async function fetchLimited(
   rawUrl: string,
@@ -118,8 +142,8 @@ async function fetchLimited(
   timeoutMs: number,
   cap: number,
   truncate = false,
-): Promise<Limited | null> {
-  if (timeoutMs <= 0) return null;
+): Promise<Limited | null | typeof CUT_SHORT> {
+  if (timeoutMs <= 0) return CUT_SHORT;
   let current = publicHttps(rawUrl);
   if (!current) return null;
   const controller = new AbortController();
@@ -138,7 +162,7 @@ async function fetchLimited(
           },
         });
       } catch {
-        return null;
+        return CUT_SHORT;
       }
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get('location');
@@ -154,9 +178,9 @@ async function fetchLimited(
         current = validated;
         continue;
       }
-      if (!response.ok) return null;
+      if (!response.ok) return response.status >= 500 || RETRY_SHAPED_STATUSES.has(response.status) ? CUT_SHORT : null;
       const bytes = await readCap(response, cap, truncate);
-      if (!bytes) return null;
+      if (!bytes || bytes === CUT_SHORT) return bytes;
       return {
         bytes,
         contentType: (response.headers.get('content-type') ?? '').toLowerCase(),
@@ -175,7 +199,11 @@ function publicHttps(raw: string): string | null {
   return validated.url.toString();
 }
 
-async function readCap(response: Response, cap: number, truncate: boolean): Promise<Uint8Array | null> {
+async function readCap(
+  response: Response,
+  cap: number,
+  truncate: boolean,
+): Promise<Uint8Array | null | typeof CUT_SHORT> {
   const declared = Number(response.headers.get('content-length'));
   if (!truncate && Number.isFinite(declared) && declared > cap) return null;
   if (!response.body) {
@@ -201,7 +229,7 @@ async function readCap(response: Response, cap: number, truncate: boolean): Prom
       }
     }
   } catch {
-    return null;
+    return CUT_SHORT;
   }
   const out = new Uint8Array(total);
   let offset = 0;

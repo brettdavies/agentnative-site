@@ -19,7 +19,7 @@ import {
 } from '../../shared/score-og';
 import { applyHeaders, type CacheClassSpec } from '../headers';
 import { emitLog } from '../telemetry/log';
-import { findLogo } from './find-logo';
+import { findLogo, type LogoSource } from './find-logo';
 import { loadScoreOgFonts } from './fonts';
 import type { LogoFetch } from './logo';
 import { renderScoreOgPng, type ScoreOgFonts } from './render';
@@ -93,8 +93,8 @@ export async function handleScoreOg(request: Request, env: ScoreOgEnv, deps: Sco
   if (immutable) {
     const stored = await readStoredCard(env.SCORE_CACHE, subject.target, key).catch(() => null);
     if (stored) {
-      log('stored', started, undefined, subject.card.lane);
-      return pngResponse(request, url.pathname, stored, immutable, { 'x-anc-card': 'stored' });
+      log('stored', started, undefined, subject.card.lane, stored.logo ?? undefined);
+      return pngResponse(request, url.pathname, stored.png, immutable, cardDiagnostics('stored', stored.logo));
     }
   }
 
@@ -102,7 +102,7 @@ export async function handleScoreOg(request: Request, env: ScoreOgEnv, deps: Sco
     const fonts = deps.fonts ?? (await loadScoreOgFonts(env));
     const found =
       subject.pages.length === 0
-        ? { logo: null, source: 'tile' as const }
+        ? { logo: null, source: 'tile' as const, settled: true }
         : await findLogo({
             pages: subject.pages,
             fonts,
@@ -114,18 +114,17 @@ export async function handleScoreOg(request: Request, env: ScoreOgEnv, deps: Sco
             waitUntil: deps.waitUntil,
           });
     const png = await renderScoreOgPng({ ...subject.card, logo: found.logo }, fonts);
-    log('ok', started, undefined, subject.card.lane, found.source);
-    if (immutable) {
-      const store = storeCard(env.SCORE_CACHE, subject.target, key, png).catch((err: unknown) =>
+    log(found.settled ? 'ok' : 'logo-unsettled', started, undefined, subject.card.lane, found.source);
+    const finalCard = immutable && found.settled;
+    if (finalCard) {
+      const meta = { scoredAt: subject.scoredAt, logo: found.source };
+      const store = storeCard(env.SCORE_CACHE, subject.target, key, png, meta).catch((err: unknown) =>
         log('store-error', started, err, subject.card.lane),
       );
       if (deps.waitUntil) deps.waitUntil(store);
       else await store;
     }
-    return pngResponse(request, url.pathname, png, immutable, {
-      'x-anc-card': 'drawn',
-      'x-anc-card-logo': found.source,
-    });
+    return pngResponse(request, url.pathname, png, finalCard, cardDiagnostics('drawn', found.source));
   } catch (err) {
     log('error', started, err, subject.card.lane);
     return text(request, 500, 'scorecard image failed\n');
@@ -134,9 +133,13 @@ export async function handleScoreOg(request: Request, env: ScoreOgEnv, deps: Sco
 
 /**
  * `x-anc-card` says whether this response drew the card or read it from R2, and `x-anc-card-logo` which source the
- * drawn logo came from, so a live smoke can tell the paths apart. An edge hit replays the headers of the response it
- * cached.
+ * card's logo came from, read from the stored card's metadata on the stored path, so a live smoke can tell the paths
+ * apart. An edge hit replays the headers of the response it cached.
  */
+function cardDiagnostics(card: 'drawn' | 'stored', logo: LogoSource | null): Record<string, string> {
+  return logo ? { 'x-anc-card': card, 'x-anc-card-logo': logo } : { 'x-anc-card': card };
+}
+
 function pngResponse(
   request: Request,
   pathname: string,

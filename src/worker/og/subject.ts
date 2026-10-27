@@ -6,7 +6,7 @@
 // nothing stored yet. Unscored is a record whose headline is not a 0–100
 // percent. A real zero is a score.
 
-import { curatedEntryForBinary, hasScorecard, scorePctOf } from '../../shared/audit-envelope';
+import { cliScoredAt, curatedEntryForBinary, hasScorecard, scorePctOf } from '../../shared/audit-envelope';
 import { classifyTarget } from '../../shared/audit-routes';
 import { brandName, cliOgIdentity, type ScoreOgCard } from '../../shared/score-og';
 import { CANONICAL_SITE_URL } from '../../shared/site-url';
@@ -39,6 +39,8 @@ export type ScoreOgSubject =
       card: ScoreOgCard;
       /** HTTPS pages a logo may be fetched from. Empty when the card stays a wordmark. */
       pages: string[];
+      /** When the score was recorded; null for a pending card or a record without the stamp. */
+      scoredAt: string | null;
     }
   | { status: 'missing' }
   | { status: 'unavailable' };
@@ -78,6 +80,7 @@ async function loadWeb(env: ScoreOgEnv, host: string): Promise<ScoreOgSubject> {
     specVersion: record.spec_version,
     logo: null,
     pages: [`https://${host}/`],
+    scoredAt: record.scored_at ?? null,
   });
 }
 
@@ -119,6 +122,7 @@ async function loadCachedCli(env: ScoreOgEnv, target: string, registry: Registry
     specVersion: record.spec_version,
     logo: null,
     pages,
+    scoredAt: cliScoredAt(record),
   });
 }
 
@@ -134,12 +138,13 @@ async function curatedSubject(env: ScoreOgEnv, entry: RegistryEntry): Promise<Sc
     specVersion: envelope.spec_version,
     logo: null,
     pages: httpsPage(entry.url),
+    scoredAt: cliScoredAt({ scorecard: envelope.scorecard }),
   });
 }
 
-function ready(target: string, card: Omit<ScoreOgCard, never> & { pages: string[] }): ScoreOgSubject {
-  const { pages, ...rest } = card;
-  return { status: 'ready', target, card: rest, pages };
+function ready(target: string, card: ScoreOgCard & { pages: string[]; scoredAt: string | null }): ScoreOgSubject {
+  const { pages, scoredAt, ...rest } = card;
+  return { status: 'ready', target, card: rest, pages, scoredAt };
 }
 
 function pending(
@@ -158,6 +163,7 @@ function pending(
     specVersion: SPEC_VERSION,
     logo: null,
     pages,
+    scoredAt: null,
   });
 }
 
