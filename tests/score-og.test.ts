@@ -1,16 +1,21 @@
 // Scorecard card: the cache key, the lockup fallbacks, and a real 1200×630 PNG.
 
 import { describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import sharp from 'sharp';
 import {
   brandName,
   cliOgIdentity,
   fitName,
+  isImmutableScoreOgKey,
   logoCandidatesFromHtml,
+  parseScoreOgPath,
   renderScoreOgSvg,
+  SCORE_OG_TEMPLATE,
   type ScoreOgCard,
   scoreOgAlt,
+  scoreOgEdition,
   scoreOgKey,
   scoreOgPath,
   scoreOgUrl,
@@ -39,6 +44,8 @@ function pngSize(bytes: Uint8Array): { width: number; height: number } {
   return { width: view.getUint32(16), height: view.getUint32(20) };
 }
 
+const WEB_EDITION = scoreOgEdition({ lane: 'web', scoredAt: '2026-10-26T23:30:00.000Z' });
+
 const CARD: ScoreOgCard = {
   name: 'Railway',
   subtitle: 'railway.com',
@@ -46,26 +53,119 @@ const CARD: ScoreOgCard = {
   scorePct: 80,
   pending: false,
   specVersion: '0.6.0',
+  edition: WEB_EDITION,
   logo: null,
 };
 
+const R = `-r${SCORE_OG_TEMPLATE}`;
+
+function roundTrips(target: string, key: string): boolean {
+  return parseScoreOgPath(scoreOgPath(target, key))?.key === key;
+}
+
 describe('scorecard OG key', () => {
-  test('the key changes when the rounded score or the spec changes, and zero is a score', () => {
-    expect(scoreOgKey({ scorePct: 80.4, specVersion: '0.6.0' })).toBe('s80-v0.6.0');
-    expect(scoreOgKey({ scorePct: 79.5, specVersion: '0.6.0' })).toBe('s80-v0.6.0');
-    expect(scoreOgKey({ scorePct: 80, specVersion: '0.7.0' })).toBe('s80-v0.7.0');
-    expect(scoreOgKey({ scorePct: 0, specVersion: '0.6.0' })).toBe('s0-v0.6.0');
-    expect(scoreOgPath('railway.com', 's80-v0.6.0')).toBe('/og/score/railway.com/s80-v0.6.0.png');
-    expect(scoreOgUrl('https://anc.dev', 'owner/repo@branch', 's80-v0.6.0')).toBe(
-      'https://anc.dev/og/score/owner/repo@branch/s80-v0.6.0.png',
+  test('a web card keys on the rounded score, the spec, the UTC audit date, and the template', () => {
+    expect(WEB_EDITION).toEqual({ token: 'd20261026', label: '2026-10-26' });
+    const key = scoreOgKey({ scorePct: 80, specVersion: '0.6.0', edition: WEB_EDITION });
+    expect(key).toBe(`s80-v0.6.0-d20261026${R}`);
+    expect(scoreOgKey({ scorePct: 79.5, specVersion: '0.6.0', edition: WEB_EDITION })).toBe(key);
+    expect(scoreOgKey({ scorePct: 80, specVersion: '0.7.0', edition: WEB_EDITION })).toBe(`s80-v0.7.0-d20261026${R}`);
+    expect(scoreOgKey({ scorePct: 0, specVersion: '0.6.0', edition: WEB_EDITION })).toBe(`s0-v0.6.0-d20261026${R}`);
+    expect(scoreOgPath('railway.com', key)).toBe(`/og/score/railway.com/${key}.png`);
+    expect(scoreOgUrl('https://anc.dev', 'owner/repo@branch', key)).toBe(
+      `https://anc.dev/og/score/owner/repo@branch/${key}.png`,
+    );
+    expect(roundTrips('railway.com', key)).toBe(true);
+  });
+
+  test('a same-score re-audit on a later date mints a new key', () => {
+    const later = scoreOgEdition({ lane: 'web', scoredAt: '2026-10-27T00:00:01.000Z' });
+    expect(scoreOgKey({ scorePct: 80, specVersion: '0.6.0', edition: later })).not.toBe(
+      scoreOgKey({ scorePct: 80, specVersion: '0.6.0', edition: WEB_EDITION }),
     );
   });
 
-  test('pending wins, and a missing or out-of-range percent is unscored', () => {
-    expect(scoreOgKey({ scorePct: 80, specVersion: '0.6.0', pending: true })).toBe('pending');
-    expect(scoreOgKey({ scorePct: null, specVersion: '0.6.0' })).toBe('unscored');
-    expect(scoreOgKey({ scorePct: Number.NaN, specVersion: '0.6.0' })).toBe('unscored');
-    expect(scoreOgKey({ scorePct: 140, specVersion: '0.6.0' })).toBe('unscored');
+  test('a CLI card keys on its tool version and shows it with a v', () => {
+    const edition = scoreOgEdition({ lane: 'cli', toolVersion: '15.1.0' });
+    expect(edition).toEqual({ token: 't15.1.0', label: 'v15.1.0' });
+    expect(scoreOgEdition({ lane: 'cli', toolVersion: 'v15.1.0' })).toEqual(edition);
+    expect(scoreOgKey({ scorePct: 92, specVersion: '0.6.0', edition })).toBe(`s92-v0.6.0-t15.1.0${R}`);
+    expect(scoreOgEdition({ lane: 'cli', toolVersion: '1.0.0-beta.1' })).toEqual({
+      token: 't1.0.0_beta.1',
+      label: 'v1.0.0-beta.1',
+    });
+  });
+
+  test("a tool's raw --version line keys and shows the version number in it", () => {
+    expect(scoreOgEdition({ lane: 'cli', toolVersion: 'ripgrep 15.2.0' })).toEqual(
+      scoreOgEdition({ lane: 'cli', toolVersion: '15.2.0' }),
+    );
+    expect(
+      scoreOgEdition({
+        lane: 'cli',
+        toolVersion: 'curl 8.22.0 (x86_64-pc-linux-gnu) libcurl/8.22.0 OpenSSL/3.6.5 zlib/1.3.1.zlib-ng',
+      }),
+    ).toEqual({ token: 't8.22.0', label: 'v8.22.0' });
+  });
+
+  test('a version outside the key alphabet is hashed, stays distinct, and still parses back', () => {
+    const upper = scoreOgEdition({ lane: 'cli', toolVersion: '1.0.0-RC1' });
+    const lower = scoreOgEdition({ lane: 'cli', toolVersion: '1.0.0-rc1' });
+    const mixed = scoreOgEdition({ lane: 'cli', toolVersion: 'tool 1.0.0-Beta.2' });
+    const long = scoreOgEdition({ lane: 'cli', toolVersion: `1.2.3-${'a'.repeat(30)}` });
+    for (const edition of [upper, mixed, long]) {
+      expect(edition?.token).toMatch(/^h[0-9a-f]{8}$/);
+      expect(roundTrips('ouch', scoreOgKey({ scorePct: 70, specVersion: '0.6.0', edition }))).toBe(true);
+    }
+    expect(lower?.token).toBe('t1.0.0_rc1');
+    expect(new Set([upper?.token, lower?.token, mixed?.token, long?.token]).size).toBe(4);
+    expect(scoreOgEdition({ lane: 'cli', toolVersion: '1.0.0-RC1' })).toEqual(upper);
+    expect(upper?.label).toBe('v1.0.0-RC1');
+    expect(mixed?.label).toBe('v1.0.0-Beta.2');
+    expect(long?.label).toBe(`v1.2.3-${'a'.repeat(18)}…`);
+  });
+
+  test('a --version line with no version number in it gives the card no edition', () => {
+    for (const line of [
+      'Warning: could not connect to a running Ollama instance',
+      'ShellCheck - shell script analysis tool',
+      'Yazi',
+      'dev-build',
+    ]) {
+      expect([line, scoreOgEdition({ lane: 'cli', toolVersion: line })]).toEqual([line, null]);
+    }
+  });
+
+  test('a branch card keys on its short source sha, which wins over a tool version', () => {
+    const edition = scoreOgEdition({ lane: 'cli', toolVersion: '', sourceSha: 'ABCDEF1234567890' });
+    expect(edition).toEqual({ token: 'gabcdef1', label: 'abcdef1' });
+    expect(scoreOgEdition({ lane: 'cli', toolVersion: '2.0.0', sourceSha: 'abcdef1234' })?.token).toBe('gabcdef1');
+    const key = scoreOgKey({ scorePct: 51, specVersion: '0.6.0', edition });
+    expect(key).toBe(`s51-v0.6.0-gabcdef1${R}`);
+    expect(roundTrips('owner/repo@feature', key)).toBe(true);
+  });
+
+  test('a record with no usable date, version, or sha keys without an edition', () => {
+    expect(scoreOgEdition({ lane: 'web', scoredAt: null })).toBeNull();
+    expect(scoreOgEdition({ lane: 'web', scoredAt: 'not a date' })).toBeNull();
+    expect(scoreOgEdition({ lane: 'cli', toolVersion: '' })).toBeNull();
+    expect(scoreOgEdition({ lane: 'cli', toolVersion: '  ', sourceSha: 'xyz' })).toBeNull();
+    expect(scoreOgKey({ scorePct: 80, specVersion: '0.6.0', edition: null })).toBe(`s80-v0.6.0${R}`);
+    expect(roundTrips('railway.com', `s80-v0.6.0${R}`)).toBe(true);
+  });
+
+  test('pending and unscored keys carry no edition and are never immutable', () => {
+    expect(scoreOgKey({ scorePct: 80, specVersion: '0.6.0', pending: true, edition: WEB_EDITION })).toBe('pending');
+    expect(scoreOgKey({ scorePct: null, specVersion: '0.6.0', edition: WEB_EDITION })).toBe('unscored');
+    expect(scoreOgKey({ scorePct: Number.NaN, specVersion: '0.6.0', edition: null })).toBe('unscored');
+    expect(scoreOgKey({ scorePct: 140, specVersion: '0.6.0', edition: null })).toBe('unscored');
+    expect(isImmutableScoreOgKey('pending')).toBe(false);
+    expect(isImmutableScoreOgKey('unscored')).toBe(false);
+    expect(isImmutableScoreOgKey(`s80-v0.6.0-d20261026${R}`)).toBe(true);
+  });
+
+  test('a key in the earlier grammar no longer parses', () => {
+    expect(parseScoreOgPath('/og/score/railway.com/s80-v0.6.0.png')).toBeNull();
   });
 });
 
@@ -162,6 +262,40 @@ describe('logo fetch', () => {
   });
 });
 
+// A card is stored and edge-cached forever under its key, so a change to what
+// the card draws must ship with a new SCORE_OG_TEMPLATE. Record the new
+// template's fingerprint here; never overwrite an existing one.
+const FACE_FINGERPRINTS: Record<number, string> = {
+  1: 'c02c0019c91ee3dd',
+};
+
+describe('template version', () => {
+  test('the card face matches the fingerprint recorded for the current template', () => {
+    const faces = [
+      CARD,
+      {
+        ...CARD,
+        name: 'ripgrep',
+        subtitle: 'rg',
+        lane: 'cli' as const,
+        scorePct: 92,
+        edition: scoreOgEdition({ lane: 'cli', toolVersion: '15.2.0' }),
+      },
+      {
+        ...CARD,
+        name: 'r',
+        subtitle: 'o/r@feature',
+        lane: 'cli' as const,
+        scorePct: 51,
+        edition: scoreOgEdition({ lane: 'cli', sourceSha: 'abcdef1234' }),
+      },
+      { ...CARD, scorePct: null, pending: true, edition: null },
+    ].map(renderScoreOgSvg);
+    const fingerprint = createHash('sha256').update(faces.join('\n')).digest('hex').slice(0, 16);
+    expect(FACE_FINGERPRINTS[SCORE_OG_TEMPLATE]).toBe(fingerprint);
+  });
+});
+
 describe('card svg and png', () => {
   test('the svg names the score, draws the ANC mark, and uses a wordmark when there is no logo', () => {
     const svg = renderScoreOgSvg(CARD);
@@ -171,11 +305,28 @@ describe('card svg and png', () => {
     expect(svg).toContain('<polyline points="9,10 15,16 9,22"/>');
     expect(svg).not.toContain('<image ');
     expect(svg).toContain('>RA<');
-    const pending = renderScoreOgSvg({ ...CARD, scorePct: null, pending: true });
+    const pending = renderScoreOgSvg({ ...CARD, scorePct: null, pending: true, edition: null });
     expect(pending).toContain('>Pending<');
     expect(pending).not.toContain('%');
-    expect(scoreOgAlt({ name: 'Railway', lane: 'web', scorePct: 80 })).toBe(
-      'Railway scored 80%. agent-readiness audit on anc.dev.',
+  });
+
+  test('the footer shows the edition where the spec was, and the description names the spec', () => {
+    expect(renderScoreOgSvg(CARD)).toContain('· website audit  ·  2026-10-26<');
+    expect(renderScoreOgSvg(CARD)).not.toContain('spec v');
+    const cli = renderScoreOgSvg({
+      ...CARD,
+      name: 'ripgrep',
+      subtitle: 'rg',
+      lane: 'cli',
+      edition: scoreOgEdition({ lane: 'cli', toolVersion: '15.1.0' }),
+    });
+    expect(cli).toContain('· CLI scorecard  ·  v15.1.0<');
+    expect(renderScoreOgSvg({ ...CARD, edition: null })).toContain('· website audit<');
+    expect(scoreOgAlt({ name: 'Railway', lane: 'web', scorePct: 80, specVersion: '0.6.0' })).toBe(
+      'Railway scored 80% against spec v0.6.0. agent-readiness audit on anc.dev.',
+    );
+    expect(scoreOgAlt({ name: 'ripgrep', lane: 'cli', scorePct: 92, specVersion: null })).toBe(
+      'ripgrep scored 92%. agent-native CLI scorecard on anc.dev.',
     );
   });
 

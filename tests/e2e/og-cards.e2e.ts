@@ -61,7 +61,9 @@ for (const host of HOSTS) {
     const imageUrl = /<meta property="og:image" content="([^"]+)"/.exec(html)?.[1];
     expect(imageUrl, 'the scorecard page names a card').toBeDefined();
     const cardPath = new URL(imageUrl as string).pathname;
-    expect(cardPath).toMatch(new RegExp(`^/og/score/${host.replaceAll('.', '\\.')}/s\\d+-v[\\d.]+\\.png$`));
+    expect(cardPath).toMatch(
+      new RegExp(`^/og/score/${host.replaceAll('.', '\\.')}/s\\d+-v[\\d.]+-d\\d{8}-r\\d+\\.png$`),
+    );
 
     const first = await request.get(cardPath);
     expect(first.status()).toBe(200);

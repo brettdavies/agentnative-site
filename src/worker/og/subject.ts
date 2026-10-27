@@ -8,7 +8,7 @@
 
 import { cliScoredAt, curatedEntryForBinary, hasScorecard, scorePctOf } from '../../shared/audit-envelope';
 import { classifyTarget } from '../../shared/audit-routes';
-import { brandName, cliOgIdentity, type ScoreOgCard } from '../../shared/score-og';
+import { brandName, cliOgIdentity, type ScoreOgCard, scoreOgEdition } from '../../shared/score-og';
 import { CANONICAL_SITE_URL } from '../../shared/site-url';
 import { readInFlight } from '../audit/inflight';
 import {
@@ -78,6 +78,7 @@ async function loadWeb(env: ScoreOgEnv, host: string): Promise<ScoreOgSubject> {
     scorePct: finiteScore(scorePctOf(record.scorecard)),
     pending: false,
     specVersion: record.spec_version,
+    edition: scoreOgEdition({ lane: 'web', scoredAt: record.scored_at }),
     logo: null,
     pages: [`https://${host}/`],
     scoredAt: record.scored_at ?? null,
@@ -120,6 +121,7 @@ async function loadCachedCli(env: ScoreOgEnv, target: string, registry: Registry
     scorePct: finiteScore(scorePctOf(record.scorecard)),
     pending: false,
     specVersion: record.spec_version,
+    edition: scoreOgEdition({ lane: 'cli', toolVersion: record.tool_version, sourceSha: record.source_sha }),
     logo: null,
     pages,
     scoredAt: cliScoredAt(record),
@@ -136,6 +138,7 @@ async function curatedSubject(env: ScoreOgEnv, entry: RegistryEntry): Promise<Sc
     scorePct: finiteScore(envelope.score_pct),
     pending: false,
     specVersion: envelope.spec_version,
+    edition: scoreOgEdition({ lane: 'cli', toolVersion: envelope.tool_version }),
     logo: null,
     pages: httpsPage(entry.url),
     scoredAt: cliScoredAt({ scorecard: envelope.scorecard }),
@@ -161,6 +164,7 @@ function pending(
     scorePct: null,
     pending: true,
     specVersion: SPEC_VERSION,
+    edition: null,
     logo: null,
     pages,
     scoredAt: null,

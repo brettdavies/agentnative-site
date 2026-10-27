@@ -6,6 +6,7 @@
 // order. The og-30day-ttl lifecycle rule (RELEASES.md) bounds whatever
 // remains.
 
+import { SCORE_OG_TEMPLATE } from '../../shared/score-og';
 import { sha256Hex } from '../audit-web/cache';
 import { LOGO_SOURCES, type LogoSource } from './find-logo';
 
@@ -40,7 +41,12 @@ export async function storeCard(
 ): Promise<void> {
   const prefix = await targetPrefix(target);
   const name = `${prefix}${key}.png`;
-  const customMetadata: Record<string, string> = { target, key, logo: meta.logo };
+  const customMetadata: Record<string, string> = {
+    target,
+    key,
+    logo: meta.logo,
+    template: String(SCORE_OG_TEMPLATE),
+  };
   if (meta.scoredAt) customMetadata.scored_at = meta.scoredAt;
   await bucket.put(name, png, { httpMetadata: { contentType: 'image/png' }, customMetadata });
   const scoredAt = scoredAtMs(meta.scoredAt);

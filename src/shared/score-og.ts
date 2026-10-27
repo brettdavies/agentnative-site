@@ -2,17 +2,24 @@
 // SVG. The Worker rasterizes the SVG; this module stays free of wasm so the
 // build and the unit tests can call it.
 //
-// The URL carries the rounded score and the spec version
-// (`/og/score/<target>/s82-v0.6.0.png`). A rescore mints a new URL, so an
-// edge cache of the previous PNG does not have to be purged to stop lying.
-// `pending` and `unscored` are the two keys for a card that has no number yet.
+// The URL carries everything the card shows: the rounded score, the spec
+// version, the edition (a website's audit date, a CLI's tool version, a
+// branch's commit), and the template version
+// (`/og/score/<target>/s82-v0.6.0-d20261026-r1.png`). Any change to the card
+// mints a new URL, so an edge cache of the previous PNG does not have to be
+// purged to stop lying. `pending` and `unscored` are the two keys for a card
+// that has no number yet.
 
 import { isResultTarget, SCORE_PREFIX, scorePath } from './audit-routes';
 import { escHtml } from './esc-html';
+import { shortDate } from './result-spine';
 
 export const SCORE_OG_WIDTH = 1200;
 export const SCORE_OG_HEIGHT = 630;
 export const SCORE_OG_PREFIX = '/og/score/';
+
+/** Bump on any change to the card's layout or motion, so every card gets a new URL. */
+export const SCORE_OG_TEMPLATE = 1;
 
 /** Dark-mode foundation tokens, resolved to sRGB. SVG cannot read the oklch variables. */
 const COLOR = {
@@ -35,7 +42,14 @@ const COLOR = {
 const NAME_MAX_WIDTH = 700;
 const SUBTITLE_MAX_CHARS = 42;
 
-const KEY_RE = /^(?:pending|unscored|s(?:100|[1-9]?\d)-v\d+(?:\.\d+){0,3})$/;
+const KEY_RE =
+  /^(?:pending|unscored|s(?:100|[1-9]?\d)-v\d+(?:\.\d+){0,3}(?:-(?:d\d{8}|t[a-z0-9._]{1,24}|h[0-9a-f]{8}|g[0-9a-f]{7}))?-r\d{1,4})$/;
+
+const SPEC_VERSION_RE = /^\d+(?:\.\d+){0,3}$/;
+/** anc records a tool's whole `--version` line (`curl 8.22.0 (x86_64…)`); the card shows the version number in it. */
+const VERSION_TOKEN_RE = /\d+(?:\.\d+){1,3}(?:-[0-9A-Za-z][0-9A-Za-z.]*)?/;
+const KEY_SAFE_VERSION_RE = /^[0-9a-z][0-9a-z.-]{0,23}$/;
+const EDITION_LABEL_MAX = 26;
 
 export type ScoreOgLane = 'web' | 'cli';
 
@@ -53,13 +67,45 @@ export type ScoreOgCard = {
   scorePct: number | null;
   pending: boolean;
   specVersion: string | null;
+  /** What distinguishes this scorecard from the target's others; null when its record carries none. */
+  edition: ScoreOgEdition | null;
   logo: ScoreOgLogo | null;
 };
+
+/** `token` goes in the key; `label` is what the card's footer shows. */
+export type ScoreOgEdition = { token: string; label: string };
+
+export type ScoreOgEditionInput = {
+  lane: ScoreOgLane;
+  scoredAt?: string | null;
+  toolVersion?: string | null;
+  sourceSha?: string | null;
+};
+
+/**
+ * A website's edition is its UTC audit date. A CLI's is its source commit
+ * when it was built from a branch, else its tool version.
+ */
+export function scoreOgEdition(input: ScoreOgEditionInput): ScoreOgEdition | null {
+  if (input.lane === 'web') {
+    const date = shortDate(input.scoredAt);
+    return date ? { token: `d${date.replaceAll('-', '')}`, label: date } : null;
+  }
+  const sha = input.sourceSha?.trim().toLowerCase() ?? '';
+  if (/^[0-9a-f]{7,}$/.test(sha)) return { token: `g${sha.slice(0, 7)}`, label: sha.slice(0, 7) };
+  const version = input.toolVersion?.match(VERSION_TOKEN_RE)?.[0];
+  if (!version) return null;
+  const token = KEY_SAFE_VERSION_RE.test(version) ? `t${version.replaceAll('-', '_')}` : `h${fnv1a32(version)}`;
+  const shown = `v${version}`;
+  const label = shown.length > EDITION_LABEL_MAX ? `${shown.slice(0, EDITION_LABEL_MAX - 1)}…` : shown;
+  return { token, label };
+}
 
 export type ScoreOgKeyInput = {
   scorePct: number | null;
   specVersion: string | null;
   pending?: boolean;
+  edition: ScoreOgEdition | null;
 };
 
 /** The filename stem. `pending` wins over a number: an in-flight run has no score yet. */
@@ -68,8 +114,9 @@ export function scoreOgKey(input: ScoreOgKeyInput): string {
   const rounded = roundedScore(input.scorePct);
   if (rounded === null) return 'unscored';
   const spec = input.specVersion?.trim() ?? '';
-  const safe = /^\d+(?:\.\d+){0,3}$/.test(spec) ? spec : '0';
-  return `s${rounded}-v${safe}`;
+  const safe = SPEC_VERSION_RE.test(spec) ? spec : '0';
+  const edition = input.edition ? `-${input.edition.token}` : '';
+  return `s${rounded}-v${safe}${edition}-r${SCORE_OG_TEMPLATE}`;
 }
 
 export function isScoreOgKey(key: string): boolean {
@@ -117,13 +164,15 @@ export function scoreOgAlt(input: {
   name: string;
   lane: ScoreOgLane;
   scorePct: number | null;
+  specVersion: string | null;
   pending?: boolean;
 }): string {
   const surface = input.lane === 'web' ? 'agent-readiness audit' : 'agent-native CLI scorecard';
   if (input.pending) return `${input.name}: audit in progress. ${surface} on anc.dev.`;
   const rounded = roundedScore(input.scorePct);
   if (rounded === null) return `${input.name}: unscored. ${surface} on anc.dev.`;
-  return `${input.name} scored ${rounded}%. ${surface} on anc.dev.`;
+  const spec = specLabel(input.specVersion);
+  return `${input.name} scored ${rounded}%${spec ? ` against spec ${spec}` : ''}. ${surface} on anc.dev.`;
 }
 
 const APEX_TLDS = new Set(['com', 'dev', 'io', 'org', 'net', 'app', 'ai', 'co', 'so', 'sh', 'fyi', 'xyz']);
@@ -267,8 +316,7 @@ export function renderScoreOgSvg(card: ScoreOgCard): string {
   const bar = rounded === null ? COLOR.track : barColor(rounded);
   const meterWidth = rounded === null ? 0 : Math.round((rounded / 100) * 1072);
   const lane = card.lane === 'web' ? 'website audit' : 'CLI scorecard';
-  const spec = card.specVersion && /^\d+(?:\.\d+){0,3}$/.test(card.specVersion) ? `spec v${card.specVersion}` : null;
-  const footerTail = [lane, spec].filter((part) => part !== null).join('  ·  ');
+  const footerTail = card.edition ? `${lane}  ·  ${card.edition.label}` : lane;
   const logo = logoMarkup(card.logo, wordmarkInitials(card.name));
 
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -314,6 +362,19 @@ function logoMarkup(logo: ScoreOgLogo | null, initials: string): string {
   return `<clipPath id="brand-logo"><rect x="${x}" y="${y}" width="${size}" height="${size}" rx="22"/></clipPath>
   <rect x="${x}" y="${y}" width="${size}" height="${size}" rx="22" fill="${COLOR.tile}"/>
   <image href="${href}" xlink:href="${href}" x="${x}" y="${y}" width="${size}" height="${size}" preserveAspectRatio="xMidYMid meet" clip-path="url(#brand-logo)"/>`;
+}
+
+function specLabel(specVersion: string | null): string | null {
+  return specVersion && SPEC_VERSION_RE.test(specVersion) ? `v${specVersion}` : null;
+}
+
+function fnv1a32(text: string): string {
+  let hash = 0x811c9dc5;
+  for (const byte of new TextEncoder().encode(text)) {
+    hash ^= byte;
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
 function roundedScore(scorePct: number | null): number | null {

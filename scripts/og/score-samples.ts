@@ -6,7 +6,7 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { cliOgIdentity, type ScoreOgCard } from '../../src/shared/score-og';
+import { cliOgIdentity, type ScoreOgCard, scoreOgEdition } from '../../src/shared/score-og';
 import { resolveLogo } from '../../src/worker/og/logo';
 import { renderScoreOgPng, type ScoreOgFonts } from '../../src/worker/og/render';
 
@@ -35,7 +35,11 @@ async function logoFor(page: string | null, face: ScoreOgFonts): Promise<ScoreOg
   return (await resolveLogo({ pages: [page], fonts: face, budgetMs: 8_000 })).logo;
 }
 
-type CliFile = { spec_version?: string; badge?: { score_pct?: number }; tool?: { name?: string; binary?: string } };
+type CliFile = {
+  spec_version?: string;
+  badge?: { score_pct?: number };
+  tool?: { name?: string; binary?: string; version?: string };
+};
 
 async function cliCard(file: string, slug: string, homepage: string | null, face: ScoreOgFonts): Promise<ScoreOgCard> {
   const scorecard = JSON.parse(await readFile(new URL(file, ROOT), 'utf8')) as CliFile;
@@ -46,6 +50,7 @@ async function cliCard(file: string, slug: string, homepage: string | null, face
     scorePct: scorecard.badge?.score_pct ?? null,
     pending: false,
     specVersion: scorecard.spec_version ?? null,
+    edition: scoreOgEdition({ lane: 'cli', toolVersion: scorecard.tool?.version }),
     logo: await logoFor(homepage, face),
   };
 }
@@ -55,12 +60,18 @@ await mkdir(OUT, { recursive: true });
 
 let railwayScore = 80;
 let railwaySpec = '0.6.0';
+let railwayScoredAt = '2026-10-26T12:00:00.000Z';
 try {
   const live = await fetch('https://anc.dev/score/railway.com/json', { headers: { accept: 'application/json' } });
   if (live.ok) {
-    const body = (await live.json()) as { score_pct?: unknown; spec_version?: unknown };
+    const body = (await live.json()) as {
+      score_pct?: unknown;
+      spec_version?: unknown;
+      freshness?: { scored_at?: unknown };
+    };
     if (typeof body.score_pct === 'number') railwayScore = body.score_pct;
     if (typeof body.spec_version === 'string') railwaySpec = body.spec_version;
+    if (typeof body.freshness?.scored_at === 'string') railwayScoredAt = body.freshness.scored_at;
   }
 } catch {
   // The known public score stands when the twin cannot be read.
@@ -76,6 +87,7 @@ await writeCard(
     scorePct: railwayScore,
     pending: false,
     specVersion: railwaySpec,
+    edition: scoreOgEdition({ lane: 'web', scoredAt: railwayScoredAt }),
     logo: railwayLogo,
   },
   face,
@@ -92,6 +104,7 @@ await writeCard(
     scorePct: null,
     pending: true,
     specVersion: '0.6.0',
+    edition: null,
     logo: null,
   },
   face,

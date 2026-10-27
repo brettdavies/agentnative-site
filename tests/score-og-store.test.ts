@@ -2,6 +2,7 @@
 // a target keeps its newest card even when two stores finish out of order.
 
 import { describe, expect, test } from 'bun:test';
+import { SCORE_OG_TEMPLATE } from '../src/shared/score-og';
 import { readStoredCard, storeCard } from '../src/worker/og/store';
 
 type Stored = { bytes: Uint8Array; meta: Record<string, string> };
@@ -36,6 +37,8 @@ function bucket() {
 const TARGET = 'anc.dev';
 const OLDER = '2026-10-20T10:00:00.000Z';
 const NEWER = '2026-10-26T10:00:00.000Z';
+const OLD_KEY = 's70-v0.6.0-d20261020-r1';
+const NEW_KEY = 's80-v0.6.0-d20261026-r1';
 
 function storedKeys(objects: Map<string, Stored>): string[] {
   return [...objects.keys()].map((key) => key.slice(key.lastIndexOf('/') + 1)).sort();
@@ -44,35 +47,36 @@ function storedKeys(objects: Map<string, Stored>): string[] {
 describe('storeCard', () => {
   test('an older card stored after a newer one leaves the newer card in place', async () => {
     const { objects, r2 } = bucket();
-    await storeCard(r2, TARGET, 's80-v0.6.0', new Uint8Array([2]), { scoredAt: NEWER, logo: 'homepage' });
-    await storeCard(r2, TARGET, 's70-v0.6.0', new Uint8Array([1]), { scoredAt: OLDER, logo: 'homepage' });
-    expect(storedKeys(objects)).toContain('s80-v0.6.0.png');
+    await storeCard(r2, TARGET, NEW_KEY, new Uint8Array([2]), { scoredAt: NEWER, logo: 'homepage' });
+    await storeCard(r2, TARGET, OLD_KEY, new Uint8Array([1]), { scoredAt: OLDER, logo: 'homepage' });
+    expect(storedKeys(objects)).toContain(`${NEW_KEY}.png`);
   });
 
   test('a newer card stored after an older one removes the older card', async () => {
     const { objects, r2 } = bucket();
-    await storeCard(r2, TARGET, 's70-v0.6.0', new Uint8Array([1]), { scoredAt: OLDER, logo: 'homepage' });
-    await storeCard(r2, TARGET, 's80-v0.6.0', new Uint8Array([2]), { scoredAt: NEWER, logo: 'homepage' });
-    expect(storedKeys(objects)).toEqual(['s80-v0.6.0.png']);
+    await storeCard(r2, TARGET, OLD_KEY, new Uint8Array([1]), { scoredAt: OLDER, logo: 'homepage' });
+    await storeCard(r2, TARGET, NEW_KEY, new Uint8Array([2]), { scoredAt: NEWER, logo: 'homepage' });
+    expect(storedKeys(objects)).toEqual([`${NEW_KEY}.png`]);
   });
 
   test('a card stored without a scored-at stamp counts as older than a stamped one', async () => {
     const { objects, r2 } = bucket();
-    await storeCard(r2, TARGET, 's70-v0.6.0', new Uint8Array([1]), { scoredAt: null, logo: 'tile' });
-    await storeCard(r2, TARGET, 's80-v0.6.0', new Uint8Array([2]), { scoredAt: NEWER, logo: 'homepage' });
-    expect(storedKeys(objects)).toEqual(['s80-v0.6.0.png']);
+    await storeCard(r2, TARGET, OLD_KEY, new Uint8Array([1]), { scoredAt: null, logo: 'tile' });
+    await storeCard(r2, TARGET, NEW_KEY, new Uint8Array([2]), { scoredAt: NEWER, logo: 'homepage' });
+    expect(storedKeys(objects)).toEqual([`${NEW_KEY}.png`]);
   });
 
   test('a card stored without a scored-at stamp deletes nothing', async () => {
     const { objects, r2 } = bucket();
-    await storeCard(r2, TARGET, 's80-v0.6.0', new Uint8Array([2]), { scoredAt: NEWER, logo: 'homepage' });
-    await storeCard(r2, TARGET, 's70-v0.6.0', new Uint8Array([1]), { scoredAt: null, logo: 'tile' });
-    expect(storedKeys(objects)).toEqual(['s70-v0.6.0.png', 's80-v0.6.0.png']);
+    await storeCard(r2, TARGET, NEW_KEY, new Uint8Array([2]), { scoredAt: NEWER, logo: 'homepage' });
+    await storeCard(r2, TARGET, OLD_KEY, new Uint8Array([1]), { scoredAt: null, logo: 'tile' });
+    expect(storedKeys(objects)).toEqual([`${OLD_KEY}.png`, `${NEW_KEY}.png`]);
   });
 
-  test('a stored card reads back with the logo source it was drawn with', async () => {
-    const { r2 } = bucket();
-    await storeCard(r2, TARGET, 's80-v0.6.0', new Uint8Array([7, 8]), { scoredAt: NEWER, logo: 'brand' });
-    expect(await readStoredCard(r2, TARGET, 's80-v0.6.0')).toEqual({ png: new Uint8Array([7, 8]), logo: 'brand' });
+  test('a stored card reads back with the logo source it was drawn with, and records its template', async () => {
+    const { objects, r2 } = bucket();
+    await storeCard(r2, TARGET, NEW_KEY, new Uint8Array([7, 8]), { scoredAt: NEWER, logo: 'brand' });
+    expect(await readStoredCard(r2, TARGET, NEW_KEY)).toEqual({ png: new Uint8Array([7, 8]), logo: 'brand' });
+    expect([...objects.values()][0]?.meta.template).toBe(String(SCORE_OG_TEMPLATE));
   });
 });

@@ -1,7 +1,7 @@
 // GET /og/score/<target>/<key>.png
 //
-// The key is the rounded score and the spec version (`s80-v0.6.0`), or
-// `pending` / `unscored`. A request whose key is not the score stored for
+// The key names everything the card shows (`s80-v0.6.0-d20261026-r1`; the
+// grammar is in src/shared/score-og.ts), or `pending` / `unscored`. A request whose key is not the score stored for
 // that target 301s to the key that is, so a guessed percent cannot be
 // minted into a card. Finished keys are cached immutably: a rescore changes
 // the URL the page advertises, and the previous object can stay at the edge.
@@ -67,11 +67,7 @@ export async function handleScoreOg(request: Request, env: ScoreOgEnv, deps: Sco
     return text(request, 404, 'not found\n');
   }
 
-  const key = scoreOgKey({
-    scorePct: subject.card.scorePct,
-    specVersion: subject.card.specVersion,
-    pending: subject.card.pending,
-  });
+  const key = scoreOgKey(subject.card);
   let canonical: string;
   try {
     canonical = scoreOgPath(subject.target, key);

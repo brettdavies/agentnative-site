@@ -503,10 +503,10 @@ describe('emitShell — OG image alt text', () => {
       breadcrumb: 'ripgrep',
       bodyHtml: '<article>body</article>',
       themeInitJs: '/* theme init */',
-      ogImage: '/og/score/ripgrep/s92-v0.6.0.png',
+      ogImage: '/og/score/ripgrep/s92-v0.6.0-t15.2.0-r1.png',
       ogImageAlt: 'ripgrep scored 92%. agent-native CLI scorecard on anc.dev.',
     });
-    expect(custom).toContain('content="https://anc.dev/og/score/ripgrep/s92-v0.6.0.png"');
+    expect(custom).toContain('content="https://anc.dev/og/score/ripgrep/s92-v0.6.0-t15.2.0-r1.png"');
     expect(custom).toContain('ripgrep scored 92%');
     expect(custom).not.toContain('/og-image.png');
     const plain = shell();

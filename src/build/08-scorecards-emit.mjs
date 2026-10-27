@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { buildRegistryEnvelope } from '../shared/audit-envelope';
 import { SCORECARDS_PATH, scoreMarkdownPath, scorePath } from '../shared/audit-routes';
 import { resultAlternateLinks } from '../shared/result-head';
-import { scoreOgAlt, scoreOgKey, scoreOgPath } from '../shared/score-og';
+import { scoreOgAlt, scoreOgEdition, scoreOgKey, scoreOgPath } from '../shared/score-og';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
 import { renderBadgeSvg } from './badge.mjs';
 import { buildCoverageBody, buildCoverageMarkdown, loadCoverageMatrix } from './coverage.mjs';
@@ -239,7 +239,11 @@ export async function emitScorecardSurface({
 
     const scorecardBody = buildScorecardBody(tool, scorecard, topIssues, principleScore, version, metadata);
     const canonicalPath = scorePath(tool.name);
-    const ogKey = scoreOgKey({ scorePct: scorecard.badge.score_pct, specVersion: scorecard.spec_version });
+    const ogKey = scoreOgKey({
+      scorePct: scorecard.badge.score_pct,
+      specVersion: scorecard.spec_version,
+      edition: scoreOgEdition({ lane: 'cli', toolVersion: version }),
+    });
     await writeFile(
       join(distDir, 'score', `${tool.name}.html`),
       emitShell({
@@ -256,6 +260,7 @@ export async function emitScorecardSurface({
           name: tool.name,
           lane: 'cli',
           scorePct: scorecard.badge.score_pct,
+          specVersion: scorecard.spec_version,
         }),
       }),
     );
