@@ -744,11 +744,16 @@ describe('POST /mcp — response posture', () => {
 });
 
 describe('POST /mcp — Host allowlist', () => {
-  async function postFrom(env: Env, url: string, host: string): Promise<Response> {
+  async function postFrom(env: Env, url: string, host: string, origin?: string): Promise<Response> {
     return worker.fetch(
       new Request(url, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', accept: 'application/json', host },
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json',
+          host,
+          ...(origin === undefined ? {} : { origin }),
+        },
         body: JSON.stringify(initBody()),
       }),
       env,
@@ -796,27 +801,30 @@ describe('POST /mcp — Host allowlist', () => {
   });
 
   test('a browser Origin is rejected with the same -32000 the Host gate uses', async () => {
-    // `allowedOriginHostnames` is left unset, which is a localhost-only Origin
-    // gate rather than no Origin checking. It shares the transport code with
-    // the Host rejection, so telemetry alone cannot tell the two apart.
+    // The Origin gate shares the transport code with the Host rejection, so
+    // telemetry alone cannot tell the two apart.
     const env = makeEnv();
-    const res = await worker.fetch(
-      new Request('https://anc.dev/mcp', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          accept: 'application/json',
-          host: 'anc.dev',
-          origin: 'https://evil.example',
-        },
-        body: JSON.stringify(initBody()),
-      }),
-      env,
-      {} as ExecutionContext,
-    );
+    const res = await postFrom(env, 'https://anc.dev/mcp', 'anc.dev', 'https://evil.example');
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error?: { code?: number } };
     expect(body.error?.code).toBe(-32000);
+  });
+
+  test('production and staging each reject their own origin', async () => {
+    // The wrapper's default Origin list admits the request's own hostname on
+    // `*.workers.dev` and not on a custom domain, so staging would serve a
+    // same-origin browser POST that production refuses.
+    const env = makeEnv();
+    for (const host of ['anc.dev', 'agentnative-site-staging.brettdavies.workers.dev']) {
+      const res = await postFrom(env, `https://${host}/mcp`, host, `https://${host}`);
+      expect(`${host}:${res.status}`).toBe(`${host}:403`);
+    }
+  });
+
+  test('a localhost Origin is served', async () => {
+    const env = makeEnv();
+    const res = await postFrom(env, 'http://localhost:8787/mcp', 'localhost:8787', 'http://localhost:8787');
+    expect(res.status).toBe(200);
   });
 });
 

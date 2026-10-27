@@ -33,8 +33,9 @@ Five layers can end a request. The first one to answer wins, so a code's meaning
 
 1. **Dispatch shell** (`src/worker/index.ts:553-763`): kill switch, method gate, Accept gate, legacy-era gate, rate
    limiter. Everything it emits is hand-built in this repo.
-2. **SDK transport** (`agents/mcp/server` via `createMcpHandler`, wired at `src/worker/mcp/server.ts:98-118`): JSON
-   parse, batch shape, protocol-version check, SEP-2243 header mirror, `_meta` validation.
+2. **SDK transport** (`agents/mcp/server` via `createMcpHandler`, wired in `getMcpHandler` in
+   `src/worker/mcp/server.ts`): Host and Origin allowlists, JSON parse, batch shape, protocol-version check, SEP-2243
+   header mirror, `_meta` validation.
 3. **SDK method router**: method-not-found.
 4. **Tool and resource handlers** (`src/worker/mcp/tools/`, `src/worker/mcp/resources.ts`): argument validation and
    resource lookup.
@@ -56,6 +57,7 @@ misleading era rejection (`tests/worker-mcp-dispatch.test.ts:923`).
 | `-32020` | Header mismatch (SEP-2243) | SDK transport (layer 2)        | HTTP **400**, envelope                                       | `tests/worker-mcp-dispatch.test.ts:1098`; `tests/worker-mcp.test.ts:718`                |
 | `-32022` | UnsupportedProtocolVersion | **two producers, split below** | shell HTTP **200**; SDK HTTP **400**                         | shell `tests/worker-mcp-dispatch.test.ts:980`; SDK `:1151`                              |
 | `-32099` | Rate limit                 | dispatch shell (layer 1)       | HTTP **200**, envelope, request `id` echoed                  | `tests/worker-mcp-dispatch.test.ts:557`, `:1073`                                        |
+| `-32000` | Host or Origin rejected    | SDK transport (layer 2)        | HTTP **403**, envelope, `id: null`, both lanes               | Host `tests/worker-mcp-dispatch.test.ts:764`; Origin `:803`, own origin `:813`          |
 | `-32002` | Resource not found         | resource handler tag only      | **never reaches the wire**; the encode seam rewrites it      | `src/worker/mcp/resources.ts:45`; rewrite noted at `tests/worker-mcp.test.ts:657`       |
 | `-32603` | Internal error             | not emitted deliberately       | not probed                                                   | `src/worker/audit-web/handlers/mcp.ts:266`                                              |
 
@@ -148,11 +150,11 @@ failure and transport-level failure are two layers, and only the second one is i
 Three shell rejections happen before or outside JSON-RPC, so they carry a plain-text body and no envelope. Treating
 these as JSON-RPC errors is a common client bug.
 
-| Condition                            | Response                                   | Verified at                                                |
-| ------------------------------------ | ------------------------------------------ | ---------------------------------------------------------- |
-| `MCP_ENABLED` is not `'true'`        | **503**, `Retry-After: 3600`, `text/plain` | `tests/worker-mcp-dispatch.test.ts:292`, body shape `:300` |
-| Method is not `POST` (`GET` included) | **405**, `Allow: POST`, `text/plain`, `Cache-Control: no-store` | `tests/worker-mcp-dispatch.test.ts` |
-| `Accept` allows neither JSON nor SSE | **406**, `text/plain`                      | `tests/worker-mcp-dispatch.test.ts:531`                    |
+| Condition                             | Response                                                        | Verified at                                                |
+| ------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------- |
+| `MCP_ENABLED` is not `'true'`         | **503**, `Retry-After: 3600`, `text/plain`                      | `tests/worker-mcp-dispatch.test.ts:292`, body shape `:300` |
+| Method is not `POST` (`GET` included) | **405**, `Allow: POST`, `text/plain`, `Cache-Control: no-store` | `tests/worker-mcp-dispatch.test.ts`                        |
+| `Accept` allows neither JSON nor SSE  | **406**, `text/plain`                                           | `tests/worker-mcp-dispatch.test.ts:531`                    |
 
 The 406 is pre-JSON-RPC by design (`src/worker/index.ts:615`): there is no negotiated type in which to serialize an
 envelope, so sending one would answer in a type the caller just refused.
@@ -279,7 +281,8 @@ Two codes are excluded from the conformance matrix, recorded at `src/worker/audi
 
 A third code appears in probe results without being probed for: **`-32000`**, JSON-RPC's reserved generic server error,
 which a stateful legacy server returns to a sessionless POST (`SESSION_REQUIRED_CODE`,
-`src/worker/audit-web/handlers/mcp.ts:182`). It is a statefulness signal, not an error-taxonomy signal.
+`src/worker/audit-web/handlers/mcp.ts:182`). It is a statefulness signal, not an error-taxonomy signal. anc's own
+`-32000` is the HTTP 403 Host or Origin rejection in the table above, a different producer behind the same code.
 
 ## Bumping the revision
 

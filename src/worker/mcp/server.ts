@@ -5,7 +5,7 @@
 // request; catalog is warmed synchronously via getWarmCatalog() after
 // loadCatalog(env) in the dispatch shell.
 
-import { McpServer } from '@modelcontextprotocol/server';
+import { localhostAllowedOrigins, McpServer } from '@modelcontextprotocol/server';
 import { createMcpHandler } from 'agents/mcp/server';
 import { MCP_SERVER_NAME, MCP_SERVER_VERSION } from '../../shared/mcp-discovery';
 import type { AuditJob } from '../audit/job';
@@ -99,12 +99,16 @@ export function getMcpHandler(opts: GetMcpHandlerOptions): McpHandler {
       legacy: opts.legacy,
       responseMode: opts.jsonResponse ? 'json' : 'auto',
       allowedHostnames: MCP_ALLOWED_HOSTNAMES,
-      // POST /mcp is server-to-agent. The wrapper's default `corsOptions={}`
-      // emits CORS headers, so it is disabled at the source; dispatch strips
-      // `Access-Control-*` as defense in depth. Leaving
-      // `allowedOriginHostnames` unset is not the same as origin checking off:
-      // the SDK then admits only localhost-class Origins, so a browser POST
-      // carrying any other Origin is rejected before the handler runs.
+      // POST /mcp is server-to-agent, so a browser POST carrying any
+      // non-localhost Origin, the site's own included, is rejected 403 before
+      // the handler runs. That also stops a CORS-simple cross-site POST, which
+      // skips preflight. The list is passed rather than left to the wrapper's
+      // default, which adds the request's own hostname on `*.workers.dev`
+      // only, so staging would admit an Origin that production rejects.
+      allowedOriginHostnames: localhostAllowedOrigins(),
+      // The wrapper's default `corsOptions={}` emits CORS headers, so it is
+      // disabled at the source; dispatch strips `Access-Control-*` as defense
+      // in depth.
       corsOptions: false,
     });
     handler = sdkHandler as unknown as McpHandler;
