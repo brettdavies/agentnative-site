@@ -1,4 +1,4 @@
-// Era-agnostic MCP server-card surface: GET /mcp content negotiation, the
+// Era-agnostic MCP server-card surface: GET /mcp is protocol-only (405), the
 // SEP-2127 card and the AI catalog that lists it, and the SEP-1649 card with
 // its pointer aliases. None of it depends on a JSON-RPC lane, so
 // it runs against the local `wrangler dev` webServer in the default
@@ -74,35 +74,42 @@ test.describe('MCP server card — pointer aliases', () => {
   });
 });
 
-test.describe('MCP server card — GET /mcp negotiation', () => {
-  test('a JSON Accept 301s to the canonical card', async ({ request, baseURL }) => {
-    const res = await request.get('/mcp', {
-      headers: { accept: 'application/json' },
-      maxRedirects: 0,
+test.describe('MCP endpoint — GET is protocol-only', () => {
+  for (const accept of ['text/event-stream', 'text/html', 'text/markdown', 'application/json', '*/*']) {
+    test(`GET /mcp Accept ${accept} returns 405 Allow POST`, async ({ request, baseURL }) => {
+      const res = await request.get('/mcp', { headers: { accept }, maxRedirects: 0 });
+      expect(res.status()).toBe(405);
+      expect(res.headers().allow).toBe('POST');
+      expect(res.headers()['cache-control'] ?? '').toContain('no-store');
+      expect(res.headers()['content-type'] ?? '').toContain('text/plain');
+      const body = await res.text();
+      expect(body).toContain(`${baseURL}/mcp-docs`);
+      expect(body.toLowerCase()).not.toContain('<html');
     });
-    expect(res.status()).toBe(301);
-    expect(res.headers().location).toBe(`${baseURL}${CANONICAL_PATH}`);
-  });
+  }
 
-  test('an HTML Accept serves the endpoint landing page', async ({ request }) => {
-    const res = await request.get('/mcp', { headers: { accept: 'text/html' } });
+  test('GET /mcp-docs serves the endpoint description as HTML', async ({ request }) => {
+    const res = await request.get('/mcp-docs', { headers: { accept: 'text/html' } });
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('text/html');
     expect(await res.text()).toContain('anc.dev MCP server');
   });
 
-  // `*/*` (a bare curl, and the browser default) reduces to HTML rather
-  // than the card, so a human clicking /mcp lands on the rendered page.
-  test('a wildcard Accept serves the landing page, not the card', async ({ request }) => {
-    const res = await request.get('/mcp', { headers: { accept: '*/*' }, maxRedirects: 0 });
-    expect(res.status()).toBe(200);
-    expect(res.headers()['content-type']).toContain('text/html');
-  });
-
-  test('a markdown Accept serves the twin', async ({ request }) => {
-    const res = await request.get('/mcp', { headers: { accept: 'text/markdown' } });
+  test('GET /mcp-docs.md serves the markdown twin', async ({ request }) => {
+    const res = await request.get('/mcp-docs.md');
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('text/markdown');
+    expect(await res.text()).toMatch(/405 Method Not\s+Allowed/);
+  });
+
+  test('llms.txt links the endpoint and the docs page, and the docs link resolves', async ({ request, baseURL }) => {
+    const res = await request.get('/llms.txt');
+    expect(res.status()).toBe(200);
+    const text = await res.text();
+    expect(text).toContain(`${baseURL}/mcp`);
+    expect(text).toContain(`${baseURL}/mcp-docs.md`);
+    const docs = await request.get('/mcp-docs.md');
+    expect(docs.status()).toBe(200);
   });
 });
 

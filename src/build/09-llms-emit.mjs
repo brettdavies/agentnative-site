@@ -72,6 +72,7 @@ export async function emitLlmsSurface({
     // Section title matches the convention streamsgrp uses.
     programmaticAccess: [
       { label: 'MCP server (streamable HTTP)', path: '/mcp' },
+      { label: 'MCP endpoint docs', path: '/mcp-docs.md' },
       ...MCP_DISCOVERY_DOCUMENTS.map(({ label, path }) => ({ label, path })),
       { label: 'MCP client skill', path: '/mcp-skill.md' },
     ],

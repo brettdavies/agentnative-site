@@ -65,8 +65,9 @@ function buildInstructionsText(siteUrl: string): string {
       'envelopes at HTTP 200 (-32099 rate-limit breach at either limiter, ' +
       `-32022 with data.supported listing ${SPEC_REVISION} when the disabled legacy lane rejects a request) or at ` +
       'HTTP 400 (-32700 malformed JSON with id null, -32600 invalid batch, -32020 header mismatch, and -32022 with ' +
-      'data.requested for an unsupported version claim). The 406 Accept-header rejection is the one transport error ' +
-      'that bypasses the JSON-RPC envelope.',
+      'data.requested for an unsupported version claim) or at HTTP 403 (-32000 with id null for a non-localhost ' +
+      'Origin header or an unserved Host; send no Origin header). The 406 Accept-header rejection is the one ' +
+      'transport error that bypasses the JSON-RPC envelope.',
     `Rate limits are split. ${READ_LIMIT_REQUESTS} requests per ${READ_LIMIT_WINDOW_SECONDS} seconds per IP gate ` +
       `every call (MCP_LIMITER). ${AUDIT_LIMIT_REQUESTS} fresh audits per ${AUDIT_LIMIT_WINDOW_MINUTES} minutes per ` +
       'IP gate score_cli cache-miss audits only (MCP_AUDIT_LIMITER). audit_website has its own budget: a per-IP ' +
@@ -80,7 +81,7 @@ function buildInstructionsText(siteUrl: string): string {
     FOLLOW_DISCLOSURE,
     `Spec revision is pinned to ${SPEC_REVISION}; the ${SEP_1649_CARD_PATH} server card advertises the same value, and the ` +
       'two are bumped in lockstep when the SDK is upgraded.',
-    `Connect now at ${siteUrl}/mcp (no authentication). Full recipes remain at ${docsUrl}.`,
+    `Connect now at ${siteUrl}/mcp (no authentication). GET ${siteUrl}/mcp returns 405; the endpoint description is ${siteUrl}/mcp-docs. Full recipes remain at ${docsUrl}.`,
   ].join(' ');
 }
 

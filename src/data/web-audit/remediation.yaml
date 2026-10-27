@@ -221,17 +221,16 @@ remediation:
       - { label: MCP transports, url: "https://modelcontextprotocol.io/specification/2025-06-18/basic/transports" }
   mcp-get-fast-fail:
     title: GET on the MCP endpoint answers fast
-    goal: Answer GET on the MCP endpoint fast (a fast-fail status or a documented surface), never a held-open hang
+    goal: Answer GET with 405 or an SSE stream, never a document and never a held-open hang
     fix: |
-      Answer a `GET` on the MCP endpoint promptly; this check fails only when the connection is
-      held open. A streamable-HTTP `GET` routed into the transport opens the server-to-client SSE
-      notification stream, and a stateless server (nothing to push) parks that connection until the
-      caller times out. Answer one of two ways instead: fast-fail non-`POST` at the router with
-      `405 Method Not Allowed` and an `Allow: POST` header; or serve a documented surface on `GET`
-      (a human- and agent-readable docs page, or a redirect to your `.well-known` MCP server card)
-      so the `GET` returns content rather than a rejection. Any prompt, completed response passes
-      (a fast-fail status, or a documented `2xx`/redirect) except a `408` or `429`, which asks to be
-      retried and is not scored; only a held-open hang or a `5xx` fails.
+      Answer a `GET` on the MCP endpoint promptly, and answer it as streamable HTTP defines.
+      The probe sends `Accept: text/event-stream`. A `200` whose `Content-Type` is `text/html`,
+      `text/markdown`, or any other non-SSE type fails: a catalog client treats that document as a
+      transport error. Return one of two answers. Fast-fail at the router with `405 Method Not
+      Allowed`, `Allow: POST`, and `Cache-Control: no-store`. Or return `200` with
+      `Content-Type: text/event-stream` and an SSE body. Put the human-readable description on a
+      different path. A held-open connection and a `5xx` also fail. A `408` or `429` asks to be
+      retried and is not scored.
     resources:
       - { label: MCP transports, url: "https://modelcontextprotocol.io/specification/2025-06-18/basic/transports" }
   mcp-cors-preflight:
@@ -440,17 +439,17 @@ remediation:
     resources:
       - { label: RFC 7763 (text/markdown), url: "https://www.rfc-editor.org/rfc/rfc7763" }
   markdown-vary:
-    title: Negotiated responses carry Vary Accept, User-Agent
-    goal: Emit Vary Accept, User-Agent so shared caches never serve one client the wrong variant
+    title: Negotiated responses carry Vary Accept
+    goal: Name every negotiated request header in Vary so shared caches never serve one client the wrong variant
     fix: |
-      When the same URL serves HTML or markdown depending on the request, emit
-      `Vary: Accept, User-Agent` on every response. Without it a shared cache (a CDN or a corporate
-      proxy) can store the markdown twin under the bare URL and then hand it to a browser, or vice
-      versa. Listing both request headers you negotiate on tells every cache to key its stored copies
-      by them, so each client class gets the variant it asked for. If the CDN ignores or strips Vary
-      (Cloudflare's zone cache historically keeps only `Accept-Encoding`), do not give that cache a
-      long `s-maxage` on negotiated responses — otherwise HIT replies reach clients with no Vary and
-      the check still fails.
+      When the same URL serves HTML or markdown depending on the request, emit a `Vary` header on
+      every response that names each request header the choice depends on: `Vary: Accept` when you
+      negotiate on `Accept` alone, and `Vary: Accept, User-Agent` when agent User-Agents also receive
+      the markdown twin. Without it a shared cache (a CDN or a corporate proxy) can store the markdown
+      twin under the bare URL and then hand it to a browser, or the reverse. If the CDN ignores or
+      strips Vary (Cloudflare's zone cache historically keeps only `Accept-Encoding`), do not give
+      that cache a long `s-maxage` on negotiated responses: HIT replies would then reach clients with
+      no Vary, and the check still fails.
     resources:
       - { label: RFC 9110 (Vary), url: "https://www.rfc-editor.org/rfc/rfc9110#name-vary" }
   markdown-frontmatter:

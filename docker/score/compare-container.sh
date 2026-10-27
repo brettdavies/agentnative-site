@@ -66,11 +66,12 @@ audit() {
 
   timeout --kill-after=10 "$limit" "$H/anc" "${args[@]}" >"$out" 2>"$err" </dev/null
   rc=$?
-  # anc exits 0, 1 or 2 beside a well-formed scorecard; a higher code is anc
-  # itself failing. timeout exits 124, or 137 when the kill was needed.
+  # anc exits 0 to 3 beside a well-formed scorecard (3: an audit errored or
+  # none applied); a higher code is anc itself failing. timeout exits 124, or
+  # 137 when the kill was needed.
   if ((rc == 124 || rc == 137)); then
     status=timeout
-  elif ((rc > 2)); then
+  elif ((rc > 3)); then
     status="anc-exit-$rc"
   elif ! jq -e '.schema_version' "$out" >/dev/null 2>&1; then
     status=invalid-json

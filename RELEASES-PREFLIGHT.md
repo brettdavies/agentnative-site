@@ -108,8 +108,9 @@ Dependabot raises the same fix again.
 - [ ] Every commit on `main` since the last release has its changes on `dev` (gate 1 lists the ones that do not, as
   `differs` or `missing`). Backport them by PR into `dev` first, merge, and rerun. Until the first `v*` tag exists the
   gate anchors on the newest `release:` squash on `main`; pass `--since <sha>` to anchor elsewhere.
-- [ ] `.github/` is identical on both branches (gate 2). A difference either way is a config change that only reached
-  one branch.
+- [ ] Every `.github/` change on `main` is also on `dev` (gate 2 lists the paths that are not, as `differs` or
+  `missing`). A `.github/` path `dev` holds and `main` lacks is what the release delivers, not drift; a path `dev`
+  deleted counts as delivered while `main` still has the anchor's copy.
 - [ ] No lockfile package resolves newer on `main` than on `dev` (gate 3). The gate reads this repo's `bun.lock` one
   line per package name, strips its trailing commas before parsing, and fails when it parses zero packages.
 - [ ] `dev`-newer packages are the routine updates this release ships; the gate counts them and does not list them.

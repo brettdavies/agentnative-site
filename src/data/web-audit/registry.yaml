@@ -482,9 +482,13 @@ checks:
     with:
       path: "{mcp_endpoint}"
       method: GET
+      headers:
+        Accept: text/event-stream
       timeout: 8
-      expect: { status_below: 500 }
-    hint: "Answer GET promptly: fast-fail non-POST with 405, or serve a documented surface (a docs page, or a redirect to your server card). A stateless streamable-HTTP GET routed into the transport otherwise holds the SSE stream open until the caller times out."
+      expect:
+        status_below: 500
+        sse_when_success: true
+    hint: "Answer GET with Accept: text/event-stream promptly. Return 405 Method Not Allowed, or 200 with Content-Type text/event-stream. A 200 that serves HTML or markdown fails. A held-open hang or a 5xx also fails."
 
   - id: mcp-cors-preflight
     category: mcp
@@ -826,19 +830,17 @@ checks:
     site_types: [all]
     antecedent: markdown-twin
     weight: 1
-    title: Negotiated responses carry Vary Accept, User-Agent
+    title: Negotiated responses carry Vary Accept
     breadcrumb: Markdown Vary
     handler: http
     with:
       path: /
       expect:
-        # Both tokens present, in either order, with `accept` not the prefix of
-        # `accept-encoding` or `accept-language`. Spelled without lookaround
-        # because the CLI compiles every registry pattern with a linear-time
-        # engine that has none; tests/web-audit-vary-pattern.test.ts pins it
-        # to the lookaround form it replaces.
-        header_regex: { name: vary, pattern: "accept(?:user-agent|[^-\\n\\r\\u2028\\u2029].*user-agent)|user-agent.*accept(?:[^-]|$)" }
-    hint: 'Emit Vary: Accept, User-Agent when the markdown twin is negotiated on the same URL, so shared caches never serve one client the wrong variant.'
+        # `accept` (or `*`) as a whole field name, so Accept-Encoding and
+        # Accept-Language do not count. Spelled without lookaround because the
+        # CLI compiles every registry pattern with a linear-time engine.
+        header_regex: { name: vary, pattern: "(?:^|[\\s,])(?:accept|\\*)(?:[\\s,]|$)" }
+    hint: 'Name every request header the markdown twin is negotiated on in Vary (Accept, plus User-Agent when agent User-Agents also get markdown), so shared caches never serve one client the wrong variant.'
 
   - id: markdown-frontmatter
     category: content-for-agents

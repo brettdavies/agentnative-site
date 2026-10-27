@@ -4,7 +4,7 @@
 // metadata, agent-skills index, auth.md, oauth2/token, webmcp.js).
 //
 // Complements tests/build-discovery-emit.test.ts (emit shape) and
-// tests/worker-mcp-dispatch.test.ts (GET /mcp content negotiation).
+// tests/worker-mcp-dispatch.test.ts (GET /mcp returns 405).
 
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
@@ -183,6 +183,8 @@ describe('agent-readiness cross-surface drift (built dist/)', () => {
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
     expect(section).toContain('- [MCP server card (SEP-2127)](https://anc.dev/mcp/server-card)');
     expect(section).toContain('- [AI catalog](https://anc.dev/.well-known/ai-catalog.json)');
+    expect(section).toContain('- [MCP server (streamable HTTP)](https://anc.dev/mcp)');
+    expect(section).toContain('- [MCP endpoint docs](https://anc.dev/mcp-docs.md)');
   });
 
   test('auth.md lists every discovery document, in list order', async () => {
@@ -207,7 +209,7 @@ describe('agent-readiness cross-surface drift (built dist/)', () => {
     // not found inside /.well-known/mcp/server-card.json.
     const names = (text: string, path: string): boolean =>
       new RegExp(`${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w/-]|\\.\\w)`).test(text);
-    for (const page of ['mcp', 'mcp-skill']) {
+    for (const page of ['mcp-docs', 'mcp-skill']) {
       const source = await readFile(join(REPO_ROOT, 'content', `${page}.md`), 'utf8');
       const twin = await readFile(join(DIST_DIR, `${page}.md`), 'utf8');
       for (const d of MCP_DISCOVERY_DOCUMENTS) {
@@ -221,15 +223,15 @@ describe('agent-readiness cross-surface drift (built dist/)', () => {
     }
   });
 
-  test('/mcp lists the discovery documents in list order, SEP-1649 card first', async () => {
-    const source = await readFile(join(REPO_ROOT, 'content', 'mcp.md'), 'utf8');
+  test('/mcp-docs lists the discovery documents in list order, SEP-1649 card first', async () => {
+    const source = await readFile(join(REPO_ROOT, 'content', 'mcp-docs.md'), 'utf8');
     const positions = MCP_DISCOVERY_DOCUMENTS.map((d) => source.indexOf(`](${d.path})`));
     expect(positions.every((index) => index >= 0)).toBe(true);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
   });
 
   test('shell HTML pages load /js/webmcp.js on the entry and spec surfaces', async () => {
-    for (const page of ['index.html', 'audit.html', 'mcp.html', 'p1.html']) {
+    for (const page of ['index.html', 'audit.html', 'mcp-docs.html', 'p1.html']) {
       const html = await readFile(join(DIST_DIR, page), 'utf8');
       expect(html).toContain('/js/webmcp.js');
     }
@@ -771,6 +773,7 @@ describe('homepage MCP prose (built dist/)', () => {
     expect(useIt.length).toBeGreaterThan(0);
     expect(useIt).toContain('MCP');
     expect(useIt).toContain('href="/mcp"');
+    expect(useIt).toContain('href="/mcp-docs"');
     expect(useIt).toContain('href="/mcp-skill"');
     expect(useIt).toContain('streamable-HTTP');
     expect(useIt).toContain('wire contract');
@@ -779,6 +782,7 @@ describe('homepage MCP prose (built dist/)', () => {
   test('index.md twin mirrors the MCP endpoint + guide links', async () => {
     const md = await readFile(join(DIST_DIR, 'index.md'), 'utf8');
     expect(md).toContain('https://anc.dev/mcp');
+    expect(md).toContain('/mcp-docs');
     expect(md).toContain('/mcp-skill');
     expect(md).toContain('streamable-HTTP');
   });
@@ -792,6 +796,7 @@ describe('homepage MCP prose (built dist/)', () => {
   test('content/_use.md source still names the same two surfaces', async () => {
     const raw = await readFile(join(REPO_ROOT, 'content', '_use.md'), 'utf8');
     expect(raw).toContain('(/mcp)');
+    expect(raw).toContain('(/mcp-docs)');
     expect(raw).toContain('(/mcp-skill)');
     expect(raw).not.toContain('/.well-known/mcp"');
   });
@@ -800,12 +805,22 @@ describe('homepage MCP prose (built dist/)', () => {
 describe('homepage MCP links resolve (worker)', () => {
   const PAGE_ENV = makeEnv({
     '/mcp': '<!doctype html><html><body><h1>anc.dev MCP server</h1></body></html>',
+    '/mcp-docs': '<!doctype html><html><body><h1>anc.dev MCP server</h1></body></html>',
     '/mcp-skill': '<!doctype html><html><body><h1>MCP skill</h1></body></html>',
     '/mcp-skill/': '<!doctype html><html><body><h1>MCP skill</h1></body></html>',
   });
 
-  test('GET /mcp serves the endpoint landing page as HTML', async () => {
+  test('GET /mcp returns 405 and does not serve the asset at that path', async () => {
     const res = await worker.fetch(req('https://anc.dev/mcp'), PAGE_ENV, {} as ExecutionContext);
+    expect(res.status).toBe(405);
+    expect(res.headers.get('allow')).toBe('POST');
+    const body = await res.text();
+    expect(body).toContain('https://anc.dev/mcp-docs');
+    expect(body).not.toContain('anc.dev MCP server');
+  });
+
+  test('GET /mcp-docs serves the endpoint description as HTML', async () => {
+    const res = await worker.fetch(req('https://anc.dev/mcp-docs'), PAGE_ENV, {} as ExecutionContext);
     expect(res.status).toBe(200);
     expect(await res.text()).toContain('anc.dev MCP server');
   });

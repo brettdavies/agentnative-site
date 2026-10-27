@@ -263,8 +263,10 @@ describe('llms.txt Programmatic access section', () => {
   test('links the MCP endpoint, both server cards, the AI catalog, and the client skill', async () => {
     const llms = await readFile(join(DIST_DIR, 'llms.txt'), 'utf8');
     const section = llms.slice(llms.indexOf('## Programmatic access'), llms.indexOf('## Principles'));
-    expect(section.match(/^- \[/gm)).toHaveLength(5);
+    expect(section.match(/^- \[/gm)).toHaveLength(6);
     expect(section).toContain('https://anc.dev/mcp');
+    expect(section).toContain('https://anc.dev/mcp-docs.md');
+    expect(section).toContain('returns 405');
     expect(section).toContain('https://anc.dev/.well-known/mcp/server-card.json');
     expect(section).toContain('(https://anc.dev/mcp/server-card)');
     expect(section).toContain('(https://anc.dev/.well-known/ai-catalog.json)');
@@ -401,6 +403,7 @@ describe('auth.md (built dist/)', () => {
     expect(raw).toContain('## CORS posture');
     expect(raw).toContain('authentication.required: false');
     expect(raw).toContain('https://anc.dev/mcp');
+    expect(raw).toContain('https://anc.dev/mcp-docs.md');
     expect(raw).toContain('oauth-protected-resource');
     expect(raw).toContain('oauth-authorization-server');
     expect(raw).toContain('/.well-known/mcp/server-card.json');

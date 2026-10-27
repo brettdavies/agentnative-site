@@ -245,7 +245,7 @@ more than the path does passes the class it served (the result route: a curated 
 shape); a 4xx/5xx or an always-MISS path is MISS regardless.
 
 - **HIT-1d** — bake-at-build HTML/markdown (`/about`, `/p1`–`/p8`, bare `/audit`, curated `/score/<slug>` and its `/md`
-  twin, `/mcp-skill`, GET `/mcp` as a page, other spec/docs pages without a live board). Browser:
+  twin, `/mcp-skill`, `/mcp-docs`, other spec/docs pages without a live board). Browser:
   `Cache-Control: public, max-age=300, stale-while-revalidate=60` (no `s-maxage`; that re-arms the custom-domain zone
   HIT that stored the Worker response and dropped `Vary`). Edge: `Cloudflare-CDN-Cache-Control: public, max-age=86400`.
   Extensionless URLs keep `Vary: Accept, User-Agent`. Explicit `.md` is one representation (no `Vary`). A new Worker
@@ -262,7 +262,8 @@ shape); a 4xx/5xx or an always-MISS path is MISS regardless.
   `web:{host}` with `web` and `home`. `/audit` with a query string is HIT-min with no tag, so a prefill hop never mints
   a day-long edge key. Explicit `.md` and `/md` twins and `/json` still have no `Vary`.
 - **MISS** — every-request `Cache-Control: no-store` plus `Cloudflare-CDN-Cache-Control: no-store`, untagged.
-  `/scoring*`, `POST /mcp`, `/api/score`, a `/score/<target>?v=` fetch, the 202 in-progress `/json`, and every Worker
+  `/scoring*`, `GET` and `POST /mcp` (the protocol endpoint sets `no-store` itself and never enters the cached
+  entrypoint), `/api/score`, a `/score/<target>?v=` fetch, the 202 in-progress `/json`, and every Worker
   4xx/5xx (including a never-audited `/score/<target>`). A stored 5xx would otherwise become a skip-Worker HIT.
 
 Hashed immutable assets (fonts at `/fonts/*`, the content-hashed `/og-image.png`) carry

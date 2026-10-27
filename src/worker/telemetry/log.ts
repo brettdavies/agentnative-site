@@ -1,10 +1,9 @@
 // Central structured-log emitter. Every Worker log record is built here and
-// handed to `console` as an object: Workers Logs indexes each key of an
-// object argument as a queryable field, whereas a pre-serialized string
-// collapses every field into `message` and leaves only `message` and
-// `level` indexed. Call sites name a discriminator and their fields; the
-// envelope, the closed scope vocabulary, the request-scoped ambient
-// fields, the verbosity tier, and the console level all live here.
+// handed to `console` as an object, the contract Workers Logs documents for
+// indexing each key as a queryable field. Call sites name a discriminator
+// and their fields; the envelope, the closed scope vocabulary, the
+// request-scoped ambient fields, the verbosity tier, and the console level
+// all live here.
 
 import { msBucket, truncateClientName } from './caps';
 import { getRequestContext } from './request-context';

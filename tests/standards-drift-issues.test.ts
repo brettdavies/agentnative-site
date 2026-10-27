@@ -210,7 +210,7 @@ describe('the workflow that runs the poll', () => {
     const doc = await parsed();
     expect(doc.concurrency).toEqual({ group: 'spec-drift', 'cancel-in-progress': false });
     expect(await text()).not.toMatch(/^\s*continue-on-error\s*:/m);
-    expect(doc.env).toEqual({ FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true });
+    expect(doc.env).toBeUndefined();
   });
 
   test('a scheduled run checks only from main, while a dispatch may name a branch', async () => {

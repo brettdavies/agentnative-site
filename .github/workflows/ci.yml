@@ -35,11 +35,6 @@ concurrency:
 permissions:
   contents: read
 
-# Opt into Node.js 24 runtime for JS actions ahead of GitHub's 2026-06-02
-# hard cutover. Kills the Node 20 deprecation warning on pinned actions.
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   gate:
     name: lint · build · test · wrangler
