@@ -1,11 +1,11 @@
 // Central structured-log emitter tests. The load-bearing assertion is
-// that the sink receives an object rather than a pre-serialized string:
-// Workers Logs indexes the keys of an object argument and collapses a
-// string into `message`. The rest pins the envelope: `mcp.request` is
-// keyed `event` with no `scope`, a throwing sink never reaches the
-// caller, undefined fields are omitted, the debug tier is gated on the
-// caller's flag, ambient request fields merge in without threading, and
-// the console level survives so the indexed `level` key is unchanged.
+// that the sink receives an object rather than a pre-serialized string,
+// the contract Workers Logs documents for indexing each key. The rest pins
+// the envelope: `mcp.request` is keyed `event` with no `scope`, a throwing
+// sink never reaches the caller, undefined fields are omitted, the debug
+// tier is gated on the caller's flag, ambient request fields merge in
+// without threading, and the console level survives so the indexed `level`
+// key is unchanged.
 
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { emitLog, type LogLevel, type LogRecord, setLogSink } from '../src/worker/telemetry/log';
