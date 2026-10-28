@@ -51,6 +51,15 @@ MUST, SHOULD, MAY, MUST NOT, and SHOULD NOT on this site carry their [RFC 2119](
 meanings. They are not emphatic; they are contractual. A tool that does not satisfy a MUST is non-conformant with the
 version of the standard it claims to target.
 
+## Flag names
+
+Requirement text names a flag by its double-dash spelling (`--force`, `--quiet`, `--output`). A tool whose help declares
+no double-dash name follows the Go `flag` convention, where one dash and two name the same flag, and meets the
+requirement with the single-dash spelling: `-force` on `terraform force-unlock` satisfies a requirement that names
+`--force`. In a help that declares any double-dash name, a single-dash word is a name of its own and does not stand in
+for the double-dash spelling. A single letter is a different name in either case and meets only a requirement that names
+that letter, so `-f` meets `--force` only where the requirement also names `-f`.
+
 ## License
 
 Spec text on this site is available under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The `anc` linter is

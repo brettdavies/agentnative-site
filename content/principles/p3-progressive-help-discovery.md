@@ -21,8 +21,11 @@ The principle is framework-agnostic. `clap`'s `after_help` is the worked example
 
 **MUST:**
 
-- Every subcommand ships at least one concrete invocation example showing the command with realistic arguments, rendered
-  in the section that appears after the flags list. In clap this is the `after_help` attribute.
+- Every subcommand that takes its own arguments or options ships at least one concrete invocation example showing the
+  command with realistic arguments, rendered in the section that appears after the flags list. In clap this is the
+  `after_help` attribute. A subcommand whose `--help` shows no positional argument (a nested command list counts as one)
+  and no option beyond `-h`/`--help` and the global flags every subcommand inherits is exempt: its usage line
+  (`tool version`, `tool logout`) is its whole call shape, so an example would repeat it.
 - The top-level command ships at least one concrete example, and 2–3 when the tool has multiple primary use cases.
 - The top-level command responds to `--version` with a non-empty version line on stdout and exits 0. Agents pin against
   tool versions to detect breaking changes; a `--version` that errors, exits non-zero, or prints nothing forces every
@@ -74,9 +77,10 @@ The principle is framework-agnostic. `clap`'s `after_help` is the worked example
 ## Evidence
 
 - `after_help` (or `after_long_help`) attribute on the top-level parser struct.
-- `after_help` attribute on every subcommand variant.
+- `after_help` attribute on every subcommand variant that takes its own arguments or options.
 - Example invocations in `after_help` text that include realistic arguments, not placeholder `<foo>` tokens.
-- Both `about` (short) and `after_help` (examples) present on each subcommand.
+- `about` (short) present on each subcommand, and `after_help` (examples) on each subcommand that takes its own
+  arguments or options.
 - The command list's left column holds bare command tokens; the binary name appears in the `Usage:` line and in
   examples, not at the head of each command entry.
 
@@ -90,5 +94,6 @@ The principle is framework-agnostic. `clap`'s `after_help` is the worked example
 - A hand-written command list that prefixes every entry with the binary name, so the command token sits second on each
   line and a scanner has to strip the prefix before it can read the command.
 
-Measured by audit IDs `p3-help`, `p3-after-help`, `p3-version`, `p3-unprefixed-command-list`. Run `anc audit
---principle 3 .` against the CLI under test to see each.
+Measured by audit IDs `p3-subcommand-examples`, `p3-help`, `p3-version`, `p3-paired-examples`, `p3-about-long-about`,
+`p3-unprefixed-command-list`, `p3-examples-subcommand`. Run `anc audit --principle 3 .` against the CLI under test to
+see each.
