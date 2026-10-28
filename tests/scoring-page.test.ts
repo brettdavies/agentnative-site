@@ -88,6 +88,14 @@ describe('GET /scoring?target=', () => {
     expect(html).not.toContain('/js/scoring.js');
   });
 
+  test('a GitHub repo URL renders the page for its owner/repo, the way the audit form sends it', async () => {
+    const { res, html } = await page('/scoring?target=https://github.com/sindresorhus/gh-home');
+    expect(res.status).toBe(200);
+    expect(html).toContain('data-lane="cli"');
+    expect(html).toContain('data-target="sindresorhus/gh-home"');
+    expect(html).toContain('src="/js/scoring.js"');
+  });
+
   test('a target the classifier accepts but no result page can express is the pointer, not a throw', async () => {
     // An owner/repo shorthand classifies fine, yet the result-path builder
     // refuses it. An unauthenticated GET must not reach that RangeError.
