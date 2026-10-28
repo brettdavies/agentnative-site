@@ -3,6 +3,7 @@
 // against this server.
 
 import { expect, test } from '@playwright/test';
+import { parseScoreOgPath } from '../../src/shared/score-og';
 
 test('ripgrep scorecard meta points at a working PNG card', async ({ page, request }) => {
   await page.goto('/score/ripgrep');
@@ -17,7 +18,7 @@ test('ripgrep scorecard meta points at a working PNG card', async ({ page, reque
   expect(await page.locator('meta[property="og:description"]').first().getAttribute('content')).toBeTruthy();
 
   const pathname = new URL(og ?? '').pathname;
-  expect(pathname).toMatch(/^\/og\/score\/ripgrep\/s(?:100|[1-9]?\d)-v\d+(?:\.\d+){1,3}\.png$/);
+  expect(parseScoreOgPath(pathname)).toEqual({ target: 'ripgrep', key: expect.stringMatching(/-t[a-z0-9._]+-r\d+$/) });
   const image = await request.get(pathname);
   expect(image.status()).toBe(200);
   expect(image.headers()['content-type']).toContain('image/png');
