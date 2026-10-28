@@ -19,7 +19,27 @@
 # curl must be on PATH.
 set -euo pipefail
 
-BASE="${1:?usage: scripts/og/smoke.sh <base-url>}"
+usage() { sed -n '2,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+
+# The fixture deploy below is live on anc.dev, so a help request or anything
+# that is not a site URL stops here.
+case "${1:-}" in
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  http://* | https://*) BASE="$1" ;;
+  "")
+    echo "smoke.sh: missing <base-url>" >&2
+    usage >&2
+    exit 2
+    ;;
+  *)
+    echo "smoke.sh: '$1' is not a base URL; pass the site as http:// or https://" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CONFIG="$ROOT/tests/e2e/og-cards-fixture/wrangler.jsonc"
 RUN="$(date +%s)"
