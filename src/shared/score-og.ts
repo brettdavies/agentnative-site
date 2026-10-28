@@ -149,6 +149,12 @@ export function scoreOgKey(input: ScoreOgKeyInput): string {
   return `s${rounded}-v${safe}${edition}-r${SCORE_OG_TEMPLATE}`;
 }
 
+/** The template version a card key names, or null for `pending` and `unscored`. */
+export function templateOfKey(key: string): number | null {
+  const match = /-r(\d{1,4})$/.exec(key);
+  return match ? Number(match[1]) : null;
+}
+
 export function isScoreOgKey(key: string): boolean {
   return KEY_RE.test(key);
 }

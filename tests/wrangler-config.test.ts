@@ -700,8 +700,8 @@ describe('src/og-render/wrangler.jsonc — render Worker', () => {
     },
   );
 
-  test('each environment names its own og-rendered queue, which the site consumes once and setup.sh creates', () => {
-    const setup = readFileSync(join(import.meta.dir, '..', 'scripts', 'og', 'setup.sh'), 'utf8');
+  test('each environment names its own og-rendered queue, which the site consumes once and the og scripts name', () => {
+    const names = readFileSync(join(import.meta.dir, '..', 'scripts', 'og', 'contract.sh'), 'utf8');
     for (const [label, renderBlock, siteBlock] of [
       ['production', render, site],
       ['staging', renderStaging, siteStaging],
@@ -712,7 +712,7 @@ describe('src/og-render/wrangler.jsonc — render Worker', () => {
         consumers.map((consumer) => consumer.queue),
         label,
       ).toEqual([produced]);
-      expect(setup, label).toContain(`QUEUE=${produced} `);
+      expect(names, label).toContain(`QUEUE=${produced} `);
     }
     expect(render.queues).not.toEqual(renderStaging.queues);
   });

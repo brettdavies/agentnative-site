@@ -29,7 +29,7 @@ import {
   MCP_SERVER_CARD_TYPE,
   SEP_1649_CARD_SEED_PATH,
 } from '../shared/mcp-discovery';
-import type { OgRenderedMessage, RenderService } from '../shared/og-render';
+import type { OgRenderedMessage } from '../shared/og-render';
 import { isScoreOgClipPath, isScoreOgPath } from '../shared/score-og';
 import { classifyGatewayRequest, detectMcpFormat, detectPreference } from './accept';
 import { type AuditApiEnv, handleAuditApi, isAuditApiPath } from './audit/api';
@@ -218,8 +218,8 @@ export interface Env {
   // card and clip; OG_VIDEO_ENABLED (wrangler secret, read as `=== 'true'`)
   // stops new renders without a deploy. Optional so tests that don't exercise
   // the card or clip routes can stub a minimal env.
-  RENDER?: RenderService;
-  OG_VIDEO_ENABLED?: string;
+  RENDER?: OgVideoEnv['RENDER'];
+  OG_VIDEO_ENABLED?: OgVideoEnv['OG_VIDEO_ENABLED'];
   // Telemetry-lake freshness bindings. TELEMETRY_LAKE is the lake bucket
   // the daily cron lists for stall detection; TELEMETRY_ENVIRONMENT names
   // the deploy environment so the stall alert emails only from production

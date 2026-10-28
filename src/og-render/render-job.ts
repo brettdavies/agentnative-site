@@ -9,14 +9,8 @@
 // LOCAL_MEDIA_STANDIN set stores the committed sample clip in its place and
 // everything around the binding runs as deployed.
 
-import {
-  CLIP_FRESH_MS,
-  type LogoSource,
-  type OgRenderedMessage,
-  type RenderInputs,
-  templateOfKey,
-} from '../shared/og-render';
-import { isImmutableScoreOgKey, SCORE_OG_TEMPLATE, type ScoreOgCard } from '../shared/score-og';
+import { CLIP_FRESH_MS, type LogoSource, type OgRenderedMessage, type RenderInputs } from '../shared/og-render';
+import { isImmutableScoreOgKey, SCORE_OG_TEMPLATE, type ScoreOgCard, templateOfKey } from '../shared/score-og';
 import { SCORE_OG_MOTION, type ScoreOgMotion } from '../shared/score-og-motion';
 import { headClip, storeCard, storeClip } from '../worker/og/store';
 import { emitLog } from '../worker/telemetry/log';

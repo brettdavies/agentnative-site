@@ -5,14 +5,8 @@
 // stored only when its logo lookup settled; a lookup cut short draws the
 // tile, which must not be pinned under a key the clip draws with a logo.
 
-import {
-  type DrawnCard,
-  type RenderInputs,
-  type RenderJobState,
-  type RenderJobStatus,
-  templateOfKey,
-} from '../shared/og-render';
-import { isImmutableScoreOgKey, SCORE_OG_TEMPLATE } from '../shared/score-og';
+import type { DrawnCard, RenderInputs, RenderJobState, RenderJobStatus, RenderJobWaitUntil } from '../shared/og-render';
+import { isImmutableScoreOgKey, SCORE_OG_TEMPLATE, templateOfKey } from '../shared/score-og';
 import { readStoredCard } from '../worker/og/store';
 import { loadScoreOgFonts } from './fonts';
 import { drawStill, logRender, type RenderDeps, type RenderEnv } from './render-job';
@@ -25,7 +19,7 @@ const RUNNING: ReadonlySet<RenderJobState> = new Set(['queued', 'rendering']);
 /** The two RenderJob calls the on-demand card makes. */
 export type JobStub = {
   status(): Promise<RenderJobStatus>;
-  wait(deadline: number, until: 'png' | 'terminal'): Promise<RenderJobStatus>;
+  wait(deadline: number, until: RenderJobWaitUntil): Promise<RenderJobStatus>;
 };
 
 export async function drawCard(

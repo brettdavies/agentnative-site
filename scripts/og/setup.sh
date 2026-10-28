@@ -47,11 +47,7 @@ done
   exit 2
 }
 
-if [[ "$ENV_NAME" == staging ]]; then
-  QUEUE=og-rendered-staging RENDER=anc-og-render-staging SITE=agentnative-site-staging
-else
-  QUEUE=og-rendered RENDER=anc-og-render SITE=agentnative-site
-fi
+og_names "$ENV_NAME"
 # 1Password item "Context.dev API Key".
 KEY_ITEM=p74cl4fnnccvfjegihcctqjbha
 READ_FIELD="$(command -v read_field.sh || echo "$HOME/.claude/skills/1password/scripts/read_field.sh")"

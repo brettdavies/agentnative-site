@@ -31,10 +31,9 @@ import type { OutboundHandler } from '@cloudflare/containers';
 import { Sandbox as BaseSandbox } from '@cloudflare/sandbox';
 import { isResultTarget, targetOfSpec } from '../../shared/audit-routes';
 import { ndjsonLineWriter } from '../../shared/ndjson';
-import type { RenderService } from '../../shared/og-render';
 import { invokeCachedPurge } from '../audit-web/hit-min-purge';
 import { cliTargetTag } from '../audit-web/hit-min-tags';
-import { requestRender } from '../og/render-request';
+import { type OgVideoEnv, requestRender } from '../og/render-request';
 import { SPEC_VERSION } from '../spec-version.gen';
 import { emitLog } from '../telemetry/log';
 import * as cache from './cache';
@@ -54,12 +53,8 @@ import { score as runSandboxScore, type SandboxPhase, type ScoreResult } from '.
 //
 // ASSETS stays in the env shape because @cloudflare/sandbox + the
 // Worker binding plumbing inject it regardless; the DO does not read it.
-export type ScoreSandboxEnv = {
-  ASSETS: Fetcher;
+export type ScoreSandboxEnv = Pick<OgVideoEnv, 'ASSETS' | 'SCORE_KV' | 'RENDER' | 'OG_VIDEO_ENABLED'> & {
   SCORE_CACHE?: R2Bucket;
-  SCORE_KV?: KVNamespace;
-  RENDER?: RenderService;
-  OG_VIDEO_ENABLED?: string;
 };
 
 // `hash` is unused in the install+score path; it stays on the wire for

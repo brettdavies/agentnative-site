@@ -49,8 +49,5 @@ export interface RenderService {
 /** A clip uploaded longer ago than this is rendered again, ahead of the 30-day lifecycle rule. */
 export const CLIP_FRESH_MS = 21 * 24 * 60 * 60 * 1000;
 
-/** The template version a card key names, or null for `pending` and `unscored`. */
-export function templateOfKey(key: string): number | null {
-  const match = /-r(\d{1,4})$/.exec(key);
-  return match ? Number(match[1]) : null;
-}
+/** What a `RenderJob.wait` caller waits for: the stored PNG, or a terminal state. */
+export type RenderJobWaitUntil = 'png' | 'terminal';

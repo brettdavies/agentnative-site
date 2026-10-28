@@ -21,12 +21,12 @@ import {
   scoreOgClipUrl,
 } from '../../shared/score-og';
 import { CANONICAL_SITE_URL } from '../../shared/site-url';
-import { type OgVideoEnv, ogVideoEnabled } from './render-request';
+import { type OgVideoEnv, ogVideoEnabled, withinMs } from './render-request';
 import { headClip } from './store';
 
 const STATUS_BUDGET_MS = 250;
 
-export type ClipHeader = 'present' | 'off' | 'none' | 'queued' | 'rendering' | 'failed';
+type ClipHeader = 'present' | 'off' | 'none' | 'queued' | 'rendering' | 'failed';
 
 export type PageClip = { metaHtml: string; headers: Record<string, string> };
 
@@ -56,19 +56,9 @@ export async function pageClip(env: OgVideoEnv, target: string, key: string): Pr
   return { metaHtml: '', headers };
 }
 
-async function jobStatus(env: OgVideoEnv, target: string, key: string) {
-  if (!env.RENDER) return null;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<null>((resolve) => {
-    timer = setTimeout(() => resolve(null), STATUS_BUDGET_MS);
-  });
-  try {
-    return await Promise.race([env.RENDER.status(target, key), late]);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+function jobStatus(env: OgVideoEnv, target: string, key: string) {
+  if (!env.RENDER) return Promise.resolve(null);
+  return withinMs(env.RENDER.status(target, key), STATUS_BUDGET_MS).catch(() => null);
 }
 
 function ogVideoMeta(url: string): string {

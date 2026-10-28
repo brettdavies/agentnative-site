@@ -15,9 +15,6 @@ type StoredKind = { prefix: string; ext: string; contentType: string };
 const CARD: StoredKind = { prefix: 'og/score/', ext: '.png', contentType: 'image/png' };
 const CLIP: StoredKind = { prefix: 'og/clip/', ext: '.mp4', contentType: 'video/mp4' };
 
-export const STORED_CARD_PREFIX = CARD.prefix;
-export const STORED_CLIP_PREFIX = CLIP.prefix;
-
 export type StoredMeta = { scoredAt: string | null; logo: LogoSource };
 
 export type StoredCard = { png: Uint8Array; logo: LogoSource | null };
@@ -31,7 +28,7 @@ async function objectKey(kind: StoredKind, target: string, key: string): Promise
 }
 
 /** The logo source a stored object's metadata names, or null when it names none. */
-export function storedLogo(object: { customMetadata?: Record<string, string> }): LogoSource | null {
+function storedLogo(object: { customMetadata?: Record<string, string> }): LogoSource | null {
   const logo = object.customMetadata?.logo;
   return LOGO_SOURCES.find((source) => source === logo) ?? null;
 }

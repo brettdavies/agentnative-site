@@ -23,7 +23,7 @@
 // drops them and their callers fall back on their own deadline.
 
 import { DurableObject } from 'cloudflare:workers';
-import type { RenderInputs, RenderJobState, RenderJobStatus } from '../shared/og-render';
+import type { RenderInputs, RenderJobState, RenderJobStatus, RenderJobWaitUntil } from '../shared/og-render';
 import { logRender, type RenderDeps, type RenderEnv, RunTakenOver, runRender } from './render-job';
 
 /** A queued or rendering job older than this is treated as dead. */
@@ -44,9 +44,7 @@ type JobRecord = {
   inputs: RenderInputs;
 };
 
-type Until = 'png' | 'terminal';
-
-type Waiter = { until: Until; settle: (status: RenderJobStatus) => void };
+type Waiter = { until: RenderJobWaitUntil; settle: (status: RenderJobStatus) => void };
 
 const LIVE: ReadonlySet<RenderJobState> = new Set(['queued', 'rendering', 'png']);
 
@@ -82,7 +80,7 @@ export class RenderJob extends DurableObject<RenderEnv> {
   }
 
   /** Resolve once the job reaches `until` (`png`, or a terminal state) or `deadline` passes. */
-  async wait(deadline: number, until: Until): Promise<RenderJobStatus> {
+  async wait(deadline: number, until: RenderJobWaitUntil): Promise<RenderJobStatus> {
     const current = await this.status();
     if (reached(current, until) || Date.now() >= deadline) return current;
     return new Promise((resolve) => {
@@ -184,7 +182,7 @@ function statusOf(job: JobRecord): RenderJobStatus {
 }
 
 /** Whether a waiter for `until` can stop: the state it asked for, or one past which it never comes. */
-function reached(status: RenderJobStatus, until: Until): boolean {
+function reached(status: RenderJobStatus, until: RenderJobWaitUntil): boolean {
   if (status.state === 'none' || status.state === 'done' || status.state === 'failed') return true;
   return until === 'png' && status.state === 'png';
 }

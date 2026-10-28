@@ -17,31 +17,29 @@ import {
 } from '../../shared/score-og';
 import { applyHeaders } from '../headers';
 import { emitLog } from '../telemetry/log';
+import { ogMethodNotAllowed, ogText, ogUnavailable } from './respond';
 import { headClip, readStoredClip } from './store';
 import { loadScoreOgSubject, type ScoreOgEnv } from './subject';
 
+const CLIP_UNREADABLE = 'the scorecard clip could not be read right now\n';
+
 export async function handleScoreOgClip(request: Request, env: ScoreOgEnv): Promise<Response> {
-  if (request.method !== 'GET' && request.method !== 'HEAD') {
-    return new Response('method not allowed\n', {
-      status: 405,
-      headers: { Allow: 'GET, HEAD', 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
-    });
-  }
+  if (request.method !== 'GET' && request.method !== 'HEAD') return ogMethodNotAllowed();
   const url = new URL(request.url);
   const parsed = isScoreOgClipPath(url.pathname) ? parseScoreOgClipPath(url.pathname) : null;
-  if (!parsed) return text(request, 404, 'not found\n');
+  if (!parsed) return ogText(request, 404, 'not found\n');
 
   try {
     const subject = await loadScoreOgSubject(env, parsed.target);
-    if (subject.status === 'unavailable') return unavailable(request);
-    if (subject.status === 'missing') return text(request, 404, 'not found\n');
+    if (subject.status === 'unavailable') return ogUnavailable(request, CLIP_UNREADABLE);
+    if (subject.status === 'missing') return ogText(request, 404, 'not found\n');
     const key = scoreOgKey(subject.card);
-    if (!isImmutableScoreOgKey(key)) return text(request, 404, 'not found\n');
+    if (!isImmutableScoreOgKey(key)) return ogText(request, 404, 'not found\n');
 
     const canonical = scoreOgClipPath(subject.target, key);
     if (canonical !== url.pathname || url.search !== '') {
       const current = await headClip(env.SCORE_CACHE, subject.target, key);
-      if (!current) return text(request, 404, 'not found\n');
+      if (!current) return ogText(request, 404, 'not found\n');
       return applyHeaders(new Response(null, { status: 301, headers: { Location: canonical } }), {
         request,
         pathname: url.pathname,
@@ -51,7 +49,7 @@ export async function handleScoreOgClip(request: Request, env: ScoreOgEnv): Prom
     }
 
     const clip = await readClip(env.SCORE_CACHE, subject.target, key, request.method === 'HEAD');
-    if (!clip) return text(request, 404, 'not found\n');
+    if (!clip) return ogText(request, 404, 'not found\n');
     const headers = new Headers({
       'content-type': 'video/mp4',
       'content-length': String(clip.size),
@@ -70,7 +68,7 @@ export async function handleScoreOgClip(request: Request, env: ScoreOgEnv): Prom
       { outcome: 'clip-error', error: err instanceof Error ? err.message : String(err) },
       { level: 'error' },
     );
-    return unavailable(request);
+    return ogUnavailable(request, CLIP_UNREADABLE);
   }
 }
 
@@ -87,18 +85,4 @@ async function readClip(
   }
   const object = await readStoredClip(bucket, target, key);
   return object ? { size: object.size, body: object.body } : null;
-}
-
-function unavailable(request: Request): Response {
-  return text(request, 503, 'the scorecard clip could not be read right now\n', { 'retry-after': '30' });
-}
-
-function text(request: Request, status: number, body: string, extra?: Record<string, string>): Response {
-  const headers = new Headers({ 'content-type': 'text/plain; charset=utf-8', 'x-robots-tag': 'noindex', ...extra });
-  return applyHeaders(new Response(body, { status, headers }), {
-    request,
-    pathname: new URL(request.url).pathname,
-    servedMarkdown: false,
-    cache: { klass: 'miss' },
-  });
 }

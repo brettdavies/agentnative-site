@@ -44,11 +44,9 @@ done
 BASE="${ARGS[0]%/}"
 TARGET="${ARGS[1]}"
 
-if [[ "$BASE" =~ ^https?://(www\.)?anc\.dev$ ]]; then
-  ENV_NAME=production RENDER=anc-og-render SITE=agentnative-site
-else
-  ENV_NAME=staging RENDER=anc-og-render-staging SITE=agentnative-site-staging
-fi
+ENV_NAME=staging
+[[ "$BASE" =~ ^https?://(www\.)?anc\.dev$ ]] && ENV_NAME=production
+og_names "$ENV_NAME"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT

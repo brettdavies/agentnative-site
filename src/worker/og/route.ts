@@ -15,7 +15,7 @@
 // an image and the real card takes over once drawing works again.
 
 import { SITE_OG_IMAGE_PATH } from '../../shared/og-card';
-import type { DrawnCard, LogoSource, RenderInputs } from '../../shared/og-render';
+import type { DrawnCard, LogoSource } from '../../shared/og-render';
 import {
   isImmutableScoreOgKey,
   isScoreOgKey,
@@ -26,7 +26,8 @@ import {
 } from '../../shared/score-og';
 import { applyHeaders, type CacheClassSpec } from '../headers';
 import { emitLog } from '../telemetry/log';
-import { type OgVideoEnv, renderInputsOf } from './render-request';
+import { type OgVideoEnv, renderInputsOf, withinMs } from './render-request';
+import { ogMethodNotAllowed, ogText, ogUnavailable } from './respond';
 import { readStoredCard } from './store';
 import { loadScoreOgSubject } from './subject';
 
@@ -45,31 +46,26 @@ type CardHeader = 'drawn' | 'stored' | 'fallback';
 /** Serve one scorecard card, or redirect to the key the stored score names. */
 export async function handleScoreOg(request: Request, env: OgVideoEnv, deps: ScoreOgDeps = {}): Promise<Response> {
   const started = Date.now();
-  if (request.method !== 'GET' && request.method !== 'HEAD') {
-    return new Response('method not allowed\n', {
-      status: 405,
-      headers: { Allow: 'GET, HEAD', 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
-    });
-  }
+  if (request.method !== 'GET' && request.method !== 'HEAD') return ogMethodNotAllowed();
   const url = new URL(request.url);
-  if (!isScoreOgPath(url.pathname)) return text(request, 404, 'not found\n');
+  if (!isScoreOgPath(url.pathname)) return ogText(request, 404, 'not found\n');
   const parsed = parseScoreOgPath(url.pathname);
-  if (!parsed || !isScoreOgKey(parsed.key)) return text(request, 404, 'not found\n');
+  if (!parsed || !isScoreOgKey(parsed.key)) return ogText(request, 404, 'not found\n');
 
   let subject: Awaited<ReturnType<typeof loadScoreOgSubject>>;
   try {
     subject = await loadScoreOgSubject(env, parsed.target);
   } catch (err) {
     log('error', started, err);
-    return text(request, 500, 'scorecard image failed\n');
+    return ogText(request, 500, 'scorecard image failed\n');
   }
   if (subject.status === 'unavailable') {
     log('unavailable', started);
-    return text(request, 503, 'the scorecard could not be read right now\n', { 'retry-after': '30' });
+    return ogUnavailable(request, 'the scorecard could not be read right now\n');
   }
   if (subject.status === 'missing') {
     log('missing', started);
-    return text(request, 404, 'not found\n');
+    return ogText(request, 404, 'not found\n');
   }
 
   const key = scoreOgKey(subject.card);
@@ -78,7 +74,7 @@ export async function handleScoreOg(request: Request, env: OgVideoEnv, deps: Sco
     canonical = scoreOgPath(subject.target, key);
   } catch (err) {
     log('error', started, err);
-    return text(request, 500, 'scorecard image failed\n');
+    return ogText(request, 500, 'scorecard image failed\n');
   }
   const lane = subject.card.lane;
   if (canonical !== url.pathname || url.search !== '') {
@@ -102,14 +98,15 @@ export async function handleScoreOg(request: Request, env: OgVideoEnv, deps: Sco
 
   let drawn: DrawnCard;
   try {
-    drawn = await drawRemote(env, renderInputsOf(subject), deps.timeoutMs ?? DRAW_TIMEOUT_MS);
+    if (!env.RENDER) throw new Error('RENDER binding missing');
+    drawn = await withinMs(env.RENDER.drawCard(renderInputsOf(subject)), deps.timeoutMs ?? DRAW_TIMEOUT_MS);
   } catch (err) {
     log('fallback', started, err, lane);
     return defaultCard(request, url.pathname, env);
   }
   if (drawn.outcome === 'skew') {
     log('skew', started, undefined, lane);
-    return text(request, 503, 'the scorecard image could not be drawn right now\n', { 'retry-after': '30' });
+    return ogUnavailable(request, 'the scorecard image could not be drawn right now\n');
   }
   log(drawn.settled ? 'ok' : 'logo-unsettled', started, undefined, lane, drawn.logo);
   return pngResponse(
@@ -121,18 +118,9 @@ export async function handleScoreOg(request: Request, env: OgVideoEnv, deps: Sco
   );
 }
 
-function drawRemote(env: OgVideoEnv, inputs: RenderInputs, ms: number): Promise<DrawnCard> {
-  if (!env.RENDER) return Promise.reject(new Error('RENDER binding missing'));
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`render Worker took longer than ${ms} ms`)), ms);
-  });
-  return Promise.race([env.RENDER.drawCard(inputs), timeout]).finally(() => clearTimeout(timer));
-}
-
 async function defaultCard(request: Request, pathname: string, env: OgVideoEnv): Promise<Response> {
   const asset = await env.ASSETS.fetch(new Request(`https://assets.internal${SITE_OG_IMAGE_PATH}`));
-  if (!asset.ok) return text(request, 500, 'scorecard image failed\n');
+  if (!asset.ok) return ogText(request, 500, 'scorecard image failed\n');
   return pngResponse(request, pathname, new Uint8Array(await asset.arrayBuffer()), false, { 'x-anc-card': 'fallback' });
 }
 
@@ -165,16 +153,6 @@ function pngResponse(
     pathname,
     servedMarkdown: false,
     cache: { klass: immutable ? 'immutable' : 'hit-min' },
-  });
-}
-
-function text(request: Request, status: number, body: string, extra?: Record<string, string>): Response {
-  const headers = new Headers({ 'content-type': 'text/plain; charset=utf-8', 'x-robots-tag': 'noindex', ...extra });
-  return applyHeaders(new Response(body, { status, headers }), {
-    request,
-    pathname: new URL(request.url).pathname,
-    servedMarkdown: false,
-    cache: { klass: 'miss' },
   });
 }
 

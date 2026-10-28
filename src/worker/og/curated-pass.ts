@@ -9,14 +9,12 @@
 
 import { hasScorecard } from '../../shared/audit-envelope';
 import { CLIP_FRESH_MS, type RenderInputs } from '../../shared/og-render';
-import { isImmutableScoreOgKey } from '../../shared/score-og';
 import { requireRescoreAuth } from '../audit-web/rescore-trigger';
 import { loadWebSeed } from '../audit-web/seed';
 import { loadRegistryIndex } from '../score/registry-lookup';
 import { emitLog } from '../telemetry/log';
-import { type OgVideoEnv, ogVideoEnabled, renderInputsOf } from './render-request';
+import { type OgVideoEnv, ogVideoEnabled, readyRenderInputs } from './render-request';
 import { headClip } from './store';
-import { loadScoreOgSubject } from './subject';
 
 /** Targets read at once; each costs a record read and a clip head. */
 const CONCURRENCY = 8;
@@ -56,10 +54,8 @@ export async function runCuratedPass(env: OgVideoEnv): Promise<CuratedPassResult
 
 /** The card's inputs when its clip is missing or older than the fresh window. */
 async function staleInputs(env: OgVideoEnv, target: string, now: number): Promise<RenderInputs | 'fresh' | 'skipped'> {
-  const subject = await loadScoreOgSubject(env, target);
-  if (subject.status !== 'ready') return 'skipped';
-  const inputs = renderInputsOf(subject);
-  if (!isImmutableScoreOgKey(inputs.key)) return 'skipped';
+  const inputs = await readyRenderInputs(env, target);
+  if (!inputs) return 'skipped';
   const clip = await headClip(env.SCORE_CACHE, inputs.target, inputs.key);
   return clip && now - clip.uploaded.getTime() < CLIP_FRESH_MS ? 'fresh' : inputs;
 }

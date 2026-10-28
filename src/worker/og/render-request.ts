@@ -8,7 +8,6 @@ import { isImmutableScoreOgKey, scoreOgKey } from '../../shared/score-og';
 import { emitLog } from '../telemetry/log';
 import { loadScoreOgSubject, type ScoreOgEnv, type ScoreOgSubject } from './subject';
 
-/** The switch is a secret read as `=== 'true'`, so unset is off and the feature ships dark. */
 export type OgVideoEnv = ScoreOgEnv & { RENDER?: RenderService; OG_VIDEO_ENABLED?: string };
 
 export function ogVideoEnabled(env: { OG_VIDEO_ENABLED?: string }): boolean {
@@ -26,15 +25,29 @@ export function renderInputsOf(subject: Extract<ScoreOgSubject, { status: 'ready
   };
 }
 
+/** A finished card's inputs; null for a missing, unreadable, pending or unscored one, which has no clip. */
+export async function readyRenderInputs(env: ScoreOgEnv, target: string): Promise<RenderInputs | null> {
+  const subject = await loadScoreOgSubject(env, target);
+  if (subject.status !== 'ready') return null;
+  const inputs = renderInputsOf(subject);
+  return isImmutableScoreOgKey(inputs.key) ? inputs : null;
+}
+
+/** `call`, or a rejection once `ms` pass first. */
+export function withinMs<T>(call: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`render Worker took longer than ${ms} ms`)), ms);
+  });
+  return Promise.race([call, late]).finally(() => clearTimeout(timer));
+}
+
 /** Ask for one target's clip. Never throws: a render request must not fail the audit that made it. */
 export async function requestRender(env: OgVideoEnv, target: string): Promise<void> {
   if (!ogVideoEnabled(env) || !env.RENDER) return;
   try {
-    const subject = await loadScoreOgSubject(env, target);
-    if (subject.status !== 'ready') return;
-    const inputs = renderInputsOf(subject);
-    if (!isImmutableScoreOgKey(inputs.key)) return;
-    await env.RENDER.request(inputs);
+    const inputs = await readyRenderInputs(env, target);
+    if (inputs) await env.RENDER.request(inputs);
   } catch (err) {
     emitLog(
       { scope: 'score.og' },

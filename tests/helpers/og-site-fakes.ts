@@ -48,7 +48,6 @@ const CURATED_JSON = JSON.stringify({
   },
 });
 
-/** The site's default card, served from ASSETS when the render Worker cannot draw. */
 export const DEFAULT_CARD = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 7]);
 
 export const DRAWN_PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
@@ -90,7 +89,6 @@ export function fakeRender(overrides: Partial<RenderService> = {}): FakeRender {
 
 export type SiteEnvOptions = {
   records?: Record<string, unknown>;
-  /** Seeded websites, served as the build's web-seed asset. */
   seed?: string[];
   registry?: unknown;
   kv?: Record<string, string>;
@@ -140,7 +138,6 @@ export function siteEnv(options: SiteEnvOptions = {}): SiteEnv {
   };
 }
 
-/** A web cache record for `host` at `pct`, scored at SCORED_AT. */
 export function webRecord(host: string, pct: number) {
   return {
     spec_version: SPEC_VERSION,

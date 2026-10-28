@@ -57,7 +57,6 @@ import {
   suggestTargets,
 } from '../../shared/audit-routes';
 import { escHtml } from '../../shared/esc-html';
-import type { RenderService } from '../../shared/og-render';
 import { resultAlternateLinks } from '../../shared/result-head';
 import { type ReauditControl, type ResultTier, type SpineInput, shortDate } from '../../shared/result-spine';
 import { brandName, cliOgIdentity, scoreOgAlt, scoreOgEdition, scoreOgKey, scoreOgUrl } from '../../shared/score-og';
@@ -82,6 +81,7 @@ import { buildWebSummaryMarkdown } from '../audit-web/summary-markdown';
 import { buildWebSummaryBody } from '../audit-web/summary-render';
 import { applyHeaders, type CacheClassSpec, resultCacheClass } from '../headers';
 import { curatedCardOf, pageClip, withOgVideo } from '../og/page-clip';
+import type { OgVideoEnv } from '../og/render-request';
 import { get as cliCacheGet, keyFor as cliKeyFor } from '../score/cache';
 import { readCuratedEnvelope } from '../score/core';
 import { loadRegistryIndex, type RegistryIndex } from '../score/registry-lookup';
@@ -91,13 +91,8 @@ import { emitLog } from '../telemetry/log';
 import { envelopeJsonBody } from './api';
 import { readInFlight } from './inflight';
 
-export type ResultEnv = {
-  ASSETS: Fetcher;
-  SCORE_CACHE: R2Bucket;
-  SCORE_KV?: KVNamespace;
+export type ResultEnv = OgVideoEnv & {
   TURNSTILE_SITEKEY?: string;
-  RENDER?: RenderService;
-  OG_VIDEO_ENABLED?: string;
 };
 
 export type ResultDeps = {

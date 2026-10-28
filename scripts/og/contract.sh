@@ -21,6 +21,17 @@ wrangler-failed 30 run'
 
 OG_DOCS='https://github.com/brettdavies/agentnative-site/blob/dev/RELEASES-PREFLIGHT.md#ogvideo-reason-codes'
 
+# og_names <staging|production>: set QUEUE, RENDER and SITE to the
+# environment's og-rendered queue, render Worker and site Worker.
+# shellcheck disable=SC2034 # the scripts that source this file read them
+og_names() {
+  if [[ "$1" == production ]]; then
+    QUEUE=og-rendered RENDER=anc-og-render SITE=agentnative-site
+  else
+    QUEUE=og-rendered-staging RENDER=anc-og-render-staging SITE=agentnative-site-staging
+  fi
+}
+
 og_reason_field() {
   awk -v r="$1" -v f="$2" '$1 == r { print $f; found = 1 } END { exit !found }' <<<"$OG_REASONS"
 }
