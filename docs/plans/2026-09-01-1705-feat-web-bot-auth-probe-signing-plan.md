@@ -271,7 +271,7 @@ stateDiagram-v2
 - **Requirements:** R1, R2, R3, R10.
 - **Dependencies:** U1.
 - **Files:** `src/worker/audit-web/ssrf.ts`, `src/worker/audit-web/engine.ts`, `src/worker/audit-web/discovery.ts`,
-  `src/worker/audit-web/handlers/types.ts`, `src/worker/audit-web/handlers/mcp.ts`, `src/worker/audit-web/route.ts`,
+  `src/worker/audit-web/handlers/types.ts`, `src/worker/audit-web/handlers/mcp.ts`, `src/worker/audit/api.ts`,
   `src/worker/mcp/tools/web-audit.ts`, `src/worker/audit-web/rescore-workflow.ts`, `src/worker/audit-web/audit-log.ts`,
   `scripts/web-audit/audit.ts`, `tests/web-audit-ssrf.test.ts`.
 - **Approach:**

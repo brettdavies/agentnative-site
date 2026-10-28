@@ -6,7 +6,7 @@ product_contract_source: ce-brainstorm
 title: "Sitewide telemetry - Plan"
 type: feat
 status: active
-prs: ["#322", "#330", "#331"]
+prs: ["#322"]
 date: 2026-09-01
 topic: sitewide-telemetry
 ---
@@ -31,7 +31,8 @@ topic: sitewide-telemetry
   staging-first; its two audits gate production. Three proofs are live-surface and post-deploy, not suite-green.
 - **Stop conditions:** stop and ask if any record or export would carry a client IP or raw User-Agent (R5), if the
   staging audit finds identifying data in the trace-event envelope, or if lake usage leaves the included billing tiers.
-- **Open blockers:** none. The session plan's open questions block its work, not this contract.
+- **Open blockers:** release #369 keeps the lake off `main` until the alert path is provisioned: no `EMAIL` binding
+  exists, so `notify()` returns `unprovisioned`. The session plan's open questions block its work, not this contract.
 - **Tail ownership:** ends when the Definition of Done table is green, the runbook reproduces every dashboard-side
   artifact, and the thesis query returns production rows.
 
@@ -236,7 +237,7 @@ committed roadmap.
   Keeps its 13-unit shape; this artifact absorbs the "why" so that plan stays mechanism-only.
 - **Session identity plan** (`docs/plans/2026-09-01-1152-feat-telemetry-session-identity-plan.md`) — Carries R17's
   journey mechanics under R5's privacy constraints. Depends on the emitter plan's `page.request` record and platform-key
-  audit; blocked on its own four open questions.
+  audit; blocked on its own three open questions.
 - **CWV milestone** (R13) — Can proceed independently of everything above; it carries the R6 posture page with it.
 - **Operator chart surface** — later area: a small operator-only page rendering thesis charts from scheduled R2 SQL
   results. Depends on the lake being proven. Still to decide: operator auth model.
@@ -393,6 +394,8 @@ first classified page-record deploy) → U3 (stall alert). U6 (runbook) accretes
 
 ### U1. Stand up the staging lake and run both audits
 
+- [ ] Partly built in #322, on `dev` only: the `TELEMETRY_LAKE` binding pair, `logpush: true` in both envs, and the
+  runbook with its field-selection audit; the catalog, the Logpush jobs, and the export audit are not done.
 - **Goal:** The full export chain works against staging traffic, and the field-shape and export-privacy gates are
   answered with recorded evidence.
 - **Requirements:** R5, R8, R9, R11 (KTD1, KTD2, KTD3)
@@ -447,6 +450,8 @@ first classified page-record deploy) → U3 (stall alert). U6 (runbook) accretes
 
 ### U3. Alert when the lake goes stale
 
+- [ ] Partly built in #322, on `dev` only: `lake-freshness.ts`, its tests, and the daily cron; the check is not armed,
+  because `LAKE_INGEST_PREFIX` is `''` and no `EMAIL` binding exists.
 - **Goal:** A stalled export is detected and emailed well inside the live layer's window (R18).
 - **Requirements:** R16, R18 (KTD4)
 - **Dependencies:** U2 (the production sink and its object prefix exist); the emitter plan's central log module is
@@ -474,6 +479,7 @@ first classified page-record deploy) → U3 (stall alert). U6 (runbook) accretes
 
 ### U4. Publish the privacy posture page
 
+- [x] Built in #322 on `dev`; release #369 keeps it off `main` until the alert path is provisioned.
 - **Goal:** A visitor can read the full posture (R6) before the beacon runs.
 - **Requirements:** R6, R13 (KTD6)
 - **Dependencies:** none — first unit to ship.
@@ -516,6 +522,9 @@ first classified page-record deploy) → U3 (stall alert). U6 (runbook) accretes
 
 ### U6. Write the analytics runbook
 
+- [ ] Partly built in #322 and #331: the runbook's lake, field-selection audit, freshness-check, and live-layer field
+  index sections; the Logpush job options, credentials, saved queries, Web Analytics, and zone-dashboard sections are
+  not done.
 - **Goal:** Every dashboard-side artifact is reproducible from the runbook alone (R15).
 - **Requirements:** R15 (KTD7)
 - **Dependencies:** U1–U5 — accretes throughout and closes last.

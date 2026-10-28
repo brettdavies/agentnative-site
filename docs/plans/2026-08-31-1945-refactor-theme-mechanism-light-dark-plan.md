@@ -124,7 +124,7 @@ the theme-selection mechanism in favour of `color-scheme`, declare the browser f
 (prefers-color-scheme: dark) :root:not([data-theme="light"])`, dark again on `:root[data-theme="dark"]`, and light again
 on `:root[data-theme="light"]`. The `:not()` exists so a user who picks light beats an OS preference of dark.
 
-`AGENTS.md:221` tells a verifier to "toggle through both themes (light + dark) using the in-page toggle." That reaches
+`AGENTS.md:257` tells a verifier to "toggle through both themes (light + dark) using the in-page toggle." That reaches
 both themes but only the two `[data-theme]` blocks; the two OS-preference paths are never exercised by the documented
 procedure.
 
@@ -170,7 +170,7 @@ overrides in `src/styles/site.css`, the toggle in `src/client/theme.ts` and `the
 - [web-features explorer — light-dark](https://web-platform-dx.github.io/web-features-explorer/features/light-dark/)
 - [WebKit — text-wrap: pretty](https://webkit.org/blog/16547/better-typography-with-text-wrap-pretty/) (the contrast
   case for graceful degradation)
-- `scripts/design/generate-palette.mjs:601-633` (the four-block emitter and its README string)
+- `scripts/design/generate-palette.mjs:623-645` (the four-block emitter and its README string)
 - `AGENTS.md` § "Browser-verify before declaring done"
 
 ---
@@ -217,8 +217,8 @@ U1 → U2 → U3 → U4, one PR. U4 is the final commit so the documentation is 
 
 - **Goal:** Each palette is declared once.
 - **Requirements:** R1 (KTD1, KTD2)
-- **Files:** `scripts/design/generate-palette.mjs` (emitter at lines 601-620, header comment, and the README string at
-  630-633), `src/styles/foundation.css` (regenerated, never hand-edited).
+- **Files:** `scripts/design/generate-palette.mjs` (emitter at lines 623-629, header comment, and the README string at
+  642-645), `src/styles/foundation.css` (regenerated, never hand-edited).
 - **Approach:** Replace the four `cssTokenBlock` calls with one `:root` block that sets `color-scheme: light dark` and
   emits each of the 31 tokens as `light-dark(<light>, <dark>)`, paired from the same `light` and `dark` objects the
   emitter already holds. Delete the media wrapper, both `[data-theme]` blocks, and the `:not()` precedence note. Update
@@ -275,7 +275,7 @@ U1 → U2 → U3 → U4, one PR. U4 is the final commit so the documentation is 
 
 - **Goal:** The documented procedure matches what the stylesheets implement.
 - **Requirements:** R4
-- **Files:** `AGENTS.md` (§ "Browser-verify before declaring done", line 221; plus the browser-floor note).
+- **Files:** `AGENTS.md` (§ "Browser-verify before declaring done", line 257; plus the browser-floor note).
 - **Approach:** Rewrite the verify step for the merged mechanism: two themes reached through `color-scheme`, verified
   with the in-page toggle and with the OS preference, with no `data-theme` route to caveat. Add the U3 floor in prose so
   a contributor sees the bar without opening `package.json`.

@@ -6,7 +6,7 @@ date: 2026-06-01
 origin: 'post-release retro on the 2026-06-01 live-scoring v3 + audit rename + spec/principles v0.5.0 release (PR #145, squash `08958bc`). Cache-purge step ran cleanly; the production live-DO smoke step in RELEASES-PREFLIGHT.md is structurally unfollowable with curl because production Turnstile validates real tokens. Manual browser submission is the only operator path today.'
 related:
   - 'RELEASES-PREFLIGHT.md (post-tag verification block)'
-  - 'src/worker/score/handler.ts (gate ordering)'
+  - 'src/worker/audit/admit.ts (gate ordering)'
   - 'src/worker/score/turnstile.ts (verifyTurnstile)'
   - 'docs/solutions/architecture-patterns/cf-worker-gate-ordering-before-cost-bearing-outbounds-2026-05-20.md'
 ---
@@ -67,7 +67,8 @@ traffic and so a leaked token shows up loudly in the dashboard rather than silen
 
 ### Handler integration
 
-The bypass slot sits in `src/worker/score/handler.ts` inside the gate block at line ~478. Concrete shape:
+The bypass slot sits in `src/worker/audit/admit.ts` inside `admitTransact()`, between the lane kill switch and the
+Turnstile siteverify at line 133. Concrete shape:
 
 ```ts
 // 4a. Kill switch (operator flip).
@@ -155,7 +156,7 @@ is the recovery lever (the runbook documents the procedure today). Token rotatio
   match → bypass returns true, length mismatch → no-op (timing-safe).
 - [ ] Handler integration: bypass is checked between kill-switch and Turnstile; rate-limit still runs; telemetry tags
   the run as smoke; existing `score.tier` log line carries the smoke flag.
-- [ ] Analytics Engine field-shape contract updated in `tests/score-telemetry.test.ts` and
+- [ ] Analytics Engine field-shape contract updated in `tests/score-stream.test.ts` and
   `docs/runbooks/live-scoring-analytics.md`.
 - [ ] `scripts/smoke-api-score.sh --live` ships with an example invocation in `RELEASES-PREFLIGHT.md` and a 1Password
   item created at `Cloudflare Worker - anc.dev SMOKE_SERVICE_TOKEN`.

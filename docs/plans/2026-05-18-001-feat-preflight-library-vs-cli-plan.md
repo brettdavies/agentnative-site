@@ -101,16 +101,16 @@ So pre-flight covers pip/uv/cargo/npm/bun, leaving go + direct on the reactive p
 
 ### Relevant Code and Patterns
 
-- **`src/worker/score/do.ts:resolveSpec()` (~line 166)** — natural hook point. Pre-flight runs after spec resolution but
-  before `sandbox-exec.score()` dispatch. Returns `{ok: false, error: 'chain_resolved_library_not_cli'}` on library hit;
-  otherwise passes through to existing flow.
-- **`src/worker/score/discover-binary.ts:step3_distributions()` (~line 223)** — already makes the same fetches for
+- **`src/worker/score/resolve-spec.ts:resolveSpec()` (~line 76)** — natural hook point. Pre-flight runs after spec
+  resolution but before `sandbox-exec.score()` dispatch. Returns `{ok: false, error: 'chain_resolved_library_not_cli'}`
+  on library hit; otherwise passes through to existing flow.
+- **`src/worker/score/discover-binary.ts:step3_distributions()` (~line 332)** — already makes the same fetches for
   github-URL inputs. Per-registry helpers (`crates.io/api/v1/crates/.../bin_names`, `registry.npmjs.org/.../bin`,
   `pypi.org/.../console_scripts`) are the exact shape pre-flight needs. Refactor: extract per-PM "is-cli" predicates
   into shared helpers callable from both Step 3 and the new pre-flight module.
 - **`src/worker/score/response-shape.ts`** — `ScoreError` union; add `chain_resolved_library_not_cli` variant + map to a
   status code (502, same class as other resolved-but-uninstallable bounces).
-- **`src/worker/score/handler.ts:mapDoError()`** — needs the new code mapped to the user-facing error envelope. New
+- **`src/worker/score/core.ts:doError()`** — needs the new code mapped to the user-facing error envelope. New
   ScoreError variant flows through automatically once added to the union.
 
 ### Institutional Learnings
@@ -273,7 +273,7 @@ the helper. Shared fetch + same field-check.
 
 ---
 
-### U2. Pre-flight check in do.ts:resolveSpec for pip / uv / cargo / npm / bun
+### U2. Pre-flight check in resolve-spec.ts:resolveSpec for pip / uv / cargo / npm / bun
 
 **Goal:** Before dispatching to `sandbox-exec.score()`, query the relevant PM registry API for install-command inputs
 and return `chain_resolved_library_not_cli` if the package is a library.
@@ -284,9 +284,9 @@ and return `chain_resolved_library_not_cli` if the package is a library.
 
 **Files:**
 
-- Modify: `src/worker/score/do.ts` — add pre-flight branch in `resolveSpec()`. For `kind: 'install-command'` and `pm in
-  [pip, cargo-binstall, npm, bun]` (uv inputs already parse as pm=pip per U4 parse-install), call the U1 helper. If
-  `isCli: false`, return `{ok: false, error: 'chain_resolved_library_not_cli', details: 'pm=<pm> pkg=<pkg>
+- Modify: `src/worker/score/resolve-spec.ts` — add pre-flight branch in `resolveSpec()`. For `kind: 'install-command'`
+  and `pm in [pip, cargo-binstall, npm, bun]` (uv inputs already parse as pm=pip per U4 parse-install), call the U1
+  helper. If `isCli: false`, return `{ok: false, error: 'chain_resolved_library_not_cli', details: 'pm=<pm> pkg=<pkg>
   reason=<helper.reason>'}`.
 - Modify: `src/worker/score/sandbox-exec.ts` — add `chain_resolved_library_not_cli` to the `ScoreErrorCode` union.
 - Test: `tests/score-do.test.ts` — add pre-flight test cases.
@@ -326,8 +326,8 @@ wall-clock but otherwise behave identically. go + direct unchanged.
 
 ### U3. Handler error-code mapping for `chain_resolved_library_not_cli`
 
-**Goal:** Map the new DO error code to a user-facing ScoreError variant; integrate into the existing handler.ts
-mapDoError flow.
+**Goal:** Map the new DO error code to a user-facing ScoreError variant; integrate into the existing `core.ts`
+`doError()` flow.
 
 **Requirements:** R11 (response triad). User-visible response envelope must carry `spec_version`, `anc_version` (well,
 N/A for bounces — only success), `auditor_url` AND the new error code with PM-specific details.
@@ -338,13 +338,14 @@ N/A for bounces — only success), `auditor_url` AND the new error code with PM-
 
 - Modify: `src/worker/score/response-shape.ts` — add `{code: 'chain_resolved_library_not_cli'; details: string;
   cta_text: string}` to the ScoreError union. Update `statusForError()` to return 502.
-- Modify: `src/worker/score/handler.ts:mapDoError()` — add the new code to the switch.
-- Modify: `tests/score-handler.test.ts` — add a DO mock case that returns the new error and assert the response shape.
+- Modify: `src/worker/score/core.ts:doError()` — add the new code to the switch.
+- Modify: `tests/audit-api.test.ts` — add a DO mock case that returns the new error and assert the response shape.
 
 **Approach:**
 
-Straight type-union extension. Once the new variant is added to ScoreError, mapDoError's exhaustiveness check (via
-`assertNever()`) forces handling. The user-facing envelope shape is identical to other bounce classes.
+Straight type-union extension. Once the new variant is added to ScoreError, `statusForError()`'s exhaustiveness check
+(via `assertNever()`) forces handling; `doError()` needs its own case, because its default collapses an unknown code to
+`incomplete_response_contract`. The user-facing envelope shape is identical to other bounce classes.
 
 **Test scenarios:**
 
@@ -359,6 +360,10 @@ Straight type-union extension. Once the new variant is added to ScoreError, mapD
 
 ### U4. Telemetry shim (precondition for the build decision)
 
+- [ ] Partly covered by #104: the `SCORE_TELEMETRY` Analytics Engine dataset (`src/worker/score/telemetry.ts:198`)
+  records `input_kind`, `pm`, `error_code`, and timings for each CLI audit request; it has no `library` outcome, so a
+  library input reads as any other `chain_resolved_no_binary_produced` bounce.
+
 **Goal:** Before any of U1-U3 ships, add a lightweight telemetry counter that measures the actual library-input rate in
 production. The build trigger is "library inputs exceed 10% of install-command traffic over 7 days." Without this
 measurement, the recommendation in Key Technical Decisions stays at "defer" — we'd be building speculation, not response
@@ -371,11 +376,11 @@ justified.
 
 **Files:**
 
-- Modify: `src/worker/score/handler.ts` — add a Workers Analytics Engine write per POST with the eventual outcome
-  classification. Fields: `pm` (the install-command pm), `outcome` ('cli' / 'library' / 'install_failed' / 'no_resolve'
-  / etc.), `duration_ms`.
-- Modify: `wrangler.jsonc` — add `analytics_engine_datasets[]` binding if not already present.
-- Test: `tests/score-handler.test.ts` — add a stub for the AE write; assert the right fields are emitted on each outcome
+- Modify: `src/worker/score/telemetry.ts` — add the eventual outcome classification to the Workers Analytics Engine
+  write `recordScoreEvent()` makes for each CLI request from `src/worker/audit/api.ts`. Fields: `pm` (the
+  install-command pm), `outcome` ('cli' / 'library' / 'install_failed' / 'no_resolve' / etc.), `duration_ms`.
+- `wrangler.jsonc` — no change: it declares the `SCORE_TELEMETRY` `analytics_engine_datasets[]` binding in both envs.
+- Test: `tests/score-stream.test.ts` — add a stub for the AE write; assert the right fields are emitted on each outcome
   branch.
 
 **Approach:**

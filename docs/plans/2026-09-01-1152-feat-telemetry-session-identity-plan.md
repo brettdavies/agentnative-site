@@ -25,8 +25,9 @@ topic: telemetry-session-identity
 - **Stop conditions:** Do not begin implementation while any Open Question is unresolved. Two of them can invalidate the
   whole approach.
 - **Depends on:** `docs/plans/2026-09-01-0042-refactor-structured-log-emitter-plan.md` — specifically its `page.request`
-  record (U10) and its platform-key finding (U6). Both are on `dev` (#330 `77814f9`, #331 `fbeff01`); the finding is
-  recorded in `docs/runbooks/sitewide-analytics.md` § Live-layer field index.
+  record (U10) and its platform-key finding (U6). #330 (`77814f9`) and #331 (`fbeff01`) are on `dev` and, through
+  release #369, on `main`; the finding is recorded in `docs/runbooks/sitewide-analytics.md` § Live-layer field index,
+  which is on `dev` only.
 - **Parent view:** `docs/plans/2026-09-01-1732-feat-sitewide-telemetry-plan.md` owns the sitewide contract these
   journeys serve; its R5 governs what any record or export may carry.
 - **Execution order:** filename timestamps do not encode execution order. This plan runs last in the telemetry family —

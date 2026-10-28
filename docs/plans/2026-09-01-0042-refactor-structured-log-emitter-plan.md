@@ -7,7 +7,7 @@ title: "Central structured-log emitter - Plan"
 type: fix
 status: released
 completed: 2026-09-03
-released_in: "#332"
+released_in: "#369"
 prs: ["#330", "#331"]
 date: 2026-09-01
 topic: structured-log-emitter

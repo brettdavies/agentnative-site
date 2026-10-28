@@ -16,10 +16,11 @@ topic: toolchain-and-asset-integrity-gates
 ## Goal Capsule
 
 - **Objective:** The declarations anc.dev ships stay true to the assets and packages behind them, and CI proves it
-  before a deploy. Four integrity gaps are latent today — an invalid color declaration, three overstated font ranges,
-  one package the Worker imports that nothing declares, and a build toolchain whose local and CI halves disagree — and
-  this work makes each unshippable going forward. Two of the four have no reader-visible symptom now, so their PRs are
-  expected to show no visual change; the value is that the next one cannot ship quietly.
+  before a deploy. The work covers four integrity gaps: an invalid color declaration, three overstated font ranges,
+  one package the Worker imports that nothing declares, and a build toolchain whose local and CI halves disagree.
+  PRs #323, #324, and #325 close the color, package, and toolchain gaps; the three overstated font ranges are still
+  latent. This work makes each gap unshippable going forward. Two of the four have no reader-visible symptom, so their
+  PRs are expected to show no visual change; the value is that the next one cannot ship quietly.
 - **Means:** Close each gap with a deterministic gate, then fix what the gate finds (KTD1, KTD3, KTD5).
 - **Authority:** R-IDs win on required behavior. KTDs win on mechanism inside those constraints. Units override neither.
 - **Execution profile:** Test-first throughout. Every gate is written and **observed failing against the unfixed tree**
@@ -50,11 +51,12 @@ font binary. `AGENTS.md` § "Browser-verify before declaring done" exists becaus
 dark-mode text past a green suite. The undefined `--fg` token and the three overstated font-weight ranges are that same
 shape, still open.
 
-The other two are configuration drift rather than unrendered artifacts. Five workflow sites pin Bun 1.3.11 while
-developers run 1.4.0, and no test compares them, so the halves can diverge indefinitely without a signal. Separately,
-`@cloudflare/containers` is imported by Worker source and declared in no manifest, resolving only transitively through
-`@cloudflare/sandbox`; nothing in the repo performs cross-module reachability or manifest analysis, because Biome's
-recommended preset is per-file and `tsconfig.json` sets no `noUnusedLocals`.
+The other two are configuration drift rather than unrendered artifacts. Bun is declared once, in `.bun-version`
+(1.4.4), which every workflow's `setup-bun` step reads through `bun-version-file`; `tests/bun-version.test.ts` fails
+when a workflow restates the version or the running Bun differs from the pin (#324). Separately,
+`@cloudflare/containers`, which Worker source imports, is declared directly in `package.json` (#325), and `knip` on
+`bun run lint` performs the cross-module reachability and manifest analysis that Biome's per-file recommended preset and
+`tsconfig.json` (no `noUnusedLocals`) do not.
 
 ### Key Decisions
 
@@ -156,6 +158,7 @@ recommended preset is per-file and `tsconfig.json` sets no `noUnusedLocals`.
 - KTD1. **One `BUN_VERSION` env var per workflow, bumped to 1.4.0.** (session-settled: user-approved — chosen over
   pinning local down to 1.3.11: 1.4.0 is what the machine already runs, and the lockfile is verified compatible.)
   `deploy.yml` and `dependabot-lockfile.yml` have no top-level `env:` block and need one added. Governs R1.
+  Built in #324 as one `.bun-version` file that every workflow reads through setup-bun's `bun-version-file`.
 - KTD2. **`color: inherit` on `.install-cmd__copy`.** (session-settled: user-directed — chosen over `var(--fg-body)`:
   measured byte-identical to shipped output, and it matches the idiom `.copy-button__icon` already uses.) Deleting the
   declaration is not an option — it is a visible regression, because an undefined token makes the declaration invalid at
@@ -297,6 +300,8 @@ merges rather than the work.
 
 ### U1. Consolidate the Bun pin and bump to 1.4.0
 
+- [x] Built in #324: `.bun-version` holds the pin and every `setup-bun` step reads it through `bun-version-file`; no
+  workflow sets `BUN_VERSION`.
 - **Goal:** One declared Bun version, matching what developers run.
 - **Requirements:** R1 (KTD1)
 - **Files:** `.github/workflows/ci.yml` (`env.BUN_VERSION`, line 42), `.github/workflows/deep-check.yml`
@@ -322,9 +327,10 @@ merges rather than the work.
 
 ### U2. Guard the Bun pin against re-splitting
 
+- [x] Built in #324.
 - **Goal:** A workflow that names a Bun version literally fails a test.
 - **Requirements:** R2
-- **Files:** `tests/toolchain-pin.test.ts` (new).
+- **Files:** `tests/bun-version.test.ts` (new).
 - **Approach:** No CI/hook parity test exists in this repo, which is how five pin sites drifted from local. Read every
   file in `.github/workflows/`, parse each `bun-version:` value and each `BUN_VERSION:` assignment, and assert: every
   `bun-version:` is the literal `${{ env.BUN_VERSION }}`; every `BUN_VERSION:` resolves to one identical value; and that
@@ -337,13 +343,16 @@ merges rather than the work.
   - Error path: set two workflows' `BUN_VERSION` to different values; the test fails naming both.
   - Error path: set `bun-types` to `^1.3.11` against `BUN_VERSION: 1.4.0`; the test fails naming the mismatch.
   - Edge case: a workflow with no Bun step is skipped, not failed.
-- **Verification:** `bun test tests/toolchain-pin.test.ts`.
+- **Verification:** `bun test tests/bun-version.test.ts`.
 
 ### U3. Add the CSS custom-property resolution gate
 
+- [ ] Partly built in #323: `tests/css-contract.test.ts` fails on a bare `var()` reference to an undefined token in
+  built CSS; it exempts fallbacked references, does not check `scripts/og/og.css`, and allowlists all five
+  `--shiki-dark*` tokens.
 - **Goal:** An undefined design token in shipped or source CSS fails a test.
 - **Requirements:** R3 (KTD10)
-- **Files:** `tests/css-token-resolution.test.ts` (new), `docs/TODOS.md` (record the unused-exports deferral).
+- **Files:** `tests/css-contract.test.ts` (new), `docs/TODOS.md` (record the unused-exports deferral).
 - **Approach:** Build one defined set per **serving group**, not per file (KTD10): source group =
   `src/styles/foundation.css` + `src/styles/site.css`; built group = `dist/css/foundation.css` + `dist/css/site.css`; OG
   group = `src/styles/foundation.css` + `scripts/og/og.css`, which `scripts/og/og.html:8` link-loads in that order. For
@@ -356,7 +365,7 @@ merges rather than the work.
   referenced by a stylesheet and undefined in its group, so a suppression that has stopped suppressing fails rather than
   lingering.
 
-  No cross-theme symmetry assertion is added. `scripts/design/generate-palette.mjs:611-617` emits all four theme blocks
+  No cross-theme symmetry assertion is added. `scripts/design/generate-palette.mjs:623-629` emits all four theme blocks
   from one `light` object and one `dark` object, so a token cannot drift between blocks through the generator. Removing
   the duplicated emission is the separate theme plan's job, not this one's.
 - **Test scenarios:**
@@ -371,13 +380,16 @@ merges rather than the work.
     fails naming the now-unnecessary allowlist entry.
   - Edge case: a token defined in `foundation.css` and referenced in `site.css` passes — that is the normal case and the
     reason for KTD10.
-- **Verification:** `bun run build && bun test tests/css-token-resolution.test.ts`.
+- **Verification:** `bun run build && bun test tests/css-contract.test.ts`.
 
 ### U4. Make every `site.css` token reference resolve
 
+- [ ] Partly built in #323: `.install-cmd__copy` sets `color: var(--fg-body)` (`src/styles/site.css:505`), not
+  `inherit`; the `--shiki-dark-font-style`, `--shiki-dark-font-weight`, and `--shiki-dark-text-decoration` references at
+  lines 323-325 and 332-334 still have no fallbacks.
 - **Goal:** No token reference depends on an allowlist entry that does not describe a real runtime emitter.
 - **Requirements:** R3, R4, R5 (KTD2)
-- **Files:** `src/styles/site.css` (line 472, plus the three Shiki reference sites at lines 291, 300, 1459).
+- **Files:** `src/styles/site.css` (line 505, plus the two Shiki reference sites at lines 323-325 and 332-334).
 - **Approach:** Replace `color: var(--fg);` with `color: inherit;`. Do not delete the declaration — measured, that
   yields `rgb(0,0,0)` light and `rgb(255,255,255)` dark, because the undefined token currently makes the declaration
   invalid at computed-value time, which resolves to `unset`, which for `color` means `inherit`. Separately, give
@@ -395,19 +407,21 @@ merges rather than the work.
   - Edge case: the button stays visually distinct from its sibling `.install-cmd__pm`.
 - **Verification:** `bun run build`, then load the homepage and read `getComputedStyle` in both themes. The element has
   three visibility preconditions the measurement depends on: `.site-header__install-cmd` is `display: none` at
-  `src/styles/site.css:402` and unhidden only by `:root.js …:not([hidden])` once `src/client/install-cmd.ts` strips the
-  attribute, and it is hidden again below 640px at line 527. So verify with JavaScript enabled, at a viewport wider than
+  `src/styles/site.css:435` and unhidden only by `:root.js …:not([hidden])` once `src/client/install-cmd.ts` strips the
+  attribute, and it is hidden again below 640px at line 559. So verify with JavaScript enabled, at a viewport wider than
   640px, switching themes with the in-page `data-theme-cycle` control rather than the OS setting. Screenshot both for
   the PR.
 
 ### U5. Add knip with a repo-shaped config
 
+- [ ] Partly built in #325: `knip.json` and the `knip` step at the end of `bun run lint`; `CONTRIBUTING.md:84` and the
+  `scripts/hooks/pre-push` header (line 11) still describe stage 1 as biome + markdownlint.
 - **Goal:** `bun run lint` fails on dead files, unused dependencies, and undeclared imports.
 - **Requirements:** R6 (KTD3, KTD4, KTD11)
 - **Files:** `knip.json` (new), `package.json` (`lint` script, `knip` devDependency), `CONTRIBUTING.md` (§ Git hooks,
   pre-push stage 1), `scripts/hooks/pre-push` (header stage list), `docs/TODOS.md`.
 - **Approach:** Add `knip` as a devDependency and append it to the `lint` script after `markdownlint-cli2`, so the
-  pre-push hook and CI's Lint step both enforce it with one wiring. `CONTRIBUTING.md:82` and the `pre-push` header both
+  pre-push hook and CI's Lint step both enforce it with one wiring. `CONTRIBUTING.md:84` and the `pre-push` header both
   currently describe stage 1 as biome + markdownlint; update both, since KTD4 chose this wiring specifically because it
   reaches the hook. In `knip.json`: restrict `include` to `files`, `dependencies`, and `unlisted` per KTD3; declare the
   entry points import analysis cannot infer (esbuild-built client entries under `src/client/`, Playwright specs under
@@ -431,6 +445,7 @@ merges rather than the work.
 
 ### U6. Clear the dead-code findings
 
+- [x] Built in #325.
 - **Goal:** Nothing the Worker imports resolves by accident, and no declared dependency is dead.
 - **Requirements:** R7 (KTD11)
 - **Files:** `package.json`.
@@ -455,6 +470,9 @@ merges rather than the work.
 
 ### U7. Rebuild the font-face guard against built output and the font binaries
 
+- [ ] Partly built in #323: `tests/font-face-src.test.ts` checks the format in built CSS and resolves every
+  `url(/fonts/...)` and `shell.mjs` preload to a file in `dist/fonts/` (lines 86-124); no check reads a font's `wght`
+  axis or compares it to a declared weight range.
 - **Goal:** A stylesheet cannot declare a font range the font does not have, point at a font that is not there, or name
   a non-`woff2` format.
 - **Requirements:** R8, R9, R10, R11 (KTD5, KTD6, KTD6a, KTD7, KTD8, KTD9)

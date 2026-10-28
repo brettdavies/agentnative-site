@@ -144,8 +144,8 @@ code defaults to off (`env.LIVE_BREW_TIER2_ENABLED !== 'true'`).
 The existing `'brew'` tag means "user typed brew install, route through fallback" (the tier-1 input shape). Tier 2 needs
 a distinct tag so the install table can distinguish "fallback failed, escalate to literal brew install" from the legacy
 "always bounce" path. Adding `'brew-install'` to the union cascades through `installCommandFor` exhaustiveness,
-`installHostsFor`, `mapDoError`, `PmTag` (telemetry), and the share-url derivation — all caught by TypeScript on the
-first compile.
+`installHostsFor`, `doError` (`src/worker/score/core.ts`), `PmTag` (telemetry), and the share-url derivation — all
+caught by TypeScript on the first compile.
 
 ### KTD7. Subshell-wrap the brew install command
 
@@ -401,12 +401,12 @@ guard (U3) passes.
   spec-vs-PM-tag choice), and append `'4-brew-install-fallback'` to the `ResolvedStep` literal-union type)
 - `src/worker/score/resolve-spec.ts` (modify — extend `resolveSpec` to read the flag + synthesize on tier-1 bounce)
 - `src/worker/score/resolve-spec.ts` may also export a small `synthesizeBrewInstallSpec(pkg)` helper.
-- `tests/score-resolve-spec.test.ts` (modify — add tier-2 dispatch test scenarios)
+- `tests/score-do-brew-fallback.test.ts` (modify — add tier-2 dispatch test scenarios)
 
 **Approach:**
 
 - New PM tag: extend `ParsedInstall.pm` union to include `'brew-install'`. TypeScript exhaustiveness checks in
-  `installCommandFor`, `installHostsFor`, `mapDoError`, and `PmTag` will surface compile errors at every union site; fix
+  `installCommandFor`, `installHostsFor`, `doError`, and `PmTag` will surface compile errors at every union site; fix
   each as a discrete edit.
 - `resolveSpec`: when `input.kind === 'install-command'` AND `input.spec.pm === 'brew'`, call `resolveBrewFallback`. If
   `result.ok`, return as today. If `!result.ok && result.error === 'install_unsupported'` AND
@@ -438,7 +438,7 @@ result is the original bounce.
 - Edge: `pm=brew, package=<entry>` AND `resolveBrewFallback` throws (network error to formulae.brew.sh) → bounce per
   existing error handling, tier 2 doesn't trigger.
 
-**Verification:** Tests pass; exhaustiveness checks pass; no tier-1 regression in `tests/score-resolve-spec.test.ts`
+**Verification:** Tests pass; exhaustiveness checks pass; no tier-1 regression in `tests/score-do-brew-fallback.test.ts`
 baseline.
 
 ---
@@ -515,27 +515,27 @@ INSTALL_HOSTS entry without regression.
 **Files:**
 
 - `src/worker/score/telemetry.ts` (modify — extend `PmTag` union; add tier-2 accumulator slots)
-- `src/worker/score/handler.ts` (modify — write the tier-2 counters in the response path)
-- `tests/score-telemetry.test.ts` (modify — assert the new PmTag value; assert slot order unchanged)
+- `src/worker/audit/api.ts` (modify — write the tier-2 counters where `emitCliTerminal()` calls `recordScoreEvent`)
+- `tests/score-stream.test.ts` (modify — assert the new PmTag value; assert slot order unchanged)
 
 **Approach:**
 
 - Extend `PmTag` union: add `'brew-install'` as a new allowed value (append, no reorder).
 - Extend `Telemetry` accumulator: add `tier_2_attempted: boolean`, `tier_2_ok: boolean`, `tier_2_failure_reason: string
   | undefined`. These are doubles/blobs that append to existing slots (the schema-pinning test in
-  `tests/score-telemetry.test.ts` will catch any reorder).
+  `tests/score-stream.test.ts` will catch any reorder).
 - Handler writes the counters in the same try/finally as today's `recordScoreEvent`.
 - Cloudflare Analytics Engine dataset stays the same (`SCORE_TELEMETRY` binding). No new bindings, no migration.
 
 **Patterns to follow:**
 
 - `src/worker/score/telemetry.ts` `PmTag` union + the append-only slot contract documented in the module header
-- `tests/score-telemetry.test.ts` (regression test for slot order)
+- `tests/score-stream.test.ts` (regression test for slot order)
 
 **Test scenarios:**
 
 - Append-only: `PmTag` union now includes `'brew-install'` AND the existing values are unchanged.
-- Slot order: `tests/score-telemetry.test.ts` baseline still passes; new slots are appended.
+- Slot order: `tests/score-stream.test.ts` baseline still passes; new slots are appended.
 - Tier-2 attempt counter increments: a request whose tier-1 bounces + tier-2 dispatches writes `tier_2_attempted: true`,
   `tier_2_ok: true` on install success.
 - Tier-2 failure counter increments: a request whose tier-1 bounces + tier-2 install fails writes `tier_2_attempted:
@@ -559,7 +559,7 @@ INSTALL_HOSTS entry without regression.
 - `wrangler.jsonc` (NO change — secrets aren't declared here; they're set via `wrangler secret put`)
 - `src/worker/score/resolve-spec.ts` (already modified in U4 to read `env.LIVE_BREW_TIER2_ENABLED`)
 - `docs/runbooks/live-scoring-feature-flags.md` (new or modify — document the new secret and its rollout)
-- `tests/score-resolve-spec.test.ts` (already covered in U4 — flag off vs flag on scenarios)
+- `tests/score-do-brew-fallback.test.ts` (already covered in U4 — flag off vs flag on scenarios)
 
 **Approach:**
 
@@ -757,7 +757,7 @@ per the symlink contract.
 | Stale derivations (cache key, share URL) for tier-2 specs                   | Per [`docs/solutions/architecture-patterns/stale-derivations-across-tier-migrations.md`](../solutions/architecture-patterns/stale-derivations-across-tier-migrations.md), U4 audit runs the migration checklist before merge |
 | Production tap-trust posture (off) audited as too permissive                | Documented as KTD3 trade-off; reversible via a separate plan that adds per-tap allowlist; no in-flight rollback path                                                                                                         |
 | Secret flip propagation lag (>30s observed)                                 | Per the conventions doc, secret-shape is 5-10s typical; if a flip lags, the rollback path is the same `wrangler secret put` to `false`                                                                                       |
-| AE schema regression from telemetry slot reorder                            | `tests/score-telemetry.test.ts` regression test pins the order; appended slots only                                                                                                                                          |
+| AE schema regression from telemetry slot reorder                            | `tests/score-stream.test.ts` regression test pins the order; appended slots only                                                                                                                                             |
 
 ---
 
