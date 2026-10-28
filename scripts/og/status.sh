@@ -104,7 +104,7 @@ else
     queued | rendering) reason=clip-rendering message="the clip is on its way: $line" command="$(tail_cmd "$RENDER" "$run")" ;;
     failed) reason=clip-failed message="the RenderJob failed its last retry: $line" command="$(tail_cmd "$RENDER" "$run")" ;;
     unknown) reason=clip-unknown message="the RenderJob did not answer the page within 250 ms; ask again: $line" command="scripts/og/status.sh $BASE $TARGET" ;;
-    *) reason=clip-missing message="no RenderJob answered for the current card: $line" command="$(tail_cmd "$SITE" score.og)" ;;
+    *) reason=clip-missing message="no render was asked for the current card, or its job ended without a stored clip: $line" command="$(tail_cmd "$SITE" score.og)" ;;
   esac
 fi
 

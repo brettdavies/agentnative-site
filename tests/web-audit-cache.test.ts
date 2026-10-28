@@ -1129,6 +1129,34 @@ describe('HIT-min tag purge', () => {
     expect(calls).toEqual([{ tags: ['web:other.dev', 'web'] }]);
   });
 
+  test('invokeCachedPurge resolves whether the tags were purged, and never throws', async () => {
+    const answer = (purgeHitMinTags: () => Promise<{ success: boolean; errors: unknown[] }>) =>
+      ({ exports: { Cached: { purgeHitMinTags } } }) as unknown as ExecutionContext;
+    const logs = captureLogs();
+    try {
+      expect(
+        await invokeCachedPurge(
+          answer(async () => ({ success: true, errors: [] })),
+          ['web'],
+        ),
+      ).toBe(true);
+      expect(
+        await invokeCachedPurge(
+          answer(async () => ({ success: false, errors: [{ code: 1134 }] })),
+          ['web'],
+        ),
+      ).toBe(false);
+      const thrown = answer(async () => {
+        throw new Error('RPC failed');
+      });
+      expect(await invokeCachedPurge(thrown, ['web'])).toBe(false);
+      expect(await invokeCachedPurge({ exports: {} } as unknown as ExecutionContext, ['web'])).toBe(false);
+      expect(await invokeCachedPurge({ exports: {} } as unknown as ExecutionContext, [])).toBe(true);
+    } finally {
+      logs.restore();
+    }
+  });
+
   test('invokeCachedPurge does not fall back to gateway ctx.cache.purge', async () => {
     const cacheCalls: unknown[] = [];
     const ctx = {
