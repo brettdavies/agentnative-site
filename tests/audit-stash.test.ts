@@ -202,6 +202,16 @@ function deferred<T>() {
 }
 
 describe('startAudit', () => {
+  test('a GitHub repo URL navigates to the progress page for its owner/repo and stashes the token there', async () => {
+    const navigations: string[] = [];
+    await startAudit(
+      { target: 'https://github.com/sindresorhus/gh-home', lane: 'cli', listing: null },
+      { acquire: async () => 'tok', navigate: (path: string) => navigations.push(path) },
+    );
+    expect(navigations).toEqual(['/scoring?target=sindresorhus/gh-home']);
+    expect(take('sindresorhus/gh-home')).toMatchObject({ token: 'tok' });
+  });
+
   test('two submits before the first resolves issue one acquire and one navigation', async () => {
     const gate = deferred<string>();
     let acquires = 0;
