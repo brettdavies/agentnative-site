@@ -102,6 +102,17 @@ jobs:
       - name: Build
         run: bun run build
 
+      # The site's RENDER service binding names the render Worker, so the
+      # render Worker deploys first: a binding to a Worker that does not exist
+      # fails the site's deploy. Its og-rendered queue comes from
+      # scripts/og/setup.sh, run once per environment before the first deploy.
+      - name: Deploy render Worker to staging
+        uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: deploy --config src/og-render/wrangler.jsonc --env staging
+
       - name: Deploy to staging
         uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
         with:
@@ -323,6 +334,13 @@ jobs:
 
       - name: Build
         run: bun run build
+
+      - name: Deploy render Worker to production
+        uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: deploy --config src/og-render/wrangler.jsonc --env=""
 
       - name: Deploy to production
         uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3

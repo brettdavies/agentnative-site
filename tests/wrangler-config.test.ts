@@ -650,3 +650,87 @@ describe('wrangler.jsonc — og:video wiring', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// og:video render Worker config (src/og-render/wrangler.jsonc)
+// ---------------------------------------------------------------------------
+
+// The render Worker's routes and triggers inherit like the site's, so its
+// staging block states them empty: an inherited custom domain or cron would
+// move silently. Each block declares every binding itself, and the local
+// stand-in switch never ships in any deployed vars block.
+
+const RENDER_PATH = join(import.meta.dir, '..', 'src', 'og-render', 'wrangler.jsonc');
+
+function loadJsonc(path: string): Record<string, unknown> {
+  const stripped = readFileSync(path, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1')
+    .replace(/,(\s*[}\]])/g, '$1');
+  return JSON.parse(stripped) as Record<string, unknown>;
+}
+
+describe('src/og-render/wrangler.jsonc — render Worker', () => {
+  const render = loadJsonc(RENDER_PATH);
+  const renderStaging = getStagingEnv(render);
+  const site = loadWranglerConfig();
+  const siteStaging = getStagingEnv(site);
+  const blocks: Array<[string, Record<string, unknown>, string, string]> = [
+    ['top-level', render, 'anc-score-cache', 'og-rendered'],
+    ['env.staging', renderStaging, 'anc-score-cache-staging', 'og-rendered-staging'],
+  ];
+
+  test('the staging block names its own Worker with no routes, no crons and no workers.dev URL', () => {
+    expect(renderStaging.name).toBe('anc-og-render-staging');
+    expect(renderStaging.routes).toEqual([]);
+    expect(renderStaging.triggers).toEqual({ crons: [] });
+    expect(renderStaging.workers_dev).toBe(false);
+    expect(render.name).toBe('anc-og-render');
+    expect(render.workers_dev).toBe(false);
+  });
+
+  test.each(blocks)(
+    '%s declares the Media binding, the card bucket, RenderJob and its producer',
+    (_l, block, bucket, queue) => {
+      expect(block.media).toEqual({ binding: 'MEDIA' });
+      expect(block.r2_buckets).toEqual([{ binding: 'SCORE_CACHE', bucket_name: bucket }]);
+      expect(block.durable_objects).toEqual({ bindings: [{ class_name: 'RenderJob', name: 'RENDER_JOB' }] });
+      expect(block.migrations).toEqual([{ tag: 'v1-render-job', new_sqlite_classes: ['RenderJob'] }]);
+      expect(block.queues).toEqual({ producers: [{ binding: 'OG_RENDERED', queue }] });
+    },
+  );
+
+  test('each environment names its own og-rendered queue, which the site consumes once and setup.sh creates', () => {
+    const setup = readFileSync(join(import.meta.dir, '..', 'scripts', 'og', 'setup.sh'), 'utf8');
+    for (const [label, renderBlock, siteBlock] of [
+      ['production', render, site],
+      ['staging', renderStaging, siteStaging],
+    ] as const) {
+      const produced = (renderBlock.queues as { producers: Array<{ queue: string }> }).producers[0].queue;
+      const consumers = (siteBlock.queues as { consumers: Array<{ queue: string }> }).consumers;
+      expect(
+        consumers.map((consumer) => consumer.queue),
+        label,
+      ).toEqual([produced]);
+      expect(setup, label).toContain(`QUEUE=${produced} `);
+    }
+    expect(render.queues).not.toEqual(renderStaging.queues);
+  });
+
+  test('compatibility flags carry nodejs_compat and global_fetch_strictly_public', () => {
+    expect(render.compatibility_flags).toEqual(['nodejs_compat', 'global_fetch_strictly_public']);
+  });
+
+  test('LOCAL_MEDIA_STANDIN is declared in no vars block of either Worker', () => {
+    for (const block of [render, renderStaging, site, siteStaging]) {
+      expect(Object.hasOwn((block.vars ?? {}) as Record<string, unknown>, 'LOCAL_MEDIA_STANDIN')).toBe(false);
+    }
+  });
+
+  test('the render Worker local secret files under src/ stay untracked', () => {
+    for (const file of ['src/og-render/.dev.vars', 'src/og-render/.dev.vars.staging']) {
+      const proc = Bun.spawnSync(['git', 'check-ignore', '-q', file], { cwd: join(import.meta.dir, '..') });
+      expect([file, proc.exitCode]).toEqual([file, 0]);
+    }
+  });
+});

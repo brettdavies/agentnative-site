@@ -502,11 +502,13 @@ bun x wrangler r2 bucket lifecycle add anc-score-cache og-30day-ttl og/ --expire
 bun x wrangler r2 bucket lifecycle add anc-score-cache-staging og-30day-ttl og/ --expire-days 30 -y
 ```
 
-`og/` holds the scorecard social cards the Worker draws and the brand logos it found for them (`og/logo/`, including
-stored misses). Storing a card deletes the target's older cards, so the 30-day rule only bounds cards whose target
-stopped being requested; an expired card is drawn again on its next request. The brand-logo fallback reads
-`CONTEXT_DEV_API_KEY`, a `wrangler secret put` value on both Workers (1Password item `Context.dev API Key`, field
-`credential`); unset, cards skip that lookup and use the homepage's icon or the wordmark.
+`og/` holds the scorecard social cards and clips the render Worker draws (`og/score/`, `og/clip/`) and the brand logos
+it found for them (`og/logo/`, including stored misses). Storing a card or a clip deletes the target's older ones, so
+the 30-day rule only bounds the objects whose target stopped being requested: an expired card is drawn again on its next
+request, and an expired clip is rendered again by the target's next audit, or by the curated pass for a curated target,
+which renders a clip again once it is 21 days old. The brand-logo fallback reads `CONTEXT_DEV_API_KEY`, a
+`wrangler secret put` value on the render Worker in each environment (1Password item `Context.dev API Key`, field
+`credential`), set by `scripts/og/setup.sh`; unset, cards skip that lookup and use the homepage's icon or the wordmark.
 
 Verify:
 
@@ -517,6 +519,25 @@ bun x wrangler r2 bucket lifecycle list anc-score-cache-staging
 
 Both buckets were configured on 2026-05-19. The `tests/wrangler-config.test.ts` drift-guard pins the exact literal
 command above.
+
+#### og:video setup
+
+Run once per environment before the og:video code first deploys there, whether by a staging dispatch of a branch or by
+the merge, because the site Worker's deploy fails without its `og-rendered` queue:
+
+```bash
+scripts/og/setup.sh staging
+scripts/og/setup.sh production
+```
+
+The script creates the environment's queue (`og-rendered-staging`, `og-rendered`) when it is missing, sets
+`CONTEXT_DEV_API_KEY` on the render Worker (`anc-og-render-staging`, `anc-og-render`) from 1Password without echoing it,
+deletes the key from the site Worker, and reports the `OG_VIDEO_ENABLED` switch. Before the render Worker's first
+deploy, its secret steps report `render-worker-missing` and the script exits non-zero: deploy, then rerun it. Every step
+is idempotent. `--check` verifies without changing anything, `--json` prints one result object, and the reason codes are
+in [`RELEASES-PREFLIGHT.md`](./RELEASES-PREFLIGHT.md#og-video-reason-codes). The release preflight runs
+`scripts/og/setup.sh staging --check` before the og-cards smoke. `deploy.yml` deploys the render Worker before the site
+Worker in both jobs, and calls `POST /api/og-curated-pass` after the rescore trigger.
 
 #### R2 telemetry-lake catalog
 
@@ -691,6 +712,10 @@ The queryable counterpart with canonical Analytics Engine SQL lives in the analy
 
 - [`docs/runbooks/live-scoring-analytics.md`](docs/runbooks/live-scoring-analytics.md).
 
+og:video render volume is the count of `og.render` records with outcome `rendered` in the render Worker's Workers Logs
+(`anc-og-render`, `anc-og-render-staging`). Each is one clip from the Media Transformations binding, about $0.002 at
+$0.50 per 1,000 output seconds once the binding's beta ends.
+
 ### Cost guardrails
 
 Four-layer cost-cap stance, ordered by speed-to-act:
@@ -845,6 +870,15 @@ top-level config with no `env.production` block. Propagation is bounded by the s
 fresh isolate; warm isolates pick up the new value when the underlying env mapping refreshes. Recovery from a
 surface-level emergency uses `MCP_ENABLED`; recovery from a cost-level emergency uses `MCP_LIVE_SCORING_ENABLED` and
 keeps the read tier serving cached scorecards.
+
+`OG_VIDEO_ENABLED` stops every og:video render request (audit hooks and the curated pass) without a deploy; pages keep
+naming the clips that exist. It is a secret on the site Worker in both environments, read as `=== 'true'`, so unset is
+off:
+
+```bash
+printf true | bunx wrangler secret put OG_VIDEO_ENABLED --name agentnative-site-staging   # staging on
+printf false | bunx wrangler secret put OG_VIDEO_ENABLED --name agentnative-site          # production off
+```
 
 `MCP_LEGACY_ENABLED` is a var, so `wrangler secret put` on that name fails with Cloudflare API 10053. Flip it by editing
 the committed `"true"` to `"false"` in the target environment's `wrangler.jsonc` block and shipping that through a PR;

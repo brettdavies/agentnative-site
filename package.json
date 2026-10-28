@@ -6,7 +6,7 @@
   "description": "agentnative.dev — the agent-native CLI standard",
   "scripts": {
     "build": "bun src/build/build.mjs",
-    "dev": "bun run build && wrangler dev --env staging --local --port 8787",
+    "dev": "bun run build && wrangler dev -c wrangler.jsonc -c src/og-render/wrangler.jsonc --env staging --local --port 8787",
     "test": "bun test",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit -p tsconfig.client.json && tsc --noEmit -p tsconfig.worker.json && tsc --noEmit -p tsconfig.node.json",
