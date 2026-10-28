@@ -30,22 +30,29 @@ beforeEach(() => {
 afterEach(() => rmSync(stub, { recursive: true, force: true }));
 
 describe('scripts/og/smoke.sh', () => {
-  test.each([['--help'], ['-h']])('%s prints usage on stdout, exits 0 and deploys nothing', (flag) => {
-    const run = smoke(flag);
-    expect(run.status).toBe(0);
-    expect(run.stdout).toContain('Usage: scripts/og/smoke.sh <base-url>');
-    expect(run.calls).toEqual([]);
-  });
-
-  test.each([[[]], [['not-a-url']], [['anc.dev']], [['--bogus']]])(
-    'arguments %j name the problem on stderr, exit 2 and deploy nothing',
+  test.each([[['--help']], [['-h']], [['http://localhost:8787', '--help']]])(
+    '%j prints usage on stdout, exits 0 and deploys nothing',
     (args) => {
       const run = smoke(...args);
-      expect(run.status).toBe(2);
-      expect(run.stderr).toContain('Usage: scripts/og/smoke.sh <base-url>');
+      expect(run.status).toBe(0);
+      expect(run.stdout).toContain('Usage: scripts/og/smoke.sh <base-url>');
       expect(run.calls).toEqual([]);
     },
   );
+
+  test.each([
+    [[]],
+    [['not-a-url']],
+    [['anc.dev']],
+    [['--bogus']],
+    [['https://']],
+    [['http://localhost:8787', 'extra']],
+  ])('arguments %j name the problem on stderr, exit 2 and deploy nothing', (args) => {
+    const run = smoke(...args);
+    expect(run.status).toBe(2);
+    expect(run.stderr).toContain('Usage: scripts/og/smoke.sh <base-url>');
+    expect(run.calls).toEqual([]);
+  });
 
   test('an http(s) base URL reaches the fixture deploy', () => {
     const run = smoke('http://localhost:8787');

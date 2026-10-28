@@ -159,13 +159,15 @@ manual recipe below skips the headers; for prod the recipe runs unauthenticated.
   ```bash
   scripts/og/setup.sh production           # sets the render Worker's key, deletes the site's copy; reports switch-off
   printf true | bunx wrangler secret put OG_VIDEO_ENABLED --name agentnative-site
-  curl -sSf -X POST -H "x-web-rescore-secret: $WEB_RESCORE_SECRET" https://anc.dev/api/og-curated-pass
+  curl -sSf -X POST -H "x-web-rescore-secret: $WEB_RESCORE_SECRET" https://anc.dev/api/og-curated-pass | jq -e .enabled
   scripts/og/setup.sh production --check   # must read ok
   ```
 
   The curated pass that ran with the deploy did so while the switch was off and asked for nothing, so the manual pass
   renders the curated clips now instead of at Sunday's cron. It answers 200 with `{enabled, requested, fresh, skipped}`,
-  where `requested` counts the cards it asked for. `WEB_RESCORE_SECRET` is in the 1Password item
+  where `requested` counts the cards it asked for. `jq -e` fails the step unless `enabled` is `true`: an isolate that
+  has not picked up the new switch yet answers `enabled: false` and asks for nothing, and a rerun a few seconds later
+  reaches the new one. `WEB_RESCORE_SECRET` is in the 1Password item
   `CF Worker Secret - WEB_RESCORE_SECRET (agentnative-site)`. Allow a few minutes for the clips before the playback
   check below.
 
