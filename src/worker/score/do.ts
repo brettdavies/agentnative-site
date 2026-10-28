@@ -30,6 +30,7 @@
 import type { OutboundHandler } from '@cloudflare/containers';
 import { Sandbox as BaseSandbox } from '@cloudflare/sandbox';
 import { isResultTarget, targetOfSpec } from '../../shared/audit-routes';
+import { hasErroredAudits } from '../../shared/errored-audit';
 import { ndjsonLineWriter } from '../../shared/ndjson';
 import { withinMs } from '../../shared/within-ms';
 import { invokeCachedPurge } from '../audit-web/hit-min-purge';
@@ -238,7 +239,11 @@ const PURGE_TIMEOUT_MS = 5_000;
 // precondition is checked here so cache.put's refusal never throws at
 // runtime: a binary record needs the scorecard's tool version, a branch
 // record needs the SHA the clone printed (a source run may report no
-// tool version). Skipped with a log when SCORE_CACHE isn't bound. Once
+// tool version). A scorecard that reports an errored audit measured only
+// part of the tool, so it is not written: the next request scores fresh
+// instead of serving the partial result for the bucket's lifecycle window,
+// and `buildCliEnvelope` gives the run no page URL to match. Skipped with a
+// log when SCORE_CACHE isn't bound. Once
 // R2 accepts the record, `cli:<target>` is purged through the RPC the
 // caller passes, and the render Worker is asked for the new card's clip;
 // a failed purge or render request is logged and never thrown.
@@ -257,6 +262,10 @@ export async function writeCacheBestEffort(
   const target = targetOfSpec(spec);
   if (!isResultTarget(target)) {
     emitLog({ scope: 'cache.write' }, { skipped: 'unroutable_target', target });
+    return;
+  }
+  if (hasErroredAudits(value.scorecard)) {
+    emitLog({ scope: 'cache.write' }, { skipped: 'errored_audit', target });
     return;
   }
   const toolVersion = extractToolVersion(value.scorecard) ?? '';

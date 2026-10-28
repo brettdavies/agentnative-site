@@ -197,6 +197,31 @@ describe('envelope builders', () => {
     expect(html).not.toContain('badge');
   });
 
+  test('a live run that reports an errored audit has no URL and an inline body, binary or branch', () => {
+    const errored = (binary: string) => {
+      const record = cliRecord(binary);
+      return { ...record, scorecard: { ...record.scorecard, summary: { error: 1 } } };
+    };
+    const binary = buildCliEnvelope({ tier: 'live', target: 'fd', record: errored('fd'), registry, origin: ORIGIN });
+    expect(binary).toMatchObject({ tier: 'live', scorecard_url: null, markdown_url: null, json_url: null });
+    expect(binary.summary_html).toContain('Binary <code>fd</code>');
+
+    const branch = buildCliEnvelope({
+      tier: 'live',
+      target: 'o/r@feature',
+      record: errored('r'),
+      registry,
+      origin: ORIGIN,
+      sourceSha: 'abc1234',
+    });
+    expect(branch).toMatchObject({ scorecard_url: null, markdown_url: null, json_url: null, source_sha: 'abc1234' });
+    expect(branch.summary_html).toContain('Source <code>o/r@feature</code>');
+
+    const stored = buildCliEnvelope({ tier: 'cache', target: 'fd', record: errored('fd'), registry, origin: ORIGIN });
+    expect(stored.scorecard_url).toBe(`${ORIGIN}/score/fd`);
+    expect(stored.summary_html).toBeUndefined();
+  });
+
   test('no envelope field carries a sandbox path, stderr, or session identifier', () => {
     for (const env of [
       buildCliEnvelope({ tier: 'cache', target: 'fd', record: cliRecord('fd'), registry, origin: ORIGIN }),

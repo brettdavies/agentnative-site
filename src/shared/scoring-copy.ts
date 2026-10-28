@@ -2,8 +2,10 @@
 // the first paint and the client that renders every state after it, so the
 // two never disagree about what the page says.
 
+import type { AuditEnvelope } from './audit-envelope';
 import type { AuditEvent, CliPhase } from './audit-events';
 import type { Lane } from './audit-routes';
+import { hasErroredAudits } from './errored-audit';
 import { escHtml } from './esc-html';
 import { hostOf } from './url-host';
 import { FINDING_STATUSES, isNotRunReason } from './web-audit-findings';
@@ -61,6 +63,19 @@ export function rowHostPhrase(
 
 /** The lane as the heading's chip names it. */
 export const LANE_LABEL: Readonly<Record<Lane, string>> = { cli: 'CLI', web: 'Website' };
+
+const INLINE_SUBLINE: Readonly<Record<Lane, string>> = {
+  cli: 'This name belongs to a curated tool; this result has no URL.',
+  web: 'This result was not saved.',
+};
+
+/** The subline over a result the progress page renders in place of a page of its own. */
+export function inlineSubline(lane: Lane, envelope?: Pick<AuditEnvelope, 'tier' | 'scorecard'>): string {
+  if (envelope?.tier === 'live' && hasErroredAudits(envelope.scorecard)) {
+    return 'An audit errored, so this result was not saved; running it again scores it fresh.';
+  }
+  return INLINE_SUBLINE[lane];
+}
 
 /** Each CLI phase as its progress row names it. */
 export const CLI_PHASE_LABEL: Readonly<Record<CliPhase, string>> = {

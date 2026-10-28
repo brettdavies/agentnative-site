@@ -218,3 +218,44 @@ describe('writeCacheBestEffort — render request', () => {
     expect(failedRender.calls).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// writeCacheBestEffort — errored audits
+// ---------------------------------------------------------------------------
+
+describe('writeCacheBestEffort — errored audits', () => {
+  const errored = { ...SCORECARD_WITH_VERSION, badge: { score_pct: 88 }, summary: { error: 2 } };
+
+  test('a scorecard that reports an errored audit is not written, purged, or rendered', async () => {
+    const { env, writes } = makeR2Stub();
+    const purged: string[][] = [];
+    const render = fakeRender();
+    await writeCacheBestEffort(
+      { ...env, RENDER: render, OG_VIDEO_ENABLED: 'true' },
+      SPEC,
+      { scorecard: errored, anc_version: ANC_VERSION },
+      async (tags) => {
+        purged.push(tags);
+      },
+    );
+    expect(writes).toHaveLength(0);
+    expect(purged).toEqual([]);
+    expect(render.calls).toEqual([]);
+  });
+
+  test('a branch run that reports an errored audit is not written either', async () => {
+    const { env, writes } = makeR2Stub();
+    const branch: InstallSpec = { pm: 'git-clone', owner: 'o', repo: 'r', branch: 'feature', binary: 'r' };
+    await writeCacheBestEffort(env, branch, { scorecard: errored, anc_version: ANC_VERSION, source_sha: 'abc1234' });
+    expect(writes).toHaveLength(0);
+  });
+
+  test('a scorecard whose error count is zero is written', async () => {
+    const { env, writes } = makeR2Stub();
+    await writeCacheBestEffort(env, SPEC, {
+      scorecard: { ...SCORECARD_WITH_VERSION, summary: { error: 0 } },
+      anc_version: ANC_VERSION,
+    });
+    expect(writes).toHaveLength(1);
+  });
+});
