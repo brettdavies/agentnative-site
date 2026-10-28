@@ -339,7 +339,9 @@ export async function runWebRescore(
 export class WebRescoreWorkflow extends WorkflowEntrypoint<WebRescoreEnv> {
   async run(_event: Readonly<WorkflowEvent<unknown>>, step: WorkflowStep): Promise<unknown> {
     return runWebRescore(this.env, step, {
-      purgeTags: (tags) => invokeCachedPurge(this.ctx, tags),
+      purgeTags: async (tags) => {
+        await invokeCachedPurge(this.ctx, tags);
+      },
     });
   }
 }

@@ -20,6 +20,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { OG_RENDERED_MAX_ATTEMPTS, OG_RENDERED_PURGE_TAG_LIMIT } from '../src/worker/og/rendered-consumer';
 
 const WRANGLER_PATH = join(import.meta.dir, '..', 'wrangler.jsonc');
 
@@ -621,7 +622,8 @@ describe('wrangler.jsonc — WEB_AUDIT_FOLLOW_ENABLED binding shape', () => {
 // The site asks the render Worker for renders over RENDER and consumes
 // og-rendered to purge the page that names a new clip. Queues are
 // account-wide, so each environment names its own; one consumer per queue,
-// at batch size 1 so the purge follows the clip at once. OG_VIDEO_ENABLED is
+// batching up to one purge call's 100 tags, with a retry for every attempt
+// the consumer makes before it gives up. OG_VIDEO_ENABLED is
 // a secret in both environments, read as `=== 'true'`, so the feature ships
 // dark and a var of the same name would break the flip (CF API 10053).
 
@@ -637,11 +639,21 @@ describe('wrangler.jsonc — og:video wiring', () => {
     expect(block.services).toEqual([{ binding: 'RENDER', service }]);
   });
 
-  test.each(blocks)('%s consumes its own og-rendered queue one message at a time', (_label, block, _s, queue) => {
-    const queues = block.queues as { consumers?: Array<Record<string, unknown>>; producers?: unknown[] };
-    expect(queues.consumers).toEqual([expect.objectContaining({ queue, max_batch_size: 1 })]);
-    expect(queues.producers).toBeUndefined();
-  });
+  test.each(blocks)(
+    '%s consumes its own og-rendered queue in batches of one purge call',
+    (_label, block, _s, queue) => {
+      const queues = block.queues as { consumers?: Array<Record<string, unknown>>; producers?: unknown[] };
+      expect(queues.consumers).toEqual([
+        {
+          queue,
+          max_batch_size: OG_RENDERED_PURGE_TAG_LIMIT,
+          max_batch_timeout: 5,
+          max_retries: OG_RENDERED_MAX_ATTEMPTS - 1,
+        },
+      ]);
+      expect(queues.producers).toBeUndefined();
+    },
+  );
 
   test('OG_VIDEO_ENABLED is declared in no vars block', () => {
     for (const [label, block] of blocks) {

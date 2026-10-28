@@ -539,6 +539,11 @@ in [`RELEASES-PREFLIGHT.md`](./RELEASES-PREFLIGHT.md#ogvideo-reason-codes). The 
 `scripts/og/setup.sh staging --check` before the og-cards smoke. `deploy.yml` deploys the render Worker before the site
 Worker in both jobs, and calls `POST /api/og-curated-pass` after the rescore trigger.
 
+A burst of clips, such as the first curated pass or the one after a template bump, outruns the Workers Cache purge rate
+of 5 a minute. The `og-rendered` consumer batches each burst into a few purge calls and retries a refused one for about
+15 minutes. An `og_rendered_gave_up` record in the site Worker's `hit-min-purge` logs names a page that will name its clip
+only when its cached copy expires.
+
 #### R2 telemetry-lake catalog
 
 Configure once per bucket. The lake stores raw telemetry events indefinitely, so NO object-expiry lifecycle rules are

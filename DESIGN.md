@@ -1174,7 +1174,11 @@ same metadata and the same older-only pruning. The render Worker draws each fram
 palette (one palette from the final card turns the mid-climb bands grey), encodes a GIF, and has the Media
 Transformations binding turn it into the MP4. One `RenderJob` Durable Object per card runs that render once, on its own
 alarm, whatever asks for it: a finished audit, the rescore Workflow, the live CLI Durable Object, or the curated pass
-after a deploy and on the weekly cron. No page view or crawler fetch ever starts one.
+after a deploy and on the weekly cron. No page view or crawler fetch ever starts one. A stored clip sends
+`og-rendered`, and the site purges the page so its next fetch names the clip. Workers Cache purges run at 5 a minute with
+a burst of 25, shared by every purge on the account, so the site takes up to 100 messages a batch and purges their tags
+in one call. A refused purge retries with a growing delay for about 15 minutes, then gives up, and the page names the
+clip once its cached copy expires: 300 s for a live result, a day for a curated page.
 
 **Bump rule.** Any change to the card face or to the motion bumps `SCORE_OG_TEMPLATE`. Every key then changes: the
 curated pass re-renders curated cards the same day, and a live site gets a card and clip in the new design on its next

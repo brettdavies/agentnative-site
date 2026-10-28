@@ -222,8 +222,11 @@ triggers ask, and runs it on its own alarm: draw and store the PNG, encode the c
 failed attempt rethrows and Cloudflare retries the alarm; the last retry marks the job `failed` for 24 hours. Renders
 start from finished audits (the web audit core, the rescore Workflow, the live CLI Durable Object) and from the curated
 pass (`POST /api/og-curated-pass` after each deploy, and the weekly cron), never from a page view or a crawler fetch.
-Each environment has its own `og-rendered` queue (`og-rendered-staging`, `og-rendered`); the site consumes it at batch
-size 1 and purges the page tag of the target whose clip landed.
+Each environment has its own `og-rendered` queue (`og-rendered-staging`, `og-rendered`). The site consumes it in batches
+of up to 100 messages, at most 5 s after a clip lands, and purges each batch's page tags in one call, because Workers
+Cache purges run at 5 a minute with a burst of 25, shared with every other purge on the account. A refused purge retries
+its messages after 60 s, then 120 s, up to 300 s; the sixth refusal acknowledges them with an `og_rendered_gave_up`
+`hit-min-purge` record, and the page names its clip once its cached copy expires.
 
 **Diagnostic headers.** Every card PNG response carries `x-anc-card` (`drawn`, `stored`, or `fallback` when the render
 Worker could not draw and the site-wide card was served) and, for a drawn or stored card, `x-anc-card-logo` (`homepage`,

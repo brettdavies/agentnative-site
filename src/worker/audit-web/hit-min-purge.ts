@@ -62,12 +62,14 @@ export async function flushHitMinPurge(): Promise<void> {
 }
 
 /**
- * One RPC with the given tags. Used by the rescore cycle (already batched)
- * and as the flush target. Never sends pathPrefixes.
+ * One RPC with the given tags. Used by the rescore cycle (already batched),
+ * the og-rendered consumer, and as the flush target. Never sends
+ * pathPrefixes. Resolves whether the tags were purged; a failure is logged,
+ * never thrown.
  */
-export async function invokeCachedPurge(ctx: PurgeCtx, tags: readonly string[]): Promise<void> {
+export async function invokeCachedPurge(ctx: PurgeCtx, tags: readonly string[]): Promise<boolean> {
   const unique = [...new Set(tags.filter((t) => t.length > 0))];
-  if (unique.length === 0) return;
+  if (unique.length === 0) return true;
   try {
     const rpc = cachedPurgeRpc(ctx);
     if (rpc) {
@@ -75,13 +77,14 @@ export async function invokeCachedPurge(ctx: PurgeCtx, tags: readonly string[]):
       if (!result.success) {
         emitLog({ scope: 'hit-min-purge' }, { tags: unique, errors: result.errors ?? [] });
       }
-      return;
+      return result.success;
     }
     emitLog({ scope: 'hit-min-purge' }, { error: 'cache_purge_unavailable', tags: unique });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     emitLog({ scope: 'hit-min-purge' }, { error: message, tags: unique });
   }
+  return false;
 }
 
 function cachedPurgeRpc(ctx: PurgeCtx): CachedPurgeRpc | null {

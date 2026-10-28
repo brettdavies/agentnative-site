@@ -5,8 +5,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { OgRenderedMessage } from '../src/shared/og-render';
 import { requestRender } from '../src/worker/og/render-request';
-import { handleOgRendered } from '../src/worker/og/rendered-consumer';
+import { handleOgRendered, OG_RENDERED_MAX_ATTEMPTS } from '../src/worker/og/rendered-consumer';
 import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
+import { withLogCapture } from './helpers/log-capture';
 import { CURATED_KEY, fakeRender, SCORED_AT, siteEnv, WEB_KEY, webEnv } from './helpers/og-site-fakes';
 
 beforeEach(() => _resetRegistryIndexCache());
@@ -74,24 +75,36 @@ describe('requestRender', () => {
   });
 });
 
-function batch(messages: OgRenderedMessage[]) {
-  const acked: OgRenderedMessage[] = [];
+type Settled =
+  | { body: OgRenderedMessage; outcome: 'ack' }
+  | { body: OgRenderedMessage; outcome: 'retry'; delaySeconds?: number };
+
+function batch(messages: OgRenderedMessage[], attempts = 1) {
+  const settled: Settled[] = [];
   return {
-    acked,
+    settled,
     batch: {
-      messages: messages.map((body) => ({ body, ack: () => acked.push(body) })),
+      messages: messages.map((body) => ({
+        body,
+        attempts,
+        ack: () => settled.push({ body, outcome: 'ack' }),
+        retry: (options?: { delaySeconds?: number }) =>
+          settled.push({ body, outcome: 'retry', delaySeconds: options?.delaySeconds }),
+      })),
     } as unknown as MessageBatch<OgRenderedMessage>,
   };
 }
 
-function purgeCtx() {
+function purgeCtx(succeed: (tags: string[]) => boolean = () => true) {
   const purged: string[][] = [];
   const ctx = {
     exports: {
       Cached: {
         async purgeHitMinTags(tags: string[]) {
           purged.push(tags);
-          return { success: true, errors: [] };
+          return succeed(tags)
+            ? { success: true, errors: [] }
+            : { success: false, errors: [{ message: 'Unable to purge, rate limit reached', code: 1134 }] };
         },
       },
     },
@@ -99,15 +112,59 @@ function purgeCtx() {
   return { ctx, purged };
 }
 
+function web(n: number): OgRenderedMessage {
+  return { target: `site-${n}.example`, lane: 'web', key: WEB_KEY };
+}
+
 describe('og-rendered consumer', () => {
-  test("a landed clip purges its page's tag: web:<host> for a site, cli:<slug> for a tool", async () => {
+  test("a batch purges every landed clip's page tag in one call: web:<host> for a site, cli:<slug> for a tool", async () => {
     const { ctx, purged } = purgeCtx();
-    const { batch: web, acked } = batch([
+    const { batch: landed, settled } = batch([
       { target: 'railway.com', lane: 'web', key: WEB_KEY },
       { target: 'ripgrep', lane: 'cli', key: CURATED_KEY },
+      { target: 'railway.com', lane: 'web', key: WEB_KEY },
     ]);
-    await handleOgRendered(web, ctx);
-    expect(purged).toEqual([['web:railway.com'], ['cli:ripgrep']]);
-    expect(acked).toHaveLength(2);
+    await handleOgRendered(landed, ctx);
+    expect(purged).toEqual([['web:railway.com', 'cli:ripgrep']]);
+    expect(settled.map((s) => s.outcome)).toEqual(['ack', 'ack', 'ack']);
+  });
+
+  test('a batch with more page tags than one purge takes splits into calls of at most 100', async () => {
+    const { ctx, purged } = purgeCtx();
+    const { batch: landed, settled } = batch(Array.from({ length: 130 }, (_, n) => web(n)));
+    await handleOgRendered(landed, ctx);
+    expect(purged.map((tags) => tags.length)).toEqual([100, 30]);
+    expect(settled.every((s) => s.outcome === 'ack')).toBe(true);
+  });
+
+  test('a refused purge retries its messages after a delay that grows with each attempt, and acks the rest', async () => {
+    const { ctx } = purgeCtx((tags) => tags.length === 30);
+    const { batch: first, settled } = batch(Array.from({ length: 130 }, (_, n) => web(n)));
+    await handleOgRendered(first, ctx);
+    expect(settled.filter((s) => s.outcome === 'retry')).toHaveLength(100);
+    expect(settled.filter((s) => s.outcome === 'ack')).toHaveLength(30);
+
+    const delays: Array<number | undefined> = [];
+    for (let attempts = 1; attempts < OG_RENDERED_MAX_ATTEMPTS; attempts++) {
+      const refused = batch([web(1)], attempts);
+      await handleOgRendered(refused.batch, purgeCtx(() => false).ctx);
+      const [only] = refused.settled;
+      expect(only.outcome).toBe('retry');
+      delays.push(only.outcome === 'retry' ? only.delaySeconds : undefined);
+    }
+    expect(delays[0]).toBeGreaterThanOrEqual(60);
+    expect(delays).toEqual([...delays].sort((a, b) => (a ?? 0) - (b ?? 0)));
+  });
+
+  test('on its last attempt a refused purge is acknowledged and logged as given up, and the page refreshes at its TTL', async () => {
+    const { result, records } = await withLogCapture(async () => {
+      const last = batch([web(7)], OG_RENDERED_MAX_ATTEMPTS);
+      await handleOgRendered(last.batch, purgeCtx(() => false).ctx);
+      return last.settled;
+    });
+    expect(result).toEqual([{ body: web(7), outcome: 'ack' }]);
+    expect(records.map((r) => r.record)).toContainEqual(
+      expect.objectContaining({ scope: 'hit-min-purge', error: 'og_rendered_gave_up', tags: ['web:site-7.example'] }),
+    );
   });
 });

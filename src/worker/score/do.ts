@@ -151,7 +151,9 @@ export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
     const { body, done } = streamScore(parsed.spec, {
       env: this.env,
       run: (spec, onPhase) => this.score(spec, onPhase),
-      purge: (tags) => invokeCachedPurge(this.ctx, tags),
+      purge: async (tags) => {
+        await invokeCachedPurge(this.ctx, tags);
+      },
     });
     this.ctx.waitUntil(done);
     return new Response(body, { status: 200, headers: { 'content-type': 'application/x-ndjson; charset=utf-8' } });
