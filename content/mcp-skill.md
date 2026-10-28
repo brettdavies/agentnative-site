@@ -130,7 +130,8 @@ audited says so; a miss returns a typed redirect. None of the three is an error.
 ```
 
 The miss is `isError: false`. Cache state is data, not failure. Follow the `next_tool` pointer. An `in_progress` answer
-means a run is already in flight for that target: wait for it rather than starting a second one.
+means a run is already in flight for that target: wait for it rather than starting a second one. A waited-on run that
+reports an errored audit leaves no record, so the read after it misses.
 
 ### "I want to live-audit a CLI that isn't cached yet"
 
@@ -175,6 +176,11 @@ container run, no cost). On a true cache miss it runs a metered audit and return
 
 A branch-scoped input (`owner/repo@branch`, or a `/tree/<branch>` URL) resolves to `/score/<owner>/<repo>@<branch>` and
 adds `source_sha`, the commit the sandbox cloned.
+
+A fresh audit whose `scorecard.summary.error` is above 0 (an audit that errored or could not finish) is returned but
+never saved, binary or branch-scoped: `scorecard_url`, `markdown_url`, `json_url`, and `freshness.refresh_after` are
+`null`, `summary_html` carries the rendered body, `get_scorecard` misses on the same input, and the next `score_cli`
+call runs a fresh, metered audit.
 
 The tools are symmetric: `get_scorecard` returns `found: true` exactly when `score_cli` returns `audited: false` on the
 same input. The cost difference (registry/cache lookup vs container run) is the only reason to choose between them.
