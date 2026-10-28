@@ -51,6 +51,13 @@ async function status(...args: string[]): Promise<{ code: number; out: string }>
   return { code: await proc.exited, out };
 }
 
+async function raw(...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  const proc = Bun.spawn(['bash', STATUS, ...args], { stdout: 'pipe', stderr: 'pipe' });
+  const stdout = await new Response(proc.stdout).text();
+  const stderr = await new Response(proc.stderr).text();
+  return { code: await proc.exited, stdout, stderr };
+}
+
 async function statusJson(state: Page): Promise<Record<string, unknown> & { next_step: { command: string } }> {
   page = state;
   return JSON.parse((await status('--json')).out.trim().split('\n').at(-1) ?? '{}');
@@ -103,6 +110,13 @@ describe('scripts/og/status.sh', () => {
     expect(result.reason).toBe('clip-missing');
     expect(result.message).toContain('answered 404');
     expect(result.next_step.command).toBe(`curl -sS -o /dev/null -w '%{http_code}\\n' ${base}/score/no-such.example`);
+  });
+
+  test('a page that cannot be fetched reports through curl alone, with no noise from the missing body', async () => {
+    const run = await raw('http://127.0.0.1:1', 'railway.com', '--json');
+    expect(run.code).toBe(20);
+    expect(JSON.parse(run.stdout.trim()).reason).toBe('clip-missing');
+    expect(run.stderr).not.toContain('No such file');
   });
 
   test('a fallback card maps to card-fallback ahead of the clip', async () => {

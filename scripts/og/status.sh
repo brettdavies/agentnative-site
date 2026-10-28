@@ -60,6 +60,7 @@ fi
 fetch() { curl -sS -m 30 -H @"$WORK/access" -D "$WORK/$1.headers" -o "$WORK/$1.body" -w '%{http_code}' "${@:2}"; }
 header() { awk -v name="$2" 'tolower($1) == name ":" { sub(/\r$/, "", $2); print $2 }' "$WORK/$1.headers" | tail -1; }
 meta() {
+  [[ -f "$WORK/$1.body" ]] || return 0
   { grep -o "<meta property=\"$2\" content=\"[^\"]*\"" "$WORK/$1.body" || true; } | head -1 | sed 's/.*content="//; s/"$//'
 }
 
