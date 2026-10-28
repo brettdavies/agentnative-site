@@ -153,6 +153,20 @@ manual recipe below skips the headers; for prod the recipe runs unauthenticated.
   # both must match
   ```
 
+- [ ] **og:video plays in iMessage and Discord (manual, prod only).** Run on the release that ships og:video and on any
+  release that bumps `SCORE_OG_TEMPLATE`. Staging sits behind Cloudflare Access, so neither app's link crawler can fetch
+  a staging scorecard. First confirm each page names its clip, then share one website scorecard and one CLI scorecard
+  from anc.dev in an iMessage thread and in a Discord channel:
+
+  ```bash
+  scripts/og/status.sh https://anc.dev anc.dev    # must read og:video=named
+  scripts/og/status.sh https://anc.dev ripgrep    # must read og:video=named
+  # share https://anc.dev/score/anc.dev and https://anc.dev/score/ripgrep
+  ```
+
+  iMessage must play the clip in the link preview on its own; Discord must show the card and play the clip on click.
+  `scripts/release/postflight.sh` does not drive this check.
+
 ### Live HTTP `/api/score` path (prod only)
 
 **Prod only.** Staging uses CF's always-pass test Turnstile pair, so the staging live-DO smoke is already covered by
