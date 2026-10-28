@@ -262,16 +262,19 @@ describe('logo fetch', () => {
   });
 });
 
-// A card is stored and edge-cached forever under its key, so a change to what
-// the card draws must ship with a new SCORE_OG_TEMPLATE. Record the new
-// template's fingerprint here; never overwrite an existing one.
+// A card is stored and edge-cached forever under its key, so a change to the
+// pixels a card draws must ship with a new SCORE_OG_TEMPLATE. The fingerprint
+// hashes rendered PNGs, so the layout, the bundled fonts, and the resvg version
+// all count. Record the new template's fingerprint here; a fingerprint that
+// has shipped never changes.
 const FACE_FINGERPRINTS: Record<number, string> = {
-  1: 'c02c0019c91ee3dd',
+  1: '65c850c13040c89d',
 };
 
 describe('template version', () => {
-  test('the card face matches the fingerprint recorded for the current template', () => {
-    const faces = [
+  test('the card face matches the fingerprint recorded for the current template', async () => {
+    const face = await fonts();
+    const cards: ScoreOgCard[] = [
       CARD,
       {
         ...CARD,
@@ -290,9 +293,10 @@ describe('template version', () => {
         edition: scoreOgEdition({ lane: 'cli', sourceSha: 'abcdef1234' }),
       },
       { ...CARD, scorePct: null, pending: true, edition: null },
-    ].map(renderScoreOgSvg);
-    const fingerprint = createHash('sha256').update(faces.join('\n')).digest('hex').slice(0, 16);
-    expect(FACE_FINGERPRINTS[SCORE_OG_TEMPLATE]).toBe(fingerprint);
+    ];
+    const hash = createHash('sha256');
+    for (const card of cards) hash.update(await renderScoreOgPng(card, face));
+    expect(FACE_FINGERPRINTS[SCORE_OG_TEMPLATE]).toBe(hash.digest('hex').slice(0, 16));
   });
 });
 

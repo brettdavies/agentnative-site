@@ -18,6 +18,9 @@ export const SCORE_OG_WIDTH = 1200;
 export const SCORE_OG_HEIGHT = 630;
 export const SCORE_OG_PREFIX = '/og/score/';
 
+/** Family names as the bundled card fonts declare them; resvg draws the default face for any other name. */
+export const SCORE_OG_FONT = { sans: 'Uncut Sans', mono: 'Monaspace Xenon Medium' } as const;
+
 /** Bump on any change to the card's layout or motion, so every card gets a new URL. */
 export const SCORE_OG_TEMPLATE = 1;
 
@@ -329,9 +332,9 @@ export function renderScoreOgSvg(card: ScoreOgCard): string {
       <line x1="17" y1="23" x2="24" y2="23"/>
     </g>
   </g>
-  <text x="136" y="82" fill="${COLOR.accent}" font-family="Monaspace Xenon" font-size="28">anc.dev</text>
-  <text x="1136" y="64" text-anchor="end" fill="${COLOR.muted}" font-family="Monaspace Xenon" font-size="20">SCORE</text>
-  <text x="1136" y="168" text-anchor="end" fill="${scoreColor}" font-family="Uncut Sans" font-weight="700" font-size="${scoreSize}">${escHtml(scoreText)}</text>
+  <text x="136" y="82" fill="${COLOR.accent}" font-family="${SCORE_OG_FONT.mono}" font-size="28">anc.dev</text>
+  <text x="1136" y="64" text-anchor="end" fill="${COLOR.muted}" font-family="${SCORE_OG_FONT.mono}" font-size="20">SCORE</text>
+  <text x="1136" y="168" text-anchor="end" fill="${scoreColor}" font-family="${SCORE_OG_FONT.sans}" font-weight="700" font-size="${scoreSize}">${escHtml(scoreText)}</text>
   <g transform="translate(64 230) scale(3.5)">
     <rect width="32" height="32" rx="6" fill="${COLOR.accent}"/>
     <g fill="none" stroke="${COLOR.bg}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
@@ -339,13 +342,13 @@ export function renderScoreOgSvg(card: ScoreOgCard): string {
       <line x1="17" y1="23" x2="24" y2="23"/>
     </g>
   </g>
-  <text x="196" y="302" text-anchor="middle" fill="${COLOR.secondary}" font-family="Uncut Sans" font-weight="600" font-size="48">×</text>
+  <text x="196" y="302" text-anchor="middle" fill="${COLOR.secondary}" font-family="${SCORE_OG_FONT.sans}" font-weight="600" font-size="48">×</text>
   ${logo}
-  <text x="400" y="${subtitle ? 286 : 310}" fill="${COLOR.fg}" font-family="Uncut Sans" font-weight="600" font-size="${name.fontSize}">${escHtml(name.text)}</text>
-  ${subtitle ? `<text x="400" y="334" fill="${COLOR.muted}" font-family="Monaspace Xenon" font-size="26">${escHtml(subtitle)}</text>` : ''}
+  <text x="400" y="${subtitle ? 286 : 310}" fill="${COLOR.fg}" font-family="${SCORE_OG_FONT.sans}" font-weight="600" font-size="${name.fontSize}">${escHtml(name.text)}</text>
+  ${subtitle ? `<text x="400" y="334" fill="${COLOR.muted}" font-family="${SCORE_OG_FONT.mono}" font-size="26">${escHtml(subtitle)}</text>` : ''}
   <rect x="64" y="430" width="1072" height="16" rx="8" fill="${COLOR.track}"/>
   <rect x="64" y="430" width="${meterWidth}" height="16" rx="8" fill="${bar}"/>
-  <text x="64" y="560" font-family="Monaspace Xenon" font-size="24"><tspan fill="${COLOR.accent}">anc.dev</tspan><tspan fill="${COLOR.muted}"> · ${escHtml(footerTail)}</tspan></text>
+  <text x="64" y="560" font-family="${SCORE_OG_FONT.mono}" font-size="24"><tspan fill="${COLOR.accent}">anc.dev</tspan><tspan fill="${COLOR.muted}"> · ${escHtml(footerTail)}</tspan></text>
 </svg>`;
 }
 
@@ -355,7 +358,7 @@ function logoMarkup(logo: ScoreOgLogo | null, initials: string): string {
   const size = 112;
   if (!logo) {
     return `<rect x="${x}" y="${y}" width="${size}" height="${size}" rx="22" fill="${COLOR.raised}" stroke="${COLOR.accent}" stroke-width="3"/>
-  <text x="${x + size / 2}" y="${y + 70}" text-anchor="middle" fill="${COLOR.accent}" font-family="Uncut Sans" font-weight="700" font-size="42">${escHtml(initials)}</text>`;
+  <text x="${x + size / 2}" y="${y + 70}" text-anchor="middle" fill="${COLOR.accent}" font-family="${SCORE_OG_FONT.sans}" font-weight="700" font-size="42">${escHtml(initials)}</text>`;
   }
   const mime = logo.mime === 'image/jpeg' ? 'image/jpeg' : 'image/png';
   const href = `data:${mime};base64,${bytesToBase64(logo.bytes)}`;

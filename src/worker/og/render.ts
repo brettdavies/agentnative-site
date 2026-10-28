@@ -9,7 +9,7 @@
 
 import { type InitInput, initWasm, Resvg } from '@resvg/resvg-wasm';
 import wasm from '@resvg/resvg-wasm/index_bg.wasm';
-import { renderScoreOgSvg, type ScoreOgCard, type ScoreOgLogo } from '../../shared/score-og';
+import { renderScoreOgSvg, SCORE_OG_FONT, type ScoreOgCard, type ScoreOgLogo } from '../../shared/score-og';
 
 const LOGO_PX = 256;
 
@@ -49,9 +49,9 @@ export async function renderScoreOgPng(card: ScoreOgCard, fonts: ScoreOgFonts): 
   const resvg = new Resvg(svg, {
     font: {
       fontBuffers: [...fonts],
-      defaultFontFamily: 'Uncut Sans',
-      sansSerifFamily: 'Uncut Sans',
-      monospaceFamily: 'Monaspace Xenon',
+      defaultFontFamily: SCORE_OG_FONT.sans,
+      sansSerifFamily: SCORE_OG_FONT.sans,
+      monospaceFamily: SCORE_OG_FONT.mono,
     },
     fitTo: { mode: 'original' },
     background: '#060a0e',
@@ -74,7 +74,7 @@ export async function rasterizeSvgLogo(svg: string, fonts: ScoreOgFonts): Promis
   await ensureScoreOgWasm();
   try {
     const resvg = new Resvg(svg, {
-      font: { fontBuffers: [...fonts], sansSerifFamily: 'Uncut Sans' },
+      font: { fontBuffers: [...fonts], sansSerifFamily: SCORE_OG_FONT.sans },
       fitTo: { mode: 'width', value: LOGO_PX },
       background: '#00000000',
     });
