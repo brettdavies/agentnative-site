@@ -57,6 +57,7 @@ import {
   suggestTargets,
 } from '../../shared/audit-routes';
 import { escHtml } from '../../shared/esc-html';
+import type { RenderService } from '../../shared/og-render';
 import { resultAlternateLinks } from '../../shared/result-head';
 import { type ReauditControl, type ResultTier, type SpineInput, shortDate } from '../../shared/result-spine';
 import { brandName, cliOgIdentity, scoreOgAlt, scoreOgEdition, scoreOgKey, scoreOgUrl } from '../../shared/score-og';
@@ -80,6 +81,7 @@ import type { WebSummaryInput } from '../audit-web/summary-input';
 import { buildWebSummaryMarkdown } from '../audit-web/summary-markdown';
 import { buildWebSummaryBody } from '../audit-web/summary-render';
 import { applyHeaders, type CacheClassSpec, resultCacheClass } from '../headers';
+import { curatedCardOf, pageClip, withOgVideo } from '../og/page-clip';
 import { get as cliCacheGet, keyFor as cliKeyFor } from '../score/cache';
 import { readCuratedEnvelope } from '../score/core';
 import { loadRegistryIndex, type RegistryIndex } from '../score/registry-lookup';
@@ -94,6 +96,8 @@ export type ResultEnv = {
   SCORE_CACHE: R2Bucket;
   SCORE_KV?: KVNamespace;
   TURNSTILE_SITEKEY?: string;
+  RENDER?: RenderService;
+  OG_VIDEO_ENABLED?: string;
 };
 
 export type ResultDeps = {
@@ -432,10 +436,16 @@ async function serveCurated(ctx: RenderContext, entry: RegistryEntryLike): Promi
   const suffix = ctx.representation === 'md' ? '.md' : '';
   const asset = await ctx.env.ASSETS.fetch(new Request(`https://assets.internal${scorePath(entry.name)}${suffix}`));
   if (asset.status !== 200) return null;
-  const body = await asset.text();
-  const headers: Record<string, string> =
-    ctx.representation === 'md' ? {} : { 'content-type': 'text/html; charset=utf-8' };
-  return finish(ctx, new Response(body, { status: 200, headers }), ctx.representation, { curated: true });
+  const built = await asset.text();
+  if (ctx.representation === 'md') {
+    return finish(ctx, new Response(built, { status: 200 }), 'md', { curated: true });
+  }
+  const card = curatedCardOf(built);
+  const clip = card ? await pageClip(ctx.env, card.target, card.key) : { metaHtml: '', headers: {} };
+  const headers = { 'content-type': 'text/html; charset=utf-8', ...clip.headers };
+  return finish(ctx, new Response(withOgVideo(built, clip.metaHtml), { status: 200, headers }), 'html', {
+    curated: true,
+  });
 }
 
 async function inFlightResponse(ctx: RenderContext, lane: Lane, target: string): Promise<Response | null> {
@@ -537,6 +547,7 @@ async function respond(ctx: RenderContext, rendered: Rendered): Promise<Response
     sourceSha: rendered.envelope.source_sha,
   });
   const ogKey = scoreOgKey({ scorePct, specVersion: rendered.envelope.spec_version, edition });
+  const clip = await pageClip(ctx.env, target, ogKey);
   const html = substituteShell(template, {
     title,
     description,
@@ -547,10 +558,11 @@ async function respond(ctx: RenderContext, rendered: Rendered): Promise<Response
     alternatesHtml: resultAlternateLinks(target),
     ogImage: scoreOgUrl(CANONICAL_SITE_URL, target, ogKey),
     ogImageAlt: scoreOgAlt({ name: identity.name, lane, scorePct, specVersion: rendered.envelope.spec_version }),
+    ogVideoHtml: clip.metaHtml,
   });
   return finish(
     ctx,
-    new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } }),
+    new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8', ...clip.headers } }),
     'html',
     {
       noindex,

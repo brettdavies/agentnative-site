@@ -186,6 +186,7 @@ export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
     extraScripts: [WEBMCP_SCRIPT],
     ogImage: '{{OG_IMAGE}}',
     ogImageAlt: '{{OG_IMAGE_ALT}}',
+    ogVideo: '{{OG_VIDEO}}',
   });
 }
 
@@ -210,6 +211,8 @@ export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
  * @param {string=} args.ogImage             — absolute, site-relative, or a `{{OG_IMAGE}}`
  *     placeholder. Omitted pages use the site-wide card.
  * @param {string=} args.ogImageAlt          — alt for that card. Omitted pages use the site-wide alt.
+ * @param {string=} args.ogVideo             — og:video meta markup, or the `{{OG_VIDEO}}` placeholder the
+ *     Worker fills when the page's clip exists. Omitted pages name no video.
  * @returns {string} full HTML document.
  */
 export function emitShell({
@@ -231,6 +234,7 @@ export function emitShell({
   extraScripts = [],
   ogImage = null,
   ogImageAlt = null,
+  ogVideo = '',
 }) {
   // Everything `base` feeds below is crawler-facing identity: the
   // canonical link, the OpenGraph/Twitter block, and the JSON-LD @id
@@ -392,7 +396,7 @@ ${isIndex || turnstileSitekey ? `    <meta name="turnstile-sitekey" content="{{T
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="${esc(resolvedOgAlt)}" />
-    <meta property="og:site_name" content="${SITE_NAME}" />
+${ogVideo ? `    ${ogVideo}\n` : ''}    <meta property="og:site_name" content="${SITE_NAME}" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${esc(title)}" />
     <meta name="twitter:description" content="${esc(description)}" />

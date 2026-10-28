@@ -581,9 +581,9 @@ describe('applyHeaders — cache class served by the result route', () => {
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate');
   });
 
-  test('a curated slug is HIT-1d with no tag and its build-emitted JSON is the path-keyed short class', () => {
-    expect(curated('html')).toEqual({ klass: 'hit-1d' });
-    expect(curated('md')).toEqual({ klass: 'hit-1d' });
+  test('a curated slug is HIT-1d under cli:<slug> and its build-emitted JSON is the path-keyed short class with no tag', () => {
+    expect(curated('html')).toEqual({ klass: 'hit-1d', tag: 'cli:ripgrep' });
+    expect(curated('md')).toEqual({ klass: 'hit-1d', tag: 'cli:ripgrep' });
     expect(curated('json')).toEqual({ klass: 'short' });
     const html = applyHeaders(new Response('html'), {
       request: req('https://anc.dev/score/ripgrep'),
@@ -593,7 +593,7 @@ describe('applyHeaders — cache class served by the result route', () => {
     });
     expect(html.headers.get('Cache-Control')).toBe('public, max-age=300, stale-while-revalidate=60');
     expect(html.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=86400');
-    expect(html.headers.get('Cache-Tag')).toBeNull();
+    expect(html.headers.get('Cache-Tag')).toBe('cli:ripgrep');
     const json = applyHeaders(new Response('{}'), {
       request: req('https://anc.dev/score/ripgrep/json'),
       servedMarkdown: false,

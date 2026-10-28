@@ -10,9 +10,10 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import { scoreJsonPath, scoreMarkdownPath, scorePath } from '../src/shared/audit-routes';
-import { SCORE_OG_TEMPLATE, scoreOgPath } from '../src/shared/score-og';
+import type { RenderService } from '../src/shared/og-render';
+import { SCORE_OG_TEMPLATE, scoreOgClipPath, scoreOgPath } from '../src/shared/score-og';
 import { _resetResultCaches, badgeAliasRedirect, handleResultRoute, type ResultEnv } from '../src/worker/audit/result';
-import { keyFor as webKeyFor } from '../src/worker/audit-web/cache';
+import { sha256Hex, keyFor as webKeyFor } from '../src/worker/audit-web/cache';
 import { webEnvelope } from '../src/worker/audit-web/core';
 import { handleScoreOg } from '../src/worker/og/route';
 import { keyFor as cliKeyFor } from '../src/worker/score/cache';
@@ -21,6 +22,7 @@ import { _resetShellTemplateCache } from '../src/worker/shell-template';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 import { parseHtml } from './helpers/html-elements';
 import { captureLogs } from './helpers/log-capture';
+import { fakeRender } from './helpers/og-site-fakes';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
 const ORIGIN = 'https://anc.dev';
@@ -40,6 +42,7 @@ const SHELL_TEMPLATE = `<!doctype html><html><head><title>{{TITLE}}</title><meta
     {{ALTERNATES}}
     <meta property="og:image" content="{{OG_IMAGE}}" />
     <meta property="og:image:alt" content="{{OG_IMAGE_ALT}}" />
+    {{OG_VIDEO}}
     <meta name="twitter:image" content="{{OG_IMAGE}}" />
     <meta name="twitter:card" content="summary_large_image" />
 </head><body><main>{{BODY}}</main><footer><a href="{{MARKDOWN_TWIN_PATH}}">This page as markdown</a></footer></body></html>`;
@@ -68,6 +71,8 @@ const CURATED_SCORECARD = {
   results: [],
 };
 const CURATED_HTML = `<!doctype html><html><head><title>ripgrep</title>
+    <meta property="og:type" content="article" />
+    <meta property="og:image" content="https://anc.dev/og/score/ripgrep/s92-v${SPEC_VERSION}-t15.1.0-r${SCORE_OG_TEMPLATE}.png" />
     <link rel="alternate" type="text/markdown" href="/score/ripgrep/md" title="This page as markdown" />
     <link rel="alternate" type="application/json" href="/score/ripgrep/json" title="This result as JSON" />
 </head><body><article class="scorecard-page">curated ripgrep page</article></body></html>`;
@@ -132,6 +137,11 @@ type Overrides = Partial<{
   sitekey: string;
   seed: unknown[];
   now: number;
+  /** Stored clips, by result target and card key. */
+  clips: Array<[string, string]>;
+  failHead: boolean;
+  render: RenderService;
+  ogVideo: string;
 }>;
 
 type TestEnv = ResultEnv & { _r2Gets: string[]; _assetGets: string[]; _aggregateReads: number };
@@ -142,6 +152,11 @@ async function makeEnv(overrides: Overrides = {}): Promise<TestEnv> {
   const kvStore = new Map(Object.entries(overrides.kvSeed ?? {}));
   const r2Gets: string[] = [];
   const assetGets: string[] = [];
+  const clipObjects = new Set(
+    await Promise.all(
+      (overrides.clips ?? []).map(async ([target, key]) => `og/clip/${await sha256Hex(target)}/${key}.mp4`),
+    ),
+  );
   const registryJson = await webRegistryJson();
   const aggregateKey = `audits/web/leaderboard/${SPEC_VERSION}.json`;
   const env = {
@@ -200,12 +215,18 @@ async function makeEnv(overrides: Overrides = {}): Promise<TestEnv> {
         if (raw === undefined) return null;
         return { json: async () => JSON.parse(raw), text: async () => raw };
       },
+      async head(key: string) {
+        if (overrides.failHead) throw new Error('head: We encountered an internal error. (10001)');
+        return clipObjects.has(key) ? { key, size: 12, uploaded: new Date() } : null;
+      },
       async put() {},
       async delete() {},
       async list() {
         return { objects: [], truncated: false };
       },
     } as unknown as R2Bucket,
+    RENDER: overrides.render,
+    OG_VIDEO_ENABLED: overrides.ogVideo,
     SCORE_KV: {
       async get(key: string) {
         return kvStore.get(key) ?? null;
@@ -753,12 +774,12 @@ describe('representations and headers', () => {
     }
   });
 
-  test('a curated slug is HIT-1d with no tag and its build-emitted /json is the path-keyed short class', async () => {
+  test('a curated slug is HIT-1d under cli:<slug> and its build-emitted /json is the path-keyed short class with no tag', async () => {
     const env = await seededEnv();
     for (const path of [scorePath('ripgrep'), scoreMarkdownPath('ripgrep')]) {
       const res = await route(path, env);
       expect(res.status).toBe(200);
-      expect(res.headers.get('cache-tag')).toBeNull();
+      expect(res.headers.get('cache-tag')).toBe('cli:ripgrep');
       expect(res.headers.get('cache-control')).toBe('public, max-age=300, stale-while-revalidate=60');
       expect(res.headers.get('cloudflare-cdn-cache-control')).toBe('public, max-age=86400');
     }
@@ -983,5 +1004,132 @@ describe('scorecard social card', () => {
       const card = await handleScoreOg(new Request(image as string), cards as never);
       expect([target, card.status]).toEqual([target, 200]);
     }
+  });
+});
+
+describe('scorecard clip', () => {
+  const R = `-r${SCORE_OG_TEMPLATE}`;
+  const WEB_KEY = `s64-v${SPEC_VERSION}-d20260910${R}`;
+  const CURATED_KEY = `s92-v${SPEC_VERSION}-t15.1.0${R}`;
+  const html = { accept: 'text/html' };
+
+  function videoTags(page: string): Record<string, string> {
+    return Object.fromEntries(
+      [...page.matchAll(/<meta property="(og:video[^"]*)" content="([^"]+)"/g)].map((m) => [m[1], m[2]]),
+    );
+  }
+
+  test('a website page with a stored clip names it in all five og:video tags on the canonical base', async () => {
+    const env = await seededEnv({ clips: [['anc.dev', WEB_KEY]] });
+    const res = await route('/score/anc.dev', env, html);
+    const page = await res.text();
+    const clip = `https://anc.dev${scoreOgClipPath('anc.dev', WEB_KEY)}`;
+    expect(videoTags(page)).toEqual({
+      'og:video': clip,
+      'og:video:secure_url': clip,
+      'og:video:type': 'video/mp4',
+      'og:video:width': '1200',
+      'og:video:height': '630',
+    });
+    expect(page).toContain(`property="og:image" content="https://anc.dev${scoreOgPath('anc.dev', WEB_KEY)}"`);
+    expect(res.headers.get('x-anc-clip')).toBe('present');
+    expect(res.headers.get('x-anc-clip-run')).toBeNull();
+  });
+
+  test('without the clip the page names no video and keeps its card', async () => {
+    const res = await route('/score/anc.dev', await seededEnv(), html);
+    const page = await res.text();
+    expect(videoTags(page)).toEqual({});
+    expect(page).toContain('property="og:image"');
+    expect(page).not.toContain('{{OG_VIDEO}}');
+  });
+
+  test('a curated page gains the block when its clip exists, under its cli:<slug> tag', async () => {
+    const env = await seededEnv({ clips: [['ripgrep', CURATED_KEY]] });
+    const res = await route('/score/ripgrep', env, html);
+    const page = await res.text();
+    expect(videoTags(page)['og:video']).toBe(`https://anc.dev${scoreOgClipPath('ripgrep', CURATED_KEY)}`);
+    expect(page).toContain('property="og:type" content="article"');
+    expect(page).toContain('curated ripgrep page');
+    expect(res.headers.get('cache-tag')).toBe('cli:ripgrep');
+    expect(res.headers.get('x-anc-clip')).toBe('present');
+    const twin = await route(scoreMarkdownPath('ripgrep'), env);
+    expect(await twin.text()).not.toContain('og:video');
+  });
+
+  test('an unscored page never names a clip or asks for the job', async () => {
+    const render = fakeRender();
+    const unscored = { ...WEB_RECORD, scorecard: { ...WEB_RECORD.scorecard, score_pct: null, score: null } };
+    const env = await makeEnv({
+      cache: { [await webKeyFor('https://anc.dev/', SPEC_VERSION)]: unscored },
+      render,
+      ogVideo: 'true',
+    });
+    const res = await route('/score/anc.dev', env, html);
+    expect(videoTags(await res.text())).toEqual({});
+    expect(res.headers.get('x-anc-clip')).toBe('none');
+    expect(render.calls).toEqual([]);
+  });
+
+  test('R2 trouble during the clip head leaves a 200 page with no block', async () => {
+    const res = await route('/score/anc.dev', await seededEnv({ failHead: true }), html);
+    expect(res.status).toBe(200);
+    expect(videoTags(await res.text())).toEqual({});
+  });
+
+  test.each([
+    ['queued', 'queued'],
+    ['rendering', 'rendering'],
+    ['png', 'rendering'],
+    ['failed', 'failed'],
+  ] as const)('a %s job reads %s, with its run id', async (state, header) => {
+    const render = fakeRender({ status: async () => ({ state, run: 'run-9', attempt: 1 }) });
+    const res = await route('/score/anc.dev', await seededEnv({ render, ogVideo: 'true' }), html);
+    expect(res.headers.get('x-anc-clip')).toBe(header);
+    expect(res.headers.get('x-anc-clip-run')).toBe('run-9');
+    expect(render.calls).toEqual([{ method: 'status', target: 'anc.dev', key: WEB_KEY }]);
+  });
+
+  test('the switch off reads off, no job reads none, and a stored clip reads present without asking the job', async () => {
+    const off = await route('/score/anc.dev', await seededEnv({ render: fakeRender() }), html);
+    expect(off.headers.get('x-anc-clip')).toBe('off');
+    const none = await route('/score/anc.dev', await seededEnv({ render: fakeRender(), ogVideo: 'true' }), html);
+    expect(none.headers.get('x-anc-clip')).toBe('none');
+    expect(none.headers.get('x-anc-clip-run')).toBeNull();
+    const render = fakeRender();
+    const present = await route(
+      '/score/anc.dev',
+      await seededEnv({ render, ogVideo: 'true', clips: [['anc.dev', WEB_KEY]] }),
+      html,
+    );
+    expect(present.headers.get('x-anc-clip')).toBe('present');
+    expect(render.calls).toEqual([]);
+  });
+
+  test('a status call that fails or takes longer than 250 ms reads none and never fails the page', async () => {
+    const failing = fakeRender({
+      status: async () => {
+        throw new Error('render Worker down');
+      },
+    });
+    const slow = fakeRender({ status: () => new Promise(() => {}) });
+    for (const render of [failing, slow]) {
+      const started = Date.now();
+      const res = await route('/score/anc.dev', await seededEnv({ render, ogVideo: 'true' }), html);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('x-anc-clip')).toBe('none');
+      expect(Date.now() - started).toBeLessThan(2_000);
+    }
+  });
+
+  test("a ?v= fetch is served uncached and reads the job's state at that moment", async () => {
+    let state: 'queued' | 'rendering' = 'queued';
+    const render = fakeRender({ status: async () => ({ state, run: 'run-3', attempt: 1 }) });
+    const env = await seededEnv({ render, ogVideo: 'true' });
+    const first = await route('/score/anc.dev?v=1', env, html);
+    expect(first.headers.get('cache-control')).toBe('no-store');
+    expect(first.headers.get('x-anc-clip')).toBe('queued');
+    state = 'rendering';
+    expect((await route('/score/anc.dev?v=2', env, html)).headers.get('x-anc-clip')).toBe('rendering');
   });
 });
