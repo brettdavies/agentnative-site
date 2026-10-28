@@ -39,8 +39,8 @@
       "label": "Structured output support",
       "group": "P2",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "--output/--format flag detected but could not validate JSON via safe probes (--help/--version override output flags in most CLIs)",
+      "status": "skip",
+      "evidence": "`--format` is declared in `log --help`, but no safe probe printed JSON (--help and --version override output flags in most CLIs)",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p2-json-output"
@@ -62,7 +62,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "warn",
-      "evidence": "no --quiet/-q flag detected in --help output",
+      "evidence": "no option definition in --help declares --quiet or -q; a flag named only in a usage line does not count.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p7-quiet"
@@ -150,7 +150,7 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "no structured-output indicator (--output / --format / json / jsonl) in --help",
+      "evidence": "antecedent `p2-json-output` could not be measured: `--format` is declared in `log --help`, but no safe probe printed JSON (--help and --version override output flags in most CLIs)",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p2-schema-print"
@@ -211,8 +211,8 @@
       "label": "Skill bundle has install path (`tool skill install [<host>]`)",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p8-bundle-install"
@@ -222,8 +222,8 @@
       "label": "`skill install --all` for multi-runtime install",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p8-install-all"
@@ -233,8 +233,8 @@
       "label": "`skill update` / `skill upgrade` for bundle refresh",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p8-bundle-update"
@@ -288,8 +288,8 @@
       "label": "`--verbose` flag for diagnostic escalation",
       "group": "P7",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "warn",
+      "evidence": "no `--verbose` / `-v` flag advertised. SHOULD-tier — agents debugging failures need a way to escalate diagnostic detail. `-v` is declared, but its definition (`-v, --version  Print the version number`) does not mean verbose.",
       "confidence": "high",
       "tier": "should",
       "audit_id": "p7-verbose"
@@ -300,7 +300,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "no list-style subcommand detected (list/ls/search/query/find/show/get); vacuous skip for the list-only SHOULD.",
+      "evidence": "no list-style subcommand detected (list/ls/search/query/find, or a show/get whose summary describes several results); vacuous skip for the list-only SHOULD.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p7-limit"
@@ -311,7 +311,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "no list-style subcommand detected; vacuous skip for the list-only MAY.",
+      "evidence": "no list-style subcommand detected (list/ls/search/query/find, or a show/get whose summary describes several results); vacuous skip for the list-only MAY.",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p7-cursor-pagination"
@@ -354,8 +354,8 @@
       "label": "Input-accepting commands read from stdin when no file is given",
       "group": "P6",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "input-accepting subcommand present but `--help` does not mention stdin or `-` as a path placeholder. SHOULD-tier — agents piping data into the tool expect stdin to work when no file arg is provided.",
+      "status": "pass",
+      "evidence": "every input-accepting subcommand's --help mentions stdin: format (stdin).",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p6-stdin-input"
@@ -410,7 +410,7 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; MUST applies only to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); MUST applies only to CLIs that opt into the JSON contract.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p2-json-errors"
@@ -421,7 +421,7 @@
       "group": "P4",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; SHOULD applies only to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); SHOULD applies only to CLIs that opt into the JSON contract.",
       "confidence": "high",
       "tier": "should",
       "audit_id": "p4-json-error-output"
@@ -432,14 +432,14 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; envelope-consistency only applies to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); envelope-consistency only applies to CLIs that opt into the JSON contract.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p2-consistent-envelope"
     },
     {
       "id": "p3-must-subcommand-examples",
-      "label": "Each subcommand's `--help` ships at least one invocation example",
+      "label": "Each subcommand that takes arguments ships an invocation example in its `--help`",
       "group": "P3",
       "layer": "behavioral",
       "status": "fail",
@@ -517,12 +517,12 @@
   ],
   "summary": {
     "total": 44,
-    "pass": 15,
-    "warn": 15,
+    "pass": 12,
+    "warn": 14,
     "fail": 3,
     "opt_out": 0,
-    "n_a": 0,
-    "skip": 11,
+    "n_a": 3,
+    "skip": 12,
     "error": 0
   },
   "coverage_summary": {
@@ -539,21 +539,21 @@
       "verified": 10
     }
   },
-  "audience": "mixed",
+  "audience": "agent-optimized",
   "audit_profile": null,
-  "spec_version": "0.5.0",
+  "spec_version": "0.6.0",
   "tool": {
     "name": "gum",
     "binary": "gum",
     "version": "gum version 2.0.2"
   },
   "anc": {
-    "version": "0.6.0"
+    "version": "0.7.0"
   },
   "run": {
     "invocation": "anc audit --command gum --output json",
-    "started_at": "2026-10-05T18:44:44.989870128Z",
-    "duration_ms": 838,
+    "started_at": "2026-10-28T15:55:05.508995736Z",
+    "duration_ms": 935,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -566,7 +566,7 @@
   },
   "badge": {
     "eligible": false,
-    "score_pct": 68,
+    "score_pct": 66,
     "embed_markdown": null,
     "scorecard_url": "https://anc.dev/score/gum",
     "badge_url": "https://anc.dev/badge/gum.svg",

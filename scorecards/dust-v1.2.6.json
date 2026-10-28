@@ -39,8 +39,8 @@
       "label": "Structured output support",
       "group": "P2",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "--output/--format flag detected but could not validate JSON via safe probes (--help/--version override output flags in most CLIs)",
+      "status": "opt_out",
+      "evidence": "no option definition in --help declares --output, --format, --output-format, --json or --jsonl, the flags this requirement accepts; a flag named only in a usage line does not count.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p2-json-output"
@@ -62,7 +62,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "warn",
-      "evidence": "no --quiet/-q flag detected in --help output",
+      "evidence": "no option definition in --help declares --quiet or -q; a flag named only in a usage line does not count.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p7-quiet"
@@ -116,8 +116,8 @@
       "label": "Pager-using CLI ships --no-pager escape hatch",
       "group": "P6",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "pager referenced in --help but no --no-pager escape hatch advertised",
+      "status": "skip",
+      "evidence": "no pager signal ($PAGER, --pager, pager, or less/more named as a program) in --help",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p6-no-pager-behavioral"
@@ -149,8 +149,8 @@
       "label": "Structured-output CLI exposes its schema at runtime",
       "group": "P2",
       "layer": "behavioral",
-      "status": "fail",
-      "evidence": "CLI emits structured output but exposes no `schema` subcommand or `--schema` flag at top level or nested one level deep. Agents need a runtime-discoverable schema to pin against shape changes.",
+      "status": "n_a",
+      "evidence": "antecedent `p2-json-output` is opt_out: no option definition in --help declares --output, --format, --output-format, --json or --jsonl, the flags this requirement accepts; a flag named only in a usage line does not count.",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p2-schema-print"
@@ -182,8 +182,8 @@
       "label": "Skill bundle has install path (`tool skill install [<host>]`)",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p8-bundle-install"
@@ -193,8 +193,8 @@
       "label": "`skill install --all` for multi-runtime install",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p8-install-all"
@@ -204,8 +204,8 @@
       "label": "`skill update` / `skill upgrade` for bundle refresh",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p8-bundle-update"
@@ -259,8 +259,8 @@
       "label": "`--verbose` flag for diagnostic escalation",
       "group": "P7",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "warn",
+      "evidence": "no `--verbose` / `-v` flag advertised. SHOULD-tier — agents debugging failures need a way to escalate diagnostic detail. `-v` is declared, but its definition (`-v, --invert-filter <REGEX>  Exclude filepaths matching this regex. …`) does not mean verbose.",
       "confidence": "high",
       "tier": "should",
       "audit_id": "p7-verbose"
@@ -271,7 +271,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "no list-style subcommand detected (list/ls/search/query/find/show/get); vacuous skip for the list-only SHOULD.",
+      "evidence": "no list-style subcommand detected (list/ls/search/query/find, or a show/get whose summary describes several results); vacuous skip for the list-only SHOULD.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p7-limit"
@@ -282,7 +282,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "no list-style subcommand detected; vacuous skip for the list-only MAY.",
+      "evidence": "no list-style subcommand detected (list/ls/search/query/find, or a show/get whose summary describes several results); vacuous skip for the list-only MAY.",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p7-cursor-pagination"
@@ -380,8 +380,8 @@
       "label": "Errors emit JSON envelope with discriminant + type id + message roles under `--output json`",
       "group": "P2",
       "layer": "behavioral",
-      "status": "fail",
-      "evidence": "bad invocation under `--output json` produced no parseable JSON on stderr or stdout. JSON mode must emit a JSON error envelope, not plain text.",
+      "status": "skip",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); MUST applies only to CLIs that opt into the JSON contract.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p2-json-errors"
@@ -391,8 +391,8 @@
       "label": "`--output json` produces JSON-formatted errors",
       "group": "P4",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "errors under `--output json` are not JSON-formatted. Consumers parsing stdout-as-JSON cannot recover the failure without a separate text-parsing path; switch the error writer to honor the active output mode.",
+      "status": "skip",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); SHOULD applies only to CLIs that opt into the JSON contract.",
       "confidence": "high",
       "tier": "should",
       "audit_id": "p4-json-error-output"
@@ -403,14 +403,14 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "success-mode probe (`--help --output json`) produced no parseable JSON; cannot compare envelope shapes.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); envelope-consistency only applies to CLIs that opt into the JSON contract.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p2-consistent-envelope"
     },
     {
       "id": "p3-must-subcommand-examples",
-      "label": "Each subcommand's `--help` ships at least one invocation example",
+      "label": "Each subcommand that takes arguments ships an invocation example in its `--help`",
       "group": "P3",
       "layer": "behavioral",
       "status": "skip",
@@ -488,12 +488,12 @@
   ],
   "summary": {
     "total": 44,
-    "pass": 17,
-    "warn": 12,
-    "fail": 2,
-    "opt_out": 0,
-    "n_a": 1,
-    "skip": 12,
+    "pass": 13,
+    "warn": 10,
+    "fail": 0,
+    "opt_out": 1,
+    "n_a": 5,
+    "skip": 15,
     "error": 0
   },
   "coverage_summary": {
@@ -510,21 +510,21 @@
       "verified": 10
     }
   },
-  "audience": "mixed",
+  "audience": "agent-optimized",
   "audit_profile": null,
-  "spec_version": "0.5.0",
+  "spec_version": "0.6.0",
   "tool": {
     "name": "dust",
     "binary": "dust",
     "version": "Dust 1.2.6"
   },
   "anc": {
-    "version": "0.6.0"
+    "version": "0.7.0"
   },
   "run": {
     "invocation": "anc audit --command dust --output json",
-    "started_at": "2026-10-05T18:42:27.837977342Z",
-    "duration_ms": 124,
+    "started_at": "2026-10-28T15:53:00.119136746Z",
+    "duration_ms": 74,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -537,7 +537,7 @@
   },
   "badge": {
     "eligible": true,
-    "score_pct": 74,
+    "score_pct": 75,
     "embed_markdown": "[![agent-native](https://anc.dev/badge/dust.svg)](https://anc.dev/score/dust)",
     "scorecard_url": "https://anc.dev/score/dust",
     "badge_url": "https://anc.dev/badge/dust.svg",

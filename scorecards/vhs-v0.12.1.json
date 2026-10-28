@@ -39,8 +39,8 @@
       "label": "Structured output support",
       "group": "P2",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "--output/--format flag detected but could not validate JSON via safe probes (--help/--version override output flags in most CLIs)",
+      "status": "skip",
+      "evidence": "`--output` is declared in --help, but no safe probe printed JSON (--help and --version override output flags in most CLIs)",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p2-json-output"
@@ -116,8 +116,8 @@
       "label": "Pager-using CLI ships --no-pager escape hatch",
       "group": "P6",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "pager referenced in --help but no --no-pager escape hatch advertised",
+      "status": "skip",
+      "evidence": "no pager signal ($PAGER, --pager, pager, or less/more named as a program) in --help",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p6-no-pager-behavioral"
@@ -149,8 +149,8 @@
       "label": "Structured-output CLI exposes its schema at runtime",
       "group": "P2",
       "layer": "behavioral",
-      "status": "fail",
-      "evidence": "CLI emits structured output but exposes no `schema` subcommand or `--schema` flag at top level or nested one level deep. Agents need a runtime-discoverable schema to pin against shape changes.",
+      "status": "skip",
+      "evidence": "antecedent `p2-json-output` could not be measured: `--output` is declared in --help, but no safe probe printed JSON (--help and --version override output flags in most CLIs)",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p2-schema-print"
@@ -201,8 +201,8 @@
       "label": "Skill bundle has install path (`tool skill install [<host>]`)",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p8-bundle-install"
@@ -212,8 +212,8 @@
       "label": "`skill install --all` for multi-runtime install",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p8-install-all"
@@ -223,8 +223,8 @@
       "label": "`skill update` / `skill upgrade` for bundle refresh",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p8-bundle-update"
@@ -278,8 +278,8 @@
       "label": "`--verbose` flag for diagnostic escalation",
       "group": "P7",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "warn",
+      "evidence": "no `--verbose` / `-v` flag advertised. SHOULD-tier — agents debugging failures need a way to escalate diagnostic detail. `-v` is declared, but its definition (`-v, --version  version for vhs`) does not mean verbose.",
       "confidence": "high",
       "tier": "should",
       "audit_id": "p7-verbose"
@@ -290,7 +290,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "no list-style subcommand detected (list/ls/search/query/find/show/get); vacuous skip for the list-only SHOULD.",
+      "evidence": "no list-style subcommand detected (list/ls/search/query/find, or a show/get whose summary describes several results); vacuous skip for the list-only SHOULD.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p7-limit"
@@ -301,7 +301,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "no list-style subcommand detected; vacuous skip for the list-only MAY.",
+      "evidence": "no list-style subcommand detected (list/ls/search/query/find, or a show/get whose summary describes several results); vacuous skip for the list-only MAY.",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p7-cursor-pagination"
@@ -345,7 +345,7 @@
       "group": "P6",
       "layer": "behavioral",
       "status": "warn",
-      "evidence": "input-accepting subcommand present but `--help` does not mention stdin or `-` as a path placeholder. SHOULD-tier — agents piping data into the tool expect stdin to work when no file arg is provided.",
+      "evidence": "input-accepting subcommand(s) whose --help does not mention stdin or `-` as a path placeholder: validate. SHOULD-tier: agents piping data into the tool expect stdin to work when no file arg is provided.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p6-stdin-input"
@@ -367,7 +367,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "warn",
-      "evidence": "long-running subcommand present but no timeout flag advertised (looked for --timeout, --deadline, --max-time). SHOULD-tier — without a bound, agents that hit a hung operation have to enforce timeouts externally.",
+      "evidence": "no long-running subcommand advertises a timeout flag in its --help: serve (looked for --timeout, --deadline, --max-time). SHOULD-tier: without a bound, agents that hit a hung operation have to enforce timeouts externally.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p7-timeout-behavioral"
@@ -400,7 +400,7 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; MUST applies only to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); MUST applies only to CLIs that opt into the JSON contract.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p2-json-errors"
@@ -411,7 +411,7 @@
       "group": "P4",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; SHOULD applies only to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); SHOULD applies only to CLIs that opt into the JSON contract.",
       "confidence": "high",
       "tier": "should",
       "audit_id": "p4-json-error-output"
@@ -422,14 +422,14 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; envelope-consistency only applies to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); envelope-consistency only applies to CLIs that opt into the JSON contract.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p2-consistent-envelope"
     },
     {
       "id": "p3-must-subcommand-examples",
-      "label": "Each subcommand's `--help` ships at least one invocation example",
+      "label": "Each subcommand that takes arguments ships an invocation example in its `--help`",
       "group": "P3",
       "layer": "behavioral",
       "status": "pass",
@@ -507,12 +507,12 @@
   ],
   "summary": {
     "total": 44,
-    "pass": 17,
-    "warn": 17,
-    "fail": 2,
+    "pass": 13,
+    "warn": 16,
+    "fail": 1,
     "opt_out": 0,
-    "n_a": 0,
-    "skip": 8,
+    "n_a": 3,
+    "skip": 11,
     "error": 0
   },
   "coverage_summary": {
@@ -531,19 +531,19 @@
   },
   "audience": "agent-optimized",
   "audit_profile": null,
-  "spec_version": "0.5.0",
+  "spec_version": "0.6.0",
   "tool": {
     "name": "vhs",
     "binary": "vhs",
     "version": "vhs version 0.12.1"
   },
   "anc": {
-    "version": "0.6.0"
+    "version": "0.7.0"
   },
   "run": {
     "invocation": "anc audit --command vhs --output json",
-    "started_at": "2026-10-05T18:44:46.323055213Z",
-    "duration_ms": 596,
+    "started_at": "2026-10-28T15:55:06.991798668Z",
+    "duration_ms": 785,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -556,7 +556,7 @@
   },
   "badge": {
     "eligible": true,
-    "score_pct": 71,
+    "score_pct": 70,
     "embed_markdown": "[![agent-native](https://anc.dev/badge/vhs.svg)](https://anc.dev/score/vhs)",
     "scorecard_url": "https://anc.dev/score/vhs",
     "badge_url": "https://anc.dev/badge/vhs.svg",

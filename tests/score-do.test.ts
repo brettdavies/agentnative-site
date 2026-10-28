@@ -704,13 +704,13 @@ describe('sandbox-exec.score() — bounce classes', () => {
     expect(result.error).toBe('anc_audit_failed');
   });
 
-  test('anc audit non-zero but valid JSON envelope → still returns scorecard', async () => {
-    // anc emits structured envelopes on stderr-exit when checks produce
-    // findings; the orchestration treats a parseable envelope as the
-    // authoritative response regardless of exit code.
+  // anc writes the scorecard to stdout whatever it exits: 1 for warnings, 2
+  // for failures, 3 when an audit errored or none applied (anc 0.7.0+). The
+  // orchestration treats a parseable envelope as the result regardless of code.
+  test.each([1, 2, 3])('anc audit exits %d with a valid JSON envelope → still returns scorecard', async (exitCode) => {
     const responder: ExecResponder = (cmd) => {
       if (cmd.startsWith('anc audit ')) {
-        return { success: false, stdout: ANC_CHECK_OK, stderr: '', exitCode: 1 };
+        return { success: false, stdout: ANC_CHECK_OK, stderr: '', exitCode };
       }
       return defaultResponder(cmd);
     };
