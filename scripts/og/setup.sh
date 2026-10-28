@@ -92,7 +92,10 @@ if ! jq -e 'any(.[]; .name == "CONTEXT_DEV_API_KEY")' <<<"$render_secrets" >/dev
   # An empty read would be stored as an empty secret that every later check reads as set.
   key=$("$READ_FIELD" "$KEY_ITEM" credential 2>/dev/null) && [[ -n "$key" ]] \
     || finish secret-missing "could not read CONTEXT_DEV_API_KEY from 1Password, so $RENDER has no key" "$SELF"
-  printf '%s' "$key" | wrangler secret put CONTEXT_DEV_API_KEY --name "$RENDER" >/dev/null \
+  # --name names the Worker, so --env stays empty: wrangler appends a non-empty
+  # env to the name (--env staging would target $RENDER-staging), and with no
+  # --env it warns that the repo config defines several environments.
+  printf '%s' "$key" | wrangler secret put CONTEXT_DEV_API_KEY --name "$RENDER" --env= >/dev/null \
     || finish wrangler-failed "wrangler could not set CONTEXT_DEV_API_KEY on $RENDER" "bunx wrangler whoami"
   unset key
   CHANGED+=("set CONTEXT_DEV_API_KEY on $RENDER")
@@ -103,7 +106,7 @@ site_secrets=$(wrangler secret list --name "$SITE" --format json 2>/dev/null) \
   || finish wrangler-failed "wrangler could not list the secrets of $SITE" "bunx wrangler whoami"
 if jq -e 'any(.[]; .name == "CONTEXT_DEV_API_KEY")' <<<"$site_secrets" >/dev/null; then
   [[ "$CHECK" -eq 0 ]] || finish site-secret-present "$SITE still holds CONTEXT_DEV_API_KEY" "$SELF"
-  wrangler secret delete CONTEXT_DEV_API_KEY --name "$SITE" </dev/null >/dev/null \
+  wrangler secret delete CONTEXT_DEV_API_KEY --name "$SITE" --env= </dev/null >/dev/null \
     || finish wrangler-failed "wrangler could not delete CONTEXT_DEV_API_KEY from $SITE" "bunx wrangler whoami"
   CHANGED+=("deleted CONTEXT_DEV_API_KEY from $SITE")
   say "deleted CONTEXT_DEV_API_KEY from $SITE"

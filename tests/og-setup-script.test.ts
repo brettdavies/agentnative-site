@@ -79,7 +79,8 @@ describe('scripts/og/setup.sh', () => {
       },
     });
     expect(readFileSync(join(stub, 'put-anc-og-render-staging-CONTEXT_DEV_API_KEY'), 'utf8')).toBe(KEY);
-    expect(run.calls).toContain('secret delete CONTEXT_DEV_API_KEY --name agentnative-site-staging');
+    expect(run.calls).toContain('secret put CONTEXT_DEV_API_KEY --name anc-og-render-staging --env=');
+    expect(run.calls).toContain('secret delete CONTEXT_DEV_API_KEY --name agentnative-site-staging --env=');
     expect(run.out).not.toContain(KEY);
   });
 
