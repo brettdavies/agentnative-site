@@ -3,17 +3,17 @@
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
+import type { LogoFetch } from '../src/og-render/logo';
+import type { ScoreOgFonts } from '../src/og-render/render';
 import { SCORE_OG_TEMPLATE, scoreOgPath } from '../src/shared/score-og';
 import { keyFor as webKeyFor } from '../src/worker/audit-web/cache';
-import type { LogoFetch } from '../src/worker/og/logo';
-import type { ScoreOgFonts } from '../src/worker/og/render';
 import { handleScoreOg } from '../src/worker/og/route';
 import { keyFor as cliKeyFor } from '../src/worker/score/cache';
 import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 const ORIGIN = 'https://anc.dev';
-const FONT_DIR = new URL('../src/worker/og/fonts/', import.meta.url);
+const FONT_DIR = new URL('../src/og-render/fonts/', import.meta.url);
 
 let fontBuffers: ScoreOgFonts | null = null;
 async function fonts(): Promise<ScoreOgFonts> {

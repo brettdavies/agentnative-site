@@ -11,8 +11,9 @@
 // homepage keeps the host's outcome unsettled.
 
 import { getDomain } from 'tldts';
-import type { ScoreOgLogo } from '../../shared/score-og';
-import { sha256Hex } from '../audit-web/cache';
+import type { LogoSource } from '../shared/og-render';
+import type { ScoreOgLogo } from '../shared/score-og';
+import { sha256Hex } from '../worker/audit-web/cache';
 import { type BrandLogoUrls, brandLogoUrls } from './brand-logo';
 import { type LogoFetch, logoFromUrl, resolveLogo } from './logo';
 import type { ScoreOgFonts } from './render';
@@ -20,11 +21,6 @@ import type { ScoreOgFonts } from './render';
 const STORED_LOGO_PREFIX = 'og/logo/';
 const STORED_BRAND_PREFIX = 'og/brand/';
 const BRAND_BUDGET_MS = 3_000;
-
-/** Where the card's logo came from: drawn into the `x-anc-card-logo` response header. */
-export const LOGO_SOURCES = ['homepage', 'brand', 'stored', 'tile'] as const;
-
-export type LogoSource = (typeof LOGO_SOURCES)[number];
 
 /** `settled` is false when a lookup was cut short, so the tile it fell back to is not the host's answer. */
 export type FoundLogo = { logo: ScoreOgLogo | null; source: LogoSource; settled: boolean };

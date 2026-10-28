@@ -313,7 +313,7 @@ export async function build() {
   const ogFontDir = join(DIST_DIR, '_internal', 'og-fonts');
   await ensureDir(ogFontDir);
   for (const file of ['uncut-sans-600.ttf', 'uncut-sans-700.ttf', 'monaspace-xenon-500.otf']) {
-    await copyFile(join(REPO_ROOT, 'src', 'worker', 'og', 'fonts', file), join(ogFontDir, file));
+    await copyFile(join(REPO_ROOT, 'src', 'og-render', 'fonts', file), join(ogFontDir, file));
   }
 
   // 10. Sitemap (includes scorecard paths). /install (CLI) and /skill (skill

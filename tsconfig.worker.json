@@ -1,7 +1,7 @@
 // Cloudflare Workers typecheck. The Worker runs on workerd, not Bun or the
 // browser, so it sees the Workers runtime types plus the ES2022 lib, without
-// the DOM or bun-types the base config also carries. Covers the Worker entry
-// and the server-shared modules it composes.
+// the DOM or bun-types the base config also carries. Covers the site Worker,
+// the render Worker, and the server-shared modules they compose.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
@@ -9,5 +9,5 @@
     "lib": ["ES2022"],
     "noEmit": true
   },
-  "include": ["src/worker/**/*.ts", "src/shared/**/*"]
+  "include": ["src/worker/**/*.ts", "src/og-render/**/*.ts", "src/shared/**/*"]
 }

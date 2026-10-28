@@ -19,6 +19,7 @@ export type LogScope =
   | 'cache.write'
   | 'hit-min-purge'
   | 'notify.send_failed'
+  | 'og.render'
   | 'page.request'
   | 'scheduled'
   | 'score.og'

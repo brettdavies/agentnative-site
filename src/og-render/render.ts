@@ -1,5 +1,5 @@
-/// <reference path="./resvg-wasm-module.ts" />
-// Rasterize a scorecard OG card to a 1200×630 PNG.
+/// <reference path="./bundled-modules.ts" />
+// Rasterize a scorecard OG card to a 1200×630 PNG, or one clip frame to RGBA.
 //
 // resvg-wasm is the same rasterizer the workers-og style of Worker image
 // uses, without Satori: the card is one fixed layout, so an SVG string is
@@ -9,7 +9,13 @@
 
 import { type InitInput, initWasm, Resvg } from '@resvg/resvg-wasm';
 import wasm from '@resvg/resvg-wasm/index_bg.wasm';
-import { renderScoreOgSvg, SCORE_OG_FONT, type ScoreOgCard, type ScoreOgLogo } from '../../shared/score-og';
+import {
+  renderScoreOgSvg,
+  SCORE_OG_FONT,
+  type ScoreOgCard,
+  type ScoreOgFrameState,
+  type ScoreOgLogo,
+} from '../shared/score-og';
 
 const LOGO_PX = 256;
 
@@ -29,23 +35,41 @@ export function ensureScoreOgWasm(): Promise<void> {
 }
 
 async function loadWasm(source: unknown): Promise<void> {
-  let input: InitInput;
-  if (typeof source === 'string') {
-    const bun = (globalThis as { Bun?: BunFile }).Bun;
-    if (!bun) throw new Error('scorecard OG wasm import did not resolve to bytes');
-    input = new Uint8Array(await bun.file(source).arrayBuffer());
-  } else {
-    input = source as InitInput;
-  }
-  await initWasm(input);
+  await initWasm(typeof source === 'string' ? await bundledBytes(source) : (source as InitInput));
+}
+
+/** A bundled module's bytes: workerd hands over the data, Bun its file path. */
+export async function bundledBytes(source: ArrayBuffer | string): Promise<Uint8Array> {
+  if (typeof source !== 'string') return new Uint8Array(source);
+  const bun = (globalThis as { Bun?: BunFile }).Bun;
+  if (!bun) throw new Error(`bundled module did not resolve to bytes: ${source}`);
+  return new Uint8Array(await bun.file(source).arrayBuffer());
 }
 
 export type ScoreOgFonts = readonly [Uint8Array, Uint8Array, Uint8Array];
 
-/** PNG bytes. Throws when resvg rejects the SVG; the route turns that into a 500. */
-export async function renderScoreOgPng(card: ScoreOgCard, fonts: ScoreOgFonts): Promise<Uint8Array> {
+/** PNG bytes. Throws when resvg rejects the SVG. */
+export function renderScoreOgPng(card: ScoreOgCard, fonts: ScoreOgFonts): Promise<Uint8Array> {
+  return rasterize(renderScoreOgSvg(card), fonts, (image) => image.asPng());
+}
+
+/** One clip frame as 1200×630 RGBA pixels. */
+export function renderScoreOgPixels(
+  card: ScoreOgCard,
+  fonts: ScoreOgFonts,
+  frame: ScoreOgFrameState,
+): Promise<Uint8Array> {
+  return rasterize(renderScoreOgSvg(card, frame), fonts, (image) => image.pixels);
+}
+
+type RenderedImage = ReturnType<InstanceType<typeof Resvg>['render']>;
+
+async function rasterize(
+  svg: string,
+  fonts: ScoreOgFonts,
+  read: (image: RenderedImage) => Uint8Array,
+): Promise<Uint8Array> {
   await ensureScoreOgWasm();
-  const svg = renderScoreOgSvg(card);
   const resvg = new Resvg(svg, {
     font: {
       fontBuffers: [...fonts],
@@ -60,7 +84,7 @@ export async function renderScoreOgPng(card: ScoreOgCard, fonts: ScoreOgFonts): 
     resolveEmbeddedImages(resvg);
     const image = resvg.render();
     try {
-      return image.asPng();
+      return read(image);
     } finally {
       image.free();
     }

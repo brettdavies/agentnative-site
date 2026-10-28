@@ -9,6 +9,11 @@
 // replaces them at the same URL. A finished card is also stored in R2
 // (./store.ts), so an edge miss reads it rather than drawing it again.
 
+import { findLogo } from '../../og-render/find-logo';
+import { loadScoreOgFonts } from '../../og-render/fonts';
+import type { LogoFetch } from '../../og-render/logo';
+import { renderScoreOgPng, type ScoreOgFonts } from '../../og-render/render';
+import type { LogoSource } from '../../shared/og-render';
 import {
   isImmutableScoreOgKey,
   isScoreOgKey,
@@ -19,10 +24,6 @@ import {
 } from '../../shared/score-og';
 import { applyHeaders, type CacheClassSpec } from '../headers';
 import { emitLog } from '../telemetry/log';
-import { findLogo, type LogoSource } from './find-logo';
-import { loadScoreOgFonts } from './fonts';
-import type { LogoFetch } from './logo';
-import { renderScoreOgPng, type ScoreOgFonts } from './render';
 import { readStoredCard, storeCard } from './store';
 import { loadScoreOgSubject, type ScoreOgEnv } from './subject';
 
@@ -95,7 +96,7 @@ export async function handleScoreOg(request: Request, env: ScoreOgEnv, deps: Sco
   }
 
   try {
-    const fonts = deps.fonts ?? (await loadScoreOgFonts(env));
+    const fonts = deps.fonts ?? (await loadScoreOgFonts());
     const found =
       subject.pages.length === 0
         ? { logo: null, source: 'tile' as const, settled: true }
