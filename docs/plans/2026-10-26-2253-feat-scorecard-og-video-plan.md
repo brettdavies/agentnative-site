@@ -5,7 +5,7 @@ product_contract_source: ce-plan-bootstrap
 title: "Scorecard og:video - Plan"
 type: feat
 status: active
-prs: ["#461"]
+prs: ["#461", "#482"]
 date: 2026-10-26
 topic: scorecard-og-video
 ---
@@ -102,7 +102,7 @@ Two constraints shape the work. A cold render takes 10 to 12 s, above Discord's 
 - KTD1. **A separate render Worker owns all drawing.** `anc-og-render` (staging `anc-og-render-staging`) draws the PNG, looks up the logo, renders frames, encodes the GIF, and calls the binding. The site Worker keeps data loading, card keys, public routes, page tags, render requests, and the `og-rendered` consumer. (session-settled: user-directed, chosen over a queue consumer inside the site Worker. One isolate serves concurrent requests on a single thread and shares 128 MB, so seconds of rendering there would stall page requests: https://developers.cloudflare.com/workers/reference/how-workers-works/ and https://developers.cloudflare.com/workers/platform/limits/#memory.) The `CONTEXT_DEV_API_KEY` secret, resvg-wasm, and the card fonts leave the site Worker.
 - KTD2. **One queue and one service binding, with no cycle.** (D6 in the eng re-review: user-directed, the render runs on `RenderJob`'s alarm, chosen over an `og-render` queue between the claim and the render, which split each job's state between the queue and the object.)
   - The site asks for a render with `RENDER.request(target, inputs)` over the service binding. The render Worker claims the card's `RenderJob` (KTD13), and the object runs the render from its own alarm. Each card has its own object, so different cards render in parallel and one card renders once.
-  - The render Worker produces to `og-rendered`, and the site consumes it to purge page tags. Purge only works inside the site's `Cached` entrypoint (`src/worker/audit-web/hit-min-purge.ts`). The consumer runs with `max_batch_size` 1 so the purge lands right after the clip.
+  - The render Worker produces to `og-rendered`, and the site consumes it to purge page tags. Purge only works inside the site's `Cached` entrypoint (`src/worker/audit-web/hit-min-purge.ts`). The consumer takes batches of up to 100 messages (`max_batch_timeout` 5 s) and purges each batch's deduplicated tags in one call per 100 tags, because Workers Cache purges always run at the Free-tier limit of 5 requests per minute with a burst of 25, shared with the audit flow's own purges. A refused purge retries its messages after 60 s times the attempt (`max_retries` 5, about 15 minutes); the last refusal acknowledges the message and writes an `og_rendered_gave_up` hit-min-purge record, and the page names its clip when its cached copy expires.
   - Queues are account-wide and named once, so staging uses `og-rendered-staging` and production uses `og-rendered`. The per-environment render Workers (`anc-og-render`, `anc-og-render-staging`) do not isolate a queue they both name.
   - The site also calls the render Worker to draw an on-demand PNG. That RPC applies the same template-version check as `RenderJob`: on a mismatch it returns a typed skew outcome, which the PNG route serves as its existing `503` without storing.
 
@@ -315,6 +315,7 @@ on RenderJob alarm(info) (set by a new claim, by a retry, or for cleanup):
 
 ### U3. Motion frames
 
+- [x] Built in #482.
 - **Goal:** One pure function yields the clip's frame states, with the final card at both ends.
 - **Requirements:** R2, R12; KTD7.
 - **Dependencies:** U1.
@@ -338,6 +339,7 @@ on RenderJob alarm(info) (set by a new claim, by a retry, or for cleanup):
 
 ### U4. Render Worker
 
+- [x] Built in #482.
 - **Goal:** `anc-og-render` turns requested card inputs into a stored PNG and clip, and draws one PNG on request.
 - **Requirements:** R1, R2, R4; KTD1, KTD2, KTD3, KTD5, KTD6, KTD7, KTD12, KTD13.
 - **Dependencies:** U1, U2, U3.
@@ -399,6 +401,7 @@ on RenderJob alarm(info) (set by a new claim, by a retry, or for cleanup):
 
 ### U5. Site Worker wiring
 
+- [x] Built in #482.
 - **Goal:** The site produces render jobs, serves clips, purges pages when clips land, and draws no images itself.
 - **Requirements:** R4, R5, R8, R9; KTD2, KTD9, KTD11.
 - **Dependencies:** U4.
@@ -419,7 +422,7 @@ on RenderJob alarm(info) (set by a new claim, by a retry, or for cleanup):
   1. The PNG route reads the stored card, else calls the render Worker's RPC. Preserved behaviour: 301 to the canonical key, alias target, and query-free path; 404 on a malformed path, unknown key grammar, or missing subject; 503 with `retry-after: 30` when R2 cannot be read; pending and unscored served `hit-min` and never stored; finished keys immutable; `x-robots-tag: noindex` on every PNG; `x-anc-card` on every PNG response, with `x-anc-card-logo` on drawn and stored cards alike. When the RPC fails or times out, the route serves the site default card (`/og-image.png` from `ASSETS`) with the `hit-min` cache class and `x-anc-card: fallback`, stores nothing, and logs a distinct `score.og` outcome.
   2. The clip route follows KTD11.
   3. The request helper builds the card inputs from `loadScoreOgSubject` and calls `RENDER.request` only for finished keys with the switch on.
-  4. The `queue()` handler purges the target's page tag through the `Cached` entrypoint.
+  4. The `queue()` handler purges each batch's page tags through the `Cached` entrypoint in one call per 100 tags, and retries the batch's messages with a growing delay when the purge is refused (KTD2).
   5. Add to `wrangler.jsonc` in both environments: the `og-rendered` consumer and the `RENDER` service binding. Remove `CONTEXT_DEV_API_KEY` from the site's types.
 - **Test scenarios:**
   - The PNG route serves a stored card without an RPC call, with `x-anc-card: stored` and `x-anc-card-logo` read from its metadata.
@@ -440,6 +443,7 @@ on RenderJob alarm(info) (set by a new claim, by a retry, or for cleanup):
 
 ### U6. Render triggers
 
+- [x] Built in #482.
 - **Goal:** Every finished scorecard requests one render, and curated cards stay fresh.
 - **Requirements:** R1, R3, R4, R5; KTD8.
 - **Dependencies:** U5.
@@ -474,6 +478,7 @@ on RenderJob alarm(info) (set by a new claim, by a retry, or for cleanup):
 
 ### U7. Page tags
 
+- [x] Built in #482.
 - **Goal:** Pages name the clip exactly when it exists.
 - **Requirements:** R7, R8; KTD10.
 - **Dependencies:** U5.
@@ -489,7 +494,7 @@ on RenderJob alarm(info) (set by a new claim, by a retry, or for cleanup):
   1. Add `og:video` placeholders to the live shell, filled only when the clip head succeeds.
   2. For curated pages, inject the same block into the asset HTML after the head. `resultCacheClass` returns `{ klass: 'hit-1d', tag: 'cli:<slug>' }` for curated HTML and markdown and keeps curated JSON `short` with no tag, and `applyCacheClass` writes the tag for `hit-1d` (D7, F8).
   3. R2 trouble during the head omits the block and never fails the page.
-  4. Scorecard pages send `x-anc-clip`: `present` when the clip exists; otherwise the RenderJob's state (`queued`, `rendering`, `failed`, with `png` read as `rendering`), `off` when `OG_VIDEO_ENABLED` is not `'true'`, or `none` when no job exists. The `RENDER.status` call runs only when the clip is absent, so the page cache limits how often it runs, and it is bounded at 250 ms; a timeout counts as a failure (F13).
+  4. Scorecard pages send `x-anc-clip`: `present` when the clip exists; otherwise the RenderJob's state (`queued`, `rendering`, `failed`, with `png` read as `rendering`), `off` when `OG_VIDEO_ENABLED` is not `'true'`, `none` when no job exists, or `unknown` when the status call fails, misses its 250 ms bound, or has no binding. The `RENDER.status` call runs only when the clip is absent, so the page cache limits how often it runs (F13).
 - **Test scenarios:**
   - A web page with a stored clip emits all five `og:video` tags with the clip URL on the canonical base. Without the clip it emits none and keeps `og:image`.
   - A curated page gains the block when the clip exists, and the response that leaves `applyHeaders` carries `Cache-Tag: cli:<slug>`.
@@ -497,13 +502,14 @@ on RenderJob alarm(info) (set by a new claim, by a retry, or for cleanup):
   - Pending and unscored pages never emit the block.
   - An R2 error during the head yields a 200 page with no block.
   - `og:type` stays `article`.
-  - `x-anc-clip` reads `present` with a stored clip, the job state when one exists, `off` with the switch unset, and `none` otherwise; a `RENDER.status` failure or a call slower than 250 ms yields `none` and never fails the page.
+  - `x-anc-clip` reads `present` with a stored clip, the job state when one exists, `off` with the switch unset, and `none` when no job exists; a `RENDER.status` failure or a call slower than 250 ms yields `unknown` and never fails the page.
   - A `?v=` fetch of a scorecard page is served uncached, and its `x-anc-clip` reflects the job's state at that moment.
   - A `queued`, `rendering` or `failed` state also sends `x-anc-clip-run` with the job's run id.
 - **Verification:** Page tests pass. A staging fetch with `Accept: text/html` shows the block once the clip renders.
 
 ### U8. Deploy, config, and docs
 
+- [x] Built in #482.
 - **Goal:** Both Workers deploy in the right order with the right bindings, and the docs describe the result.
 - **Requirements:** R5, R6; KTD1, KTD2, KTD9, KTD14.
 - **Dependencies:** U4, U5, U6.
@@ -545,6 +551,7 @@ on RenderJob alarm(info) (set by a new claim, by a retry, or for cleanup):
 
 ### U9. Live verification
 
+- [x] Built in #482.
 - **Goal:** The release preflight proves a real clip renders, serves, and is named, end to end on staging.
 - **Requirements:** R1, R2, R7, R8, R9; success criteria.
 - **Dependencies:** U4 to U8.
@@ -560,7 +567,7 @@ on RenderJob alarm(info) (set by a new claim, by a retry, or for cleanup):
   3. Local runs assert `og:video`, `x-anc-clip` and the clip route against the stand-in clip (KTD16) and skip only the Range and track-size checks, which depend on the edge cache and real encoding.
   4. Record four staging measurements in the PR: on-demand PNG latency for a request issued while a render is in flight, the same latency for the first on-demand draw after the render Worker deploys (cold start), the render Worker's memory per invocation from Workers metrics, and the first-run wall clock from the first `scripts/og/setup.sh staging` to the green `preflight.sh e2e`, split into setup, deploy wait, rerun and preflight, against the about-5-minute target (DX D6, D18).
   5. The smoke ends with one result line per fixture: host, logo tier, `x-anc-card` (`drawn` or `stored`), seconds from audit finish to `og:video` named, Range `206` ok, and the clip URL. These are the numbers step 4 records in the PR.
-  6. When `og:video` does not appear within 60 s, the smoke fetches the page once more with `?v=<run>`, which is served uncached (`src/worker/audit/result.ts`), and fails with that response's `x-anc-clip` value and its next command (F9): `off` names `scripts/og/setup.sh <env> --check`; `failed` names `bunx wrangler tail anc-og-render-staging --format json` and the `og.render` outcome to look for; `queued` or `rendering` names `scripts/og/status.sh` and the `x-anc-clip-run` id to follow in `wrangler tail`, whose `og.render` records carry each attempt; `none` names the `score.og` request log.
+  6. When `og:video` does not appear within 60 s, the smoke fetches the page once more with `?v=<run>`, which is served uncached (`src/worker/audit/result.ts`), and fails with that response's `x-anc-clip` value and its next command (F9): `off` names `scripts/og/setup.sh <env> --check`; `failed` names `bunx wrangler tail anc-og-render-staging --format json` and the `og.render` outcome to look for; `queued` or `rendering` names `scripts/og/status.sh` and the `x-anc-clip-run` id to follow in `wrangler tail`, whose `og.render` records carry each attempt; `none` names the `score.og` request log; `unknown` names `scripts/og/status.sh` again, since the job did not answer in time.
   7. `scripts/og/status.sh <base-url> <target>` prints one line for any scorecard from public routes (Access headers when set): card key, `x-anc-card` and logo tier, `x-anc-clip` and `x-anc-clip-run` from a `?v=` fetch, whether the page names `og:video`, and the next command when something is missing. It maps each `x-anc-clip` value to the same cause and next command as the smoke, and `tests/og-status-script.test.ts` asserts that the smoke's exported map, `status.sh` and the `RELEASES-PREFLIGHT.md` table agree (F12). `RELEASES-PREFLIGHT.md` names it for debugging a missing clip.
 - **Test scenarios:**
   - The page names `og:video` within 60 s of the audit.
@@ -568,7 +575,7 @@ on RenderJob alarm(info) (set by a new claim, by a retry, or for cleanup):
   - The clip's `ftyp` box is present and its track header reads 1200x630.
   - `Range: bytes=-1000` returns 206 with the matching `Content-Range`.
   - A second fetch returns identical bytes.
-- **Verification:** `scripts/release/preflight.sh e2e` passes against staging with the switch on. A freshly audited link plays in iMessage and in Discord.
+- **Verification:** `scripts/release/preflight.sh e2e` passes against staging with the switch on, including during a full curated pass. Playback in iMessage (autoplay) and Discord (click to play) is a manual `RELEASES-POSTFLIGHT.md` step on anc.dev for the release that ships og:video and for any `SCORE_OG_TEMPLATE` bump, because staging sits behind Access and neither app's crawler can fetch it.
 
 ---
 
@@ -872,7 +879,7 @@ crawler ─► /og/score/.../<key>.png ─► stored? ─yes─► 200 immutable
                                         └─ RPC fails ─► /og-image.png, hit-min, not stored
 
 page ─► R2 head og/clip/<sha>/<key>.mp4 ─found─► og:video block, x-anc-clip: present
-          └─ absent ─► RENDER.status (250 ms) ─► x-anc-clip: queued | rendering | failed | none | off
+          └─ absent ─► RENDER.status (250 ms) ─► x-anc-clip: queued | rendering | failed | none | unknown | off
 clip route ─► 200 full; edge slices Range to 206
 ```
 
@@ -889,12 +896,12 @@ Per target and key: `finished -> queued -> rendering -> png -> stored -> superse
 | On-demand PNG | Render Worker down | Default card, `hit-min`, not stored (D3, U5 test) | Generic anc.dev card |
 | On-demand PNG | Logo lookup timeout | `hit-min`, not stored (U2/U5 tests) | Tile card briefly |
 | Deploy skew | Template versions differ | Job skipped, RPC 503 not stored, logged (U4/U5 tests) | Still card or no image briefly |
-| Clip-ready purge | Purge call fails | Page refreshes at its TTL (300 s live, 1 day curated); success path tested (U5) | `og:video` appears late |
+| Clip-ready purge | Purge refused at the rate limit | Batch retried after 60 s times the attempt, up to 5 retries; then acknowledged with an `og_rendered_gave_up` record and the page refreshes at its TTL (300 s live, 1 day curated) (U5 tests) | `og:video` appears late |
 | Curated pass | 151 renders requested at once | Alarms 400 ms apart (U4 test) | none |
 | Curated pass | Endpoint fails in CI | `curl -sSf --retry` fails the deploy step | Red deploy run |
 | Clip route | Cold-cache Range | Edge cache slices the full 200 (U9 e2e) | none |
 | Queue | Staging and production share the `og-rendered` name | Suffixed names, config test (D2, U8) | none |
-| Page | `RENDER.status` slow or down | 250 ms bound, `x-anc-clip: none`, page renders (U7 test) | Page unaffected |
+| Page | `RENDER.status` slow or down | 250 ms bound, `x-anc-clip: unknown`, page renders (U7 test) | Page unaffected |
 | Smoke diagnosis | The cached page carries a stale `x-anc-clip` | Diagnosis reads a `?v=` fetch (U9, F9) | The right cause is named |
 | Local dev | `git add -A` stages a `.dev.vars` file under `src/` | Re-ignored, `git check-ignore` test (F5) | Nothing committed |
 
@@ -1158,7 +1165,7 @@ None.
 
 ## Implementation Tasks (DX review)
 
-- [ ] **T1 (P1, human: ~2 days / CC: ~1 hour)**: render Worker: `RenderJob` Durable Object with `request`, `status`, `wait`, the alarm that runs and retries the render, cleanup and migration; `og-rendered` at `max_batch_size` 1
+- [ ] **T1 (P1, human: ~2 days / CC: ~1 hour)**: render Worker: `RenderJob` Durable Object with `request`, `status`, `wait`, the alarm that runs and retries the render, cleanup and migration; `og-rendered` with a batched consumer (B1)
   - Surfaced by: owner requirement (DX D10)
   - Files: `src/og-render/render-job-do.ts`, `src/og-render/index.ts`, `src/og-render/wrangler.jsonc`, `tests/og-render-job-do.test.ts`
   - Verify: `bun test tests/og-render-job-do.test.ts`; duplicate requests enqueue once on staging
@@ -1365,6 +1372,36 @@ Accepted scope: `resultCacheClass` returns `{ klass: 'hit-1d', tag: 'cli:<slug>'
 History: none.
 
 Approval readiness (re-review): PASS. Checked D6 (structure, scope record above), R7 (D7: A), and F5 to F14, each of which carries out a cited approval (DX D10, D12, D13, D15, D17, KTD1, R8, F3, the Goal Capsule).
+
+### B1: the og-rendered purge rate (build, #482)
+
+Finding: the staging curated pass requested 150 renders; 123 og-rendered purges and the audit flow's purges in the same minute failed with code 1134. Workers Cache purges always run at the Free-tier limit (5 requests per minute, burst 25, 100 tags per request), per account.
+Plan baseline: KTD2's `max_batch_size` 1 and the failure table's acknowledge-on-failure row.
+Correction: batches of up to 100 messages, one purge per 100 deduplicated tags, retry after 60 s times the attempt up to 5 retries, then acknowledge with an `og_rendered_gave_up` record (KTD2, U5, failure table).
+State: approved
+Actual answer: user, 2026-10-28: batch and retry (D34 in the triage decision log).
+Accepted scope: the consumer change, its tests, and the docs in #482.
+History: replaces the `max_batch_size` 1 choice recorded under DX D11.
+
+### B2: `x-anc-clip` during a slow status call (build, #482)
+
+Finding: a page polled through one render read `rendering` when `RenderJob` answered within 250 ms and `none` when it answered later, so `none` pointed at the wrong log.
+Plan baseline: U7 step 4, `none` for any status failure.
+Correction: a failed, slow, or unbound status call reads `unknown`; `none` means no job holds the card (U7, U9, failure table).
+State: approved
+Actual answer: user, 2026-10-28: add `unknown` (D35).
+Accepted scope: the header value, `status.sh`'s `clip-unknown` reason, the smoke's cause map, and the RELEASES-PREFLIGHT.md table in #482.
+History: none.
+
+### B3: real-app playback (build, #482)
+
+Finding: staging sits behind Access, so neither iMessage's nor Discord's crawler can fetch a staging scorecard.
+Plan baseline: U9 verification, "A freshly audited link plays in iMessage and in Discord."
+Correction: a manual RELEASES-POSTFLIGHT.md step on anc.dev for the release that ships og:video and for any `SCORE_OG_TEMPLATE` bump (U9 verification).
+State: approved
+Actual answer: user, 2026-10-28: postflight step (D36).
+Accepted scope: the RELEASES-POSTFLIGHT.md step in #482.
+History: none.
 
 ## Eng re-review output
 
