@@ -621,11 +621,10 @@ describe('wrangler.jsonc — WEB_AUDIT_FOLLOW_ENABLED binding shape', () => {
 
 // The site asks the render Worker for renders over RENDER and consumes
 // og-rendered to purge the page that names a new clip. Queues are
-// account-wide, so each environment names its own; one consumer per queue,
-// batching up to one purge call's 100 tags, with a retry for every attempt
-// the consumer makes before it gives up. OG_VIDEO_ENABLED is
-// a secret in both environments, read as `=== 'true'`, so the feature ships
-// dark and a var of the same name would break the flip (CF API 10053).
+// account-wide, so each environment names its own; one consumer per queue.
+// OG_VIDEO_ENABLED is a secret in both environments, read as `=== 'true'`, so
+// the feature ships dark and a var of the same name would break the flip (CF
+// API 10053).
 
 describe('wrangler.jsonc — og:video wiring', () => {
   const config = loadWranglerConfig();

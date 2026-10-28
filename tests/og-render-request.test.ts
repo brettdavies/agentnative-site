@@ -152,8 +152,7 @@ describe('og-rendered consumer', () => {
       expect(only.outcome).toBe('retry');
       delays.push(only.outcome === 'retry' ? only.delaySeconds : undefined);
     }
-    expect(delays[0]).toBeGreaterThanOrEqual(60);
-    expect(delays).toEqual([...delays].sort((a, b) => (a ?? 0) - (b ?? 0)));
+    expect(delays).toEqual([60, 120, 180, 240, 300]);
   });
 
   test('on its last attempt a refused purge is acknowledged and logged as given up, and the page refreshes at its TTL', async () => {

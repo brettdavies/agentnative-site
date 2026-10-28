@@ -34,7 +34,9 @@ export async function handleOgRendered(batch: MessageBatch<OgRenderedMessage>, c
   const byTag = new Map<string, RenderedMessage[]>();
   for (const message of batch.messages) {
     const tag = resultTag(message.body.lane, message.body.target);
-    byTag.set(tag, [...(byTag.get(tag) ?? []), message]);
+    const messages = byTag.get(tag);
+    if (messages) messages.push(message);
+    else byTag.set(tag, [message]);
   }
   const tags = [...byTag.keys()];
   for (let start = 0; start < tags.length; start += OG_RENDERED_PURGE_TAG_LIMIT) {
