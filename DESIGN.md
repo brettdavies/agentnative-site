@@ -1137,18 +1137,29 @@ The card design landed on 2026-04-30 via a `/design-shotgun` → `/impeccable` �
 
 **Per-scorecard cards.** `/score/<target>` (curated CLI, live CLI, branch, and website) points `og:image` and
 `twitter:image` at `/og/score/<target>/<key>.png`, 1200×630. The site-wide `/og-image.png` stays the default for every
-other page. The key is `s<rounded>-v<spec>` (`s80-v0.6.0`), or `pending` / `unscored`. A rescore mints a new URL, so an
-immutable edge cache of the previous PNG does not have to be purged. A key that is not the stored score 301s to the key
-that is. The Worker draws one fixed SVG (ANC mark, ANC × brand lockup, the percent, a meter) and rasterizes it with
-resvg-wasm. The brand tile is the homepage's apple-touch icon, PNG/SVG icon, or `og:image` when it is SVG or at least
-128px on each side, fetched over https inside a two-second budget and the web-audit host check; otherwise the brand's
-published logo from context.dev's brand endpoint for the registrable domain (skipped for code hosts such as
-`github.com`). The result, a logo or a miss, is stored in `SCORE_CACHE` under `og/logo/<sha256(domain)>`, so each domain
-is looked up once until the `og-30day-ttl` rule expires it. Only when both sources come up empty is the tile a wordmark.
-Playwright remains the generator for the site-wide card only: it cannot run inside the Worker, and a website scorecard
-is not known at build time. A finished card is stored in the `SCORE_CACHE` R2 bucket under
-`og/score/<sha256(target)>/<key>.png`, so an edge miss reads it instead of drawing again; storing a key deletes the
-target's other cards, and the `og-30day-ttl` lifecycle rule bounds the rest. Pending and unscored cards are not stored.
+other page. The key names everything the card shows: `s<pct>-v<spec>-<edition>-r<template>` (`s80-v0.6.0-d20261026-r1`),
+or `pending` / `unscored` for a card with no number. The edition is a website's UTC audit date (`d<YYYYMMDD>`), the
+version number in a CLI tool's `--version` line (`t<version>`, hashed to `h<8 hex>` when it does not fit the key
+alphabet, and absent when the line holds no version number), or a branch build's short commit (`g<sha7>`). `r<template>`
+is `SCORE_OG_TEMPLATE` in `src/shared/score-og.ts`, bumped with any change to the pixels a card draws; a fingerprint
+test over rendered cards fails until it is. Any visible change, a same-score audit on a later day included, mints a new
+URL, so an immutable edge cache of the previous PNG never has to be purged. A key that is not the current one 301s to
+the key that is. The footer shows the edition, and the image description names the spec version.
+
+The Worker draws one fixed SVG (ANC mark, ANC × brand lockup, the percent, a meter) and turns it into a PNG with
+resvg-wasm, using static cuts of Uncut Sans and Monaspace Xenon named by the families their font files declare
+(`SCORE_OG_FONT`). The brand tile is the homepage's apple-touch icon, PNG/SVG icon, or `og:image` when it is SVG or at
+least 128px on each side, fetched over HTTPS inside a two-second budget and the web-audit host check; otherwise the
+brand's published logo from context.dev's brand endpoint for the registrable domain (skipped for code hosts such as
+`github.com`), whose answer is kept under `og/brand/<sha256(domain)>`. A definitive result, a logo or a miss, is stored
+in `SCORE_CACHE` under `og/logo/<sha256(domain)>`, so each domain is looked up once until the `og-30day-ttl` rule
+expires it; a lookup that times out or gets no definitive answer stores nothing, and its card is drawn on the short
+cache. Only when both sources come up empty is the tile a wordmark. Playwright remains the generator for the site-wide
+card only: it cannot run inside the Worker, and a website scorecard is not known at build time. A finished card is
+stored in the `SCORE_CACHE` R2 bucket under `og/score/<sha256(target)>/<key>.png` with its target, key, logo source,
+scoring time, and template version, so an edge miss reads it instead of drawing again. Storing a card deletes only the
+target's cards scored before it, and the `og-30day-ttl` lifecycle rule bounds the rest. Pending and `unscored` cards are
+not stored.
 
 ### 4.14 Schema.org / SEO surface
 
