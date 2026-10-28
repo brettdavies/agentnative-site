@@ -67,11 +67,11 @@ export function fakeBucket(options: { failReads?: boolean } = {}): FakeBucket {
     },
     async put(
       key: string,
-      value: Uint8Array,
+      value: Uint8Array | string,
       opts: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> } = {},
     ) {
       objects.set(key, {
-        bytes: new Uint8Array(value),
+        bytes: typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value),
         contentType: opts.httpMetadata?.contentType,
         meta: opts.customMetadata ?? {},
         uploaded: new Date(),

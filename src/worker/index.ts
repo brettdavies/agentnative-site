@@ -78,6 +78,7 @@ import {
 } from './mcp/telemetry';
 import { notFoundHtml, notFoundMarkdown } from './not-found';
 import { handleScoreOgClip } from './og/clip-route';
+import { handleCuratedPass, runCuratedPass } from './og/curated-pass';
 import type { OgVideoEnv } from './og/render-request';
 import { handleOgRendered } from './og/rendered-consumer';
 import { handleScoreOg } from './og/route';
@@ -527,6 +528,12 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   // helper with the weekly cron in scheduled() below.
   if (pathname === '/api/web-rescore') {
     return handleWebRescore(request, env as WebRescoreTriggerEnv);
+  }
+
+  // Post-deploy og curated pass (same secret gate as the rescore hook); the
+  // weekly cron runs the same pass.
+  if (pathname === '/api/og-curated-pass') {
+    return handleCuratedPass(request, env as OgVideoEnv & { WEB_RESCORE_SECRET?: string });
   }
 
   // One-time public_listing backfill (same secret gate as the rescore
@@ -1152,6 +1159,7 @@ export default {
       // budget.
       case WEB_RESCORE_CRON:
         await startWebRescore(env as WebRescoreTriggerEnv);
+        await runCuratedPass(env as OgVideoEnv);
         return;
       case LAKE_FRESHNESS_CRON:
         await runLakeFreshnessCheck(env as LakeFreshnessEnv);

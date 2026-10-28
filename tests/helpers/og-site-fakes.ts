@@ -90,6 +90,9 @@ export function fakeRender(overrides: Partial<RenderService> = {}): FakeRender {
 
 export type SiteEnvOptions = {
   records?: Record<string, unknown>;
+  /** Seeded websites, served as the build's web-seed asset. */
+  seed?: string[];
+  registry?: unknown;
   kv?: Record<string, string>;
   failRegistry?: boolean;
   failReads?: boolean;
@@ -115,7 +118,11 @@ export function siteEnv(options: SiteEnvOptions = {}): SiteEnv {
         const path = new URL(req.url).pathname;
         if (path === '/registry-index.json') {
           if (options.failRegistry) return new Response('down', { status: 500 });
-          return new Response(JSON.stringify(REGISTRY));
+          return new Response(JSON.stringify(options.registry ?? REGISTRY));
+        }
+        if (path === '/_internal/web-seed.json') {
+          const seed = (options.seed ?? []).map((domain) => ({ domain, url: `https://${domain}/`, name: domain }));
+          return new Response(JSON.stringify(seed), { headers: { 'content-type': 'application/json' } });
         }
         if (path === '/score/ripgrep.json') return new Response(CURATED_JSON);
         if (path === '/og-image.png') return new Response(DEFAULT_CARD, { headers: { 'content-type': 'image/png' } });
@@ -130,6 +137,16 @@ export function siteEnv(options: SiteEnvOptions = {}): SiteEnv {
     } as unknown as KVNamespace,
     RENDER: options.render ?? fakeRender(),
     OG_VIDEO_ENABLED: options.ogVideo,
+  };
+}
+
+/** A web cache record for `host` at `pct`, scored at SCORED_AT. */
+export function webRecord(host: string, pct: number) {
+  return {
+    spec_version: SPEC_VERSION,
+    target_url: `https://${host}/`,
+    scorecard: { score_pct: pct, score: { relative: pct, global: pct } },
+    scored_at: SCORED_AT,
   };
 }
 

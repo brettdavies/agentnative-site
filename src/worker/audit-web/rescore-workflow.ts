@@ -24,6 +24,7 @@
 // REGISTRY_FINGERPRINT_KEY and FOLLOW_STATE_KEY.
 
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
+import { type OgVideoEnv, ogVideoEnabled, requestRender } from '../og/render-request';
 import { SPEC_VERSION } from '../spec-version.gen';
 import { emitLog } from '../telemetry/log';
 import { rebuildWebAggregates, type WebAggregateEnv } from './aggregate';
@@ -45,7 +46,8 @@ import { isSeededDomain, loadWebSeed, type WebSeedEntry } from './seed';
 export type WebRescoreEnv = WebAggregateEnv &
   AuditLogEnv &
   FollowSwitchEnv &
-  DomainBudgetEnv & { SCORE_KV?: KVNamespace };
+  DomainBudgetEnv &
+  OgVideoEnv & { SCORE_KV?: KVNamespace };
 
 // Narrow structural view of the Workflow binding (mirrors the RateLimit
 // pattern): enough surface for the trigger helper and its tests.
@@ -296,6 +298,7 @@ export async function runWebRescore(
         }
         audited.push(domain);
         cycleAudited.push(domain);
+        if (ogVideoEnabled(env)) await step.do(`render:${domain}`, async () => requestRender(env, domain));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         emitLog({ scope: 'web-rescore' }, { domain, error: message });

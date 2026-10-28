@@ -20,6 +20,7 @@
 import { type AuditEnvelope, buildWebEnvelope, transientWebEnvelope } from '../../shared/audit-envelope';
 import { type AuditEvent, CTA_RETRY } from '../../shared/audit-events';
 import { type NotifyEnv, notifyFailure } from '../notify';
+import { type OgVideoEnv, requestRender } from '../og/render-request';
 import { SPEC_VERSION } from '../spec-version.gen';
 import { rebuildAggregatesIfSeeded } from './aggregate';
 import { type AuditLogEnv, instrumentAuditEvents, logAuditError } from './audit-log';
@@ -40,7 +41,7 @@ import { runWebAudit } from './engine';
 import type { DomainRefusal } from './follow-requests';
 import { effectiveFollow, type FollowSwitchEnv } from './follow-switch';
 import { heldRun } from './held-run';
-import { queueHitMinPurge, webDomainTag, webTag } from './hit-min-purge';
+import { queueAfterHitMinPurge, queueHitMinPurge, webDomainTag, webTag } from './hit-min-purge';
 import { rowHostFields } from './provenance';
 import {
   decidePublicListingWrite,
@@ -57,7 +58,7 @@ import type { WebScorecardShape } from './summary-model';
 import { buildWebSummaryBody } from './summary-render';
 import type { TransientReason } from './summary-transient';
 
-export interface WebCoreEnv extends AuditLogEnv, NotifyEnv, FollowSwitchEnv, DomainBudgetEnv {
+export interface WebCoreEnv extends AuditLogEnv, NotifyEnv, FollowSwitchEnv, DomainBudgetEnv, OgVideoEnv {
   ASSETS: Fetcher;
   SCORE_CACHE: R2Bucket;
   SCORE_KV?: KVNamespace;
@@ -310,7 +311,10 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
       const transient: TransientReason | undefined = input.followDeclarations ? held?.reason : { kind: 'opt-out' };
       if (!transient) {
         const wrote = await cachePut(env, target.canonical, stamped, SPEC_VERSION, scoredAt);
-        if (wrote) queueHitMinPurge([webTag(), webDomainTag(target.host)]);
+        if (wrote) {
+          queueHitMinPurge([webTag(), webDomainTag(target.host)]);
+          queueAfterHitMinPurge(`render:${target.host}`, () => requestRender(env, target.host));
+        }
         await rebuildAggregatesIfSeeded(env, target.host, SPEC_VERSION);
       }
       const record: CachedWebAudit = {

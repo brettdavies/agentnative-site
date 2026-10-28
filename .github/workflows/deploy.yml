@@ -183,6 +183,23 @@ jobs:
             -H "x-web-rescore-secret: $WEB_RESCORE_SECRET" \
             "$PUBLIC_BASE_URL/api/web-rescore"
 
+      # Ask for every curated card whose clip is missing or older than 21
+      # days, so a template bump re-renders curated cards the same day. The
+      # pass answers 200 with its counts, and with the og:video switch off it
+      # asks for nothing. Same secret, Access headers and retry set as the
+      # rescore trigger above.
+      - name: Trigger og curated pass
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
+          WEB_RESCORE_SECRET: ${{ secrets.ANC_WEB_RESCORE_SECRET }}
+        run: |
+          curl -sSf --retry 5 --retry-delay 10 --retry-all-errors -X POST \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            -H "x-web-rescore-secret: $WEB_RESCORE_SECRET" \
+            "$PUBLIC_BASE_URL/api/og-curated-pass"
+
       # The bun test suite proves the CODE resolves each surface's origin
       # from its own request. It would still pass if someone deleted
       # PUBLIC_BASE_URL from this job, because that env var is not code.
@@ -328,6 +345,14 @@ jobs:
           curl -sSf --retry 5 --retry-delay 10 --retry-all-errors -X POST \
             -H "x-web-rescore-secret: $WEB_RESCORE_SECRET" \
             https://anc.dev/api/web-rescore
+
+      - name: Trigger og curated pass
+        env:
+          WEB_RESCORE_SECRET: ${{ secrets.ANC_WEB_RESCORE_SECRET }}
+        run: |
+          curl -sSf --retry 5 --retry-delay 10 --retry-all-errors -X POST \
+            -H "x-web-rescore-secret: $WEB_RESCORE_SECRET" \
+            https://anc.dev/api/og-curated-pass
 
   production-smoke:
     name: smoke production surface
