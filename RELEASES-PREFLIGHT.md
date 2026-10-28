@@ -558,6 +558,7 @@ that environment's Worker. `scripts/og/status.sh <base> <target>` prints all of 
 | Reason | Exit | `x-anc-clip` | Cause | Next command |
 | --- | --- | --- | --- | --- |
 | `ok` | 0 | `present` | The clip exists and the page names it; for `setup.sh`, the queue, the key and the switch are in place. | `scripts/og/status.sh <base> <target>` |
+| `usage` | 2 | | An argument is missing, unknown or malformed, and the script stopped before any work; the message names it. | `scripts/og/setup.sh --help` or `scripts/og/status.sh --help` |
 | `queue-missing` | 10 | | The environment's `og-rendered` queue does not exist. | `scripts/og/setup.sh <env>` |
 | `render-worker-missing` | 11 | | The render Worker is not deployed, so its secret steps are pending; deploy it, then rerun `setup.sh`. | `gh workflow run deploy.yml --ref <branch> -f ref=<branch> -f environment=<env>` |
 | `secret-missing` | 12 | | `CONTEXT_DEV_API_KEY` is not set on the render Worker. | `scripts/og/setup.sh <env>` |

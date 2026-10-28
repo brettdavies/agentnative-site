@@ -23,24 +23,33 @@ usage() { sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 JSON=0
 ARGS=()
+# --help and --json apply wherever they sit, so a bad argument before them is
+# still reported in the form the caller asked for.
 for arg in "$@"; do
   case "$arg" in
-    --json) JSON=1 ;;
     -h | --help)
       usage
       exit 0
       ;;
+    --json) JSON=1 ;;
+  esac
+done
+for arg in "$@"; do
+  case "$arg" in
+    --json) ;;
     -*)
-      usage >&2
-      exit 2
+      og_usage_error "$JSON" scripts/og/status.sh "unknown option '$arg'" \
+        "$(jq -cn --arg argument "$arg" '{argument: $argument}')"
       ;;
     *) ARGS+=("$arg") ;;
   esac
 done
-[[ ${#ARGS[@]} -eq 2 ]] || {
-  usage >&2
-  exit 2
-}
+[[ ${#ARGS[@]} -eq 2 ]] \
+  || og_usage_error "$JSON" scripts/og/status.sh "expected <base-url> <target>, got ${#ARGS[@]} arguments" \
+    '{"argument":null}'
+[[ "${ARGS[0]}" =~ ^https?:// ]] \
+  || og_usage_error "$JSON" scripts/og/status.sh "'${ARGS[0]}' is not a base URL; pass the site as http:// or https://" \
+    "$(jq -cn --arg argument "${ARGS[0]}" '{argument: $argument}')"
 BASE="${ARGS[0]%/}"
 TARGET="${ARGS[1]}"
 

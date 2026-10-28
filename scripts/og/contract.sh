@@ -8,6 +8,7 @@
 
 # Reason, exit code, and next-step action, one per line.
 OG_REASONS='ok 0 none
+usage 2 run
 queue-missing 10 run
 render-worker-missing 11 deploy
 secret-missing 12 run
@@ -58,4 +59,18 @@ og_emit() {
     [[ "$reason" == ok ]] || printf 'docs: %s\n' "$OG_DOCS"
   fi
   return "$code"
+}
+
+# og_usage_error <json:0|1> <script> <message> <value-json>
+# An argument that is missing, unknown or malformed, rejected before any work.
+# With --json the usage reason, else the message and the caller's usage() on
+# stderr. Exits 2 either way.
+og_usage_error() {
+  if [[ "$1" -eq 1 ]]; then
+    og_emit 1 usage "$3" "$4" "$2 --help" || true
+  else
+    printf '%s: %s\n' "${2##*/}" "$3" >&2
+    usage >&2
+  fi
+  exit 2
 }

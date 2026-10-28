@@ -27,25 +27,30 @@ usage() { sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 ENV_NAME=""
 CHECK=0
 JSON=0
+# --help and --json apply wherever they sit, so a bad argument before them is
+# still reported in the form the caller asked for.
 for arg in "$@"; do
   case "$arg" in
-    --check) CHECK=1 ;;
-    --json) JSON=1 ;;
     -h | --help)
       usage
       exit 0
       ;;
+    --json) JSON=1 ;;
+  esac
+done
+for arg in "$@"; do
+  case "$arg" in
+    --check) CHECK=1 ;;
+    --json) ;;
     staging | production) ENV_NAME="$arg" ;;
     *)
-      usage >&2
-      exit 2
+      og_usage_error "$JSON" scripts/og/setup.sh "unknown argument '$arg'; the environment is staging or production" \
+        "$(jq -cn --arg argument "$arg" '{argument: $argument}')"
       ;;
   esac
 done
-[[ -n "$ENV_NAME" ]] || {
-  usage >&2
-  exit 2
-}
+[[ -n "$ENV_NAME" ]] \
+  || og_usage_error "$JSON" scripts/og/setup.sh "missing environment: staging or production" '{"argument":null}'
 
 og_names "$ENV_NAME"
 # 1Password item "Context.dev API Key".

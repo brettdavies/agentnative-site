@@ -119,6 +119,30 @@ describe('scripts/og/status.sh', () => {
     expect(run.stderr).not.toContain('No such file');
   });
 
+  test.each([
+    [['--json'], null, 'expected <base-url> <target>'],
+    [['not-a-url', 'railway.com', '--json'], 'not-a-url', "'not-a-url' is not a base URL"],
+    [['http://127.0.0.1:1', 'railway.com', '--bogus', '--json'], '--bogus', "unknown option '--bogus'"],
+  ])('arguments %j end in the usage reason, naming the problem', async (args, argument, message) => {
+    const run = await raw(...args);
+    expect(run.code).toBe(2);
+    const result = JSON.parse(run.stdout.trim());
+    expect(result).toMatchObject({
+      reason: 'usage',
+      exit_code: 2,
+      value: { argument },
+      next_step: { action: 'run', command: 'scripts/og/status.sh --help' },
+    });
+    expect(result.message).toContain(message);
+  });
+
+  test('without --json a bad argument is named on stderr above the usage', async () => {
+    const run = await raw('not-a-url', 'railway.com');
+    expect(run.code).toBe(2);
+    expect(run.stderr).toContain("'not-a-url' is not a base URL");
+    expect(run.stderr).toContain('Usage: scripts/og/status.sh');
+  });
+
   test('a fallback card maps to card-fallback ahead of the clip', async () => {
     const result = await statusJson({ clip: 'none', video: false, card: 'fallback' });
     expect(result.reason).toBe(CARD_FALLBACK.reason);
