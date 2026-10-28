@@ -558,6 +558,7 @@ that environment's Worker. `scripts/og/status.sh <base> <target>` prints all of 
 | Reason | Exit | `x-anc-clip` | Cause | Next command |
 | --- | --- | --- | --- | --- |
 | `ok` | 0 | `present` | The clip exists and the page names it; for `setup.sh`, the queue, the key and the switch are in place. | `scripts/og/status.sh <base> <target>` |
+| `usage` | 2 | | An argument is missing, unknown or malformed, and the script stopped before any work; the message names it. | `scripts/og/setup.sh --help` or `scripts/og/status.sh --help` |
 | `queue-missing` | 10 | | The environment's `og-rendered` queue does not exist. | `scripts/og/setup.sh <env>` |
 | `render-worker-missing` | 11 | | The render Worker is not deployed, so its secret steps are pending; deploy it, then rerun `setup.sh`. | `gh workflow run deploy.yml --ref <branch> -f ref=<branch> -f environment=<env>` |
 | `secret-missing` | 12 | | `CONTEXT_DEV_API_KEY` is not set on the render Worker. | `scripts/og/setup.sh <env>` |
@@ -624,6 +625,12 @@ guarded planning paths as leaked.
   ```
 
 - [ ] **`CHANGELOG.md` versioned section** has no `[Unreleased]` placeholder and matches the `package.json` version.
+
+- [ ] **og:video production setup is in place.** Run `scripts/og/setup.sh production --check`; it reads `ok` once
+  og:video is live in production. Before the release that first ships og:video, run `scripts/og/setup.sh production`
+  instead: the production deploy of the site Worker fails without the `og-rendered` queue it creates. That run reports
+  `render-worker-missing` (exit 11), the expected result until the deploy publishes `anc-og-render`; its remaining
+  steps run after the deploy, in [`RELEASES-POSTFLIGHT.md`](./RELEASES-POSTFLIGHT.md).
 
 - [ ] **PR body scrubbed via `/unslop`.** Author in `/tmp/`, run Vale + LanguageTool + `/unslop`, submit via
   `--body-file`. Never inline `--body` / `-m` / heredoc (the `heredoc-pr-guard.sh` PreToolUse hook will reject it). Full

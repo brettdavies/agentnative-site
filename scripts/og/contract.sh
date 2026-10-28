@@ -8,6 +8,7 @@
 
 # Reason, exit code, and next-step action, one per line.
 OG_REASONS='ok 0 none
+usage 2 run
 queue-missing 10 run
 render-worker-missing 11 deploy
 secret-missing 12 run
@@ -58,4 +59,44 @@ og_emit() {
     [[ "$reason" == ok ]] || printf 'docs: %s\n' "$OG_DOCS"
   fi
   return "$code"
+}
+
+# og_prescan <args...>
+# Sets JSON from --json, and prints the caller's usage() and exits 0 on
+# -h/--help, wherever either sits, so a bad argument before them is still
+# reported in the form the caller asked for.
+# shellcheck disable=SC2034 # the scripts that source this file read JSON
+og_prescan() {
+  JSON=0
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      --json) JSON=1 ;;
+    esac
+  done
+}
+
+# og_usage_error <message> [<argument>]
+# An argument that is missing, unknown or malformed, rejected before any work.
+# With --json (as og_prescan read it) the usage reason, naming the argument in
+# value; else the message and the caller's usage() on stderr. Exits 2 either way.
+og_usage_error() {
+  local script value
+  script="scripts/og/$(basename "${BASH_SOURCE[-1]}")"
+  if [[ "${JSON:-0}" -eq 1 ]]; then
+    if [[ $# -ge 2 ]]; then
+      value=$(jq -cn --arg argument "$2" '{argument: $argument}')
+    else
+      value='{"argument":null}'
+    fi
+    og_emit 1 usage "$1" "$value" "$script --help" || true
+  else
+    printf '%s: %s\n' "${script##*/}" "$1" >&2
+    usage >&2
+  fi
+  exit 2
 }

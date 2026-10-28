@@ -166,4 +166,37 @@ describe('scripts/og/setup.sh', () => {
     expect(help.out).toContain('Usage: scripts/og/setup.sh <staging|production> [--check] [--json]');
     expect(setup('prod').status).toBe(2);
   });
+
+  test('a bad argument is named, in prose and in the --json contract, and nothing runs', () => {
+    const prose = setup('prod');
+    expect(prose.status).toBe(2);
+    expect(prose.out).toContain("unknown argument 'prod'");
+    expect(prose.out).toContain('Usage: scripts/og/setup.sh');
+
+    for (const args of [
+      ['prod', '--json'],
+      ['--json', 'staging', '--bogus'],
+    ]) {
+      const run = setup(...args);
+      expect(run.status).toBe(2);
+      expect(json(run.out)).toMatchObject({
+        reason: 'usage',
+        exit_code: 2,
+        value: { argument: args.find((a) => a !== '--json' && a !== 'staging') },
+        next_step: { action: 'run', command: 'scripts/og/setup.sh --help' },
+      });
+    }
+
+    const missing = setup('--json');
+    expect(json(missing.out)).toMatchObject({ reason: 'usage', value: { argument: null } });
+    expect(json(missing.out).message).toContain('missing environment');
+    expect(missing.calls).toEqual([]);
+  });
+
+  test('--help anywhere prints the usage and runs nothing', () => {
+    const run = setup('prod', '--help');
+    expect(run.status).toBe(0);
+    expect(run.out).toContain('Usage: scripts/og/setup.sh');
+    expect(run.calls).toEqual([]);
+  });
 });

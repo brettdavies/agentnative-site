@@ -21,26 +21,18 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 usage() { sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
-JSON=0
 ARGS=()
+og_prescan "$@"
 for arg in "$@"; do
   case "$arg" in
-    --json) JSON=1 ;;
-    -h | --help)
-      usage
-      exit 0
-      ;;
-    -*)
-      usage >&2
-      exit 2
-      ;;
+    --json) ;;
+    -*) og_usage_error "unknown option '$arg'" "$arg" ;;
     *) ARGS+=("$arg") ;;
   esac
 done
-[[ ${#ARGS[@]} -eq 2 ]] || {
-  usage >&2
-  exit 2
-}
+[[ ${#ARGS[@]} -eq 2 ]] || og_usage_error "expected <base-url> <target>, got ${#ARGS[@]} arguments"
+[[ "${ARGS[0]}" =~ ^https?:// ]] ||
+  og_usage_error "'${ARGS[0]}' is not a base URL; pass the site as http:// or https://" "${ARGS[0]}"
 BASE="${ARGS[0]%/}"
 TARGET="${ARGS[1]}"
 
@@ -60,6 +52,7 @@ fi
 fetch() { curl -sS -m 30 -H @"$WORK/access" -D "$WORK/$1.headers" -o "$WORK/$1.body" -w '%{http_code}' "${@:2}"; }
 header() { awk -v name="$2" 'tolower($1) == name ":" { sub(/\r$/, "", $2); print $2 }' "$WORK/$1.headers" | tail -1; }
 meta() {
+  [[ -f "$WORK/$1.body" ]] || return 0
   { grep -o "<meta property=\"$2\" content=\"[^\"]*\"" "$WORK/$1.body" || true; } | head -1 | sed 's/.*content="//; s/"$//'
 }
 
