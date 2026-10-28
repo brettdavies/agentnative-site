@@ -58,6 +58,5 @@ durably register what it learned, and re-pays the discovery cost on every fresh 
 - A bundle whose contents drift from the CLI's actual surface: a skill bundle in a docs subtree maintained by a
   different cadence than the binary itself, naming flags or subcommands that no longer exist.
 
-Requirement IDs `p8-must-bundle-install`, `p8-should-bundle-exists`, `p8-may-install-all`, and `p8-may-bundle-update`
-define the contract; the antecedent audit `p8-bundle-exists` gates the conditional requirements. Run `anc audit
---principle 8 .` against the CLI under test to see each.
+Measured by audit IDs `p8-bundle-install`, `p8-bundle-exists`, `p8-install-all`, `p8-bundle-update`. Run
+`anc audit --principle 8 .` against the CLI under test to see each.

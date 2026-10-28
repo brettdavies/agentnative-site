@@ -35,22 +35,24 @@ catastrophically later.
 
 - When `--output json` is active, errors are emitted as JSON (to stderr) with at least `error`, `kind`, and `message`
   fields. A plain-text error in a JSON run breaks the consumer's parser on the only shape it was told to expect.
-- *(Applies when: CLI emits structured output.)* The output schema is exposed at runtime via a `schema` subcommand or a
-  `--schema` flag on each data-emitting subcommand. The schema identifies its format (canonical recommendation: JSON
-  Schema 2020-12, the same dialect OpenAPI 3.1 uses), so an agent reading the schema loads the right validator without
-  parsing prose. A consumer asking "what shape am I about to receive?" gets a machine-readable answer in one call.
+- *(Applies when: CLI emits structured output.)* The output schema is exposed at runtime. A `schema` subcommand (or a
+  `--schema` flag on each data-emitting subcommand) is the recommended surface; an introspection command under another
+  name satisfies the requirement when the tool's `--help` documents it as the command that describes the output's
+  structure (`kubectl explain`, which prints the fields of the resources `kubectl get -o json` returns). The schema
+  identifies its format (canonical recommendation: JSON Schema 2020-12, the same dialect OpenAPI 3.1 uses), so an agent
+  reading the schema loads the right validator without parsing prose. A consumer asking "what shape am I about to
+  receive?" gets a machine-readable answer in one call.
 
 **SHOULD:**
 
 - JSON output uses a consistent envelope (a top-level object with predictable keys) across every command so agents can
-  rely on the same shape. Passthrough tools whose value is the user's own JSON (`jq`, `dasel`) are exempt; the envelope
-  applies to commands that emit tool-defined data.
-- *(Applies when: CLI emits structured output.)* The same schema is also exported to a stable file path (e.g.,
-  `schema/<command>.json` in the release artifact). Runtime discovery covers ad-hoc inspection; the file path lets CI
-  and static-analysis consumers pin the schema without invoking the tool.
+  rely on the same shape.
+- *(Applies when: CLI emits structured output.)* The same schema is also exported to a stable file path in the source
+  repo (e.g., `schema/<command>.json`), so consumers pin against it at install or CI time without invoking the tool. The
+  runtime schema is the runtime contract; the file is the build-time contract.
 - `--json` and `--jsonl` are accepted as aliases for `--output json` and `--output jsonl`. The `--output` enum remains
-  the canonical surface for `p2-must-output-flag`; a CLI shipping only the short forms still satisfies the canonical
-  MUST through the alias path.
+  the canonical surface for the format MUST above; a CLI shipping only the short forms still satisfies that MUST through
+  the alias path.
 
 **MAY:**
 
@@ -76,5 +78,6 @@ Rust reference implementation:
 - `process::exit()` in library code, bypassing structured error propagation.
 - Human-formatted tables as the only output mode with no JSON alternative.
 
-Measured by audit IDs `p2-output-json`, `p2-output-format`, `p2-stderr-diagnostics`. Run `anc audit --principle 2 .`
-against the CLI under test to see each.
+Measured by audit IDs `p2-json-output`, `p2-structured-output`, `p2-output-module`, `p2-structured-exit-codes`,
+`p2-json-errors`, `p2-schema-print`, `p2-consistent-envelope`, `p2-schema-file`, `p2-json-aliases`, `p2-more-formats`,
+`p2-raw-flag`. Run `anc audit --principle 2 .` against the CLI under test to see each.

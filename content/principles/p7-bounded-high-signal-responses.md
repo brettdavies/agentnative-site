@@ -32,25 +32,25 @@ high-signal and inside budget.
   ```
 
 - *(Applies when: CLI has list-style commands.)* List operations clamp to a documented default maximum. A `list` without
-  `--limit` does not return more than a configurable ceiling (e.g., 100 items), and that ceiling is named in `--help` so
-  callers can plan around it. If more items exist, the output indicates truncation: `"truncated": true` in JSON, a
-  stderr note in text mode.
+  `--limit` does not return more than a configurable ceiling (e.g., 100 items). If more items exist, the output indicates
+  truncation: `"truncated": true` in JSON, a stderr note in text mode.
 
 **SHOULD:**
 
 - A `--verbose` flag (or `-v` / `-vv`) escalates diagnostic detail when agents need to debug failures.
-- A `--limit` or `--max-results` flag lets callers request exactly the number of items they want.
+- *(Applies when: CLI has list-style commands.)* A `--limit` or `--max-results` flag lets callers request exactly the
+  number of items they want.
 - A `--timeout` flag bounds execution time. An agent waiting indefinitely on a hung network call cannot proceed.
 
 **MAY:**
 
-- Cursor-based pagination flags (`--after`, `--before`) for efficient traversal of large result sets.
+- *(Applies when: CLI returns paginated results.)* Cursor-based pagination flags (`--after`, `--before`) for efficient
+  traversal of large result sets.
 - Automatic verbosity reduction in non-TTY contexts (the same behavior `--quiet` explicitly requests).
 
 ## Evidence
 
-- A `--quiet` flag that respects both CLI and environment-variable input, with explicit override semantics (e.g.,
-  `--quiet=false` beats `QUIET=1`).
+- A `--quiet` flag with a falsey-value parser and an env-var binding.
 - A diagnostic macro (or equivalent gate) that short-circuits when `quiet` is true.
 - `--limit` or `--max-results` on every list / search command.
 - Pagination clamping logic (e.g., `min(requested, MAX_RESULTS)`).
@@ -66,5 +66,6 @@ high-signal and inside budget.
 - Progress bars or spinners that write to stderr in non-TTY contexts, adding noise to agent logs.
 - No `--timeout` on network operations. A stalled request blocks the agent indefinitely.
 
-Measured by audit IDs `p7-quiet`, `p7-limit`, `p7-timeout`. Run `anc audit --principle 7 .` against the CLI under test
-to see each.
+Measured by audit IDs `p7-quiet`, `p7-output-clamping`, `p7-verbose`, `p7-limit`, `p7-timeout-behavioral`,
+`p7-cursor-pagination`, `p7-auto-verbosity`, `p7-naked-println`. Run `anc audit --principle 7 .` against the CLI under
+test to see each.
