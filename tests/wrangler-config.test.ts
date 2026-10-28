@@ -613,3 +613,40 @@ describe('wrangler.jsonc — WEB_AUDIT_FOLLOW_ENABLED binding shape', () => {
     expect(Object.hasOwn(vars, 'WEB_AUDIT_FOLLOW_ENABLED')).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// og:video wiring
+// ---------------------------------------------------------------------------
+
+// The site asks the render Worker for renders over RENDER and consumes
+// og-rendered to purge the page that names a new clip. Queues are
+// account-wide, so each environment names its own; one consumer per queue,
+// at batch size 1 so the purge follows the clip at once. OG_VIDEO_ENABLED is
+// a secret in both environments, read as `=== 'true'`, so the feature ships
+// dark and a var of the same name would break the flip (CF API 10053).
+
+describe('wrangler.jsonc — og:video wiring', () => {
+  const config = loadWranglerConfig();
+  const staging = getStagingEnv(config);
+  const blocks: Array<[string, Record<string, unknown>, string, string]> = [
+    ['top-level', config, 'anc-og-render', 'og-rendered'],
+    ['env.staging', staging, 'anc-og-render-staging', 'og-rendered-staging'],
+  ];
+
+  test.each(blocks)('%s binds RENDER to its own render Worker', (_label, block, service) => {
+    expect(block.services).toEqual([{ binding: 'RENDER', service }]);
+  });
+
+  test.each(blocks)('%s consumes its own og-rendered queue one message at a time', (_label, block, _s, queue) => {
+    const queues = block.queues as { consumers?: Array<Record<string, unknown>>; producers?: unknown[] };
+    expect(queues.consumers).toEqual([expect.objectContaining({ queue, max_batch_size: 1 })]);
+    expect(queues.producers).toBeUndefined();
+  });
+
+  test('OG_VIDEO_ENABLED is declared in no vars block', () => {
+    for (const [label, block] of blocks) {
+      const vars = (block.vars ?? {}) as Record<string, unknown>;
+      expect(Object.hasOwn(vars, 'OG_VIDEO_ENABLED'), `${label} vars must not declare OG_VIDEO_ENABLED`).toBe(false);
+    }
+  });
+});

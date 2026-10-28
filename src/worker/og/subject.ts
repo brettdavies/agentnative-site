@@ -27,8 +27,6 @@ export type ScoreOgEnv = {
   ASSETS: Fetcher;
   SCORE_CACHE: R2Bucket;
   SCORE_KV?: KVNamespace;
-  /** context.dev key for the brand-logo fallback; unset skips that lookup. */
-  CONTEXT_DEV_API_KEY?: string;
 };
 
 export type ScoreOgSubject =

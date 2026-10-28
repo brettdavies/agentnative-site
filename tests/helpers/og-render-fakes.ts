@@ -62,6 +62,7 @@ export function fakeBucket(options: { failReads?: boolean } = {}): FakeBucket {
         ...meta(key, object),
         body: new Response(object.bytes.slice()).body,
         arrayBuffer: async () => object.bytes.slice().buffer,
+        json: async () => JSON.parse(new TextDecoder().decode(object.bytes)),
       };
     },
     async put(
@@ -89,6 +90,16 @@ export function fakeBucket(options: { failReads?: boolean } = {}): FakeBucket {
     },
   };
   return bucket as unknown as FakeBucket;
+}
+
+/** Seed a JSON record, the way the audit caches store a scorecard. */
+export function seedJson(bucket: FakeBucket, key: string, value: unknown): void {
+  bucket.objects.set(key, {
+    bytes: new TextEncoder().encode(JSON.stringify(value)),
+    contentType: 'application/json',
+    meta: {},
+    uploaded: new Date(),
+  });
 }
 
 export const FAKE_MP4 = new Uint8Array([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);

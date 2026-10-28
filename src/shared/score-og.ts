@@ -1,6 +1,6 @@
-// Scorecard Open Graph card: the path, the cache key, the alt text, and the
-// SVG. The Worker rasterizes the SVG; this module stays free of wasm so the
-// build and the unit tests can call it.
+// Scorecard Open Graph card: the card and clip paths, the cache key, the alt
+// text, and the SVG. The render Worker rasterizes the SVG; this module stays
+// free of wasm so the build, the site Worker and the unit tests can call it.
 //
 // The URL carries everything the card shows: the rounded score, the spec
 // version, the edition (a website's audit date, a CLI's tool version, a
@@ -17,6 +17,7 @@ import { shortDate } from './result-spine';
 export const SCORE_OG_WIDTH = 1200;
 export const SCORE_OG_HEIGHT = 630;
 export const SCORE_OG_PREFIX = '/og/score/';
+export const SCORE_OG_CLIP_PREFIX = '/og/clip/';
 
 /** Family names as the bundled card fonts declare them; resvg draws the default face for any other name. */
 export const SCORE_OG_FONT = { sans: 'Uncut Sans', mono: 'Monaspace Xenon Medium' } as const;
@@ -161,22 +162,51 @@ export function isScoreOgPath(pathname: string): boolean {
   return pathname === '/og/score' || pathname.startsWith(SCORE_OG_PREFIX);
 }
 
+export function isScoreOgClipPath(pathname: string): boolean {
+  return pathname === '/og/clip' || pathname.startsWith(SCORE_OG_CLIP_PREFIX);
+}
+
+type OgFile = { prefix: string; ext: string };
+
+const CARD_FILE: OgFile = { prefix: SCORE_OG_PREFIX, ext: '.png' };
+const CLIP_FILE: OgFile = { prefix: SCORE_OG_CLIP_PREFIX, ext: '.mp4' };
+
 /** Site-relative path. `scorePath` rejects a target the result route would not serve. */
-export function scoreOgPath(target: string, key: string): string {
+function ogFilePath(file: OgFile, target: string, key: string): string {
   if (!isScoreOgKey(key)) throw new RangeError(`not a scorecard OG key: ${key}`);
   const suffix = scorePath(target).slice(SCORE_PREFIX.length);
-  return `${SCORE_OG_PREFIX}${suffix}/${key}.png`;
+  return `${file.prefix}${suffix}/${key}${file.ext}`;
+}
+
+export function scoreOgPath(target: string, key: string): string {
+  return ogFilePath(CARD_FILE, target, key);
+}
+
+export function scoreOgClipPath(target: string, key: string): string {
+  return ogFilePath(CLIP_FILE, target, key);
 }
 
 export function scoreOgUrl(base: string, target: string, key: string): string {
   return `${base.replace(/\/$/, '')}${scoreOgPath(target, key)}`;
 }
 
+export function scoreOgClipUrl(base: string, target: string, key: string): string {
+  return `${base.replace(/\/$/, '')}${scoreOgClipPath(target, key)}`;
+}
+
 export type ParsedScoreOgPath = { target: string; key: string };
 
 export function parseScoreOgPath(pathname: string): ParsedScoreOgPath | null {
-  if (!pathname.startsWith(SCORE_OG_PREFIX) || !pathname.endsWith('.png')) return null;
-  const rest = pathname.slice(SCORE_OG_PREFIX.length, -'.png'.length);
+  return parseOgFilePath(CARD_FILE, pathname);
+}
+
+export function parseScoreOgClipPath(pathname: string): ParsedScoreOgPath | null {
+  return parseOgFilePath(CLIP_FILE, pathname);
+}
+
+function parseOgFilePath(file: OgFile, pathname: string): ParsedScoreOgPath | null {
+  if (!pathname.startsWith(file.prefix) || !pathname.endsWith(file.ext)) return null;
+  const rest = pathname.slice(file.prefix.length, -file.ext.length);
   const segments = rest.split('/');
   if (segments.length < 2 || segments.some((segment) => segment === '')) return null;
   const key = segments.pop();

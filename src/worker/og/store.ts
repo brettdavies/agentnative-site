@@ -43,6 +43,11 @@ export async function readStoredCard(bucket: R2Bucket, target: string, key: stri
   return { png: new Uint8Array(await object.arrayBuffer()), logo: storedLogo(object) };
 }
 
+/** The stored clip, or null when none is stored. */
+export async function readStoredClip(bucket: R2Bucket, target: string, key: string): Promise<R2ObjectBody | null> {
+  return bucket.get(await objectKey(CLIP, target, key));
+}
+
 /** The stored clip's metadata without its body, or null when none is stored. */
 export async function headClip(bucket: R2Bucket, target: string, key: string): Promise<R2Object | null> {
   return bucket.head(await objectKey(CLIP, target, key));

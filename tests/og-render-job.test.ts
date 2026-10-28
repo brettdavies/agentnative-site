@@ -203,6 +203,8 @@ describe('drawCard', () => {
     if (drawn.outcome !== 'card') throw new Error('expected a card');
     expect(drawn).toMatchObject({ card: 'drawn', logo: 'tile', settled: true });
     expect(drawn.png.slice(1, 4)).toEqual(new TextEncoder().encode('PNG'));
+    const view = new DataView(drawn.png.buffer, drawn.png.byteOffset, drawn.png.byteLength);
+    expect([view.getUint32(16), view.getUint32(20)]).toEqual([1200, 630]);
     const stored = env.SCORE_CACHE.objects.get(await objectName('score', INPUTS.target, KEY));
     expect(stored?.bytes).toEqual(drawn.png);
     expect(stored?.meta.logo).toBe('tile');
@@ -215,6 +217,22 @@ describe('drawCard', () => {
     expect(drawn).toMatchObject({ outcome: 'card', card: 'drawn', logo: 'tile', settled: false });
     expect([...env.SCORE_CACHE.objects.keys()].some((name) => name.startsWith('og/score/'))).toBe(false);
     expect(renderRecords().at(-1)).toMatchObject({ outcome: 'card-unsettled', key: KEY });
+  });
+
+  test.each([
+    ['base64 that does not decode', 'data:image/png;base64,%%%%'],
+    ['a percent escape that does not decode', 'data:image/svg+xml,%E0%A4%A'],
+  ])('a homepage icon given as %s falls back to the tile', async (_label, href) => {
+    const homepage = stubFetch(
+      () =>
+        new Response(`<html><head><link rel="icon" href="${href}"></head></html>`, {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        }),
+    );
+    const withHomepage = { ...INPUTS, pages: ['https://railway.com/'] };
+    const drawn = await drawCard(makeEnv(), withHomepage, idleJob(), { ...(await deps()), fetchImpl: homepage });
+    expect(drawn).toMatchObject({ outcome: 'card', card: 'drawn', logo: 'tile' });
   });
 
   test('a pending card is drawn and never stored', async () => {

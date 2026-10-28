@@ -29,7 +29,8 @@ import {
   MCP_SERVER_CARD_TYPE,
   SEP_1649_CARD_SEED_PATH,
 } from '../shared/mcp-discovery';
-import { isScoreOgPath } from '../shared/score-og';
+import type { OgRenderedMessage, RenderService } from '../shared/og-render';
+import { isScoreOgClipPath, isScoreOgPath } from '../shared/score-og';
 import { classifyGatewayRequest, detectMcpFormat, detectPreference } from './accept';
 import { type AuditApiEnv, handleAuditApi, isAuditApiPath } from './audit/api';
 import type { AuditJob } from './audit/job';
@@ -76,6 +77,9 @@ import {
   servedResponseFormat,
 } from './mcp/telemetry';
 import { notFoundHtml, notFoundMarkdown } from './not-found';
+import { handleScoreOgClip } from './og/clip-route';
+import type { OgVideoEnv } from './og/render-request';
+import { handleOgRendered } from './og/rendered-consumer';
 import { handleScoreOg } from './og/route';
 import { SPEC_VERSION } from './spec-version.gen';
 import { LAKE_FRESHNESS_CRON, type LakeFreshnessEnv, runLakeFreshnessCheck } from './telemetry/lake-freshness';
@@ -209,7 +213,12 @@ export interface Env {
   // don't exercise the rescore path can stub a minimal env.
   WEB_RESCORE_WORKFLOW?: WebRescoreWorkflowBinding;
   WEB_RESCORE_SECRET?: string;
-  CONTEXT_DEV_API_KEY?: string;
+  // og:video. RENDER is the render Worker's RPC entrypoint, which draws every
+  // card and clip; OG_VIDEO_ENABLED (wrangler secret, read as `=== 'true'`)
+  // stops new renders without a deploy. Optional so tests that don't exercise
+  // the card or clip routes can stub a minimal env.
+  RENDER?: RenderService;
+  OG_VIDEO_ENABLED?: string;
   // Telemetry-lake freshness bindings. TELEMETRY_LAKE is the lake bucket
   // the daily cron lists for stall detection; TELEMETRY_ENVIRONMENT names
   // the deploy environment so the stall alert emails only from production
@@ -864,7 +873,11 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   }
 
   if (isScoreOgPath(pathname)) {
-    return handleScoreOg(request, env as ResultEnv, { waitUntil: (promise) => ctx.waitUntil(promise) });
+    return handleScoreOg(request, env as OgVideoEnv);
+  }
+
+  if (isScoreOgClipPath(pathname)) {
+    return handleScoreOgClip(request, env as OgVideoEnv);
   }
 
   if (isResultPath(pathname)) {
@@ -1147,4 +1160,9 @@ export default {
         emitLog({ scope: 'scheduled' }, { error: 'unrecognized_cron', cron: controller.cron });
     }
   },
-} satisfies ExportedHandler<Env>;
+
+  // og-rendered: the render Worker stored a clip, so purge the page that names it.
+  async queue(batch: MessageBatch<OgRenderedMessage>, _env: Env, ctx: ExecutionContext): Promise<void> {
+    await handleOgRendered(batch, ctx);
+  },
+} satisfies ExportedHandler<Env, OgRenderedMessage>;
