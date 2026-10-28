@@ -69,13 +69,20 @@ const INLINE_SUBLINE: Readonly<Record<Lane, string>> = {
   web: 'This result was not saved.',
 };
 
-/** The subline over a result the progress page renders in place of a page of its own. */
+/**
+ * The subline over a result the progress page renders in place of a page of
+ * its own. Only the CLI lane leaves an errored run unsaved; a website run
+ * with error rows is saved, so its error count never explains a missing page.
+ */
 export function inlineSubline(lane: Lane, envelope?: Pick<AuditEnvelope, 'tier' | 'scorecard'>): string {
-  if (envelope?.tier === 'live' && hasErroredAudits(envelope.scorecard)) {
+  if (lane === 'cli' && envelope?.tier === 'live' && hasErroredAudits(envelope.scorecard)) {
     return 'An audit errored, so this result was not saved; running it again scores it fresh.';
   }
   return INLINE_SUBLINE[lane];
 }
+
+/** The idle line after a wait on another run that ended without a record this page can read. */
+export const WAITED_RUN_UNSAVED = 'The audit this page waited on finished without a saved result. Start runs it again.';
 
 /** Each CLI phase as its progress row names it. */
 export const CLI_PHASE_LABEL: Readonly<Record<CliPhase, string>> = {

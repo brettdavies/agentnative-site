@@ -204,6 +204,7 @@ describe('envelope builders', () => {
     };
     const binary = buildCliEnvelope({ tier: 'live', target: 'fd', record: errored('fd'), registry, origin: ORIGIN });
     expect(binary).toMatchObject({ tier: 'live', scorecard_url: null, markdown_url: null, json_url: null });
+    expect(binary.freshness).toEqual({ cached: false, scored_at: SCORED_AT, refresh_after: null });
     expect(binary.summary_html).toContain('Binary <code>fd</code>');
 
     const branch = buildCliEnvelope({
@@ -215,11 +216,21 @@ describe('envelope builders', () => {
       sourceSha: 'abc1234',
     });
     expect(branch).toMatchObject({ scorecard_url: null, markdown_url: null, json_url: null, source_sha: 'abc1234' });
+    expect(branch.freshness.refresh_after).toBeNull();
     expect(branch.summary_html).toContain('Source <code>o/r@feature</code>');
 
     const stored = buildCliEnvelope({ tier: 'cache', target: 'fd', record: errored('fd'), registry, origin: ORIGIN });
     expect(stored.scorecard_url).toBe(`${ORIGIN}/score/fd`);
     expect(stored.summary_html).toBeUndefined();
+
+    const collision = buildCliEnvelope({
+      tier: 'live',
+      target: 'ouch',
+      record: cliRecord('ouch'),
+      registry,
+      origin: ORIGIN,
+    });
+    expect(collision.freshness.refresh_after).not.toBeNull();
   });
 
   test('no envelope field carries a sandbox path, stderr, or session identifier', () => {

@@ -39,6 +39,7 @@ import {
   rowHostPhrase,
   streamedResultLine,
   streamedRowHost,
+  WAITED_RUN_UNSAVED,
   webReadingLine,
 } from '../shared/scoring-copy';
 import {
@@ -173,7 +174,9 @@ class ScoringRun {
     }
     const error = payload?.error;
     if (res.status === 403 && error?.code === 'turnstile_failed' && !tokened) {
-      this.idle();
+      // After a wait, a tokenless refusal means the run this page polled left
+      // no record to read: it errored or saved nothing once its flag cleared.
+      this.idle(this.polls > 0 ? WAITED_RUN_UNSAVED : undefined);
       return;
     }
     if (res.status === 503 && error?.code === 'turnstile_unavailable') {
@@ -341,9 +344,9 @@ class ScoringRun {
     this.view.focusHeading();
   }
 
-  private idle(): void {
+  private idle(line?: string): void {
     this.view.state('idle');
-    this.view.say(`${LANE_LABEL[this.lane]} audit of ${this.target}. ${LANE_EXPECTATION[this.lane]}`);
+    this.view.say(line ?? `${LANE_LABEL[this.lane]} audit of ${this.target}. ${LANE_EXPECTATION[this.lane]}`);
     this.view.actions({ start: 'Start', other: true });
     this.bindStart();
   }

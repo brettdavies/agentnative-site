@@ -192,6 +192,7 @@ describe('the progress page says why a result renders in place', () => {
       'This name belongs to a curated tool; this result has no URL.',
     );
     expect(inlineSubline('web')).toBe('This result was not saved.');
+    expect(inlineSubline('web', errored)).toBe('This result was not saved.');
   });
 });
 

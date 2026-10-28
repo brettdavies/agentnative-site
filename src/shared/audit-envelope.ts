@@ -18,8 +18,9 @@
 //   a binary the route refuses ... no URL, summary_html instead (a reserved
 //                                   name, or a dotted name the classifier
 //                                   would read as a website host)
-//   an errored live run .......... no URL, summary_html instead: the run is
-//                                   never saved, branch-scoped or not
+//   an errored live run .......... no URL and no refresh_after, summary_html
+//                                   instead: the run is never saved,
+//                                   branch-scoped or not
 //   anything else ................ live: /score/<binary>
 //
 // A website result has a page unless it was never saved (a run that did not
@@ -236,11 +237,18 @@ export function buildCliEnvelope(input: CliEnvelopeInput): AuditEnvelope {
     return envelope;
   };
 
+  // A record that was never written has no refresh window to advertise.
+  const unsavedEnvelope = (): AuditEnvelope => {
+    const envelope = liveEnvelope(NO_URLS);
+    return {
+      ...envelope,
+      freshness: { ...envelope.freshness, refresh_after: null },
+      summary_html: inlineSummaryHtml(target, record),
+    };
+  };
   const unsaved = input.tier === 'live' && hasErroredAudits(record.scorecard);
   if (target.includes('@')) {
-    const envelope = unsaved
-      ? { ...liveEnvelope(NO_URLS), summary_html: inlineSummaryHtml(target, record) }
-      : liveEnvelope(urlsFor(origin, target));
+    const envelope = unsaved ? unsavedEnvelope() : liveEnvelope(urlsFor(origin, target));
     if (input.sourceSha !== undefined) envelope.source_sha = input.sourceSha;
     return envelope;
   }
@@ -255,7 +263,8 @@ export function buildCliEnvelope(input: CliEnvelopeInput): AuditEnvelope {
     });
     return { ...registryEnvelope, anc_version: record.anc_version, tool_version: record.tool_version };
   }
-  if (unsaved || curated.kind === 'shadow' || !isRoutableBinary(target)) {
+  if (unsaved) return unsavedEnvelope();
+  if (curated.kind === 'shadow' || !isRoutableBinary(target)) {
     return { ...liveEnvelope(NO_URLS), summary_html: inlineSummaryHtml(target, record) };
   }
   return liveEnvelope(urlsFor(origin, target));

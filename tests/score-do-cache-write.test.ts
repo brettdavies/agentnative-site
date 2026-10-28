@@ -13,6 +13,7 @@
 // (R2 write failure logged but not surfaced) that fetch() relies on.
 
 import { describe, expect, test } from 'bun:test';
+import { buildCliEnvelope } from '../src/shared/audit-envelope';
 import type { InstallSpec } from '../src/worker/score/discover-binary';
 import { extractToolVersion, type ScoreSandboxEnv, writeCacheBestEffort } from '../src/worker/score/do';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
@@ -248,6 +249,21 @@ describe('writeCacheBestEffort — errored audits', () => {
     const branch: InstallSpec = { pm: 'git-clone', owner: 'o', repo: 'r', branch: 'feature', binary: 'r' };
     await writeCacheBestEffort(env, branch, { scorecard: errored, anc_version: ANC_VERSION, source_sha: 'abc1234' });
     expect(writes).toHaveLength(0);
+  });
+
+  test('the cache write and the envelope agree on which runs have a page', async () => {
+    for (const scorecard of [SCORECARD_WITH_VERSION, errored]) {
+      const { env, writes } = makeR2Stub();
+      await writeCacheBestEffort(env, SPEC, { scorecard, anc_version: ANC_VERSION });
+      const envelope = buildCliEnvelope({
+        tier: 'live',
+        target: 'cowsay',
+        record: { spec_version: SPEC_VERSION, anc_version: ANC_VERSION, tool_version: '1.6.0', scorecard },
+        registry: { by_slug: {} },
+        origin: 'https://staging.example',
+      });
+      expect(envelope.scorecard_url !== null).toBe(writes.length === 1);
+    }
   });
 
   test('a scorecard whose error count is zero is written', async () => {
