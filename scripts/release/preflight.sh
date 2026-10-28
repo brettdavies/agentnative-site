@@ -718,7 +718,7 @@ gate_og_cards() {
   failed=$(printf '%s' "$out" | grep -oE '[0-9]+ failed' | tail -1 | grep -oE '[0-9]+' || true)
 
   if [[ "$status" -eq 0 && -n "$passed" && "$passed" -gt 0 ]]; then
-    gate_pass "og-cards smoke: $passed fixture cards drawn, logo tiers as expected, served twice"
+    gate_pass "og-cards smoke: $passed fixtures with cards drawn, logo tiers as expected, served twice, and clips named"
     return
   fi
 

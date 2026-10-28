@@ -531,13 +531,43 @@ HIT, so `edge-hit` has no local equivalent and the gate SKIPs in local mode; run
   fails any post-deploy smoke the release itself changed. A green `Deploy to staging` step under a red job is this: the
   Worker published and a stale smoke rejected it.
 - [ ] `staging-mcp`, `edge-hit`, `web-audit`, and `web-audit-webkit` all pass, with a non-zero test count for each.
+- [ ] `scripts/og/setup.sh staging --check` passes before the smoke runs: the `og-rendered-staging` queue exists, the
+  render Worker holds `CONTEXT_DEV_API_KEY`, the site Worker does not, and `OG_VIDEO_ENABLED` is set.
 - [ ] The `og-cards smoke` sub-gate passes with three tests. `scripts/og/smoke.sh` deploys the `anc-og-fixtures` Worker
   on three fresh `og-<kind>-<run>.anc.dev` custom domains, audits each over MCP, and follows the scorecard's `og:image`.
-  Each card must come back a 1200x630 immutable PNG with `x-anc-card: drawn`, and the same bytes on a second request.
-  `x-anc-card-logo` must name the tier the fixture forces: `homepage` for the 512px icon, `brand` for the 32px favicon
-  and for the data URI that does not decode. A `tile` there means the brand lookup returned nothing: check the target's
-  `CONTEXT_DEV_API_KEY` secret first. The script deletes the fixture Worker and its domains on exit. If it is killed
-  first, run `bun x wrangler delete --config tests/e2e/og-cards-fixture/wrangler.jsonc --force`.
+  Each card must come back a 1200x630 immutable PNG with `x-anc-card` `drawn` or `stored` (the audit's render job
+  usually stores it first), and the same bytes on a second request. `x-anc-card-logo` must name the tier the fixture
+  forces: `homepage` for the 512px icon, `brand` for the 32px favicon and for the data URI that does not decode. A
+  `tile` there means the brand lookup returned nothing: check the render Worker's `CONTEXT_DEV_API_KEY` secret first.
+  The page must then name its clip in `og:video` within 60 seconds, and the clip must come back as `video/mp4` with an
+  `ftyp` box, a 1200x630 track, a `206` for `Range: bytes=-1000` with the matching `Content-Range`, and the same bytes
+  twice. Each test prints one result line: host, logo tier, `x-anc-card`, seconds from the audit to `og:video`, the
+  range result, and the clip URL. When the clip does not appear, the failure names the `x-anc-clip` value from an
+  uncached `?v=` fetch and the next command, per the table below. The script deletes the fixture Worker and its domains
+  on exit. If it is killed first, run `bun x wrangler delete --config tests/e2e/og-cards-fixture/wrangler.jsonc --force`.
+
+#### og:video reason codes
+
+`scripts/og/setup.sh` and `scripts/og/status.sh` print one of these reasons, prose by default and one JSON object with
+`--json` (`{reason, exit_code, message, value, next_step: {action, command, docs}}`), and exit with its code. A
+scorecard page's `x-anc-clip` header maps to the reasons that name it; the og-cards smoke names the same cause and
+command when a clip does not appear (`tests/e2e/og-clip-causes.ts`). In a command, `<env>` is `staging` or `production`,
+`<base>` the site, `<target>` the scorecard, `<run>` the `x-anc-clip-run` id, and `<render-worker>` / `<site-worker>`
+that environment's Worker. `scripts/og/status.sh <base> <target>` prints all of it for one scorecard.
+
+| Reason | Exit | `x-anc-clip` | Cause | Next command |
+| --- | --- | --- | --- | --- |
+| `ok` | 0 | `present` | The clip exists and the page names it; for `setup.sh`, the queue, the key and the switch are in place. | `scripts/og/status.sh <base> <target>` |
+| `queue-missing` | 10 | | The environment's `og-rendered` queue does not exist. | `scripts/og/setup.sh <env>` |
+| `render-worker-missing` | 11 | | The render Worker is not deployed, so its secret steps are pending; deploy it, then rerun `setup.sh`. | `gh workflow run deploy.yml --ref <branch> -f ref=<branch> -f environment=<env>` |
+| `secret-missing` | 12 | | `CONTEXT_DEV_API_KEY` is not set on the render Worker. | `scripts/og/setup.sh <env>` |
+| `site-secret-present` | 13 | | The site Worker still holds `CONTEXT_DEV_API_KEY`. | `scripts/og/setup.sh <env>` |
+| `switch-off` | 14 | `off` | `OG_VIDEO_ENABLED` is not set on the site Worker, so no render is asked for; `setup.sh` prints the flip command. | `scripts/og/setup.sh <env> --check` |
+| `clip-missing` | 20 | `none` | No RenderJob answered for the current card: no render was asked for, or the status call failed. | `bunx wrangler tail <site-worker> --format json --search score.og` |
+| `clip-rendering` | 21 | `queued`, `rendering` | The RenderJob is waiting for its alarm, or drawing or encoding the clip. | `bunx wrangler tail <render-worker> --format json --search <run>` |
+| `clip-failed` | 22 | `failed` | The RenderJob failed its last retry; its `og.render` records carry the error and the binding code. | `bunx wrangler tail <render-worker> --format json --search <run>` |
+| `card-fallback` | 23 | | The render Worker could not draw the card, and the site served its default card. | `bunx wrangler tail <site-worker> --format json --search fallback` |
+| `wrangler-failed` | 30 | | wrangler could not list queues or secrets: it is not logged in, or lacks Queues or Workers access. | `bunx wrangler whoami` |
 
 **A zero count is a failure, not a pass.** Playwright refuses an entire project on a configuration error — a duplicate
 test title is the one that has actually happened — and reports it as a non-zero exit with no failing test. The gate

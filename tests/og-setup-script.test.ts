@@ -103,7 +103,7 @@ describe('scripts/og/setup.sh', () => {
       reason: 'render-worker-missing',
       next_step: {
         action: 'deploy',
-        command: expect.stringMatching(/^gh workflow run deploy\.yml -f ref=\S+ -f environment=staging$/),
+        command: expect.stringMatching(/^gh workflow run deploy\.yml --ref (\S+) -f ref=\1 -f environment=staging$/),
       },
       value: { changed: ['created queue og-rendered-staging'] },
     });

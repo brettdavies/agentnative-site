@@ -19,7 +19,7 @@ clip-failed 22 inspect-logs
 card-fallback 23 inspect-logs
 wrangler-failed 30 run'
 
-OG_DOCS='https://github.com/brettdavies/agentnative-site/blob/dev/RELEASES-PREFLIGHT.md#og-video-reason-codes'
+OG_DOCS='https://github.com/brettdavies/agentnative-site/blob/dev/RELEASES-PREFLIGHT.md#ogvideo-reason-codes'
 
 og_reason_field() {
   awk -v r="$1" -v f="$2" '$1 == r { print $f; found = 1 } END { exit !found }' <<<"$OG_REASONS"

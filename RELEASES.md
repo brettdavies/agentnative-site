@@ -535,7 +535,7 @@ The script creates the environment's queue (`og-rendered-staging`, `og-rendered`
 deletes the key from the site Worker, and reports the `OG_VIDEO_ENABLED` switch. Before the render Worker's first
 deploy, its secret steps report `render-worker-missing` and the script exits non-zero: deploy, then rerun it. Every step
 is idempotent. `--check` verifies without changing anything, `--json` prints one result object, and the reason codes are
-in [`RELEASES-PREFLIGHT.md`](./RELEASES-PREFLIGHT.md#og-video-reason-codes). The release preflight runs
+in [`RELEASES-PREFLIGHT.md`](./RELEASES-PREFLIGHT.md#ogvideo-reason-codes). The release preflight runs
 `scripts/og/setup.sh staging --check` before the og-cards smoke. `deploy.yml` deploys the render Worker before the site
 Worker in both jobs, and calls `POST /api/og-curated-pass` after the rescore trigger.
 

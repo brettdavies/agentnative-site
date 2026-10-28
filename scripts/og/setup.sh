@@ -83,10 +83,12 @@ if ! grep -Eq "(^|[^a-z0-9-])$QUEUE([^a-z0-9-]|$)" <<<"$queues"; then
 fi
 
 if ! render_secrets=$(wrangler secret list --name "$RENDER" --format json 2>/dev/null); then
-  branch=$(git -C "$ROOT" branch --show-current 2>/dev/null || true)
+  # The dispatch ref selects the workflow file, so it must be a ref whose deploy.yml deploys the render Worker.
+  ref=main
+  [[ "$ENV_NAME" == staging ]] && ref=$(git -C "$ROOT" branch --show-current 2>/dev/null || true)
   finish render-worker-missing \
     "$RENDER is not deployed, so its secret steps are pending; deploy it, then rerun $SELF" \
-    "gh workflow run deploy.yml -f ref=${branch:-dev} -f environment=$ENV_NAME"
+    "gh workflow run deploy.yml --ref ${ref:-dev} -f ref=${ref:-dev} -f environment=$ENV_NAME"
 fi
 if ! jq -e 'any(.[]; .name == "CONTEXT_DEV_API_KEY")' <<<"$render_secrets" >/dev/null; then
   [[ "$CHECK" -eq 0 ]] || finish secret-missing "CONTEXT_DEV_API_KEY is not set on $RENDER" "$SELF"
