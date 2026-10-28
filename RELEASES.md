@@ -533,16 +533,18 @@ scripts/og/setup.sh production
 The script creates the environment's queue (`og-rendered-staging`, `og-rendered`) when it is missing, sets
 `CONTEXT_DEV_API_KEY` on the render Worker (`anc-og-render-staging`, `anc-og-render`) from 1Password without echoing it,
 deletes the key from the site Worker, and reports the `OG_VIDEO_ENABLED` switch. Before the render Worker's first
-deploy, its secret steps report `render-worker-missing` and the script exits non-zero: deploy, then rerun it. Every step
-is idempotent. `--check` verifies without changing anything, `--json` prints one result object, and the reason codes are
-in [`RELEASES-PREFLIGHT.md`](./RELEASES-PREFLIGHT.md#ogvideo-reason-codes). The release preflight runs
+deploy, its secret steps report `render-worker-missing` and the script exits non-zero: deploy, then rerun it. In
+production that order spans a release: the preflight's release mechanics run the first pass before the merge, and the
+postflight runs the rest after the deploy, turns the switch on, and asks for the curated pass. Every step is idempotent.
+`--check` verifies without changing anything, `--json` prints one result object, and the reason codes are in
+[`RELEASES-PREFLIGHT.md`](./RELEASES-PREFLIGHT.md#ogvideo-reason-codes). The release preflight runs
 `scripts/og/setup.sh staging --check` before the og-cards smoke. `deploy.yml` deploys the render Worker before the site
 Worker in both jobs, and calls `POST /api/og-curated-pass` after the rescore trigger.
 
 A burst of clips, such as the first curated pass or the one after a template bump, outruns the Workers Cache purge rate
 of 5 a minute. The `og-rendered` consumer batches each burst into a few purge calls and retries a refused one for about
-15 minutes. An `og_rendered_gave_up` record in the site Worker's `hit-min-purge` logs names a page that will name its clip
-only when its cached copy expires.
+15 minutes. An `og_rendered_gave_up` record in the site Worker's `hit-min-purge` logs names a page that will name its
+clip only when its cached copy expires.
 
 #### R2 telemetry-lake catalog
 

@@ -626,6 +626,12 @@ guarded planning paths as leaked.
 
 - [ ] **`CHANGELOG.md` versioned section** has no `[Unreleased]` placeholder and matches the `package.json` version.
 
+- [ ] **og:video production setup is in place.** Run `scripts/og/setup.sh production --check`; it reads `ok` once
+  og:video is live in production. Before the release that first ships og:video, run `scripts/og/setup.sh production`
+  instead: the production deploy of the site Worker fails without the `og-rendered` queue it creates. That run reports
+  `render-worker-missing` (exit 11), the expected result until the deploy publishes `anc-og-render`; its remaining
+  steps run after the deploy, in [`RELEASES-POSTFLIGHT.md`](./RELEASES-POSTFLIGHT.md).
+
 - [ ] **PR body scrubbed via `/unslop`.** Author in `/tmp/`, run Vale + LanguageTool + `/unslop`, submit via
   `--body-file`. Never inline `--body` / `-m` / heredoc (the `heredoc-pr-guard.sh` PreToolUse hook will reject it). Full
   procedure: [`RELEASES.md` § Prose scrubbing](./RELEASES.md#prose-scrubbing).

@@ -153,6 +153,22 @@ manual recipe below skips the headers; for prod the recipe runs unauthenticated.
   # both must match
   ```
 
+- [ ] **og:video is enabled in production (manual, prod only).** Run on the release that first ships og:video, after its
+  production deploy has published the render Worker, in this order:
+
+  ```bash
+  scripts/og/setup.sh production           # sets the render Worker's key, deletes the site's copy; reports switch-off
+  printf true | bunx wrangler secret put OG_VIDEO_ENABLED --name agentnative-site
+  curl -sSf -X POST -H "x-web-rescore-secret: $WEB_RESCORE_SECRET" https://anc.dev/api/og-curated-pass
+  scripts/og/setup.sh production --check   # must read ok
+  ```
+
+  The curated pass that ran with the deploy did so while the switch was off and asked for nothing, so the manual pass
+  renders the curated clips now instead of at Sunday's cron. It answers 200 with `{enabled, requested, fresh, skipped}`,
+  where `requested` counts the cards it asked for. `WEB_RESCORE_SECRET` is in the 1Password item
+  `CF Worker Secret - WEB_RESCORE_SECRET (agentnative-site)`. Allow a few minutes for the clips before the playback
+  check below.
+
 - [ ] **og:video plays in iMessage and Discord (manual, prod only).** Run on the release that ships og:video and on any
   release that bumps `SCORE_OG_TEMPLATE`. Staging sits behind Cloudflare Access, so neither app's link crawler can fetch
   a staging scorecard. First confirm each page names its clip, then share one website scorecard and one CLI scorecard
