@@ -535,8 +535,8 @@ HIT, so `edge-hit` has no local equivalent and the gate SKIPs in local mode; run
   render Worker holds `CONTEXT_DEV_API_KEY`, the site Worker does not, and `OG_VIDEO_ENABLED` is set.
 - [ ] The `og-cards smoke` sub-gate passes with three tests. `scripts/og/smoke.sh` deploys the `anc-og-fixtures` Worker
   on three fresh `og-<kind>-<run>.anc.dev` custom domains, audits each over MCP, and follows the scorecard's `og:image`.
-  Each card must come back a 1200x630 immutable PNG with `x-anc-card` `drawn` or `stored` (the audit's render job
-  usually stores it first), and the same bytes on a second request. `x-anc-card-logo` must name the tier the fixture
+  Each card must come back a 1200x630 immutable PNG with `x-anc-card` `drawn` or `stored` (`stored` when the audit's
+  render job wins the race), and the same bytes on a second request. `x-anc-card-logo` must name the tier the fixture
   forces: `homepage` for the 512px icon, `brand` for the 32px favicon and for the data URI that does not decode. A
   `tile` there means the brand lookup returned nothing: check the render Worker's `CONTEXT_DEV_API_KEY` secret first.
   The page must then name its clip in `og:video` within 60 seconds, and the clip must come back as `video/mp4` with an
