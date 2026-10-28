@@ -82,11 +82,17 @@ export async function drawStill(
   return { card, png, found };
 }
 
-/** `onPng` marks the job; it returns false once the run has been taken over. */
+/**
+ * One alarm attempt. `onPng` marks the job and returns false once the run has been taken over. Before the last
+ * attempt, a logo lookup cut short throws so the alarm's retry backoff gives the homepage another chance, because a
+ * clip drawn with the tile would stand for the whole fresh window.
+ */
+export type RenderAttempt = { onPng: () => Promise<boolean>; lastAttempt: boolean };
+
 export async function runRender(
   env: RenderEnv,
   inputs: RenderInputs,
-  onPng: () => Promise<boolean>,
+  attempt: RenderAttempt,
   deps: RenderDeps = {},
 ): Promise<RenderOutcome> {
   if (templateOfKey(inputs.key) !== SCORE_OG_TEMPLATE) return { outcome: 'skew' };
@@ -95,7 +101,10 @@ export async function runRender(
 
   const fonts = deps.fonts ?? (await loadScoreOgFonts());
   const still = await drawStill(env, inputs, fonts, { budgetMs: RENDER_LOGO_BUDGET_MS, fetchImpl: deps.fetchImpl });
-  if (!(await onPng())) throw new RunTakenOver();
+  if (!still.found.settled && !attempt.lastAttempt) {
+    throw new Error('logo lookup cut short; the clip waits for a retry');
+  }
+  if (!(await attempt.onPng())) throw new RunTakenOver();
 
   const gif = await encodeClipGif(still.card, fonts, deps.motion ?? SCORE_OG_MOTION, deps.yieldFrame);
   const mp4 = env.LOCAL_MEDIA_STANDIN === 'true' ? await bundledBytes(standinClip) : await toMp4(env.MEDIA, gif);

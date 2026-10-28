@@ -82,6 +82,29 @@ describe('scripts/og/status.sh', () => {
     },
   );
 
+  test('a missing or malformed run id leaves the search out of the next command', async () => {
+    for (const run of [undefined, 'x; rm -rf /']) {
+      const result = await statusJson({ clip: 'rendering', run, video: false, card: 'stored' });
+      expect(result.next_step.command).toBe('bunx wrangler tail anc-og-render-staging --format json');
+      expect(result.next_step.command).toBe(
+        fillCommand(CLIP_CAUSES.rendering.command, { base, target: 'railway.com' }),
+      );
+    }
+  });
+
+  test('a page that does not answer 200 names the access and target checks, not the render logs', async () => {
+    const proc = Bun.spawn(['bash', STATUS, base, 'no-such.example', '--json'], { stdout: 'pipe', stderr: 'pipe' });
+    const result = JSON.parse((await new Response(proc.stdout).text()).trim()) as {
+      reason: string;
+      message: string;
+      next_step: { command: string };
+    };
+    expect(await proc.exited).toBe(20);
+    expect(result.reason).toBe('clip-missing');
+    expect(result.message).toContain('answered 404');
+    expect(result.next_step.command).toBe(`curl -sS -o /dev/null -w '%{http_code}\\n' ${base}/score/no-such.example`);
+  });
+
   test('a fallback card maps to card-fallback ahead of the clip', async () => {
     const result = await statusJson({ clip: 'none', video: false, card: 'fallback' });
     expect(result.reason).toBe(CARD_FALLBACK.reason);
@@ -103,7 +126,7 @@ describe('one reason set and one cause map', () => {
     const statusScript = readFileSync(STATUS, 'utf8');
     const emitted = [
       ...[...setup.matchAll(/finish ([a-z-]+) /g)].map((m) => m[1]),
-      ...[...statusScript.matchAll(/reason=([a-z-]+)/g)].map((m) => m[1]),
+      ...[...statusScript.matchAll(/reason='?([a-z-]+)/g)].map((m) => m[1]),
     ];
     expect(emitted.length).toBeGreaterThan(8);
     expect(emitted.filter((reason) => !closed.has(reason))).toEqual([]);

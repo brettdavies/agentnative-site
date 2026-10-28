@@ -31,6 +31,7 @@ import type { OutboundHandler } from '@cloudflare/containers';
 import { Sandbox as BaseSandbox } from '@cloudflare/sandbox';
 import { isResultTarget, targetOfSpec } from '../../shared/audit-routes';
 import { ndjsonLineWriter } from '../../shared/ndjson';
+import { withinMs } from '../../shared/within-ms';
 import { invokeCachedPurge } from '../audit-web/hit-min-purge';
 import { cliTargetTag } from '../audit-web/hit-min-tags';
 import { type OgVideoEnv, requestRender } from '../og/render-request';
@@ -294,17 +295,10 @@ export async function writeCacheBestEffort(
 }
 
 async function purgeWithin(purge: (tags: string[]) => Promise<void>, tags: string[], ms: number): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error('purge_timeout')), ms);
-  });
   try {
-    await Promise.race([purge(tags), timeout]);
+    await withinMs(purge(tags), ms, 'purge_timeout');
   } catch (err) {
     emitLog({ scope: 'hit-min-purge' }, { error: err instanceof Error ? err.message : String(err), tags });
-  } finally {
-    if (timer) clearTimeout(timer);
-    timeout.catch(() => {});
   }
 }
 

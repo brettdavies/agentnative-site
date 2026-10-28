@@ -54,13 +54,17 @@ export function environmentOf(base: string): 'production' | 'staging' {
   return /^(www\.)?anc\.dev$/.test(new URL(base).hostname) ? 'production' : 'staging';
 }
 
+/** A run id from a response header passes only in its own shape, since an agent may run the command it lands in. */
+const RUN_ID_RE = /^[A-Za-z0-9-]{1,64}$/;
+
 export function fillCommand(template: string, values: CommandValues): string {
   const env = environmentOf(values.base);
+  const run = values.run && RUN_ID_RE.test(values.run) ? values.run : '';
   return template
+    .replace(' --search <run>', run ? ` --search ${run}` : '')
     .replaceAll('<env>', env)
     .replaceAll('<base>', values.base)
     .replaceAll('<target>', values.target)
-    .replaceAll('<run>', values.run ?? '')
     .replaceAll('<render-worker>', env === 'production' ? 'anc-og-render' : 'anc-og-render-staging')
     .replaceAll('<site-worker>', env === 'production' ? 'agentnative-site' : 'agentnative-site-staging');
 }

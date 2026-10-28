@@ -24,9 +24,10 @@ import {
   scoreOgKey,
   scoreOgPath,
 } from '../../shared/score-og';
+import { withinMs } from '../../shared/within-ms';
 import { applyHeaders, type CacheClassSpec } from '../headers';
 import { emitLog } from '../telemetry/log';
-import { type OgVideoEnv, renderInputsOf, withinMs } from './render-request';
+import { type OgVideoEnv, renderInputsOf } from './render-request';
 import { ogMethodNotAllowed, ogText, ogUnavailable } from './respond';
 import { readStoredCard } from './store';
 import { loadScoreOgSubject } from './subject';
@@ -99,7 +100,8 @@ export async function handleScoreOg(request: Request, env: OgVideoEnv, deps: Sco
   let drawn: DrawnCard;
   try {
     if (!env.RENDER) throw new Error('RENDER binding missing');
-    drawn = await withinMs(env.RENDER.drawCard(renderInputsOf(subject)), deps.timeoutMs ?? DRAW_TIMEOUT_MS);
+    const ms = deps.timeoutMs ?? DRAW_TIMEOUT_MS;
+    drawn = await withinMs(env.RENDER.drawCard(renderInputsOf(subject)), ms, `render Worker took longer than ${ms} ms`);
   } catch (err) {
     log('fallback', started, err, lane);
     return defaultCard(request, url.pathname, env);

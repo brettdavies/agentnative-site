@@ -50,7 +50,7 @@ async function objectName(kind: 'score' | 'clip', target: string, key: string): 
 }
 
 const deps = async () => ({ fonts: await cardFonts(), motion: SHORT, yieldFrame: async () => {} });
-const marked = async () => true;
+const marked = { onPng: async () => true, lastAttempt: true };
 const unreachable = stubFetch(() => {
   throw new TypeError('network down');
 });
@@ -129,9 +129,12 @@ describe('runRender', () => {
     await runRender(
       env,
       INPUTS,
-      async () => {
-        markedPng = true;
-        return true;
+      {
+        onPng: async () => {
+          markedPng = true;
+          return true;
+        },
+        lastAttempt: true,
       },
       {
         ...(await deps()),
@@ -146,12 +149,17 @@ describe('runRender', () => {
   test('a run taken over before its PNG is marked stops before drawing frames', async () => {
     const media = fakeMedia();
     let frames = 0;
-    const run = runRender(makeEnv({ MEDIA: media }), INPUTS, async () => false, {
-      ...(await deps()),
-      yieldFrame: async () => {
-        frames += 1;
+    const run = runRender(
+      makeEnv({ MEDIA: media }),
+      INPUTS,
+      { onPng: async () => false, lastAttempt: true },
+      {
+        ...(await deps()),
+        yieldFrame: async () => {
+          frames += 1;
+        },
       },
-    });
+    );
     await expect(run).rejects.toThrow('taken over');
     expect(frames).toBe(0);
     expect(media.calls).toHaveLength(0);
@@ -165,7 +173,18 @@ describe('runRender', () => {
     expect(env.SCORE_CACHE.objects.has(await objectName('clip', INPUTS.target, KEY))).toBe(false);
   });
 
-  test('a logo lookup cut short draws the tile, stores no logo miss and no PNG, and still stores the clip', async () => {
+  test('a logo lookup cut short before the last attempt stores nothing and asks for a retry', async () => {
+    const env = makeEnv();
+    const media = fakeMedia();
+    const withHomepage = { ...INPUTS, pages: ['https://railway.com/'] };
+    const early = { onPng: async () => true, lastAttempt: false };
+    const run = runRender({ ...env, MEDIA: media }, withHomepage, early, { ...(await deps()), fetchImpl: unreachable });
+    await expect(run).rejects.toThrow('logo lookup cut short');
+    expect([...env.SCORE_CACHE.objects.keys()].filter((name) => !name.startsWith('og/brand/'))).toEqual([]);
+    expect(media.calls).toHaveLength(0);
+  });
+
+  test('on the last attempt a logo lookup cut short draws the tile, stores no logo miss and no PNG, and stores the clip', async () => {
     const env = makeEnv();
     const withHomepage = { ...INPUTS, pages: ['https://railway.com/'] };
     const outcome = await runRender(env, withHomepage, marked, { ...(await deps()), fetchImpl: unreachable });

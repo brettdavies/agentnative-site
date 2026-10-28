@@ -1158,8 +1158,11 @@ export default {
       // in-flight batch no-ops instead of double-spending the audit
       // budget.
       case WEB_RESCORE_CRON:
-        await startWebRescore(env as WebRescoreTriggerEnv);
-        await runCuratedPass(env as OgVideoEnv);
+        try {
+          await startWebRescore(env as WebRescoreTriggerEnv);
+        } finally {
+          await runCuratedPass(env as OgVideoEnv);
+        }
         return;
       case LAKE_FRESHNESS_CRON:
         await runLakeFreshnessCheck(env as LakeFreshnessEnv);

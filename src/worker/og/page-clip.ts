@@ -21,7 +21,8 @@ import {
   scoreOgClipUrl,
 } from '../../shared/score-og';
 import { CANONICAL_SITE_URL } from '../../shared/site-url';
-import { type OgVideoEnv, ogVideoEnabled, withinMs } from './render-request';
+import { withinMs } from '../../shared/within-ms';
+import { type OgVideoEnv, ogVideoEnabled } from './render-request';
 import { headClip } from './store';
 
 const STATUS_BUDGET_MS = 250;

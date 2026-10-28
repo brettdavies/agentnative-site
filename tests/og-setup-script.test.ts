@@ -130,6 +130,29 @@ describe('scripts/og/setup.sh', () => {
     expect(siteKey.calls.some((call) => /create|put|delete/.test(call))).toBe(false);
   });
 
+  test('a key that cannot be read from 1Password is never set, and the run reports it', () => {
+    secrets('anc-og-render-staging', []);
+    secrets('agentnative-site-staging', []);
+    writeFileSync(join(stub, 'queues'), 'og-rendered-staging\n');
+    writeFileSync(join(stub, 'bin', 'read_field.sh'), '#!/usr/bin/env bash\necho "not signed in" >&2\nexit 1\n');
+    const run = setup('staging', '--json');
+    expect([run.status, json(run.out).reason]).toEqual([12, 'secret-missing']);
+    expect(json(run.out).message).toContain('1Password');
+    expect(existsSync(join(stub, 'put-anc-og-render-staging-CONTEXT_DEV_API_KEY'))).toBe(false);
+  });
+
+  test('a wrangler write that fails ends in the contract, not a bare exit', () => {
+    secrets('anc-og-render-staging', []);
+    secrets('agentnative-site-staging', []);
+    writeFileSync(
+      join(stub, 'bin', 'wrangler'),
+      WRANGLER_STUB.replace('"queues create") echo "$3" >>"$STUB/queues" ;;', '"queues create") exit 7 ;;'),
+    );
+    const run = setup('staging', '--json');
+    expect([run.status, json(run.out).reason]).toEqual([30, 'wrangler-failed']);
+    expect(json(run.out).message).toContain('og-rendered-staging');
+  });
+
   test('a wrangler that cannot list queues is its own reason, not a missing queue', () => {
     writeFileSync(join(stub, 'bin', 'wrangler'), '#!/usr/bin/env bash\nexit 1\n');
     const run = setup('staging', '--check', '--json');

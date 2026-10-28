@@ -57,6 +57,13 @@ describe('requestRender', () => {
     expect(render.calls).toEqual([]);
   });
 
+  test('a render Worker that never answers holds the caller no longer than the bound', async () => {
+    const render = fakeRender({ request: () => new Promise(() => {}) });
+    const started = Date.now();
+    await requestRender(await webEnv({ render, ogVideo: 'true' }), 'anc.dev');
+    expect(Date.now() - started).toBeLessThan(7_000);
+  }, 10_000);
+
   test('a render Worker that fails the call does not fail the caller', async () => {
     const render = fakeRender({
       request: async () => {

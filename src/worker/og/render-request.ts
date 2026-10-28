@@ -5,10 +5,14 @@
 
 import type { RenderInputs, RenderService } from '../../shared/og-render';
 import { isImmutableScoreOgKey, scoreOgKey } from '../../shared/score-og';
+import { withinMs } from '../../shared/within-ms';
 import { emitLog } from '../telemetry/log';
 import { loadScoreOgSubject, type ScoreOgEnv, type ScoreOgSubject } from './subject';
 
 export type OgVideoEnv = ScoreOgEnv & { RENDER?: RenderService; OG_VIDEO_ENABLED?: string };
+
+/** The same ceiling the CLI write gives its page purge. */
+const REQUEST_BUDGET_MS = 5_000;
 
 export function ogVideoEnabled(env: { OG_VIDEO_ENABLED?: string }): boolean {
   return env.OG_VIDEO_ENABLED === 'true';
@@ -33,21 +37,19 @@ export async function readyRenderInputs(env: ScoreOgEnv, target: string): Promis
   return isImmutableScoreOgKey(inputs.key) ? inputs : null;
 }
 
-/** `call`, or a rejection once `ms` pass first. */
-export function withinMs<T>(call: Promise<T>, ms: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`render Worker took longer than ${ms} ms`)), ms);
-  });
-  return Promise.race([call, late]).finally(() => clearTimeout(timer));
-}
-
-/** Ask for one target's clip. Never throws: a render request must not fail the audit that made it. */
+/**
+ * Ask for one target's clip. Never throws, and gives up after the bound: callers await it ahead of an audit's result
+ * or response, which a slow render Worker must not hold.
+ */
 export async function requestRender(env: OgVideoEnv, target: string): Promise<void> {
-  if (!ogVideoEnabled(env) || !env.RENDER) return;
-  try {
+  const render = env.RENDER;
+  if (!ogVideoEnabled(env) || !render) return;
+  const ask = async () => {
     const inputs = await readyRenderInputs(env, target);
-    if (inputs) await env.RENDER.request(inputs);
+    if (inputs) await render.request(inputs);
+  };
+  try {
+    await withinMs(ask(), REQUEST_BUDGET_MS, `render request took longer than ${REQUEST_BUDGET_MS} ms`);
   } catch (err) {
     emitLog(
       { scope: 'score.og' },

@@ -66,6 +66,8 @@ meta() {
 page_status=$(fetch page -H 'accept: text/html' "$BASE/score/$TARGET?v=$(date +%s)") || page_status=000
 clip=$(header page x-anc-clip)
 run=$(header page x-anc-clip-run)
+# The run id comes from a response header and lands in a command an agent may run, so only an id's shape passes.
+[[ "$run" =~ ^[A-Za-z0-9-]{1,64}$ ]] || run=""
 image=$(meta page og:image)
 video=$(meta page og:video)
 key=""
@@ -84,10 +86,15 @@ value=$(jq -cn --arg target "$TARGET" --arg key "$key" --arg card "$card" --arg 
   '{target: $target, key: $key, card: $card, logo: $logo, clip: $clip, run: $run, og_video: $video, page_status: ($status | tonumber)}')
 line="$TARGET key=${key:--} card=${card:--} logo=${logo:--} clip=${clip:-none} run=${run:--} og:video=$([[ -n "$video" ]] && echo named || echo absent)"
 
-tail_cmd() { printf 'bunx wrangler tail %s --format json --search %s' "$1" "$2"; }
+tail_cmd() {
+  printf 'bunx wrangler tail %s --format json' "$1"
+  [[ -z "$2" ]] || printf ' --search %s' "$2"
+}
 
 if [[ "$page_status" != 200 ]]; then
-  reason=clip-missing message="the page answered $page_status: $line" command="$(tail_cmd "$SITE" score.og)"
+  reason='clip-missing'
+  message="the page answered $page_status, so neither card nor clip could be read: check the target name, and on staging ANC_STAGING_ACCESS_CLIENT_ID and ANC_STAGING_ACCESS_CLIENT_SECRET: $line"
+  command="curl -sS -o /dev/null -w '%{http_code}\n' $BASE/score/$TARGET"
 elif [[ "$card" == fallback ]]; then
   reason=card-fallback message="the render Worker could not draw the card: $line" command="$(tail_cmd "$SITE" fallback)"
 else

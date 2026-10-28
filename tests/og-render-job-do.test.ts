@@ -218,7 +218,7 @@ describe('RenderJob: alarm', () => {
     expect(renderRecords().at(-1)).toMatchObject({ outcome: 'skew', key: skewKey });
   });
 
-  test('a fresh clip marks the job done without a binding call or a message', async () => {
+  test('a fresh clip marks the job done without a binding call, and still reports it so its page is purged', async () => {
     const h = harness();
     const name = `og/clip/${await sha256Hex(INPUTS.target)}/${KEY}.mp4`;
     h.env.SCORE_CACHE.objects.set(name, { bytes: new Uint8Array([1]), meta: {}, uploaded: new Date() });
@@ -227,8 +227,46 @@ describe('RenderJob: alarm', () => {
     await fire(job);
     expect(live(await job.status()).state).toBe('done');
     expect(h.env.MEDIA.calls).toHaveLength(0);
-    expect(h.env.OG_RENDERED.sent).toEqual([]);
+    expect(h.env.OG_RENDERED.sent).toEqual([{ target: 'railway.com', lane: 'web', key: KEY }]);
     expect(renderRecords().at(-1)).toMatchObject({ outcome: 'fresh' });
+  });
+
+  test('an og-rendered send that fails is sent again by the retry that finds the stored clip', async () => {
+    const h = harness();
+    const { job } = h.job();
+    const send = h.env.OG_RENDERED.send.bind(h.env.OG_RENDERED);
+    let failures = 1;
+    h.env.OG_RENDERED.send = (async (message) => {
+      if (failures-- > 0) throw new Error('queue unavailable');
+      return send(message);
+    }) as typeof h.env.OG_RENDERED.send;
+    await job.request(INPUTS);
+    await expect(fire(job)).rejects.toThrow('queue unavailable');
+    await fire(job, 1);
+    expect(live(await job.status()).state).toBe('done');
+    expect(h.env.MEDIA.calls).toHaveLength(1);
+    expect(h.env.OG_RENDERED.sent).toEqual([{ target: 'railway.com', lane: 'web', key: KEY }]);
+  });
+
+  test('a logo lookup cut short retries before the clip is drawn, and the last retry stores the tile clip', async () => {
+    const h = harness();
+    const withHomepage = { ...INPUTS, pages: ['https://railway.com/'] };
+    const { job } = h.job();
+    renderDeps = {
+      ...renderDeps,
+      fetchImpl: async () => {
+        throw new TypeError('network down');
+      },
+    };
+    await job.request(withHomepage);
+    await expect(fire(job)).rejects.toThrow('logo lookup cut short');
+    const clipName = `og/clip/${await sha256Hex(INPUTS.target)}/${KEY}.mp4`;
+    expect(h.env.SCORE_CACHE.objects.has(clipName)).toBe(false);
+    expect(h.env.MEDIA.calls).toHaveLength(0);
+    expect(live(await job.status()).state).toBe('queued');
+    await fire(job, MAX_ALARM_RETRIES);
+    expect(live(await job.status()).state).toBe('done');
+    expect(h.env.SCORE_CACHE.objects.get(clipName)?.meta.logo).toBe('tile');
   });
 
   test('a run taken over mid-render cannot write into the run that took it over', async () => {

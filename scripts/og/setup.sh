@@ -73,7 +73,8 @@ queues=$(wrangler queues list 2>/dev/null) \
   || finish wrangler-failed "wrangler could not list queues; check that it is logged in" "bunx wrangler whoami"
 if ! grep -Eq "(^|[^a-z0-9-])$QUEUE([^a-z0-9-]|$)" <<<"$queues"; then
   [[ "$CHECK" -eq 0 ]] || finish queue-missing "the $QUEUE queue does not exist" "$SELF"
-  wrangler queues create "$QUEUE" >/dev/null
+  wrangler queues create "$QUEUE" >/dev/null \
+    || finish wrangler-failed "wrangler could not create the $QUEUE queue" "bunx wrangler whoami"
   CHANGED+=("created queue $QUEUE")
   say "created queue $QUEUE"
 fi
@@ -88,7 +89,12 @@ if ! render_secrets=$(wrangler secret list --name "$RENDER" --format json 2>/dev
 fi
 if ! jq -e 'any(.[]; .name == "CONTEXT_DEV_API_KEY")' <<<"$render_secrets" >/dev/null; then
   [[ "$CHECK" -eq 0 ]] || finish secret-missing "CONTEXT_DEV_API_KEY is not set on $RENDER" "$SELF"
-  "$READ_FIELD" "$KEY_ITEM" credential | wrangler secret put CONTEXT_DEV_API_KEY --name "$RENDER" >/dev/null
+  # An empty read would be stored as an empty secret that every later check reads as set.
+  key=$("$READ_FIELD" "$KEY_ITEM" credential 2>/dev/null) && [[ -n "$key" ]] \
+    || finish secret-missing "could not read CONTEXT_DEV_API_KEY from 1Password, so $RENDER has no key" "$SELF"
+  printf '%s' "$key" | wrangler secret put CONTEXT_DEV_API_KEY --name "$RENDER" >/dev/null \
+    || finish wrangler-failed "wrangler could not set CONTEXT_DEV_API_KEY on $RENDER" "bunx wrangler whoami"
+  unset key
   CHANGED+=("set CONTEXT_DEV_API_KEY on $RENDER")
   say "set CONTEXT_DEV_API_KEY on $RENDER"
 fi
@@ -97,7 +103,8 @@ site_secrets=$(wrangler secret list --name "$SITE" --format json 2>/dev/null) \
   || finish wrangler-failed "wrangler could not list the secrets of $SITE" "bunx wrangler whoami"
 if jq -e 'any(.[]; .name == "CONTEXT_DEV_API_KEY")' <<<"$site_secrets" >/dev/null; then
   [[ "$CHECK" -eq 0 ]] || finish site-secret-present "$SITE still holds CONTEXT_DEV_API_KEY" "$SELF"
-  wrangler secret delete CONTEXT_DEV_API_KEY --name "$SITE" </dev/null >/dev/null
+  wrangler secret delete CONTEXT_DEV_API_KEY --name "$SITE" </dev/null >/dev/null \
+    || finish wrangler-failed "wrangler could not delete CONTEXT_DEV_API_KEY from $SITE" "bunx wrangler whoami"
   CHANGED+=("deleted CONTEXT_DEV_API_KEY from $SITE")
   say "deleted CONTEXT_DEV_API_KEY from $SITE"
 fi

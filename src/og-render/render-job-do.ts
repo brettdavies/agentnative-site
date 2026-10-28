@@ -114,7 +114,12 @@ export class RenderJob extends DurableObject<RenderEnv> {
     const log = { run, attempt, key: inputs.key, lane: inputs.card.lane, started };
     if (!(await this.mark(run, 'rendering', attempt))) return;
     try {
-      const result = await runRender(this.env, inputs, () => this.mark(run, 'png', attempt), this.renderDeps());
+      const result = await runRender(
+        this.env,
+        inputs,
+        { onPng: () => this.mark(run, 'png', attempt), lastAttempt: retry >= MAX_ALARM_RETRIES },
+        this.renderDeps(),
+      );
       if (result.outcome === 'skew') {
         await this.release();
         logRender({ ...log, outcome: 'skew' });
@@ -122,12 +127,10 @@ export class RenderJob extends DurableObject<RenderEnv> {
       }
       if (!(await this.mark(run, 'done', attempt))) throw new RunTakenOver();
       await this.ctx.storage.setAlarm(Date.now() + DONE_GRACE_MS);
-      if (result.outcome === 'fresh') {
-        logRender({ ...log, outcome: 'fresh' });
-        return;
-      }
+      // A fresh clip is reported too: the attempt that stored it may have failed before its own report, and the
+      // page purge it triggers is idempotent.
       await this.env.OG_RENDERED.send({ target: inputs.target, lane: inputs.card.lane, key: inputs.key });
-      logRender({ ...log, outcome: 'rendered', logo: result.logo });
+      logRender({ ...log, outcome: result.outcome, logo: result.outcome === 'rendered' ? result.logo : undefined });
     } catch (err) {
       if (err instanceof RunTakenOver) {
         logRender({ ...log, outcome: 'superseded' });
