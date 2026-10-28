@@ -1164,17 +1164,17 @@ a card deletes only the target's cards scored before it, and the `og-30day-ttl` 
 and `unscored` cards are not stored.
 
 **Scorecard clips.** Every finished scorecard also gets a 1200×630 MP4 of about 3.5 s with no audio, named in the page's
-`og:video` tags once it exists; iMessage autoplays it and Discord plays it on click, and every other platform keeps the
-PNG. The clip holds the final card, drains the score to zero, climbs back with an ease-out, and holds: `SCORE_OG_MOTION`
-in `src/shared/score-og-motion.ts`, 105 frames at 30 fps, color locked to the final score's band, digits in fixed slots.
-The motion is values, so a design change swaps frame counts, easing, color mode, or digit mode without new code. Its
-first and last frames draw the still card's SVG byte for byte, which is why the clip shares the card's key: the clip
-lives at `/og/clip/<target>/<key>.mp4`, stored under `og/clip/<sha256(target)>/<key>.mp4` with the same metadata and the
-same older-only pruning. The render Worker draws each frame, quantizes it to its own palette (one palette from the final
-card turns the mid-climb bands grey), encodes a GIF, and has the Media Transformations binding turn it into the MP4. One
-`RenderJob` Durable Object per card runs that render once, on its own alarm, whatever asks for it: a finished audit, the
-rescore Workflow, the live CLI Durable Object, or the curated pass after a deploy and on the weekly cron. No page view
-or crawler fetch ever starts one.
+`og:video` tags once it exists; iMessage plays it on its own and Discord plays it on click, and every other platform
+keeps the PNG. The clip holds the final card, drains the score to zero, climbs back with an ease-out, and holds:
+`SCORE_OG_MOTION` in `src/shared/score-og-motion.ts`, 105 frames at 30 fps, color locked to the final score's band,
+digits in fixed slots. The motion is values, so a design change swaps frame counts, easing, color mode, or digit mode
+without new code. Its first and last frames draw the still card's SVG byte for byte, which is why the clip shares the
+card's key: the clip lives at `/og/clip/<target>/<key>.mp4`, stored under `og/clip/<sha256(target)>/<key>.mp4` with the
+same metadata and the same older-only pruning. The render Worker draws each frame, reduces it to its own 256-color
+palette (one palette from the final card turns the mid-climb bands grey), encodes a GIF, and has the Media
+Transformations binding turn it into the MP4. One `RenderJob` Durable Object per card runs that render once, on its own
+alarm, whatever asks for it: a finished audit, the rescore Workflow, the live CLI Durable Object, or the curated pass
+after a deploy and on the weekly cron. No page view or crawler fetch ever starts one.
 
 **Bump rule.** Any change to the card face or to the motion bumps `SCORE_OG_TEMPLATE`. Every key then changes: the
 curated pass re-renders curated cards the same day, and a live site gets a card and clip in the new design on its next
