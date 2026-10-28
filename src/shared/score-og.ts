@@ -1,6 +1,6 @@
-// Scorecard Open Graph card: the path, the cache key, the alt text, and the
-// SVG. The Worker rasterizes the SVG; this module stays free of wasm so the
-// build and the unit tests can call it.
+// Scorecard Open Graph card: the card and clip paths, the cache key, the alt
+// text, and the SVG. The render Worker rasterizes the SVG; this module stays
+// free of wasm so the build, the site Worker and the unit tests can call it.
 //
 // The URL carries everything the card shows: the rounded score, the spec
 // version, the edition (a website's audit date, a CLI's tool version, a
@@ -17,6 +17,7 @@ import { shortDate } from './result-spine';
 export const SCORE_OG_WIDTH = 1200;
 export const SCORE_OG_HEIGHT = 630;
 export const SCORE_OG_PREFIX = '/og/score/';
+export const SCORE_OG_CLIP_PREFIX = '/og/clip/';
 
 /** Family names as the bundled card fonts declare them; resvg draws the default face for any other name. */
 export const SCORE_OG_FONT = { sans: 'Uncut Sans', mono: 'Monaspace Xenon Medium' } as const;
@@ -40,6 +41,26 @@ const COLOR = {
   highBar: '#4fce74',
   midBar: '#ffb147',
   lowBar: '#f4514c',
+} as const;
+
+const SCORE_RIGHT = 1136;
+const SCORE_SIZE = 112;
+/**
+ * Advance widths of the score's digits and percent sign in Uncut Sans 700, in font units (1000 per em), read from
+ * the bundled face's hmtx table. The face's digits are proportional, so a fixed-slot count places each one itself.
+ */
+const SCORE_ADVANCE = {
+  '0': 700,
+  '1': 574,
+  '2': 633,
+  '3': 651,
+  '4': 712,
+  '5': 639,
+  '6': 641,
+  '7': 580,
+  '8': 662,
+  '9': 665,
+  '%': 798,
 } as const;
 
 const NAME_MAX_WIDTH = 700;
@@ -74,6 +95,12 @@ export type ScoreOgCard = {
   edition: ScoreOgEdition | null;
   logo: ScoreOgLogo | null;
 };
+
+/**
+ * One frame of the clip: the number shown, the meter's fill and the score whose band colors both, each 0 to 100,
+ * and whether the digits hold fixed slots or run as one right-aligned string.
+ */
+export type ScoreOgFrameState = { shown: number; meter: number; band: number; digits: 'fixed' | 'proportional' };
 
 /** `token` goes in the key; `label` is what the card's footer shows. */
 export type ScoreOgEdition = { token: string; label: string };
@@ -122,6 +149,12 @@ export function scoreOgKey(input: ScoreOgKeyInput): string {
   return `s${rounded}-v${safe}${edition}-r${SCORE_OG_TEMPLATE}`;
 }
 
+/** The template version a card key names, or null for `pending` and `unscored`. */
+export function templateOfKey(key: string): number | null {
+  const match = /-r(\d{1,4})$/.exec(key);
+  return match ? Number(match[1]) : null;
+}
+
 export function isScoreOgKey(key: string): boolean {
   return KEY_RE.test(key);
 }
@@ -135,22 +168,51 @@ export function isScoreOgPath(pathname: string): boolean {
   return pathname === '/og/score' || pathname.startsWith(SCORE_OG_PREFIX);
 }
 
+export function isScoreOgClipPath(pathname: string): boolean {
+  return pathname === '/og/clip' || pathname.startsWith(SCORE_OG_CLIP_PREFIX);
+}
+
+type OgFile = { prefix: string; ext: string };
+
+const CARD_FILE: OgFile = { prefix: SCORE_OG_PREFIX, ext: '.png' };
+const CLIP_FILE: OgFile = { prefix: SCORE_OG_CLIP_PREFIX, ext: '.mp4' };
+
 /** Site-relative path. `scorePath` rejects a target the result route would not serve. */
-export function scoreOgPath(target: string, key: string): string {
+function ogFilePath(file: OgFile, target: string, key: string): string {
   if (!isScoreOgKey(key)) throw new RangeError(`not a scorecard OG key: ${key}`);
   const suffix = scorePath(target).slice(SCORE_PREFIX.length);
-  return `${SCORE_OG_PREFIX}${suffix}/${key}.png`;
+  return `${file.prefix}${suffix}/${key}${file.ext}`;
+}
+
+export function scoreOgPath(target: string, key: string): string {
+  return ogFilePath(CARD_FILE, target, key);
+}
+
+export function scoreOgClipPath(target: string, key: string): string {
+  return ogFilePath(CLIP_FILE, target, key);
 }
 
 export function scoreOgUrl(base: string, target: string, key: string): string {
   return `${base.replace(/\/$/, '')}${scoreOgPath(target, key)}`;
 }
 
+export function scoreOgClipUrl(base: string, target: string, key: string): string {
+  return `${base.replace(/\/$/, '')}${scoreOgClipPath(target, key)}`;
+}
+
 export type ParsedScoreOgPath = { target: string; key: string };
 
 export function parseScoreOgPath(pathname: string): ParsedScoreOgPath | null {
-  if (!pathname.startsWith(SCORE_OG_PREFIX) || !pathname.endsWith('.png')) return null;
-  const rest = pathname.slice(SCORE_OG_PREFIX.length, -'.png'.length);
+  return parseOgFilePath(CARD_FILE, pathname);
+}
+
+export function parseScoreOgClipPath(pathname: string): ParsedScoreOgPath | null {
+  return parseOgFilePath(CLIP_FILE, pathname);
+}
+
+function parseOgFilePath(file: OgFile, pathname: string): ParsedScoreOgPath | null {
+  if (!pathname.startsWith(file.prefix) || !pathname.endsWith(file.ext)) return null;
+  const rest = pathname.slice(file.prefix.length, -file.ext.length);
   const segments = rest.split('/');
   if (segments.length < 2 || segments.some((segment) => segment === '')) return null;
   const key = segments.pop();
@@ -308,16 +370,22 @@ export function logoCandidatesFromHtml(html: string, pageUrl: string): string[] 
   return out;
 }
 
-/** The 1200×630 card. `logo` is already a PNG or JPEG; SVG logos are rasterized by the caller. */
-export function renderScoreOgSvg(card: ScoreOgCard): string {
+/**
+ * The 1200×630 card. `logo` is already a PNG or JPEG; SVG logos are rasterized by the caller. A frame state draws
+ * one frame of the clip; a frame that shows the final score draws the same SVG as the card itself.
+ */
+export function renderScoreOgSvg(card: ScoreOgCard, frame?: ScoreOgFrameState): string {
   const name = fitName(card.name);
   const subtitle = card.subtitle ? fitSubtitle(card.subtitle) : null;
   const rounded = card.pending ? null : roundedScore(card.scorePct);
-  const scoreText = card.pending ? 'Pending' : rounded === null ? 'Unscored' : `${rounded}%`;
-  const scoreSize = rounded === null ? 56 : 112;
-  const scoreColor = rounded === null ? COLOR.muted : bandColor(rounded);
-  const bar = rounded === null ? COLOR.track : barColor(rounded);
-  const meterWidth = rounded === null ? 0 : Math.round((rounded / 100) * 1072);
+  const band = rounded === null ? null : (frame?.band ?? rounded);
+  const scoreColor = band === null ? COLOR.muted : bandColor(band);
+  const bar = band === null ? COLOR.track : barColor(band);
+  const meterWidth = rounded === null ? 0 : Math.round(((frame?.meter ?? rounded) / 100) * 1072);
+  const score =
+    rounded === null
+      ? scoreRun(card.pending ? 'Pending' : 'Unscored', COLOR.muted, 56)
+      : scoreNumber(rounded, frame?.shown ?? rounded, scoreColor, frame?.digits ?? 'proportional');
   const lane = card.lane === 'web' ? 'website audit' : 'CLI scorecard';
   const footerTail = card.edition ? `${lane}  ·  ${card.edition.label}` : lane;
   const logo = logoMarkup(card.logo, wordmarkInitials(card.name));
@@ -334,7 +402,7 @@ export function renderScoreOgSvg(card: ScoreOgCard): string {
   </g>
   <text x="136" y="82" fill="${COLOR.accent}" font-family="${SCORE_OG_FONT.mono}" font-size="28">anc.dev</text>
   <text x="1136" y="64" text-anchor="end" fill="${COLOR.muted}" font-family="${SCORE_OG_FONT.mono}" font-size="20">SCORE</text>
-  <text x="1136" y="168" text-anchor="end" fill="${scoreColor}" font-family="${SCORE_OG_FONT.sans}" font-weight="700" font-size="${scoreSize}">${escHtml(scoreText)}</text>
+  ${score}
   <g transform="translate(64 230) scale(3.5)">
     <rect width="32" height="32" rx="6" fill="${COLOR.accent}"/>
     <g fill="none" stroke="${COLOR.bg}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
@@ -350,6 +418,40 @@ export function renderScoreOgSvg(card: ScoreOgCard): string {
   <rect x="64" y="430" width="${meterWidth}" height="16" rx="8" fill="${bar}"/>
   <text x="64" y="560" font-family="${SCORE_OG_FONT.mono}" font-size="24"><tspan fill="${COLOR.accent}">anc.dev</tspan><tspan fill="${COLOR.muted}"> · ${escHtml(footerTail)}</tspan></text>
 </svg>`;
+}
+
+function scoreRun(text: string, fill: string, size: number): string {
+  return `<text x="${SCORE_RIGHT}" y="168" text-anchor="end" fill="${fill}" font-family="${SCORE_OG_FONT.sans}" font-weight="700" font-size="${size}">${escHtml(text)}</text>`;
+}
+
+/**
+ * The score as a percent. In fixed mode, each place of an in-between number sits centered in the slot that place
+ * takes in the final number, so the digits do not slide sideways as the count runs. The final number is the
+ * still card's right-aligned run.
+ */
+function scoreNumber(final: number, shown: number, fill: string, digits: ScoreOgFrameState['digits']): string {
+  const places = [...String(shown)].reverse();
+  const centers = slotCenters(final);
+  if (digits === 'proportional' || shown === final || places.length > centers.length) {
+    return scoreRun(`${shown}%`, fill, SCORE_SIZE);
+  }
+  const glyph = (x: number | string, anchor: 'middle' | 'end', text: string) =>
+    `<text x="${x}" y="168" text-anchor="${anchor}" fill="${fill}" font-family="${SCORE_OG_FONT.sans}" font-weight="700" font-size="${SCORE_SIZE}">${text}</text>`;
+  const marks = places.map((digit, place) => glyph(centers[place], 'middle', digit)).reverse();
+  return [...marks, glyph(SCORE_RIGHT, 'end', '%')].join('\n  ');
+}
+
+/** Center x of each place of `final` drawn right-aligned with its percent sign, ones place first. */
+function slotCenters(final: number): number[] {
+  const scale = SCORE_SIZE / 1000;
+  let right = SCORE_RIGHT - SCORE_ADVANCE['%'] * scale;
+  const centers: number[] = [];
+  for (const digit of [...String(final)].reverse()) {
+    const width = SCORE_ADVANCE[digit as keyof typeof SCORE_ADVANCE] * scale;
+    centers.push(Math.round((right - width / 2) * 10) / 10);
+    right -= width;
+  }
+  return centers;
 }
 
 function logoMarkup(logo: ScoreOgLogo | null, initials: string): string {
@@ -380,7 +482,8 @@ function fnv1a32(text: string): string {
   return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
-function roundedScore(scorePct: number | null): number | null {
+/** The score as a whole 0 to 100 percent, or null when it is not one. */
+export function roundedScore(scorePct: number | null): number | null {
   if (scorePct === null || !Number.isFinite(scorePct)) return null;
   const rounded = Math.round(scorePct);
   if (rounded < 0 || rounded > 100) return null;

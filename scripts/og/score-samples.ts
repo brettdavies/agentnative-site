@@ -7,14 +7,14 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { cliOgIdentity, type ScoreOgCard, scoreOgEdition } from '../../src/shared/score-og';
-import { resolveLogo } from '../../src/worker/og/logo';
-import { renderScoreOgPng, type ScoreOgFonts } from '../../src/worker/og/render';
+import { resolveLogo } from '../../src/og-render/logo';
+import { renderScoreOgPng, type ScoreOgFonts } from '../../src/og-render/render';
 
 const ROOT = new URL('../..', import.meta.url);
 const OUT = process.argv[2] ?? join(ROOT.pathname, '.context', 'og-samples');
 
 async function fonts(): Promise<ScoreOgFonts> {
-  const dir = new URL('../../src/worker/og/fonts/', import.meta.url);
+  const dir = new URL('../../src/og-render/fonts/', import.meta.url);
   const [regular, bold, mono] = await Promise.all([
     readFile(new URL('uncut-sans-600.ttf', dir)),
     readFile(new URL('uncut-sans-700.ttf', dir)),

@@ -11,10 +11,10 @@
 // skipped: resvg embeds PNG and JPEG only, and a failed embed must not
 // fail the card.
 
-import { logoCandidatesFromHtml, type ScoreOgLogo } from '../../shared/score-og';
-import { AUDIT_USER_AGENT } from '../../shared/user-agents';
-import { RETRY_SHAPED_STATUSES } from '../audit-web/handlers/shared';
-import { validatePublicUrl } from '../audit-web/ssrf';
+import { logoCandidatesFromHtml, type ScoreOgLogo } from '../shared/score-og';
+import { AUDIT_USER_AGENT } from '../shared/user-agents';
+import { RETRY_SHAPED_STATUSES } from '../worker/audit-web/handlers/shared';
+import { validatePublicUrl } from '../worker/audit-web/ssrf';
 import { rasterizeSvgLogo, type ScoreOgFonts } from './render';
 
 const BUDGET_MS = 2_000;

@@ -45,6 +45,7 @@ import { aiCatalog, cardEntry, html, requestsTo, router, type Seen, sep2127Card 
 import { parseHtml } from './helpers/html-elements';
 import { withLogCapture } from './helpers/log-capture';
 import { getJsonToolContent, type JsonRpcBody, mcpInitialize, mcpRpc, resetMcpTestState } from './helpers/mcp-rpc';
+import { fakeRender } from './helpers/og-site-fakes';
 import { stubFetch } from './helpers/stub-fetch';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
@@ -1648,6 +1649,8 @@ describe('audit_website with follow_declarations false', () => {
     const recorded = recordingBucket(prefill);
     const env = await makeEnv({ minimalRegistry: true, followSwitch: 'true', ...envOpts });
     (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = recorded.bucket;
+    const render = fakeRender();
+    Object.assign(env, { RENDER: render, OG_VIDEO_ENABLED: 'true' });
     const purge = purgeContext();
     const { result, records } = await offline(() =>
       withLogCapture(() =>
@@ -1664,9 +1667,16 @@ describe('audit_website with follow_declarations false', () => {
       body: result.result?.isError ? null : jsonContent(result),
       puts: recorded.puts,
       purged: purge.purged,
+      renders: render.calls,
       runRecord,
     };
   }
+
+  test('a saved run asks the render Worker for one clip through the same hook as the endpoint', async () => {
+    const saved = await run({});
+    expect(saved.renders).toEqual([{ method: 'request', inputs: expect.objectContaining({ target: 'anc.dev' }) }]);
+    expect((await run({ follow_declarations: false })).renders).toEqual([]);
+  });
 
   test('returns a scorecard recording follow_declarations false with no result URLs, and writes, purges, and rebuilds nothing', async () => {
     const out = await run({ follow_declarations: false });

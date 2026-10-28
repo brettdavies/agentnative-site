@@ -4,6 +4,8 @@ import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import sharp from 'sharp';
+import { MIN_RASTER_PX, rasterSize, resolveLogo } from '../src/og-render/logo';
+import { rasterizeSvgLogo, renderScoreOgPng, type ScoreOgFonts } from '../src/og-render/render';
 import {
   brandName,
   cliOgIdentity,
@@ -21,10 +23,8 @@ import {
   scoreOgUrl,
   wordmarkInitials,
 } from '../src/shared/score-og';
-import { MIN_RASTER_PX, rasterSize, resolveLogo } from '../src/worker/og/logo';
-import { rasterizeSvgLogo, renderScoreOgPng, type ScoreOgFonts } from '../src/worker/og/render';
 
-const FONT_DIR = new URL('../src/worker/og/fonts/', import.meta.url);
+const FONT_DIR = new URL('../src/og-render/fonts/', import.meta.url);
 
 async function fonts(): Promise<ScoreOgFonts> {
   const [regular, bold, mono] = await Promise.all([

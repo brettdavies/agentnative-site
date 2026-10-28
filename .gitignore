@@ -28,8 +28,11 @@ dist/
 !src/
 !src/**
 # Re-assert after the un-ignore above: `!src/**` re-includes everything under
-# src/, which would otherwise override line 1 for .DS_Store files there.
+# src/, which would otherwise override line 1 for .DS_Store files there and
+# the .dev.vars rules for the render Worker's local secrets in src/og-render/.
 **/.DS_Store
+**/.dev.vars
+**/.dev.vars.*
 
 # Playwright artifacts
 test-results/

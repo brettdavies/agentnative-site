@@ -6,7 +6,7 @@
   "description": "agentnative.dev — the agent-native CLI standard",
   "scripts": {
     "build": "bun src/build/build.mjs",
-    "dev": "bun run build && wrangler dev --env staging --local --port 8787",
+    "dev": "bun run build && wrangler dev -c wrangler.jsonc -c src/og-render/wrangler.jsonc --env staging --local --port 8787",
     "test": "bun test",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit -p tsconfig.client.json && tsc --noEmit -p tsconfig.worker.json && tsc --noEmit -p tsconfig.node.json",
@@ -45,6 +45,7 @@
     "accepts": "^1.3.8",
     "agents": "^0.28.1",
     "badge-maker": "^6.0.0",
+    "gifenc": "1.0.3",
     "js-yaml": "^5.5.0",
     "rehype-autolink-headings": "^7.1.0",
     "rehype-slug": "^6.0.0",

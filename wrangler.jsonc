@@ -129,6 +129,19 @@
   // the lake bucket and alerts through the KV-deduped email path when the
   // newest ingest-written object is older than a day.
   "triggers": { "crons": ["0 9 * * SUN", "0 6 * * *"] },
+  // og:video: the render Worker (src/og-render/wrangler.jsonc) draws every
+  // card and clip; it deploys before this Worker, or this binding fails the
+  // deploy. It reports each stored clip on og-rendered, which this Worker
+  // consumes in batches of up to one purge call's 100 tags, at most 5 s
+  // after a clip lands, because Workers Cache purges are limited to 5 a
+  // minute; src/worker/og/rendered-consumer.ts holds the retry policy that
+  // max_retries matches. Queues are account-wide, so each environment names
+  // its own.
+  // OG_VIDEO_ENABLED is a `wrangler secret put` value in both environments.
+  "services": [{ "binding": "RENDER", "service": "anc-og-render" }],
+  "queues": {
+    "consumers": [{ "queue": "og-rendered", "max_batch_size": 100, "max_batch_timeout": 5, "max_retries": 5 }]
+  },
   // Web-rescore Workflow: selects the stalest seeded domains in bounded
   // batches (one audit per step), rebuilds the board after each batch, and
   // cycles until none remain, so the seed list is dynamic and unbounded per
@@ -350,6 +363,12 @@
       // daily lake-freshness check, which is log-only off production. See
       // RELEASES-RATIONALE.md § Wrangler env inheritance traps.
       "triggers": { "crons": ["0 9 * * SUN", "0 6 * * *"] },
+      "services": [{ "binding": "RENDER", "service": "anc-og-render-staging" }],
+      "queues": {
+        "consumers": [
+          { "queue": "og-rendered-staging", "max_batch_size": 100, "max_batch_timeout": 5, "max_retries": 5 }
+        ]
+      },
       // Workflow name is account-scoped, so staging gets its own; the
       // binding + class stay identical to production.
       "workflows": [

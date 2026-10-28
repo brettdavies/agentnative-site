@@ -127,6 +127,7 @@ heredoc
 href
 hsla
 html_handling
+iMessage
 impeccable
 inlineCode
 inlined

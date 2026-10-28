@@ -16,6 +16,7 @@ import { describe, expect, test } from 'bun:test';
 import type { InstallSpec } from '../src/worker/score/discover-binary';
 import { extractToolVersion, type ScoreSandboxEnv, writeCacheBestEffort } from '../src/worker/score/do';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { fakeRender, siteEnv } from './helpers/og-site-fakes';
 
 // ---------------------------------------------------------------------------
 // R2 stub mirroring the cache.ts test stub
@@ -186,5 +187,34 @@ describe('writeCacheBestEffort — failure isolation', () => {
     // Must not throw — the caller (Sandbox.fetch) MUST return the user's
     // score regardless of whether the cache write landed.
     await writeCacheBestEffort(env, SPEC, { scorecard: SCORECARD_WITH_VERSION, anc_version: ANC_VERSION });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// render request
+// ---------------------------------------------------------------------------
+
+describe('writeCacheBestEffort — render request', () => {
+  test('a written scorecard asks the render Worker for its clip; a failed write asks for none', async () => {
+    const render = fakeRender();
+    const scored = { ...SCORECARD_WITH_VERSION, badge: { score_pct: 88 } };
+    await writeCacheBestEffort(siteEnv({ render, ogVideo: 'true' }), SPEC, {
+      scorecard: scored,
+      anc_version: ANC_VERSION,
+    });
+    expect(render.calls).toEqual([
+      {
+        method: 'request',
+        inputs: expect.objectContaining({ target: 'cowsay', key: expect.stringContaining('-t1.6.0-') }),
+      },
+    ]);
+
+    const failedRender = fakeRender();
+    const { env: failing } = makeR2Stub({ throwOnPut: true });
+    await writeCacheBestEffort({ ...failing, RENDER: failedRender, OG_VIDEO_ENABLED: 'true' }, SPEC, {
+      scorecard: scored,
+      anc_version: ANC_VERSION,
+    });
+    expect(failedRender.calls).toEqual([]);
   });
 });

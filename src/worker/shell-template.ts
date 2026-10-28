@@ -56,6 +56,8 @@ export type ShellFields = {
   ogImage?: string;
   /** Alt text for that card. */
   ogImageAlt?: string;
+  /** The og:video meta tags when the page's clip exists; omitted pages name no video. */
+  ogVideoHtml?: string;
 };
 
 export function substituteShell(template: string, fields: ShellFields): string {
@@ -81,6 +83,7 @@ export function substituteShell(template: string, fields: ShellFields): string {
       .replaceAll('{{ALTERNATES}}', alternates)
       .replaceAll('{{OG_IMAGE}}', escHtml(ogImage))
       .replaceAll('{{OG_IMAGE_ALT}}', escHtml(ogImageAlt))
+      .replaceAll('{{OG_VIDEO}}', fields.ogVideoHtml ?? '')
       .replaceAll('{{BODY}}', fields.body)
   );
 }

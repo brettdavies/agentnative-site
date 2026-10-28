@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { curatedCardOf } from '../src/worker/og/page-clip';
 import { handleScoreOg } from '../src/worker/og/route';
 import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
 import { distAssetsEnv, requireDistBuild } from './helpers/dist';
@@ -26,7 +27,7 @@ beforeEach(() => {
 });
 
 describe('curated scorecard card agreement', () => {
-  test("every curated page's og:image is the card path the route serves without a redirect", async () => {
+  test("every curated page's og:image is the card path the route serves without a redirect, and the key its clip is looked up under", async () => {
     requireDistBuild(DIST);
     const env = { ...distAssetsEnv(DIST), SCORE_CACHE: CARDS_EVERYWHERE };
     const pages = (await readdir(join(DIST, 'score'))).filter((file) => file.endsWith('.html'));
@@ -41,6 +42,10 @@ describe('curated scorecard card agreement', () => {
       }
       const res = await handleScoreOg(new Request(image), env as never);
       if (res.status !== 200) disagreements.push(`${page}: ${res.status} ${res.headers.get('location') ?? ''}`);
+      const card = curatedCardOf(html);
+      if (card?.target !== page.slice(0, -'.html'.length) || !image.includes(`/${card.key}.png`)) {
+        disagreements.push(`${page}: the clip lookup reads ${JSON.stringify(card)} from the page`);
+      }
     }
     expect(disagreements).toEqual([]);
   });

@@ -10,7 +10,8 @@
 # Usage: scripts/og/smoke.sh <base-url>
 #   <base-url>  the site Worker to check: the staging workers.dev host, or
 #               http://localhost:8787 for `bun run dev` (MCP_ENABLED and
-#               CONTEXT_DEV_API_KEY in .dev.vars.staging)
+#               OG_VIDEO_ENABLED in .dev.vars.staging; CONTEXT_DEV_API_KEY and
+#               LOCAL_MEDIA_STANDIN in src/og-render/.dev.vars.staging)
 #
 # Staging sits behind Cloudflare Access: export ANC_STAGING_ACCESS_CLIENT_ID
 # and ANC_STAGING_ACCESS_CLIENT_SECRET first (scripts/release/preflight.sh e2e

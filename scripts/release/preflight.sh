@@ -696,6 +696,16 @@ gate_og_cards() {
     return
   fi
 
+  # The smoke asserts clips, so og:video's queue, key and switch must be in
+  # place first; the check names what is missing and the command that fixes it.
+  local setup setup_status=0
+  setup=$("$REPO_ROOT/scripts/og/setup.sh" staging --check 2>&1) || setup_status=$?
+  if [[ "$setup_status" -ne 0 ]]; then
+    gate_fail "og:video setup" "scripts/og/setup.sh staging --check exited $setup_status"
+    printf '%s\n' "$setup" | sed 's/^/    /'
+    return
+  fi
+
   local out status=0
   out=$(
     ANC_STAGING_ACCESS_CLIENT_ID="$cid" \
@@ -708,7 +718,7 @@ gate_og_cards() {
   failed=$(printf '%s' "$out" | grep -oE '[0-9]+ failed' | tail -1 | grep -oE '[0-9]+' || true)
 
   if [[ "$status" -eq 0 && -n "$passed" && "$passed" -gt 0 ]]; then
-    gate_pass "og-cards smoke: $passed fixture cards drawn, logo tiers as expected, served twice"
+    gate_pass "og-cards smoke: $passed fixtures with cards drawn, logo tiers as expected, served twice, and clips named"
     return
   fi
 

@@ -680,6 +680,22 @@ describe('emitShellTemplate — placeholders', () => {
     expect(html).toContain('<a href="{{MARKDOWN_TWIN_PATH}}">This page as markdown</a>');
     expect(html).not.toContain('{{CANONICAL_PATH}}.md');
   });
+
+  test('the og:video block is one placeholder after the card tags, and og:type stays article', () => {
+    const head = html.slice(0, html.indexOf('</head>'));
+    expect(head.indexOf('{{OG_VIDEO}}')).toBeGreaterThan(head.indexOf('og:image:alt'));
+    expect(head).toContain('<meta property="og:type" content="article" />');
+    const page = emitShell({
+      title: 'p',
+      description: 'd',
+      canonicalPath: '/about',
+      breadcrumb: 'About',
+      bodyHtml: '',
+      themeInitJs: '',
+    });
+    expect(page).not.toContain('OG_VIDEO');
+    expect(page).not.toContain('og:video');
+  });
 });
 
 // -------------------------------------------------------------------

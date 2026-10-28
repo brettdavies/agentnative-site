@@ -29,7 +29,7 @@
 // Fail-fast: the invariant check throws on violation so CI/`bun run build`
 // exits non-zero. Regression tests are the verification net.
 
-import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { API_SCORE_PATH, SCORECARDS_PATH, scorePath } from '../shared/audit-routes';
@@ -308,13 +308,6 @@ export async function build() {
   // finds both ends.
   await ensureDir(join(DIST_DIR, '_internal'));
   await writeFile(join(DIST_DIR, '_internal', 'score-live-shell.html'), emitShellTemplate({ themeInitJs: themeInit }));
-  // Static faces for the scorecard card. resvg cannot read the variable woff2
-  // the pages use, and these files are not part of the public font set.
-  const ogFontDir = join(DIST_DIR, '_internal', 'og-fonts');
-  await ensureDir(ogFontDir);
-  for (const file of ['uncut-sans-600.ttf', 'uncut-sans-700.ttf', 'monaspace-xenon-500.otf']) {
-    await copyFile(join(REPO_ROOT, 'src', 'worker', 'og', 'fonts', file), join(ogFontDir, file));
-  }
 
   // 10. Sitemap (includes scorecard paths). /install (CLI) and /skill (skill
   // bundle) are indexed for humans; /skill.json carries X-Robots-Tag: noindex

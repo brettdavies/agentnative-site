@@ -1,7 +1,9 @@
 // HIT-min tag purge: callers queue tags after a successful R2 write and
 // flush once. The RPC lives on the cached entrypoint because Workers
 // Caching purge is scoped to that entrypoint; the uncached gateway's
-// ctx.cache.purge would miss inner entries (KTD7).
+// ctx.cache.purge would miss inner entries (KTD7). Work that should follow
+// a write without holding the response, such as asking for a scorecard's
+// clip, queues beside the tags and runs after the purge, once per key.
 //
 // R2 writers stay env-only and do not import this module.
 
@@ -19,12 +21,12 @@ type CachedPurgeRpc = {
 /** A Worker's ExecutionContext or a Durable Object's state: whatever carries `exports`. */
 export type PurgeCtx = { exports?: unknown };
 
-type PurgeStore = { ctx: PurgeCtx; tags: Set<string> };
+type PurgeStore = { ctx: PurgeCtx; tags: Set<string>; after: Map<string, () => Promise<void>> };
 
 const als = new AsyncLocalStorage<PurgeStore>();
 
 export function runWithHitMinPurge<T>(ctx: PurgeCtx, fn: () => T): T {
-  return als.run({ ctx, tags: new Set() }, fn);
+  return als.run({ ctx, tags: new Set(), after: new Map() }, fn);
 }
 
 export function queueHitMinPurge(tags: readonly string[]): void {
@@ -38,21 +40,36 @@ export function queueHitMinPurge(tags: readonly string[]): void {
   }
 }
 
+/** Queue `task` to run after the purge flushes; a second task under the same key is dropped. The task must not throw. */
+export function queueAfterHitMinPurge(key: string, task: () => Promise<void>): void {
+  const store = als.getStore();
+  if (!store) {
+    emitLog({ scope: 'hit-min-purge' }, { error: 'queue_without_store', key });
+    return;
+  }
+  if (!store.after.has(key)) store.after.set(key, task);
+}
+
 export async function flushHitMinPurge(): Promise<void> {
   const store = als.getStore();
-  if (!store || store.tags.size === 0) return;
+  if (!store) return;
   const tags = [...store.tags];
+  const after = [...store.after.values()];
   store.tags.clear();
-  await invokeCachedPurge(store.ctx, tags);
+  store.after.clear();
+  if (tags.length > 0) await invokeCachedPurge(store.ctx, tags);
+  for (const task of after) await task();
 }
 
 /**
- * One RPC with the given tags. Used by the rescore cycle (already batched)
- * and as the flush target. Never sends pathPrefixes.
+ * One RPC with the given tags. Used by the rescore cycle (already batched),
+ * the og-rendered consumer, and as the flush target. Never sends
+ * pathPrefixes. Resolves whether the tags were purged; a failure is logged,
+ * never thrown.
  */
-export async function invokeCachedPurge(ctx: PurgeCtx, tags: readonly string[]): Promise<void> {
+export async function invokeCachedPurge(ctx: PurgeCtx, tags: readonly string[]): Promise<boolean> {
   const unique = [...new Set(tags.filter((t) => t.length > 0))];
-  if (unique.length === 0) return;
+  if (unique.length === 0) return true;
   try {
     const rpc = cachedPurgeRpc(ctx);
     if (rpc) {
@@ -60,13 +77,14 @@ export async function invokeCachedPurge(ctx: PurgeCtx, tags: readonly string[]):
       if (!result.success) {
         emitLog({ scope: 'hit-min-purge' }, { tags: unique, errors: result.errors ?? [] });
       }
-      return;
+      return result.success;
     }
     emitLog({ scope: 'hit-min-purge' }, { error: 'cache_purge_unavailable', tags: unique });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     emitLog({ scope: 'hit-min-purge' }, { error: message, tags: unique });
   }
+  return false;
 }
 
 function cachedPurgeRpc(ctx: PurgeCtx): CachedPurgeRpc | null {

@@ -4,13 +4,13 @@
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import sharp from 'sharp';
+import { brandLogoUrls } from '../src/og-render/brand-logo';
+import { findLogo } from '../src/og-render/find-logo';
+import type { LogoFetch } from '../src/og-render/logo';
+import type { ScoreOgFonts } from '../src/og-render/render';
 import { sha256Hex } from '../src/worker/audit-web/cache';
-import { brandLogoUrls } from '../src/worker/og/brand-logo';
-import { findLogo } from '../src/worker/og/find-logo';
-import type { LogoFetch } from '../src/worker/og/logo';
-import type { ScoreOgFonts } from '../src/worker/og/render';
 
-const FONT_DIR = new URL('../src/worker/og/fonts/', import.meta.url);
+const FONT_DIR = new URL('../src/og-render/fonts/', import.meta.url);
 const BRAND_ENDPOINT = 'https://api.context.dev/v1/brand/retrieve';
 
 async function fonts(): Promise<ScoreOgFonts> {

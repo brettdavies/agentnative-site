@@ -5,10 +5,10 @@
 import { beforeAll, describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { Resvg } from '@resvg/resvg-wasm';
+import { ensureScoreOgWasm } from '../src/og-render/render';
 import { renderScoreOgSvg, SCORE_OG_FONT, scoreOgEdition } from '../src/shared/score-og';
-import { ensureScoreOgWasm } from '../src/worker/og/render';
 
-const FONT_DIR = new URL('../src/worker/og/fonts/', import.meta.url);
+const FONT_DIR = new URL('../src/og-render/fonts/', import.meta.url);
 const UNKNOWN_FAMILY = 'No Such Family';
 
 let fonts: Uint8Array[] = [];
