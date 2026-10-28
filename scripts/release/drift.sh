@@ -44,7 +44,10 @@
 #   3. For each lockfile head carries (package-lock.json, bun.lock,
 #      Cargo.lock): every
 #      package head resolves newer than base, one line per package name so
-#      nested copies and hoisting moves never show. The count of base-newer
+#      nested copies and hoisting moves never show. Only resolved versions
+#      compare; a file:, workspace:, link: or git spec is left out. A copy
+#      head nests under a package base no longer carries is not counted,
+#      since base dropped what pulled it in. The count of base-newer
 #      packages (routine updates awaiting release) is reported for context.
 #
 # Exit codes:
@@ -112,7 +115,11 @@ fi
 readonly JQ_BIN
 
 readonly LOCKFILE_PATTERN='(^|/)(package-lock\.json|bun\.lock|Cargo\.lock)$'
-readonly VERSION_CARRIERS='Cargo.toml package.json pyproject.toml VERSION CHANGELOG.md'
+# Overridable from release.env, which _lib.sh sourced above. A workspace names
+# each member manifest and each member changelog here: the root list covers a
+# single-package repo, and a carrier this list omits is a file whose
+# release-time edit the gate silently treats as ordinary drift.
+readonly VERSION_CARRIERS="${VERSION_CARRIERS:-Cargo.toml package.json pyproject.toml VERSION CHANGELOG.md}"
 
 # Setup ----------------------------------------------------------------------
 
@@ -267,6 +274,23 @@ classify_file_at() {
   rm -rf "$tmp"
 }
 
+# Lines on one side of a diff between two files, marker stripped. `+` gives the
+# lines added going from the first file to the second, `-` the lines removed.
+#
+# `git diff --no-index` rather than diff's --unchanged-line-format family:
+# those belong to GNU diffutils, and BSD diff rejects them outright. The
+# rejection printed a usage message and produced no lines, so every line-level
+# containment check silently answered "nothing changed" on a BSD host, which
+# passed gates that should have failed. git is already a hard dependency here.
+diff_side() {
+  local marker="$1" left="$2" right="$3"
+  git diff --no-index --no-color -U0 -- "$left" "$right" 2>/dev/null \
+    | grep -E "^\\${marker}" \
+    | grep -vE "^\\${marker}{3}" \
+    | cut -c2-
+  return 0
+}
+
 # Returns 0 when every content line ADDED between ANCHOR_FILE and HEAD_FILE
 # is present in BASE_FILE and every content line REMOVED is absent from it.
 # When PATH names a package.json, the three copies are first rewritten in place
@@ -284,11 +308,11 @@ lines_contained() {
     grep -qxF -- "$line" "$base_file" && continue
     [[ $manifest -eq 1 ]] && dependency_covered "$line" "$base_file" && continue
     return 1
-  done < <(diff --unchanged-line-format= --old-line-format= --new-line-format='%L' "$anchor_file" "$head_file" || true)
+  done < <(diff_side + "$anchor_file" "$head_file")
   while IFS= read -r line; do
     [[ "$line" =~ ^[[:space:][:punct:]]*$ ]] && continue
     grep -qxF -- "$line" "$base_file" && return 1
-  done < <(diff --unchanged-line-format= --old-line-format='%L' --new-line-format= "$anchor_file" "$head_file" || true)
+  done < <(diff_side - "$anchor_file" "$head_file")
   return 0
 }
 
@@ -402,20 +426,21 @@ gate_github_dir() {
 
 # Gate 3: lockfile resolution ------------------------------------------------
 
-# Prints "name version scope" per package for the lockfile PATH at REF,
-# keeping only the highest version per name. scope is dev/runtime for npm
-# and crate for Cargo.
-lockfile_versions() {
+# Prints "key name version scope" per package entry in the lockfile PATH at
+# REF. key is the entry's lockfile path (npm's `node_modules/a/node_modules/b`,
+# Bun's `a/b`, a crate's name), which places a nested copy under the package
+# that pulled it in. scope is dev/runtime for npm and crate for Cargo.
+lockfile_entries() {
   local ref="$1" path="$2"
   case "$path" in
     *package-lock.json)
       git show "$ref:$path" | "$JQ_BIN" -r '.packages | to_entries[]
         | select(.key | contains("node_modules/"))
         | select(.value.version != null)
-        | "\(.key | sub(".*node_modules/"; "")) \(.value.version) \(if .value.dev then "dev" else "runtime" end)"'
+        | "\(.key) \(.key | sub(".*node_modules/"; "")) \(.value.version) \(if .value.dev then "dev" else "runtime" end)"'
       ;;
     *bun.lock)
-      # Each entry is `name: ["name@version", ...]`; the first element carries
+      # Each entry is `key: ["name@version", ...]`; the first element carries
       # the resolved version. Everything is "dev" or "runtime" by workspace
       # section, which the entry does not record, so scope is unknown.
       # Bun writes trailing commas, which jq and jaq reject; strip them
@@ -424,14 +449,39 @@ lockfile_versions() {
       git show "$ref:$path" | perl -0pe 's/,(\s*[}\]])/$1/g' | "$JQ_BIN" -r '.packages | to_entries[]
         | select(.value[0] | type == "string")
         | (.value[0] | capture("^(?<name>@?[^@]+)@(?<ver>[^@]+)$")) as $m
-        | "\($m.name) \($m.ver) pkg"'
+        | "\(.key) \($m.name) \($m.ver) pkg"'
       ;;
     *Cargo.lock)
       git show "$ref:$path" | awk -F'"' '
         /^name = /    { name = $2 }
-        /^version = / { if (name != "") { print name " " $2 " crate"; name = "" } }'
+        /^version = / { if (name != "") { print name " " name " " $2 " crate"; name = "" } }'
       ;;
-  esac | sort -k1,1 -k2,2V | awk '{ last[$1] = $0 } END { for (k in last) print last[k] }' | sort -k1,1
+  esac
+}
+
+# Prints "name version scope" per package for the lockfile PATH at REF,
+# keeping only the highest resolved version per name. A spec that is not a
+# version (file:, workspace:, link:, a git URL) has no order against a
+# registry version and is left out. With PARENT_REF, a nested entry counts
+# only when its parent's key exists in PARENT_REF's lockfile: a copy pulled in
+# by a package that side no longer carries is nothing it could have received.
+lockfile_versions() {
+  local ref="$1" path="$2" parent_ref="${3:-}" tmp
+  tmp=$(mktemp -d)
+  : >"$tmp/keys"
+  [[ -n "$parent_ref" ]] && lockfile_entries "$parent_ref" "$path" | cut -d' ' -f1 >"$tmp/keys"
+  lockfile_entries "$ref" "$path" >"$tmp/entries"
+  awk -v filter="${parent_ref:+1}" '
+    FILENAME == ARGV[1] { have[$1] = 1; next }
+    $3 !~ /^[0-9]/ { next }
+    filter && length($1) > length($2) && substr($1, length($1) - length($2)) == "/" $2 {
+      parent = substr($1, 1, length($1) - length($2) - 1)
+      sub(/\/?node_modules$/, "", parent)
+      if (parent != "" && !(parent in have)) next
+    }
+    { print $2, $3, $4 }' "$tmp/keys" "$tmp/entries" \
+    | sort -k1,1 -k2,2V | awk '{ last[$1] = $0 } END { for (k in last) print last[k] }' | sort -k1,1
+  rm -rf "$tmp"
 }
 
 # Runs the resolution comparison for one lockfile path.
@@ -456,7 +506,7 @@ compare_lockfile() {
     else
       base_newer=$((base_newer + 1))
     fi
-  done < <(join <(lockfile_versions "$BASE_REF" "$path") <(lockfile_versions "$HEAD_REF" "$path"))
+  done < <(join <(lockfile_versions "$BASE_REF" "$path") <(lockfile_versions "$HEAD_REF" "$path" "$BASE_REF"))
   if [[ $head_newer -eq 0 && $base_newer -eq 0 ]] \
     && [[ -z "$(lockfile_versions "$HEAD_REF" "$path" 2>/dev/null | head -1)" ]]; then
     gate_fail "$path" "parsed zero packages on $HEAD_REF; the lockfile format is not understood"
