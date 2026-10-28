@@ -21,35 +21,18 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 usage() { sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
-JSON=0
 ARGS=()
-# --help and --json apply wherever they sit, so a bad argument before them is
-# still reported in the form the caller asked for.
-for arg in "$@"; do
-  case "$arg" in
-    -h | --help)
-      usage
-      exit 0
-      ;;
-    --json) JSON=1 ;;
-  esac
-done
+og_prescan "$@"
 for arg in "$@"; do
   case "$arg" in
     --json) ;;
-    -*)
-      og_usage_error "$JSON" scripts/og/status.sh "unknown option '$arg'" \
-        "$(jq -cn --arg argument "$arg" '{argument: $argument}')"
-      ;;
+    -*) og_usage_error "unknown option '$arg'" "$arg" ;;
     *) ARGS+=("$arg") ;;
   esac
 done
-[[ ${#ARGS[@]} -eq 2 ]] \
-  || og_usage_error "$JSON" scripts/og/status.sh "expected <base-url> <target>, got ${#ARGS[@]} arguments" \
-    '{"argument":null}'
-[[ "${ARGS[0]}" =~ ^https?:// ]] \
-  || og_usage_error "$JSON" scripts/og/status.sh "'${ARGS[0]}' is not a base URL; pass the site as http:// or https://" \
-    "$(jq -cn --arg argument "${ARGS[0]}" '{argument: $argument}')"
+[[ ${#ARGS[@]} -eq 2 ]] || og_usage_error "expected <base-url> <target>, got ${#ARGS[@]} arguments"
+[[ "${ARGS[0]}" =~ ^https?:// ]] ||
+  og_usage_error "'${ARGS[0]}' is not a base URL; pass the site as http:// or https://" "${ARGS[0]}"
 BASE="${ARGS[0]%/}"
 TARGET="${ARGS[1]}"
 
