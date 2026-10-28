@@ -38,12 +38,14 @@ high-signal and inside budget.
 **SHOULD:**
 
 - A `--verbose` flag (or `-v` / `-vv`) escalates diagnostic detail when agents need to debug failures.
-- A `--limit` or `--max-results` flag lets callers request exactly the number of items they want.
+- *(Applies when: CLI has list-style commands.)* A `--limit` or `--max-results` flag lets callers request exactly the
+  number of items they want.
 - A `--timeout` flag bounds execution time. An agent waiting indefinitely on a hung network call cannot proceed.
 
 **MAY:**
 
-- Cursor-based pagination flags (`--after`, `--before`) for efficient traversal of large result sets.
+- *(Applies when: CLI returns paginated results.)* Cursor-based pagination flags (`--after`, `--before`) for efficient
+  traversal of large result sets.
 - Automatic verbosity reduction in non-TTY contexts (the same behavior `--quiet` explicitly requests).
 
 ## Evidence
