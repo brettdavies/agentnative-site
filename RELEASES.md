@@ -170,8 +170,8 @@ gh run watch <run-id> --exit-status
 bun x wrangler containers list                                  # STATE = ready
 
 # 8. Run every gate against the deployed release build. `all` includes `e2e`,
-#    the four live Playwright projects; nothing else exercises a browser or the
-#    edge cache classes.
+#    the four live Playwright projects plus the og-cards smoke; nothing else
+#    exercises a browser, the edge cache classes, or a drawn social card.
 scripts/release/preflight.sh all
 
 # 9. Open the PR. Scrub body in /tmp/ first.
@@ -498,7 +498,15 @@ Configure once per bucket (idempotent on the rule name):
 ```bash
 bun x wrangler r2 bucket lifecycle add anc-score-cache scores-7day-ttl scores/ --expire-days 7 -y
 bun x wrangler r2 bucket lifecycle add anc-score-cache-staging scores-7day-ttl scores/ --expire-days 7 -y
+bun x wrangler r2 bucket lifecycle add anc-score-cache og-30day-ttl og/ --expire-days 30 -y
+bun x wrangler r2 bucket lifecycle add anc-score-cache-staging og-30day-ttl og/ --expire-days 30 -y
 ```
+
+`og/` holds the scorecard social cards the Worker draws and the brand logos it found for them (`og/logo/`, including
+stored misses). Storing a card deletes the target's older cards, so the 30-day rule only bounds cards whose target
+stopped being requested; an expired card is drawn again on its next request. The brand-logo fallback reads
+`CONTEXT_DEV_API_KEY`, a `wrangler secret put` value on both Workers (1Password item `Context.dev API Key`, field
+`credential`); unset, cards skip that lookup and use the homepage's icon or the wordmark.
 
 Verify:
 

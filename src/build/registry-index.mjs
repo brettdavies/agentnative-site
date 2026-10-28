@@ -39,6 +39,9 @@ function projectRegistryEntry(tool, enrichment) {
   };
   if (tool.audit_profile) out.audit_profile = tool.audit_profile;
   if (tool.repo) out.repo = tool.repo;
+  // Homepage for the scorecard card's logo. https only: an http URL is never
+  // requested, and a GitHub repo field is not a logo source.
+  if (typeof tool.url === 'string' && tool.url.startsWith('https://')) out.url = tool.url;
   // The registry-fast-path response carries the latest scorecard's
   // version + anc_version + URL so the Worker can build the response
   // triad (spec_version + anc_version + auditor_url) and route the user

@@ -10,9 +10,11 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import { scoreJsonPath, scoreMarkdownPath, scorePath } from '../src/shared/audit-routes';
+import { SCORE_OG_TEMPLATE, scoreOgPath } from '../src/shared/score-og';
 import { _resetResultCaches, badgeAliasRedirect, handleResultRoute, type ResultEnv } from '../src/worker/audit/result';
 import { keyFor as webKeyFor } from '../src/worker/audit-web/cache';
 import { webEnvelope } from '../src/worker/audit-web/core';
+import { handleScoreOg } from '../src/worker/og/route';
 import { keyFor as cliKeyFor } from '../src/worker/score/cache';
 import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
 import { _resetShellTemplateCache } from '../src/worker/shell-template';
@@ -36,6 +38,10 @@ async function webRegistryJson(): Promise<string> {
 
 const SHELL_TEMPLATE = `<!doctype html><html><head><title>{{TITLE}}</title><meta name="description" content="{{DESCRIPTION}}" /><link rel="canonical" href="https://anc.dev{{CANONICAL_PATH}}" />
     {{ALTERNATES}}
+    <meta property="og:image" content="{{OG_IMAGE}}" />
+    <meta property="og:image:alt" content="{{OG_IMAGE_ALT}}" />
+    <meta name="twitter:image" content="{{OG_IMAGE}}" />
+    <meta name="twitter:card" content="summary_large_image" />
 </head><body><main>{{BODY}}</main><footer><a href="{{MARKDOWN_TWIN_PATH}}">This page as markdown</a></footer></body></html>`;
 
 const REGISTRY_INDEX = {
@@ -919,5 +925,63 @@ describe('review pins', () => {
     expect(html).not.toContain('<img');
     expect(html).not.toContain('onerror=1>');
     expect(html).toContain('&lt;img');
+  });
+});
+
+describe('scorecard social card', () => {
+  const R = `-r${SCORE_OG_TEMPLATE}`;
+
+  test('a website page and a live CLI page point og:image at the score the page shows', async () => {
+    const env = await seededEnv();
+    const web = await route('/score/anc.dev', env, { accept: 'text/html' });
+    expect(web.status).toBe(200);
+    const webHtml = await web.text();
+    const webImage = `https://anc.dev/og/score/anc.dev/s64-v${SPEC_VERSION}-d20260910${R}.png`;
+    expect(webHtml).toContain(`property="og:image" content="${webImage}"`);
+    expect(webHtml).toContain(`name="twitter:image" content="${webImage}"`);
+    expect(webHtml).toContain('summary_large_image');
+    expect(webHtml).toContain(`Anc scored 64% against spec v${SPEC_VERSION}.`);
+    const cli = await route('/score/ouch', env, { accept: 'text/html' });
+    const cliHtml = await cli.text();
+    expect(cliHtml).toContain(`https://anc.dev/og/score/ouch/s71-v${SPEC_VERSION}-t0.5.0${R}.png`);
+    expect(cliHtml).toContain('ouch scored 71%');
+  });
+
+  test('each page names the card the card route serves without a redirect', async () => {
+    const env = await makeEnv({
+      cache: {
+        [cliKeyFor('ouch', SPEC_VERSION)]: CLI_RECORD,
+        [cliKeyFor('o/r@feature', SPEC_VERSION)]: BRANCH_RECORD,
+        [await webKeyFor('https://anc.dev/', SPEC_VERSION)]: WEB_RECORD,
+        [await webKeyFor('https://seeded.dev/', SPEC_VERSION)]: {
+          ...WEB_RECORD,
+          target_url: 'https://seeded.dev/',
+          scored_at: '2026-10-01T23:59:59.000Z',
+        },
+      },
+    });
+    // A card stored under every key, so the card route answers from R2 instead of drawing.
+    const cards = {
+      ...env,
+      SCORE_CACHE: {
+        async get(key: string) {
+          if (!key.startsWith('og/score/')) return env.SCORE_CACHE.get(key);
+          return { customMetadata: {}, arrayBuffer: async () => new Uint8Array([0x89]).buffer };
+        },
+      },
+    };
+    const lanes: [string, string][] = [
+      ['anc.dev', `s64-v${SPEC_VERSION}-d20260910${R}`],
+      ['seeded.dev', `s64-v${SPEC_VERSION}-d20261001${R}`],
+      ['ouch', `s71-v${SPEC_VERSION}-t0.5.0${R}`],
+      ['o/r@feature', `s71-v${SPEC_VERSION}-gabcdef1${R}`],
+    ];
+    for (const [target, key] of lanes) {
+      const html = await (await route(scorePath(target), env, { accept: 'text/html' })).text();
+      const image = /<meta property="og:image" content="([^"]+)"/.exec(html)?.[1];
+      expect(image).toBe(`https://anc.dev${scoreOgPath(target, key)}`);
+      const card = await handleScoreOg(new Request(image as string), cards as never);
+      expect([target, card.status]).toEqual([target, 200]);
+    }
   });
 });

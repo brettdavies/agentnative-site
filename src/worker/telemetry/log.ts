@@ -21,6 +21,7 @@ export type LogScope =
   | 'notify.send_failed'
   | 'page.request'
   | 'scheduled'
+  | 'score.og'
   | 'score.outbound'
   | 'score.telemetry.write_failed'
   | 'score.tier'

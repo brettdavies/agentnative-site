@@ -90,6 +90,7 @@ export default defineConfig({
         /discoverability\.e2e\.ts/,
         /web-audit\.e2e\.ts/,
         /edge-hit\.e2e\.ts/,
+        /og-cards\.e2e\.ts/,
       ],
     },
     { name: 'mobile-android', use: { ...devices['Pixel 7'], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) }, testMatch: /flows\.e2e\.ts/ },
@@ -126,6 +127,13 @@ export default defineConfig({
       // workerd.
       use: { ...devices['Desktop Chrome'], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) },
       testMatch: /(?:mcp|discoverability)\.e2e\.ts/,
+    },
+    {
+      name: 'og-cards',
+      // Live scorecard-card smoke: audits fresh fixture hosts and checks each card's caching and logo tier. Run it
+      // through scripts/og/smoke.sh, which deploys the fixture Worker and passes its hosts in OG_FIXTURE_HOSTS.
+      use: { ...devices['Desktop Chrome'], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) },
+      testMatch: /og-cards\.e2e\.ts/,
     },
     {
       name: 'edge-hit',

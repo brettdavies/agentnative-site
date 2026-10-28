@@ -92,6 +92,13 @@ export type CliRecordLike = {
   scored_at?: string;
 };
 
+/** When a CLI scorecard was taken: the record's stamp, else the scorecard's own run start, else null. */
+export function cliScoredAt(record: { scored_at?: unknown; scorecard: unknown }): string | null {
+  if (typeof record.scored_at === 'string') return record.scored_at;
+  const started = (record.scorecard as { run?: { started_at?: unknown } } | null)?.run?.started_at;
+  return typeof started === 'string' ? started : null;
+}
+
 export type WebRecordLike = {
   spec_version: string;
   target_url: string;
@@ -121,7 +128,8 @@ function asCliScorecard(scorecard: unknown): CliScorecardLike {
   return typeof scorecard === 'object' && scorecard !== null ? (scorecard as CliScorecardLike) : {};
 }
 
-function scorePctOf(scorecard: unknown): number | undefined {
+/** The headline percent the page prints: the badge score, else the flat `score_pct`. */
+export function scorePctOf(scorecard: unknown): number | undefined {
   const pct = (scorecard as { badge?: { score_pct?: unknown }; score_pct?: unknown } | null)?.badge?.score_pct;
   if (typeof pct === 'number') return pct;
   const flat = (scorecard as { score_pct?: unknown } | null)?.score_pct;
@@ -208,14 +216,13 @@ export type CliEnvelopeInput = {
 export function buildCliEnvelope(input: CliEnvelopeInput): AuditEnvelope {
   const { record, origin, target } = input;
   const liveEnvelope = (urls: ResultUrls): AuditEnvelope => {
-    const scorecard = asCliScorecard(record.scorecard);
     const cached = input.cached ?? input.tier === 'cache';
     const envelope: AuditEnvelope = {
       kind: 'cli',
       tier: input.tier,
       target,
       ...urls,
-      freshness: freshnessFor('cli', cached, record.scored_at ?? scorecard.run?.started_at ?? null),
+      freshness: freshnessFor('cli', cached, cliScoredAt(record)),
       spec_version: record.spec_version,
       scorecard: record.scorecard,
       anc_version: record.anc_version,

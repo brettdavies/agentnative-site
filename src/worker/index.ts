@@ -29,6 +29,7 @@ import {
   MCP_SERVER_CARD_TYPE,
   SEP_1649_CARD_SEED_PATH,
 } from '../shared/mcp-discovery';
+import { isScoreOgPath } from '../shared/score-og';
 import { classifyGatewayRequest, detectMcpFormat, detectPreference } from './accept';
 import { type AuditApiEnv, handleAuditApi, isAuditApiPath } from './audit/api';
 import type { AuditJob } from './audit/job';
@@ -75,6 +76,7 @@ import {
   servedResponseFormat,
 } from './mcp/telemetry';
 import { notFoundHtml, notFoundMarkdown } from './not-found';
+import { handleScoreOg } from './og/route';
 import { SPEC_VERSION } from './spec-version.gen';
 import { LAKE_FRESHNESS_CRON, type LakeFreshnessEnv, runLakeFreshnessCheck } from './telemetry/lake-freshness';
 import { emitLog } from './telemetry/log';
@@ -207,6 +209,7 @@ export interface Env {
   // don't exercise the rescore path can stub a minimal env.
   WEB_RESCORE_WORKFLOW?: WebRescoreWorkflowBinding;
   WEB_RESCORE_SECRET?: string;
+  CONTEXT_DEV_API_KEY?: string;
   // Telemetry-lake freshness bindings. TELEMETRY_LAKE is the lake bucket
   // the daily cron lists for stall detection; TELEMETRY_ENVIRONMENT names
   // the deploy environment so the stall alert emails only from production
@@ -858,6 +861,10 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
     });
 
     return outgoing;
+  }
+
+  if (isScoreOgPath(pathname)) {
+    return handleScoreOg(request, env as ResultEnv, { waitUntil: (promise) => ctx.waitUntil(promise) });
   }
 
   if (isResultPath(pathname)) {

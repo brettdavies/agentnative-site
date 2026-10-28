@@ -6,7 +6,8 @@
   "include": ["files", "dependencies", "devDependencies", "unlisted"],
   // Entries import analysis cannot see: the src/client/*.ts entry modules are
   // bundled by path strings in src/build/01-assets.mjs, test files run by glob
-  // under bun test / playwright, and scripts/** are standalone CLIs. Build,
+  // under bun test / playwright, scripts/** are standalone CLIs, and the
+  // og-cards fixture Worker deploys from its own wrangler config. Build,
   // worker, playwright, and bun-setup entries come from knip's own detection.
   "entry": [
     "src/client/theme.ts",
@@ -23,6 +24,7 @@
     "tests/**/*.test.ts",
     "tests/e2e/**/*.e2e.ts",
     "tests/helpers/**/*.ts",
+    "tests/e2e/og-cards-fixture/worker.ts",
     "scripts/**/*.{mjs,ts}"
   ],
   "project": ["src/**", "tests/**", "scripts/**", "*.{ts,mjs}"],
