@@ -110,9 +110,9 @@ Two constraints shape the work. A cold render takes 10 to 12 s, above Discord's 
 - KTD3. **Card inputs travel with the request.** The site builds them with `loadScoreOgSubject` when it requests a render, because it holds `ASSETS`, the registry, and the records. The request carries the target, lane, card key, card fields, logo pages, and scored-at instant, and `RenderJob` stores them with its claim. The render Worker never reads site records.
 - KTD4. **Card key grammar: `s<pct>-v<spec>-<edition>-r<template>`.**
   - The edition is `d<YYYYMMDD>` for web (UTC, from `scored_at`).
-  - For CLI it is `t<tool version>`, sanitized to the key alphabet and hashed when it does not fit.
+  - For CLI it is `t<version>`: the version number in the tool's `--version` line (anc records the whole line), hyphens keyed as underscores, hashed to `h<8 hex>` when it does not fit the key alphabet, and absent when the line holds no version number.
   - For a branch target it is `g<short source sha>`.
-  - `r<template>` is one constant in `src/shared/score-og.ts`, bumped on any layout or motion change.
+  - `r<template>` is one constant in `src/shared/score-og.ts`, bumped on any change to the pixels a card draws; a fingerprint test over rendered cards fails until it is.
 
   One shared function computes the key, and the page, both routes, the render pass, and the build all call it. This replaces #461's `s<pct>-v<spec>`. #461 is unreleased, so only staging objects carry old keys, and the lifecycle rule clears them.
 - KTD5. **Clips get their own prefix, and pruning never deletes newer work.**
@@ -252,6 +252,7 @@ on RenderJob alarm(info) (set by a new claim, by a retry, or for cleanup):
 
 ### U1. Card key grammar and card edition
 
+- [x] Built in #461.
 - **Goal:** The card face shows the date or tool version, and every visible change mints a new key.
 - **Requirements:** R10, R11, R12; KTD4.
 - **Dependencies:** none. Lands inside PR #461.
@@ -261,15 +262,20 @@ on RenderJob alarm(info) (set by a new claim, by a retry, or for cleanup):
   - `src/worker/og/route.ts`
   - `src/worker/audit/result.ts`
   - `src/build/08-scorecards-emit.mjs`
-  - `src/build/registry-index.mjs`
+  - `src/worker/og/store.ts`
+  - `scripts/og/score-samples.ts`
   - `tests/score-og.test.ts`
   - `tests/score-og-route.test.ts`
+  - `tests/score-og-store.test.ts`
+  - `tests/score-og-agreement.test.ts`
   - `tests/audit-result-route.test.ts`
   - `tests/build.test.ts`
+  - `tests/e2e/og-cards.e2e.ts`
+  - `tests/e2e/score-og.e2e.ts`
 - **Approach:**
   1. Add an edition field to the card: a date, a tool version, or a branch SHA. Draw it in the footer where the spec version is today, and move the spec version into the image description.
   2. Replace `scoreOgKey` with one function over the subject that emits the KTD4 grammar. Extend `KEY_RE` and the path parser to match.
-  3. Feed the edition from each lane's record: web `scored_at`, live CLI `tool_version`, curated scorecard version, branch `source_sha`.
+  3. Feed the edition from each lane's record: web `scored_at`, live CLI `tool_version`, curated registry version, branch `source_sha`.
   4. Add the template-version constant.
 - **Patterns to follow:** `scoreOgKey` and `parseScoreOgPath` in `src/shared/score-og.ts`. `shortDate` in `src/shared/result-spine.ts` for the UTC date.
 - **Test scenarios:**
@@ -284,6 +290,7 @@ on RenderJob alarm(info) (set by a new claim, by a retry, or for cleanup):
 
 ### U2. Logo timeouts and safe pruning
 
+- [x] Built in #461.
 - **Goal:** A slow homepage cannot lock in the fallback tile, and an out-of-order store cannot delete a newer card.
 - **Requirements:** R11; KTD5, KTD6.
 - **Dependencies:** none. Lands inside PR #461.
