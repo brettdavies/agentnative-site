@@ -13,7 +13,7 @@ import type { RenderJob } from './render-job-do';
 export { RenderJob } from './render-job-do';
 
 /** Spacing between the alarms of one batch, so a curated pass starts its renders over a minute, not at once. */
-export const BATCH_ALARM_SPACING_MS = 400;
+const BATCH_ALARM_SPACING_MS = 400;
 
 export default class OgRender extends WorkerEntrypoint<RenderEnv> implements RenderService {
   async request(inputs: RenderInputs): Promise<RenderJobStatus> {
