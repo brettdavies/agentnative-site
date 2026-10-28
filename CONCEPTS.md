@@ -311,6 +311,15 @@ An entry in the standards manifest: an external specification artifact the regis
 source type, pinned value, and canonicalization rule. The scheduled spec-drift poll compares each watched source against
 its pin and opens one issue per drifted source.
 
+## Social cards
+
+### Curated pass
+
+The batch that asks for a scorecard clip for every curated CLI card and every seeded website card whose clip is missing
+or stale. It runs after each deploy and on the weekly schedule, because curated cards change with a deploy or age out
+without an audit to ask for them; live audits ask for their own clips as they finish. While the og:video switch is off
+the pass asks for nothing and still reports success, so turning the switch on is followed by running the pass by hand.
+
 ## Agent discovery
 
 ### MCP endpoint
