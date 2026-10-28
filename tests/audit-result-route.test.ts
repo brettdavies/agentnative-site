@@ -1106,7 +1106,7 @@ describe('scorecard clip', () => {
     expect(render.calls).toEqual([]);
   });
 
-  test('a status call that fails or takes longer than 250 ms reads none and never fails the page', async () => {
+  test('a status call that fails or takes longer than 250 ms reads unknown and never fails the page', async () => {
     const failing = fakeRender({
       status: async () => {
         throw new Error('render Worker down');
@@ -1117,7 +1117,8 @@ describe('scorecard clip', () => {
       const started = Date.now();
       const res = await route('/score/anc.dev', await seededEnv({ render, ogVideo: 'true' }), html);
       expect(res.status).toBe(200);
-      expect(res.headers.get('x-anc-clip')).toBe('none');
+      expect(res.headers.get('x-anc-clip')).toBe('unknown');
+      expect(res.headers.get('x-anc-clip-run')).toBeNull();
       expect(Date.now() - started).toBeLessThan(2_000);
     }
   });

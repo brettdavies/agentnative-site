@@ -5,11 +5,12 @@
 //
 // `x-anc-clip` tells an operator why a page names no clip: `present`, the
 // switch is `off`, the RenderJob's state (`queued`, `rendering`, `failed`),
-// or `none` when no job answers. The job is asked only when the clip is
-// absent, within 250 ms, because a Durable Object answers from one location
-// and a page served far from it pays the round trip. A live or failed job
-// also sends its run id as `x-anc-clip-run`, the id its og.render log records
-// carry.
+// `none` when no job holds the card, or `unknown` when the job did not answer.
+// The job is asked only when the clip is absent, within 250 ms, because a
+// Durable Object answers from one location and a page served far from it pays
+// the round trip; a job drawing frames can also answer late. A live or failed
+// job also sends its run id as `x-anc-clip-run`, the id its og.render log
+// records carry.
 
 import { escHtml } from '../../shared/esc-html';
 import type { RenderJobState } from '../../shared/og-render';
@@ -27,7 +28,7 @@ import { headClip } from './store';
 
 const STATUS_BUDGET_MS = 250;
 
-type ClipHeader = 'present' | 'off' | 'none' | 'queued' | 'rendering' | 'failed';
+type ClipHeader = 'present' | 'off' | 'none' | 'unknown' | 'queued' | 'rendering' | 'failed';
 
 export type PageClip = { metaHtml: string; headers: Record<string, string> };
 
@@ -50,7 +51,8 @@ export async function pageClip(env: OgVideoEnv, target: string, key: string): Pr
   }
   if (!ogVideoEnabled(env)) return { metaHtml: '', headers: { 'x-anc-clip': 'off' } };
   const status = await jobStatus(env, target, key);
-  if (!status || status.state === 'none') return { metaHtml: '', headers: { 'x-anc-clip': 'none' } };
+  if (!status) return { metaHtml: '', headers: { 'x-anc-clip': 'unknown' } };
+  if (status.state === 'none') return { metaHtml: '', headers: { 'x-anc-clip': 'none' } };
   const header = JOB_HEADER[status.state];
   const headers: Record<string, string> = { 'x-anc-clip': header };
   if (header !== 'none') headers['x-anc-clip-run'] = status.run;

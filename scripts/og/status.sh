@@ -103,6 +103,7 @@ else
     off) reason=switch-off message="OG_VIDEO_ENABLED is not set: $line" command="scripts/og/setup.sh $ENV_NAME --check" ;;
     queued | rendering) reason=clip-rendering message="the clip is on its way: $line" command="$(tail_cmd "$RENDER" "$run")" ;;
     failed) reason=clip-failed message="the RenderJob failed its last retry: $line" command="$(tail_cmd "$RENDER" "$run")" ;;
+    unknown) reason=clip-unknown message="the RenderJob did not answer the page within 250 ms; ask again: $line" command="scripts/og/status.sh $BASE $TARGET" ;;
     *) reason=clip-missing message="no RenderJob answered for the current card: $line" command="$(tail_cmd "$SITE" score.og)" ;;
   esac
 fi

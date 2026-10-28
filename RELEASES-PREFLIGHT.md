@@ -563,10 +563,11 @@ that environment's Worker. `scripts/og/status.sh <base> <target>` prints all of 
 | `secret-missing` | 12 | | `CONTEXT_DEV_API_KEY` is not set on the render Worker. | `scripts/og/setup.sh <env>` |
 | `site-secret-present` | 13 | | The site Worker still holds `CONTEXT_DEV_API_KEY`. | `scripts/og/setup.sh <env>` |
 | `switch-off` | 14 | `off` | `OG_VIDEO_ENABLED` is not set on the site Worker, so no render is asked for; `setup.sh` prints the flip command. | `scripts/og/setup.sh <env> --check` |
-| `clip-missing` | 20 | `none` | No RenderJob answered for the current card: no render was asked for, or the status call failed. | `bunx wrangler tail <site-worker> --format json --search score.og` |
+| `clip-missing` | 20 | `none` | No render was asked for the current card, or its job ended without a stored clip. | `bunx wrangler tail <site-worker> --format json --search score.og` |
 | `clip-rendering` | 21 | `queued`, `rendering` | The RenderJob is waiting for its alarm, or drawing or encoding the clip. | `bunx wrangler tail <render-worker> --format json --search <run>` |
 | `clip-failed` | 22 | `failed` | The RenderJob failed its last retry; its `og.render` records carry the error and the binding code. | `bunx wrangler tail <render-worker> --format json --search <run>` |
 | `card-fallback` | 23 | | The render Worker could not draw the card, and the site served its default card. | `bunx wrangler tail <site-worker> --format json --search fallback` |
+| `clip-unknown` | 24 | `unknown` | The RenderJob did not answer the page's status call within 250 ms, as happens while it draws frames; the next fetch asks again. | `scripts/og/status.sh <base> <target>` |
 | `wrangler-failed` | 30 | | wrangler could not list queues or secrets: it is not logged in, or lacks Queues or Workers access. | `bunx wrangler whoami` |
 
 **A zero count is a failure, not a pass.** Playwright refuses an entire project on a configuration error — a duplicate

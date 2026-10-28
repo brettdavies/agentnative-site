@@ -33,9 +33,15 @@ export const CLIP_CAUSES: Readonly<Record<string, ClipCause>> = {
     cause: 'the RenderJob failed its last retry; its og.render records carry the error and the binding code',
     command: 'bunx wrangler tail <render-worker> --format json --search <run>',
   },
+  unknown: {
+    reason: 'clip-unknown',
+    cause:
+      "the RenderJob did not answer the page's status call within 250 ms, as happens while it draws frames; the next fetch asks again",
+    command: 'scripts/og/status.sh <base> <target>',
+  },
   none: {
     reason: 'clip-missing',
-    cause: 'no RenderJob answered for the current card: no render was asked for, or the status call failed',
+    cause: 'no render was asked for the current card, or its job ended without a stored clip',
     command: 'bunx wrangler tail <site-worker> --format json --search score.og',
   },
 };

@@ -231,8 +231,9 @@ its messages after 60 s, then 120 s, up to 300 s; the sixth refusal acknowledges
 **Diagnostic headers.** Every card PNG response carries `x-anc-card` (`drawn`, `stored`, or `fallback` when the render
 Worker could not draw and the site-wide card was served) and, for a drawn or stored card, `x-anc-card-logo` (`homepage`,
 `brand`, `stored`, `tile`). A scorecard page carries `x-anc-clip`: `present`, `off`, the job's state (`queued`,
-`rendering`, `failed`), or `none`; a live or failed job adds `x-anc-clip-run`, the run id its `og.render` log records
-carry. Read both from a `?v=` fetch, which is served uncached.
+`rendering`, `failed`), `none` when no job holds the card, or `unknown` when the job did not answer within 250 ms; a live
+or failed job adds `x-anc-clip-run`, the run id its `og.render` log records carry. Read both from a `?v=` fetch, which
+is served uncached.
 
 **Commands.**
 

@@ -17,6 +17,7 @@ clip-missing 20 inspect
 clip-rendering 21 wait
 clip-failed 22 inspect-logs
 card-fallback 23 inspect-logs
+clip-unknown 24 wait
 wrangler-failed 30 run'
 
 OG_DOCS='https://github.com/brettdavies/agentnative-site/blob/dev/RELEASES-PREFLIGHT.md#ogvideo-reason-codes'
