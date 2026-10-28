@@ -40,7 +40,7 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "opt_out",
-      "evidence": "no --output/--format flag detected in any subcommand — tool does not ship structured output.",
+      "evidence": "no option definition in --help, or in the --help of the 5 subcommands read, declares --output, --format, --output-format, --json or --jsonl, the flags this requirement accepts; a flag named only in a usage line does not count.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p2-json-output"
@@ -61,8 +61,8 @@
       "label": "Quiet mode available",
       "group": "P7",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "warn",
+      "evidence": "no option definition in --help declares --quiet or -q; a flag named only in a usage line does not count. `-q` is declared, but its definition (`-q, --query <QUERY>  Prepopulates the search field`) does not mean quiet.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p7-quiet"
@@ -117,7 +117,7 @@
       "group": "P6",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "no pager signal (less/more/$PAGER/--pager) in --help",
+      "evidence": "no pager signal ($PAGER, --pager, pager, or less/more named as a program) in --help",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p6-no-pager-behavioral"
@@ -150,7 +150,7 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "n_a",
-      "evidence": "antecedent `p2-json-output` is opt_out: no --output/--format flag detected in any subcommand — tool does not ship structured output.",
+      "evidence": "antecedent `p2-json-output` is opt_out: no option definition in --help, or in the --help of the 5 subcommands read, declares --output, --format, --output-format, --json or --jsonl, the flags this requirement accepts; a flag named only in a usage line does not count.",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p2-schema-print"
@@ -200,8 +200,8 @@
       "label": "Skill bundle has install path (`tool skill install [<host>]`)",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p8-bundle-install"
@@ -211,8 +211,8 @@
       "label": "`skill install --all` for multi-runtime install",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p8-install-all"
@@ -222,8 +222,8 @@
       "label": "`skill update` / `skill upgrade` for bundle refresh",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p8-bundle-update"
@@ -289,7 +289,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "no list-style subcommand detected (list/ls/search/query/find/show/get); vacuous skip for the list-only SHOULD.",
+      "evidence": "no list-style subcommand detected (list/ls/search/query/find, or a show/get whose summary describes several results); vacuous skip for the list-only SHOULD.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p7-limit"
@@ -300,7 +300,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "no list-style subcommand detected; vacuous skip for the list-only MAY.",
+      "evidence": "no list-style subcommand detected (list/ls/search/query/find, or a show/get whose summary describes several results); vacuous skip for the list-only MAY.",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p7-cursor-pagination"
@@ -366,7 +366,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "warn",
-      "evidence": "long-running subcommand present but no timeout flag advertised (looked for --timeout, --deadline, --max-time). SHOULD-tier — without a bound, agents that hit a hung operation have to enforce timeouts externally.",
+      "evidence": "no long-running subcommand advertises a timeout flag in its --help: Run (looked for --timeout, --deadline, --max-time). SHOULD-tier: without a bound, agents that hit a hung operation have to enforce timeouts externally.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p7-timeout-behavioral"
@@ -399,7 +399,7 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; MUST applies only to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); MUST applies only to CLIs that opt into the JSON contract.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p2-json-errors"
@@ -410,7 +410,7 @@
       "group": "P4",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; SHOULD applies only to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); SHOULD applies only to CLIs that opt into the JSON contract.",
       "confidence": "high",
       "tier": "should",
       "audit_id": "p4-json-error-output"
@@ -421,14 +421,14 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; envelope-consistency only applies to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); envelope-consistency only applies to CLIs that opt into the JSON contract.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p2-consistent-envelope"
     },
     {
       "id": "p3-must-subcommand-examples",
-      "label": "Each subcommand's `--help` ships at least one invocation example",
+      "label": "Each subcommand that takes arguments ships an invocation example in its `--help`",
       "group": "P3",
       "layer": "behavioral",
       "status": "fail",
@@ -506,11 +506,11 @@
   ],
   "summary": {
     "total": 44,
-    "pass": 14,
-    "warn": 14,
+    "pass": 10,
+    "warn": 15,
     "fail": 1,
     "opt_out": 1,
-    "n_a": 1,
+    "n_a": 4,
     "skip": 13,
     "error": 0
   },
@@ -531,19 +531,19 @@
   "audience": null,
   "audience_reason": "suppressed",
   "audit_profile": "human-tui",
-  "spec_version": "0.5.0",
+  "spec_version": "0.6.0",
   "tool": {
     "name": "navi",
     "binary": "navi",
     "version": "navi 2.24.0"
   },
   "anc": {
-    "version": "0.6.0"
+    "version": "0.7.0"
   },
   "run": {
     "invocation": "anc audit --command navi --audit-profile human-tui --output json",
-    "started_at": "2026-10-05T18:44:51.095686108Z",
-    "duration_ms": 113,
+    "started_at": "2026-10-28T15:55:13.254814452Z",
+    "duration_ms": 114,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -555,9 +555,9 @@
     "command": "navi"
   },
   "badge": {
-    "eligible": true,
-    "score_pct": 70,
-    "embed_markdown": "[![agent-native](https://anc.dev/badge/navi.svg)](https://anc.dev/score/navi)",
+    "eligible": false,
+    "score_pct": 65,
+    "embed_markdown": null,
     "scorecard_url": "https://anc.dev/score/navi",
     "badge_url": "https://anc.dev/badge/navi.svg",
     "convention_url": "https://anc.dev/badge"

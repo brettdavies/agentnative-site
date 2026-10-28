@@ -40,7 +40,7 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "opt_out",
-      "evidence": "no --output/--format flag detected in any subcommand — tool does not ship structured output.",
+      "evidence": "no option definition in --help, or in the --help of the 4 subcommands read, declares --output, --format, --output-format, --json or --jsonl, the flags this requirement accepts; a flag named only in a usage line does not count.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p2-json-output"
@@ -62,7 +62,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "warn",
-      "evidence": "no --quiet/-q flag detected in --help output",
+      "evidence": "no option definition in --help declares --quiet or -q; a flag named only in a usage line does not count.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p7-quiet"
@@ -116,8 +116,8 @@
       "label": "Pager-using CLI ships --no-pager escape hatch",
       "group": "P6",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "pager referenced in --help but no --no-pager escape hatch advertised",
+      "status": "skip",
+      "evidence": "no pager signal ($PAGER, --pager, pager, or less/more named as a program) in --help",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p6-no-pager-behavioral"
@@ -150,7 +150,7 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "n_a",
-      "evidence": "antecedent `p2-json-output` is opt_out: no --output/--format flag detected in any subcommand — tool does not ship structured output.",
+      "evidence": "antecedent `p2-json-output` is opt_out: no option definition in --help, or in the --help of the 4 subcommands read, declares --output, --format, --output-format, --json or --jsonl, the flags this requirement accepts; a flag named only in a usage line does not count.",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p2-schema-print"
@@ -201,8 +201,8 @@
       "label": "Skill bundle has install path (`tool skill install [<host>]`)",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p8-bundle-install"
@@ -212,8 +212,8 @@
       "label": "`skill install --all` for multi-runtime install",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p8-install-all"
@@ -223,8 +223,8 @@
       "label": "`skill update` / `skill upgrade` for bundle refresh",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p8-bundle-update"
@@ -290,7 +290,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "no list-style subcommand detected (list/ls/search/query/find/show/get); vacuous skip for the list-only SHOULD.",
+      "evidence": "no list-style subcommand detected (list/ls/search/query/find, or a show/get whose summary describes several results); vacuous skip for the list-only SHOULD.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p7-limit"
@@ -301,7 +301,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "no list-style subcommand detected; vacuous skip for the list-only MAY.",
+      "evidence": "no list-style subcommand detected (list/ls/search/query/find, or a show/get whose summary describes several results); vacuous skip for the list-only MAY.",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p7-cursor-pagination"
@@ -400,7 +400,7 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; MUST applies only to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); MUST applies only to CLIs that opt into the JSON contract.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p2-json-errors"
@@ -411,7 +411,7 @@
       "group": "P4",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; SHOULD applies only to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); SHOULD applies only to CLIs that opt into the JSON contract.",
       "confidence": "high",
       "tier": "should",
       "audit_id": "p4-json-error-output"
@@ -422,14 +422,14 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; envelope-consistency only applies to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); envelope-consistency only applies to CLIs that opt into the JSON contract.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p2-consistent-envelope"
     },
     {
       "id": "p3-must-subcommand-examples",
-      "label": "Each subcommand's `--help` ships at least one invocation example",
+      "label": "Each subcommand that takes arguments ships an invocation example in its `--help`",
       "group": "P3",
       "layer": "behavioral",
       "status": "pass",
@@ -507,12 +507,12 @@
   ],
   "summary": {
     "total": 44,
-    "pass": 18,
-    "warn": 13,
+    "pass": 15,
+    "warn": 12,
     "fail": 0,
     "opt_out": 1,
-    "n_a": 1,
-    "skip": 11,
+    "n_a": 4,
+    "skip": 12,
     "error": 0
   },
   "coverage_summary": {
@@ -531,19 +531,19 @@
   },
   "audience": "agent-optimized",
   "audit_profile": null,
-  "spec_version": "0.5.0",
+  "spec_version": "0.6.0",
   "tool": {
     "name": "gitleaks",
     "binary": "gitleaks",
     "version": "gitleaks version 8.30.1"
   },
   "anc": {
-    "version": "0.6.0"
+    "version": "0.7.0"
   },
   "run": {
     "invocation": "anc audit --command gitleaks --output json",
-    "started_at": "2026-10-05T18:42:40.812178218Z",
-    "duration_ms": 127,
+    "started_at": "2026-10-28T15:53:10.991648329Z",
+    "duration_ms": 129,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -556,7 +556,7 @@
   },
   "badge": {
     "eligible": true,
-    "score_pct": 77,
+    "score_pct": 75,
     "embed_markdown": "[![agent-native](https://anc.dev/badge/gitleaks.svg)](https://anc.dev/score/gitleaks)",
     "scorecard_url": "https://anc.dev/score/gitleaks",
     "badge_url": "https://anc.dev/badge/gitleaks.svg",

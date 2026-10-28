@@ -40,7 +40,7 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "opt_out",
-      "evidence": "no --output/--format flag detected in any subcommand — tool does not ship structured output.",
+      "evidence": "no option definition in --help, or in the --help of the 22 subcommands read, declares --output, --format, --output-format, --json or --jsonl, the flags this requirement accepts; a flag named only in a usage line does not count.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p2-json-output"
@@ -62,7 +62,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "warn",
-      "evidence": "no --quiet/-q flag detected in --help output",
+      "evidence": "no option definition in --help declares --quiet or -q; a flag named only in a usage line does not count.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p7-quiet"
@@ -117,7 +117,7 @@
       "group": "P6",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "no pager signal (less/more/$PAGER/--pager) in --help",
+      "evidence": "no pager signal ($PAGER, --pager, pager, or less/more named as a program) in --help",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p6-no-pager-behavioral"
@@ -150,7 +150,7 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "n_a",
-      "evidence": "antecedent `p2-json-output` is opt_out: no --output/--format flag detected in any subcommand — tool does not ship structured output.",
+      "evidence": "antecedent `p2-json-output` is opt_out: no option definition in --help, or in the --help of the 22 subcommands read, declares --output, --format, --output-format, --json or --jsonl, the flags this requirement accepts; a flag named only in a usage line does not count.",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p2-schema-print"
@@ -217,8 +217,8 @@
       "label": "Skill bundle has install path (`tool skill install [<host>]`)",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p8-bundle-install"
@@ -228,8 +228,8 @@
       "label": "`skill install --all` for multi-runtime install",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p8-install-all"
@@ -239,8 +239,8 @@
       "label": "`skill update` / `skill upgrade` for bundle refresh",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p8-bundle-update"
@@ -306,7 +306,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "warn",
-      "evidence": "list-style subcommand present but no limit flag advertised (looked for --limit, --max-results, --max, --top, -n). SHOULD-tier — callers should be able to bound response size directly rather than scrape-then-truncate.",
+      "evidence": "list-style subcommand(s) with no limit flag in their --help: list (looked for --limit, --max-results, --max, --top, or a -n that bounds a count). SHOULD-tier: callers should be able to bound response size directly rather than scrape-then-truncate.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p7-limit"
@@ -317,7 +317,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "warn",
-      "evidence": "list-style subcommand present but no cursor/page flag advertised (looked for --after, --before, --cursor, --page, --offset). MAY-tier — cursor pagination lets agents traverse large result sets without re-scanning earlier pages.",
+      "evidence": "no list-style subcommand advertises a cursor/page flag in its --help: list (looked for --after, --before, --cursor, --page, --offset). MAY-tier: cursor pagination lets agents traverse large result sets without re-scanning earlier pages.",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p7-cursor-pagination"
@@ -360,8 +360,8 @@
       "label": "Input-accepting commands read from stdin when no file is given",
       "group": "P6",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "input-accepting subcommand present but `--help` does not mention stdin or `-` as a path placeholder. SHOULD-tier — agents piping data into the tool expect stdin to work when no file arg is provided.",
+      "status": "pass",
+      "evidence": "every input-accepting subcommand's --help mentions stdin: format (standard input).",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p6-stdin-input"
@@ -416,7 +416,7 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; MUST applies only to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); MUST applies only to CLIs that opt into the JSON contract.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p2-json-errors"
@@ -427,7 +427,7 @@
       "group": "P4",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; SHOULD applies only to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); SHOULD applies only to CLIs that opt into the JSON contract.",
       "confidence": "high",
       "tier": "should",
       "audit_id": "p4-json-error-output"
@@ -438,18 +438,18 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; envelope-consistency only applies to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); envelope-consistency only applies to CLIs that opt into the JSON contract.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p2-consistent-envelope"
     },
     {
       "id": "p3-must-subcommand-examples",
-      "label": "Each subcommand's `--help` ships at least one invocation example",
+      "label": "Each subcommand that takes arguments ships an invocation example in its `--help`",
       "group": "P3",
       "layer": "behavioral",
       "status": "fail",
-      "evidence": "subcommands missing example invocations in their `--help`: colorcheck, complement, darken, desaturate, distinct, gray, lighten, list, paint, pick, rotate, saturate, textcolor, to-gray. Examples teach agents the call shape faster than option tables; use clap's `after_help` or a dedicated `Examples:` block.",
+      "evidence": "subcommands missing example invocations in their `--help`: complement, darken, desaturate, distinct, gray, lighten, list, paint, pick, rotate, saturate, textcolor, to-gray. Examples teach agents the call shape faster than option tables; use clap's `after_help` or a dedicated `Examples:` block. exempt: colorcheck (take no arguments).",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p3-subcommand-examples"
@@ -523,11 +523,11 @@
   ],
   "summary": {
     "total": 44,
-    "pass": 19,
-    "warn": 14,
+    "pass": 17,
+    "warn": 13,
     "fail": 1,
     "opt_out": 1,
-    "n_a": 1,
+    "n_a": 4,
     "skip": 8,
     "error": 0
   },
@@ -547,19 +547,19 @@
   },
   "audience": "agent-optimized",
   "audit_profile": null,
-  "spec_version": "0.5.0",
+  "spec_version": "0.6.0",
   "tool": {
     "name": "pastel",
     "binary": "pastel",
     "version": "pastel 0.12.0"
   },
   "anc": {
-    "version": "0.6.0"
+    "version": "0.7.0"
   },
   "run": {
     "invocation": "anc audit --command pastel --output json",
-    "started_at": "2026-10-05T18:44:52.147370993Z",
-    "duration_ms": 299,
+    "started_at": "2026-10-28T15:55:14.406713617Z",
+    "duration_ms": 300,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -572,7 +572,7 @@
   },
   "badge": {
     "eligible": true,
-    "score_pct": 74,
+    "score_pct": 73,
     "embed_markdown": "[![agent-native](https://anc.dev/badge/pastel.svg)](https://anc.dev/score/pastel)",
     "scorecard_url": "https://anc.dev/score/pastel",
     "badge_url": "https://anc.dev/badge/pastel.svg",
