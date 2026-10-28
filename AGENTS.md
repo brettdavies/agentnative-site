@@ -239,6 +239,12 @@ scripts/og/status.sh <base-url> <target> [--json] # one line per scorecard: card
 scripts/og/smoke.sh <base-url>                    # live card and clip smoke on fresh fixture hosts
 ```
 
+Both og scripts print prose by default and, with `--json`, one object
+`{reason, exit_code, message, value, next_step: {action, command, docs}}` whose reason comes from the closed set in
+`RELEASES-PREFLIGHT.md`. `status.sh` reads the environment from the base URL (`anc.dev` is production, anything else
+staging) and needs `ANC_STAGING_ACCESS_CLIENT_ID` and `ANC_STAGING_ACCESS_CLIENT_SECRET` exported to read staging
+through Cloudflare Access.
+
 ## Voice
 
 The site speaks as a **standard**, not a person. Think RFC, not blog post.
