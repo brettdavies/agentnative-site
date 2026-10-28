@@ -46,14 +46,13 @@ catastrophically later.
 **SHOULD:**
 
 - JSON output uses a consistent envelope (a top-level object with predictable keys) across every command so agents can
-  rely on the same shape. Passthrough tools whose value is the user's own JSON (`jq`, `dasel`) are exempt; the envelope
-  applies to commands that emit tool-defined data.
-- *(Applies when: CLI emits structured output.)* The same schema is also exported to a stable file path (e.g.,
-  `schema/<command>.json` in the release artifact). Runtime discovery covers ad-hoc inspection; the file path lets CI
-  and static-analysis consumers pin the schema without invoking the tool.
+  rely on the same shape.
+- *(Applies when: CLI emits structured output.)* The same schema is also exported to a stable file path in the source
+  repo (e.g., `schema/<command>.json`), so consumers pin against it at install or CI time without invoking the tool. The
+  runtime schema is the runtime contract; the file is the build-time contract.
 - `--json` and `--jsonl` are accepted as aliases for `--output json` and `--output jsonl`. The `--output` enum remains
-  the canonical surface for `p2-must-output-flag`; a CLI shipping only the short forms still satisfies the canonical
-  MUST through the alias path.
+  the canonical surface for the format MUST above; a CLI shipping only the short forms still satisfies that MUST through
+  the alias path.
 
 **MAY:**
 

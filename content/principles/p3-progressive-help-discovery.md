@@ -26,15 +26,15 @@ The principle is framework-agnostic. `clap`'s `after_help` is the worked example
   `after_help` attribute. A subcommand whose `--help` shows no positional argument (a nested command list counts as one)
   and no option beyond `-h`/`--help` and the global flags every subcommand inherits is exempt: its usage line
   (`tool version`, `tool logout`) is its whole call shape, so an example would repeat it.
-- The top-level command ships at least one concrete example, and 2–3 when the tool has multiple primary use cases.
+- The top-level command ships 2–3 concrete examples covering the primary use cases.
 - The top-level command responds to `--version` with a non-empty version line on stdout and exits 0. Agents pin against
   tool versions to detect breaking changes; a `--version` that errors, exits non-zero, or prints nothing forces every
   consumer to scrape the binary path or manifest for a clue.
 
 **SHOULD:**
 
-- When the CLI exposes a structured-output mode (see [P2](/p2)), examples show human and agent invocations side by side:
-  a text-output example followed by its `--output json` equivalent. Readers see the pair; agents see the JSON form.
+- Examples show human and agent invocations side by side: a text-output example followed by its `--output json`
+  equivalent (see [P2](/p2)). Readers see the pair; agents see the JSON form.
 - Short `about` for command-list summaries; `long_about` reserved for detailed descriptions visible with `--help` but
   not `-h`.
 - A short alias for `--version` works: `-V` (clap default; `curl`, `wget`, `gzip`), `-v` (`npm`, `node`, `bun`, `yarn`,

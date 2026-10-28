@@ -38,8 +38,7 @@ tool a building block rather than a dead end.
   suppressed automatically.
 - Shell completions available via a `completions` subcommand (clap_complete in Rust; equivalents elsewhere). This is a
   Tier 1 meta-command: it works without config, auth, or network.
-- *(Applies when: CLI makes network calls.)* A `--timeout` flag with a sensible default (30 seconds is the canonical
-  recommendation for typical request/response operations; longer for streaming or upload commands). Agents operating
+- *(Applies when: CLI makes network calls.)* A `--timeout` flag with a sensible default (30 seconds). Agents operating
   under their own time budgets need to fail fast rather than block on a slow upstream.
 - *(Applies when: CLI invokes a pager for output.)* Support `--no-pager` or respect `PAGER=""`. Pagers block headless
   execution indefinitely.
@@ -53,9 +52,9 @@ tool a building block rather than a dead end.
 **SHOULD:**
 
 - Commands that accept input read from stdin when no file argument is provided. Pipeline composition depends on it.
-- Pick one subcommand-naming convention and apply it consistently: `noun verb`, `verb noun`, or verb-only at the top
-  level (e.g., `git commit`, `git push`). Mixing kebab-case compound verbs (`list-users`) with nested noun-verb (`user
-  show`) in the same tool forces agents to learn exceptions.
+- *(Applies when: CLI uses subcommands.)* Subcommand naming follows one consistent grammar (`noun verb` or `verb noun`)
+  throughout the tool. Mixed patterns (`list-users` alongside `user show`) force agents to memorize exceptions instead
+  of applying a rule.
 - Three-tier dependency gating: Tier 1 (meta-commands like `completions`, `version`) needs nothing; Tier 2 (local
   commands) needs config; Tier 3 (network commands) needs config + auth. `completions` and `version` always work, even
   in broken environments.

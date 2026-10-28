@@ -32,9 +32,8 @@ high-signal and inside budget.
   ```
 
 - *(Applies when: CLI has list-style commands.)* List operations clamp to a documented default maximum. A `list` without
-  `--limit` does not return more than a configurable ceiling (e.g., 100 items), and that ceiling is named in `--help` so
-  callers can plan around it. If more items exist, the output indicates truncation: `"truncated": true` in JSON, a
-  stderr note in text mode.
+  `--limit` does not return more than a configurable ceiling (e.g., 100 items). If more items exist, the output indicates
+  truncation: `"truncated": true` in JSON, a stderr note in text mode.
 
 **SHOULD:**
 
@@ -49,8 +48,7 @@ high-signal and inside budget.
 
 ## Evidence
 
-- A `--quiet` flag that respects both CLI and environment-variable input, with explicit override semantics (e.g.,
-  `--quiet=false` beats `QUIET=1`).
+- A `--quiet` flag with a falsey-value parser and an env-var binding.
 - A diagnostic macro (or equivalent gate) that short-circuits when `quiet` is true.
 - `--limit` or `--max-results` on every list / search command.
 - Pagination clamping logic (e.g., `min(requested, MAX_RESULTS)`).
