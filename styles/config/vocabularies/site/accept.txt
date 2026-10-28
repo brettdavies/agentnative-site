@@ -36,6 +36,7 @@ Lazygit
 Lc
 Linuxbrew
 MAYs
+MUSTs
 Makefiles
 Mintlify
 Monaspace
