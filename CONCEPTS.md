@@ -62,10 +62,15 @@ not skip this Worker.
 
 ### HIT-1d / HIT-min / MISS
 
-Three edge classes for this site. HIT-1d is bake-at-build (about a day of freshness, empty cache on a new Worker
-version). HIT-min is live-board HTML and markdown (`max-age=300`, purge by Cache-Tag when R2 is rewritten). MISS is
-every-request `no-store` (`/web/scoring*`, POST `/mcp`, `/api/score`, `/api/audit-web`). Homepage HTML and homepage
-markdown share HIT-min because they are one object that includes the live web pane.
+The three classes the format-class edge cache sorts a negotiated page into. HIT-1d holds bake-at-build pages, curated
+scorecard pages included, for about a day and starts empty on a new Worker version. HIT-min holds live pages (the
+homepage, the leaderboard, live and website scorecards) for minutes, and browsers revalidate on every view. MISS is
+never stored: error responses, the progress page, and a fetch made to bypass the cache.
+
+A stored page can carry a Cache-Tag naming what it shows, and a purge by that tag evicts it early: a HIT-min page when
+the data behind it is rewritten, a curated HIT-1d scorecard page when its social clip lands. Every purge draws on one
+small account-wide purge budget, so purges are batched. Homepage HTML and homepage markdown share HIT-min because they
+are one object that includes the live web pane.
 
 ## Audit funnel
 
