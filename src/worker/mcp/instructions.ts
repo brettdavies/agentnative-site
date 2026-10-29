@@ -59,7 +59,9 @@ function buildInstructionsText(siteUrl: string): string {
     'Every read and transact tool returns the one result envelope: { kind, tier, target, scorecard_url, ' +
       'markdown_url, json_url, freshness, spec_version, scorecard } plus the lane metadata. The same envelope is ' +
       `what ${siteUrl}${SCORE_PREFIX}<target>/json serves, so a tool result and the page an agent follows it to ` +
-      'cannot disagree. Follow scorecard_url for the page, markdown_url or json_url for the pinned twins.',
+      'cannot disagree. Follow scorecard_url for the page, markdown_url or json_url for the pinned twins. The three ' +
+      'URLs are null for a result with no page: a live CLI run whose scorecard.summary.error is above 0 is never ' +
+      'saved, and neither is a website run that does not follow the hosts it declares.',
     'Errors carry on two layers. Tool-level failures return CallToolResult with isError: true plus a textual ' +
       'message; the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error ' +
       'envelopes at HTTP 200 (-32099 rate-limit breach at either limiter, ' +

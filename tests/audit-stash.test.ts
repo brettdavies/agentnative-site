@@ -89,6 +89,13 @@ describe('stash and take', () => {
     expect(takeInlineResult('ouch')).toBeNull();
   });
 
+  test('an inline result keeps the subline that says why it has no page; a record without one returns without it', () => {
+    stashInlineResult('fd', { html: '<article>errored</article>', follow: true, subline: 'not saved' });
+    expect(takeInlineResult('fd')).toEqual({ html: '<article>errored</article>', follow: true, subline: 'not saved' });
+    sessionStorage.setItem('audit-inline:ouch', JSON.stringify({ html: '<article>body</article>', follow: true }));
+    expect(takeInlineResult('ouch')).toEqual({ html: '<article>body</article>', follow: true });
+  });
+
   test('an inline result keeps the follow choice that produced it, so Run again repeats it after a refresh', () => {
     stashInlineResult('stripe.dev', { html: '<article>not saved</article>', follow: false });
     expect(takeInlineResult('stripe.dev')).toEqual({ html: '<article>not saved</article>', follow: false });

@@ -146,8 +146,12 @@ export function followOf(target: string, now: number = Date.now()): boolean | nu
   return readKept(FOLLOW_PREFIX + target, now, (record) => (typeof record.follow === 'boolean' ? record.follow : null));
 }
 
-/** A result body with no URL of its own, and the follow choice of the run that produced it. */
-export type InlineResult = { html: string; follow: boolean };
+/**
+ * A result body with no URL of its own, the follow choice of the run that
+ * produced it, and the subline that says why it has no page. A record kept
+ * without a subline restores under its lane's default.
+ */
+export type InlineResult = { html: string; follow: boolean; subline?: string };
 
 /** Keep a result body that has no URL of its own so a same-tab refresh can restore it. */
 export function stashInlineResult(target: string, result: InlineResult): void {
@@ -162,7 +166,10 @@ export function takeInlineResult(target: string): InlineResult | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as Partial<InlineResult>;
-    return typeof parsed.html === 'string' ? { html: parsed.html, follow: parsed.follow !== false } : null;
+    if (typeof parsed.html !== 'string') return null;
+    const result: InlineResult = { html: parsed.html, follow: parsed.follow !== false };
+    if (typeof parsed.subline === 'string') result.subline = parsed.subline;
+    return result;
   } catch {
     return null;
   }

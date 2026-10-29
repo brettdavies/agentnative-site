@@ -13,6 +13,7 @@
 // (R2 write failure logged but not surfaced) that fetch() relies on.
 
 import { describe, expect, test } from 'bun:test';
+import { buildCliEnvelope } from '../src/shared/audit-envelope';
 import type { InstallSpec } from '../src/worker/score/discover-binary';
 import { extractToolVersion, type ScoreSandboxEnv, writeCacheBestEffort } from '../src/worker/score/do';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
@@ -216,5 +217,61 @@ describe('writeCacheBestEffort — render request', () => {
       anc_version: ANC_VERSION,
     });
     expect(failedRender.calls).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// writeCacheBestEffort — errored audits
+// ---------------------------------------------------------------------------
+
+describe('writeCacheBestEffort — errored audits', () => {
+  const errored = { ...SCORECARD_WITH_VERSION, badge: { score_pct: 88 }, summary: { error: 2 } };
+
+  test('a scorecard that reports an errored audit is not written, purged, or rendered', async () => {
+    const { env, writes } = makeR2Stub();
+    const purged: string[][] = [];
+    const render = fakeRender();
+    await writeCacheBestEffort(
+      { ...env, RENDER: render, OG_VIDEO_ENABLED: 'true' },
+      SPEC,
+      { scorecard: errored, anc_version: ANC_VERSION },
+      async (tags) => {
+        purged.push(tags);
+      },
+    );
+    expect(writes).toHaveLength(0);
+    expect(purged).toEqual([]);
+    expect(render.calls).toEqual([]);
+  });
+
+  test('a branch run that reports an errored audit is not written either', async () => {
+    const { env, writes } = makeR2Stub();
+    const branch: InstallSpec = { pm: 'git-clone', owner: 'o', repo: 'r', branch: 'feature', binary: 'r' };
+    await writeCacheBestEffort(env, branch, { scorecard: errored, anc_version: ANC_VERSION, source_sha: 'abc1234' });
+    expect(writes).toHaveLength(0);
+  });
+
+  test('the cache write and the envelope agree on which runs have a page', async () => {
+    for (const scorecard of [SCORECARD_WITH_VERSION, errored]) {
+      const { env, writes } = makeR2Stub();
+      await writeCacheBestEffort(env, SPEC, { scorecard, anc_version: ANC_VERSION });
+      const envelope = buildCliEnvelope({
+        tier: 'live',
+        target: 'cowsay',
+        record: { spec_version: SPEC_VERSION, anc_version: ANC_VERSION, tool_version: '1.6.0', scorecard },
+        registry: { by_slug: {} },
+        origin: 'https://staging.example',
+      });
+      expect(envelope.scorecard_url !== null).toBe(writes.length === 1);
+    }
+  });
+
+  test('a scorecard whose error count is zero is written', async () => {
+    const { env, writes } = makeR2Stub();
+    await writeCacheBestEffort(env, SPEC, {
+      scorecard: { ...SCORECARD_WITH_VERSION, summary: { error: 0 } },
+      anc_version: ANC_VERSION,
+    });
+    expect(writes).toHaveLength(1);
   });
 });

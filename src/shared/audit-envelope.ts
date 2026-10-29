@@ -18,6 +18,9 @@
 //   a binary the route refuses ... no URL, summary_html instead (a reserved
 //                                   name, or a dotted name the classifier
 //                                   would read as a website host)
+//   an errored live run .......... no URL and no refresh_after, summary_html
+//                                   instead: the run is never saved,
+//                                   branch-scoped or not
 //   anything else ................ live: /score/<binary>
 //
 // A website result has a page unless it was never saved (a run that did not
@@ -28,6 +31,7 @@
 // registry entry owns no page, so its slug is neither a hit nor a shadow.
 
 import { isResultTarget, type Lane, laneOf, scoreJsonPath, scoreMarkdownPath, scorePath } from './audit-routes';
+import { hasErroredAudits } from './errored-audit';
 import { buildScorecardBody, escHtml } from './scorecard-format.mjs';
 
 export type AuditTier = 'registry' | 'cache' | 'live';
@@ -233,8 +237,18 @@ export function buildCliEnvelope(input: CliEnvelopeInput): AuditEnvelope {
     return envelope;
   };
 
+  // A record that was never written has no refresh window to advertise.
+  const unsavedEnvelope = (): AuditEnvelope => {
+    const envelope = liveEnvelope(NO_URLS);
+    return {
+      ...envelope,
+      freshness: { ...envelope.freshness, refresh_after: null },
+      summary_html: inlineSummaryHtml(target, record),
+    };
+  };
+  const unsaved = input.tier === 'live' && hasErroredAudits(record.scorecard);
   if (target.includes('@')) {
-    const envelope = liveEnvelope(urlsFor(origin, target));
+    const envelope = unsaved ? unsavedEnvelope() : liveEnvelope(urlsFor(origin, target));
     if (input.sourceSha !== undefined) envelope.source_sha = input.sourceSha;
     return envelope;
   }
@@ -249,8 +263,9 @@ export function buildCliEnvelope(input: CliEnvelopeInput): AuditEnvelope {
     });
     return { ...registryEnvelope, anc_version: record.anc_version, tool_version: record.tool_version };
   }
+  if (unsaved) return unsavedEnvelope();
   if (curated.kind === 'shadow' || !isRoutableBinary(target)) {
-    return { ...liveEnvelope(NO_URLS), summary_html: collisionSummaryHtml(target, record) };
+    return { ...liveEnvelope(NO_URLS), summary_html: inlineSummaryHtml(target, record) };
   }
   return liveEnvelope(urlsFor(origin, target));
 }
@@ -258,14 +273,15 @@ export function buildCliEnvelope(input: CliEnvelopeInput): AuditEnvelope {
 // The result body a result with no page of its own renders inline on the
 // progress page: the shared scorecard body without its crumb and badge
 // call-to-action, so nothing in it links to a page that would serve a
-// different tool or that the route would refuse.
-function collisionSummaryHtml(binary: string, record: CliRecordLike): string {
+// different tool, that the route would refuse, or that was never saved.
+function inlineSummaryHtml(target: string, record: CliRecordLike): string {
   const scorecard = asCliScorecard(record.scorecard);
-  const tool = { name: scorecard.tool?.name ?? binary, binary: scorecard.tool?.binary ?? binary };
-  const freshnessHtml = `Binary <code>${escHtml(binary)}</code> · scored by anc ${escHtml(record.anc_version)} · spec ${escHtml(record.spec_version)}`;
+  const tool = { name: scorecard.tool?.name ?? target, binary: scorecard.tool?.binary ?? target };
+  const label = target.includes('@') ? 'Source' : 'Binary';
+  const freshnessHtml = `${label} <code>${escHtml(target)}</code> · scored by anc ${escHtml(record.anc_version)} · spec ${escHtml(record.spec_version)}`;
   return buildScorecardBody(tool, scorecard, {
     version: record.tool_version,
-    spine: { target: binary, lane: 'cli', tier: 'live', freshnessHtml, linked: false, control: null },
+    spine: { target, lane: 'cli', tier: 'live', freshnessHtml, linked: false, control: null },
     hideBadgeEmbed: true,
     showBadgePreview: false,
   });

@@ -32,12 +32,14 @@ import {
   CLI_PHASE_LABEL,
   discoveryLine,
   endpointHostOf,
+  inlineSubline,
   LANE_EXPECTATION,
   LANE_LABEL,
   RECLASSIFIED,
   rowHostPhrase,
   streamedResultLine,
   streamedRowHost,
+  WAITED_RUN_UNSAVED,
   webReadingLine,
 } from '../shared/scoring-copy';
 import {
@@ -65,12 +67,6 @@ const MAX_POLLS = 20;
 const REQUEST_TIMEOUT_MS = 30_000;
 
 type Choice = { listing: boolean | null; refresh: boolean; follow: boolean };
-
-/** Why a result renders here: a CLI name that belongs to a curated tool, or a website run that saved nothing. */
-const INLINE_SUBLINE: Readonly<Record<Lane, string>> = {
-  cli: 'This name belongs to a curated tool; this result has no URL.',
-  web: 'This result was not saved.',
-};
 
 type JsonAnswer = Partial<AuditEnvelope> & { error?: AuditError; in_progress?: boolean };
 
@@ -107,7 +103,7 @@ class ScoringRun {
     const kept = takeInlineResult(this.target);
     if (kept) {
       this.follow = kept.follow;
-      this.inline(kept.html);
+      this.inline(kept.html, kept.subline ?? inlineSubline(this.lane));
       return;
     }
     const entered = enteredLaneOf(this.target);
@@ -178,7 +174,9 @@ class ScoringRun {
     }
     const error = payload?.error;
     if (res.status === 403 && error?.code === 'turnstile_failed' && !tokened) {
-      this.idle();
+      // After a wait, a tokenless refusal means the run this page polled left
+      // no record to read: it errored or saved nothing once its flag cleared.
+      this.idle(this.polls > 0 ? WAITED_RUN_UNSAVED : undefined);
       return;
     }
     if (res.status === 503 && error?.code === 'turnstile_unavailable') {
@@ -192,7 +190,7 @@ class ScoringRun {
     // A cached result whose name belongs to a curated tool has no URL of its
     // own; without this the page says it is opening one and never does.
     if (!envelope.scorecard_url) {
-      this.inline(envelope.summary_html ?? '');
+      this.inline(envelope.summary_html ?? '', inlineSubline(this.lane, envelope));
       return;
     }
     clearInlineResult(this.target);
@@ -313,7 +311,7 @@ class ScoringRun {
     this.stopClock();
     this.view.settle('pass');
     if (!event.scorecard_url) {
-      this.inline(event.summary_html ?? '');
+      this.inline(event.summary_html ?? '', inlineSubline(this.lane, event));
       return;
     }
     clearInlineResult(this.target);
@@ -323,10 +321,10 @@ class ScoringRun {
   }
 
   /** A result with no URL of its own renders here and survives a refresh. */
-  private inline(html: string): void {
-    stashInlineResult(this.target, { html, follow: this.follow });
+  private inline(html: string, subline: string): void {
+    stashInlineResult(this.target, { html, follow: this.follow, subline });
     this.view.state('done');
-    this.view.subline(INLINE_SUBLINE[this.lane]);
+    this.view.subline(subline);
     this.view.say('Done.');
     this.view.inline(html);
     this.view.actions({ start: 'Run again', other: true });
@@ -346,9 +344,9 @@ class ScoringRun {
     this.view.focusHeading();
   }
 
-  private idle(): void {
+  private idle(line?: string): void {
     this.view.state('idle');
-    this.view.say(`${LANE_LABEL[this.lane]} audit of ${this.target}. ${LANE_EXPECTATION[this.lane]}`);
+    this.view.say(line ?? `${LANE_LABEL[this.lane]} audit of ${this.target}. ${LANE_EXPECTATION[this.lane]}`);
     this.view.actions({ start: 'Start', other: true });
     this.bindStart();
   }
