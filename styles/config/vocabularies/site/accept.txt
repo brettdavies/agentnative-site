@@ -322,3 +322,5 @@ PRs
 SKIPs
 POSTs
 DO's
+http
+https
