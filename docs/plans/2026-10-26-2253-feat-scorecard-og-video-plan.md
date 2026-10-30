@@ -4,8 +4,9 @@ execution: code
 product_contract_source: ce-plan-bootstrap
 title: "Scorecard og:video - Plan"
 type: feat
-status: active
+status: merged
 prs: ["#461", "#482"]
+completed: 2026-10-28
 date: 2026-10-26
 topic: scorecard-og-video
 ---
@@ -927,31 +928,31 @@ Lane A: U1 then U2 (PR #461). Lane B: U3, parallel with U2 after U1. Lane C: U4,
 
 Synthesized from this review's findings. Each task derives from a specific finding above.
 
-- [ ] **T1 (P1, human: ~1h / CC: ~5min)**: config: name the staging queue `og-rendered-staging`, assert env separation
+- [x] **T1 (P1, human: ~1h / CC: ~5min)**: config: name the staging queue `og-rendered-staging`, assert env separation
   - Surfaced by: Architecture, finding 1 (R2, D2)
   - Files: `wrangler.jsonc`, `src/og-render/wrangler.jsonc`, `tests/wrangler-config.test.ts`
   - Verify: `bun test tests/wrangler-config.test.ts`
-- [ ] **T2 (P1, human: ~3h / CC: ~15min)**: og store and route: record the logo source on stored cards, emit it on stored responses, rewrite route tests on an RPC fake, keep the smoke's tier check
+- [x] **T2 (P1, human: ~3h / CC: ~15min)**: og store and route: record the logo source on stored cards, emit it on stored responses, rewrite route tests on an RPC fake, keep the smoke's tier check
   - Surfaced by: Tests, regression rule (R4, D4)
   - Files: `src/worker/og/store.ts`, `src/worker/og/route.ts`, `src/og-render/render-job.ts`, `tests/score-og-route.test.ts`, `tests/e2e/og-cards.e2e.ts`
   - Verify: `bun test tests/score-og-route.test.ts`; `scripts/release/preflight.sh e2e` on staging
-- [ ] **T3 (P2, human: ~1h / CC: ~10min)**: PNG route: serve the default card on RPC failure
+- [x] **T3 (P2, human: ~1h / CC: ~10min)**: PNG route: serve the default card on RPC failure
   - Surfaced by: Architecture, finding 2 (R3, D3)
   - Files: `src/worker/og/route.ts`, `tests/score-og-route.test.ts`
   - Verify: `bun test tests/score-og-route.test.ts`
-- [ ] **T4 (P2, human: ~20min / CC: ~2min)**: live verification: record cold-start on-demand latency
+- [x] **T4 (P2, human: ~20min / CC: ~2min)**: live verification: record cold-start on-demand latency
   - Surfaced by: Performance, finding 1 (R5, D5)
   - Files: `tests/e2e/og-cards.e2e.ts`, PR body
   - Verify: the PR records cold and warm latency from staging
-- [ ] **T5 (P2, human: ~10min / CC: ~1min)**: audit-web: export `requireRescoreAuth`
+- [x] **T5 (P2, human: ~10min / CC: ~1min)**: audit-web: export `requireRescoreAuth`
   - Surfaced by: Scope Challenge (F1)
   - Files: `src/worker/audit-web/rescore-trigger.ts`
   - Verify: `bun run typecheck`
-- [ ] **T6 (P2, human: ~10min / CC: ~1min)**: render Worker config: `nodejs_compat` and `global_fetch_strictly_public`
+- [x] **T6 (P2, human: ~10min / CC: ~1min)**: render Worker config: `nodejs_compat` and `global_fetch_strictly_public`
   - Surfaced by: Code Quality, finding 1 (F4)
   - Files: `src/og-render/wrangler.jsonc`
   - Verify: `bunx wrangler deploy --dry-run --config src/og-render/wrangler.jsonc`
-- [ ] **T7 (P2, human: ~10min / CC: ~1min)**: RELEASES.md: create the `og-rendered` queue before the stacked branch first deploys
+- [x] **T7 (P2, human: ~10min / CC: ~1min)**: RELEASES.md: create the `og-rendered` queue before the stacked branch first deploys
   - Surfaced by: Architecture, finding 3 (F3)
   - Files: `RELEASES.md`
   - Verify: the setup step precedes the first staging dispatch and the merge in the release notes
@@ -1165,39 +1166,39 @@ None.
 
 ## Implementation Tasks (DX review)
 
-- [ ] **T1 (P1, human: ~2 days / CC: ~1 hour)**: render Worker: `RenderJob` Durable Object with `request`, `status`, `wait`, the alarm that runs and retries the render, cleanup and migration; `og-rendered` with a batched consumer (B1)
+- [x] **T1 (P1, human: ~2 days / CC: ~1 hour)**: render Worker: `RenderJob` Durable Object with `request`, `status`, `wait`, the alarm that runs and retries the render, cleanup and migration; `og-rendered` with a batched consumer (B1)
   - Surfaced by: owner requirement (DX D10)
   - Files: `src/og-render/render-job-do.ts`, `src/og-render/index.ts`, `src/og-render/wrangler.jsonc`, `tests/og-render-job-do.test.ts`
   - Verify: `bun test tests/og-render-job-do.test.ts`; duplicate requests enqueue once on staging
-- [ ] **T2 (P1, human: ~3 hours / CC: ~20 min)**: `scripts/og/setup.sh` with `--check`, pending step and `--json`
+- [x] **T2 (P1, human: ~3 hours / CC: ~20 min)**: `scripts/og/setup.sh` with `--check`, pending step and `--json`
   - Surfaced by: Install friction (DX D9, D15)
   - Files: `scripts/og/setup.sh`, `tests/og-setup-script.test.ts`, `scripts/release/preflight.sh`
   - Verify: `bun test tests/og-setup-script.test.ts`; `scripts/og/setup.sh staging --check`
-- [ ] **T3 (P1, human: ~3 hours / CC: ~15 min)**: `x-anc-clip` and `x-anc-clip-run` on scorecard pages; smoke failures name the cause
+- [x] **T3 (P1, human: ~3 hours / CC: ~15 min)**: `x-anc-clip` and `x-anc-clip-run` on scorecard pages; smoke failures name the cause
   - Surfaced by: Hello World friction, Pass 3 (DX D12, D16)
   - Files: `src/worker/audit/result.ts`, `tests/audit-result-route.test.ts`, `tests/e2e/og-cards.e2e.ts`
   - Verify: `bun test tests/audit-result-route.test.ts`; a smoke run with the switch off fails naming `setup.sh --check`
-- [ ] **T4 (P1, human: ~20 min / CC: ~2 min)**: `x-anc-card: fallback` on the default-card response; typecheck covers `src/og-render`
+- [x] **T4 (P1, human: ~20 min / CC: ~2 min)**: `x-anc-card: fallback` on the default-card response; typecheck covers `src/og-render`
   - Surfaced by: Pass 3 CAP4:png-fallback:channel; Pass 6
   - Files: `src/worker/og/route.ts`, `tsconfig.worker.json`
   - Verify: `bun test tests/score-og-route.test.ts`; `bun run typecheck`
-- [ ] **T5 (P2, human: ~2 hours / CC: ~10 min)**: `scripts/og/status.sh` with `--json`
+- [x] **T5 (P2, human: ~2 hours / CC: ~10 min)**: `scripts/og/status.sh` with `--json`
   - Surfaced by: Debug friction (DX D13, D15)
   - Files: `scripts/og/status.sh`, `tests/og-status-script.test.ts`
   - Verify: `bun test tests/og-status-script.test.ts`
-- [ ] **T6 (P2, human: ~1 hour / CC: ~5 min)**: smoke result line per fixture
+- [x] **T6 (P2, human: ~1 hour / CC: ~5 min)**: smoke result line per fixture
   - Surfaced by: magical moment (DX D7)
   - Files: `tests/e2e/og-cards.e2e.ts`, `scripts/og/smoke.sh`
   - Verify: `scripts/release/preflight.sh e2e` prints three result lines
-- [ ] **T7 (P2, human: ~3 hours / CC: ~15 min)**: local stand-in clip under `LOCAL_MEDIA_STANDIN`, with its config guard
+- [x] **T7 (P2, human: ~3 hours / CC: ~15 min)**: local stand-in clip under `LOCAL_MEDIA_STANDIN`, with its config guard
   - Surfaced by: Pass 6 (DX D17)
   - Files: `src/og-render/render-job.ts`, `src/og-render/fixtures/standin.mp4`, `tests/wrangler-config.test.ts`
   - Verify: `bun run dev` then the local og-cards smoke asserts `og:video`
-- [ ] **T8 (P2, human: ~2 hours / CC: ~10 min)**: docs: `AGENTS.md` og:video section and local dev, `RELEASES.md` setup and cost watch, `RELEASES-PREFLIGHT.md` reason codes, `DESIGN.md` bump rule
+- [x] **T8 (P2, human: ~2 hours / CC: ~10 min)**: docs: `AGENTS.md` og:video section and local dev, `RELEASES.md` setup and cost watch, `RELEASES-PREFLIGHT.md` reason codes, `DESIGN.md` bump rule
   - Surfaced by: Discover, Upgrade, Pass 4
   - Files: `AGENTS.md`, `RELEASES.md`, `RELEASES-PREFLIGHT.md`, `DESIGN.md`
   - Verify: `bun run lint` (markdownlint)
-- [ ] **T9 (P3, human: ~10 min / CC: ~1 min)**: record the first-run wall clock in the stacked PR
+- [x] **T9 (P3, human: ~10 min / CC: ~1 min)**: record the first-run wall clock in the stacked PR
   - Surfaced by: Pass 8 (DX D18)
   - Files: PR body
   - Verify: the PR shows setup, deploy wait, rerun and preflight times
@@ -1475,39 +1476,39 @@ NOT in scope, What already exists, Diagrams, Failure modes and the parallelizati
 
 Synthesized from this review's findings. Each task derives from a specific finding above.
 
-- [ ] **T1 (P1, human: ~0.5 day / CC: ~15 min)**: render Worker: `RenderJob`'s alarm runs and retries the render; no `og-render` queue (with DX T1)
+- [x] **T1 (P1, human: ~0.5 day / CC: ~15 min)**: render Worker: `RenderJob`'s alarm runs and retries the render; no `og-render` queue (with DX T1)
   - Surfaced by: Scope Challenge structure (D6), Architecture F10
   - Files: `src/og-render/render-job-do.ts`, `src/og-render/index.ts`, `src/og-render/wrangler.jsonc`, `tests/og-render-job-do.test.ts`
   - Verify: `bun test tests/og-render-job-do.test.ts`; the first staging dispatch renders a real clip
-- [ ] **T2 (P1, human: ~20 min / CC: ~3 min)**: `.gitignore`: re-ignore `.dev.vars*` after `!src/**`, with a `git check-ignore` test
+- [x] **T2 (P1, human: ~20 min / CC: ~3 min)**: `.gitignore`: re-ignore `.dev.vars*` after `!src/**`, with a `git check-ignore` test
   - Surfaced by: Scope Challenge S1 (F5)
   - Files: `.gitignore`, `tests/wrangler-config.test.ts`
   - Verify: `git check-ignore src/og-render/.dev.vars.staging` exits 0; `bun test tests/wrangler-config.test.ts`
-- [ ] **T3 (P1, human: ~45 min / CC: ~5 min)**: headers: curated HTML and markdown carry `cli:<slug>`; curated JSON unchanged
+- [x] **T3 (P1, human: ~45 min / CC: ~5 min)**: headers: curated HTML and markdown carry `cli:<slug>`; curated JSON unchanged
   - Surfaced by: Architecture F8, Tests R7 (D7)
   - Files: `src/worker/headers.ts`, `tests/worker.test.ts`
   - Verify: `bun test tests/worker.test.ts`
-- [ ] **T4 (P2, human: ~1 h / CC: ~10 min)**: render: store the PNG first, mark `png`, `wait(deadline, until)`, on-demand wait at most 2 s
+- [x] **T4 (P2, human: ~1 h / CC: ~10 min)**: render: store the PNG first, mark `png`, `wait(deadline, until)`, on-demand wait at most 2 s
   - Surfaced by: Architecture F11
   - Files: `src/og-render/render-job-do.ts`, `src/og-render/index.ts`, `tests/og-render-job-do.test.ts`
   - Verify: `bun test tests/og-render-job-do.test.ts`
-- [ ] **T5 (P2, human: ~1 h / CC: ~10 min)**: smoke and `status.sh` read `x-anc-clip` from a `?v=` fetch
+- [x] **T5 (P2, human: ~1 h / CC: ~10 min)**: smoke and `status.sh` read `x-anc-clip` from a `?v=` fetch
   - Surfaced by: Architecture F9
   - Files: `tests/e2e/og-cards.e2e.ts`, `scripts/og/status.sh`, `tests/og-status-script.test.ts`
   - Verify: a staging smoke run with the switch off fails naming `scripts/og/setup.sh staging --check`
-- [ ] **T6 (P2, human: ~1 h / CC: ~10 min)**: one cause map: the smoke exports it; tests check `status.sh`, the `RELEASES-PREFLIGHT.md` table and the `setup.sh` queue names
+- [x] **T6 (P2, human: ~1 h / CC: ~10 min)**: one cause map: the smoke exports it; tests check `status.sh`, the `RELEASES-PREFLIGHT.md` table and the `setup.sh` queue names
   - Surfaced by: Code quality F12
   - Files: `tests/e2e/og-cards.e2e.ts`, `tests/og-status-script.test.ts`, `tests/og-setup-script.test.ts`, `tests/wrangler-config.test.ts`
   - Verify: `bun test tests/og-status-script.test.ts tests/og-setup-script.test.ts tests/wrangler-config.test.ts`
-- [ ] **T7 (P2, human: ~30 min / CC: ~5 min)**: page: bound `RENDER.status` at 250 ms
+- [x] **T7 (P2, human: ~30 min / CC: ~5 min)**: page: bound `RENDER.status` at 250 ms
   - Surfaced by: Performance F13
   - Files: `src/worker/audit/result.ts`, `tests/audit-result-route.test.ts`
   - Verify: `bun test tests/audit-result-route.test.ts`
-- [ ] **T8 (P2, human: ~1 h / CC: ~10 min)**: move the drawing modules under `src/og-render/`, with an import-boundary test
+- [x] **T8 (P2, human: ~1 h / CC: ~10 min)**: move the drawing modules under `src/og-render/`, with an import-boundary test
   - Surfaced by: Code quality F14
   - Files: `src/og-render/`, `tests/og-render-boundary.test.ts`
   - Verify: `bun test tests/og-render-boundary.test.ts`; `bun run build` shows no resvg-wasm in the site bundle
-- [ ] **T9 (P2, human: ~20 min / CC: ~3 min)**: staging before merge, and `RENDER` on the Sandbox DO's env type
+- [x] **T9 (P2, human: ~20 min / CC: ~3 min)**: staging before merge, and `RENDER` on the Sandbox DO's env type
   - Surfaced by: Scope Challenge S2 and S3 (F6, F7)
   - Files: `src/worker/score/do.ts`, `RELEASES.md`
   - Verify: `bun run typecheck`; the stacked branch's staging dispatch precedes the merge
