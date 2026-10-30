@@ -205,9 +205,15 @@ def fetch_pr(owner: str, repo: str, num: int) -> dict | None:
     if proc.returncode != 0:
         return None
     try:
-        return json.loads(proc.stdout)
+        pr = json.loads(proc.stdout)
     except json.JSONDecodeError:
         return None
+    # GitHub returns some PR bodies with CRLF line endings. Split on "\n", a
+    # bullet keeps its "\r" ahead of the appended attribution, and the next
+    # text-mode rewrite of CHANGELOG.md turns that CR into a line break.
+    if pr and pr.get("body"):
+        pr["body"] = re.sub(r"\r\n?", "\n", pr["body"])
+    return pr
 
 
 def slice_below(body: str, header_pattern: str) -> str | None:
