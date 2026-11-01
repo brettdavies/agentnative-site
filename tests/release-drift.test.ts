@@ -279,4 +279,27 @@ describe('drift.sh gate 0: version carriers', () => {
     expect(output).toContain('packages/a/package.json');
     expect(status).toBe(1);
   });
+
+  test('passes a line the release carried over from dev that dev reworded after the backport', () => {
+    write('CHANGELOG.md', '# Changelog\n\n## 1.0.0\n\n- first release\n');
+    commit('docs: start the changelog');
+    git('checkout', '-q', 'dev');
+    git('merge', '-q', '--ff-only', 'main');
+    write('CHANGELOG.md', '# Changelog\n\n## Unreleased\n\n- written on dev\n\n## 1.0.0\n\n- first release\n');
+    commit('docs: note a change on dev');
+    git('checkout', '-q', 'main');
+    const released = '# Changelog\n\n## 1.1.0\n\n- written on dev\n\n## 1.0.0\n\n- first release\n';
+    write('CHANGELOG.md', released);
+    commit('release: 1.1.0');
+    git('checkout', '-q', 'dev');
+    write('CHANGELOG.md', released);
+    commit('docs: backport the 1.1.0 changelog');
+    write('CHANGELOG.md', released.replace('- written on dev', '- reworded on dev'));
+    commit('docs: reword the 1.1.0 entry');
+    git('checkout', '-q', 'main');
+
+    const { status, output } = drift();
+    expect(output).toContain('dev carries the release commit');
+    expect(status).toBe(0);
+  });
 });
