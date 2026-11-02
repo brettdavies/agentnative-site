@@ -6,8 +6,8 @@
 # Activate once per clone:
 #   git config core.hooksPath scripts/hooks
 #
-# Steps mirror the CI workflow's build job, then add three prose-check
-# stages (CI does not run these — pre-push is the only enforcement):
+# Stages 1-5 and 9 mirror the CI workflow's gate job. CI does not run
+# stages 6-8 and 10, so pre-push is their only enforcement:
 #   1. lint           — biome check + markdownlint-cli2
 #   2. typecheck      — tsc --noEmit over the client + worker projects
 #   3. build          — bun src/build/build.mjs
