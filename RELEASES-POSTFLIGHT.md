@@ -64,8 +64,8 @@ Flags:
   (`v<version>`) to find the PR `scripts/sync-dev-after-release.sh` opens (default: parse the most recent merged PR to
   `main` whose title starts with `release/`)
 - `--mcp-binary <binary>` — override the live-audit binary (default: `${MCP_BINARY:-figlet}`)
-- `--staging-url <url>` — override the staging Worker URL
-- `--prod-url <url>` — override the prod URL
+- `--staging-url <url>` — override the staging Worker URL (default: `STAGING_URL_DEFAULT` in `scripts/release/release.env`)
+- `--prod-url <url>` — override the prod URL (default: `PROD_URL_DEFAULT` in `scripts/release/release.env`)
 
 ## Checklist
 

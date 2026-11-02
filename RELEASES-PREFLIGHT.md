@@ -62,7 +62,7 @@ Flags:
   otherwise `sindresorhus/<name>`. Add a binary to the `do_fixture_repo` map in `scripts/release/preflight.sh` when its
   source lives outside the `sindresorhus` namespace.
 - `--mcp-binary <name>` — fresh non-registry binary for the live MCP audit (default: `$MCP_BINARY` env var or `figlet`)
-- `--staging-url <url>` — override the staging Worker URL
+- `--staging-url <url>` — override the staging Worker URL (default: `STAGING_URL_DEFAULT` in `scripts/release/release.env`)
 - `--local-url <url>` — override the local `wrangler dev` URL
 - `--tag <tag>`: override `LAST_TAG` resolution for `surface` (default: newest `v*` tag)
 
@@ -102,20 +102,30 @@ Security PRs, hotfixes, and config edits land on `main` first. The release branc
 `dev`'s tree, so anything `main` holds that `dev` never received is reverted by the release or collides with it, and
 Dependabot raises the same fix again.
 
-- [ ] `dev` carries the previous release's own bookkeeping, the `package.json` version and the `CHANGELOG.md` section
-  (gate 0). Gate 0 fails when the previous release's bookkeeping never reached `dev`; run
-  `scripts/sync-dev-after-release.sh v<version>`, merge its PR, and rerun.
+<!-- canonical:begin drift-gate -->
+
+- [ ] The previous release's own bookkeeping reached `dev` (gate 0: the version carriers and `CHANGELOG.md` as the
+  release left them). It fails when a backport never ran; run `scripts/sync-dev-after-release.sh v<previous>`, merge its
+  PR, and rerun.
 - [ ] Every commit on `main` since the last release has its changes on `dev` (gate 1 lists the ones that do not, as
-  `differs` or `missing`). Backport them by PR into `dev` first, merge, and rerun. Until the first `v*` tag exists the
-  gate anchors on the newest `release:` squash on `main`; pass `--since <sha>` to anchor elsewhere.
-- [ ] Every `.github/` change on `main` is also on `dev` (gate 2 lists the paths that are not, as `differs` or
-  `missing`). A `.github/` path `dev` holds and `main` lacks is what the release delivers, not drift; a path `dev`
-  deleted counts as delivered while `main` still has the anchor's copy.
-- [ ] No lockfile package resolves newer on `main` than on `dev` (gate 3). The gate reads this repo's `bun.lock` one
-  line per package name, strips its trailing commas before parsing, and fails when it parses zero packages. Only
-  resolved versions compare: a `file:`, `workspace:`, `link:`, or git spec is left out, and a copy `main` nests under a
-  package `dev` no longer carries is not counted.
+  `differs` or `missing`). Backport them by PR into `dev` first, merge, and rerun.
+- [ ] Nothing under `.github/` on `main` is missing from `dev` (gate 2). `.github/` reaches `main` through the release,
+  so config that has reached `dev` and not `main` is what this release delivers, and the gate counts it. The gate fails
+  on the other direction, where `main` holds workflow or ruleset config `dev` never received, and names each path as
+  `missing` or `differs`.
+- [ ] No lockfile package resolves newer on `main` than on `dev` (gate 3, which reads `package-lock.json`, `bun.lock`,
+  and `Cargo.lock`). The one benign case is a version still inside the local package manager's release-age window when
+  the advisory is already patched at `dev`'s version.
 - [ ] `dev`-newer packages are the routine updates this release ships; the gate counts them and does not list them.
+
+<!-- canonical:end drift-gate -->
+
+In this repo gate 0's carriers are the `package.json` version and the `CHANGELOG.md` section. Until the first `v*` tag
+exists, gates 0 and 1 anchor on the newest `release:` squash on `main`; pass `--since <sha>` to anchor elsewhere. Gate 2
+counts a `.github/` path `dev` deleted as delivered while `main` still has the anchor's copy. Gate 3 reads `bun.lock`
+and `scripts/design/bun.lock` one line per package name, strips their trailing commas before parsing, and fails when it
+parses zero packages. Only resolved versions compare: a `file:`, `workspace:`, `link:`, or git spec is left out, and a
+copy `main` nests under a package `dev` no longer carries is not counted.
 
 ### Cross-repo coordination
 
