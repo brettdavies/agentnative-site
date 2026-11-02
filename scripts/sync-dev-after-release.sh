@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Canonical version: 2026.11.01 (generic)
+#
 # Backport release artifacts from main to dev after a release tag publishes.
 #
 # Writes the released version into every version carrier the repo has and
@@ -35,7 +37,8 @@
 #
 # Run AFTER:
 #   1. The release/v* -> main PR has merged.
-#   2. `git tag -a vX.Y.Z` has been pushed to origin.
+#   2. `git tag -a vX.Y.Z` (or a bare CalVer `YYYY.MM.DD[.N]` tag) has been pushed to
+#      origin.
 #   3. The GitHub Release has been created.
 #
 # Usage:
@@ -86,11 +89,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$VERSION" ]]; then
-  echo "usage: $0 vX.Y.Z [--include-contested] [--only PATH]... [--dry-run]" >&2
-  exit 64
-fi
-if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "error: version must match vMAJOR.MINOR.PATCH (got: $VERSION)" >&2
+  echo "usage: $0 vX.Y.Z|YYYY.MM.DD[.N] [--include-contested] [--only PATH]... [--dry-run]" >&2
   exit 64
 fi
 VERSION_NO_V="${VERSION#v}"
@@ -104,6 +103,11 @@ cd "$REPO_ROOT"
 # the binary crate moves.
 # shellcheck disable=SC1091  # sibling release lib, always vendored alongside
 . scripts/release/_lib.sh
+
+if [[ ! "$VERSION" =~ $RELEASE_TAG_RE ]]; then
+  echo "error: version must be a vMAJOR.MINOR.PATCH or bare CalVer YYYY.MM.DD[.N] tag (got: $VERSION); for example: $0 v1.2.3" >&2
+  exit 64
+fi
 
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "error: working tree not clean -- commit or stash first" >&2
@@ -123,7 +127,7 @@ fi
 # Peeled, since an annotated tag names a tag object, not the released commit.
 TAG_SHA="$(git rev-parse "$VERSION^{commit}")"
 if ! git merge-base --is-ancestor "$TAG_SHA" origin/main; then
-  echo "error: tag $VERSION is not reachable from origin/main -- wait for release/v* to merge" >&2
+  echo "error: tag $VERSION is not reachable from origin/main -- wait for the release PR to merge" >&2
   exit 66
 fi
 
@@ -262,9 +266,8 @@ changelog_paths() {
   [[ -n "$path" ]] && printf '%s\n' "$path"
   # Each member names its own under [package.metadata.changelog]; the same
   # table generate-changelog.py reads, so the two cannot disagree.
-  if have_bin cargo && have_bin jaq && [[ -f Cargo.toml ]]; then
-    cargo metadata --format-version 1 --no-deps 2>/dev/null \
-      | jaq -r '.packages[] | .metadata.changelog.changelog // empty' 2>/dev/null
+  if [[ -f Cargo.toml ]]; then
+    crate_changelog_paths
   fi
 }
 
@@ -290,7 +293,7 @@ fi
 
 # The previous release tag is the last commit where the branches agreed, which
 # is what makes it the reference for "did dev move this file too?".
-PREV_TAG="$(git tag --list 'v[0-9]*' --sort=-version:refname \
+PREV_TAG="$(git tag --list "${RELEASE_TAG_GLOBS[@]}" --sort=-version:refname \
   | awk -v cur="$VERSION" '$0 != cur { print; exit }')"
 
 blob_at() {
@@ -380,7 +383,7 @@ done
 # discovery as that member's manifest. Refresh the members' entries from the
 # synced manifests rather than copying main's lock, which would revert
 # dependency updates dev merged after the release, and refuse to commit a lock
-# that `cargo build --locked` rejects.
+# that `cargo metadata --locked` rejects.
 if [[ -f Cargo.lock ]]; then
   if ! have_bin cargo; then
     echo "error: cargo not on PATH -- Cargo.lock cannot be synced to the manifests; nothing was committed" >&2
@@ -447,13 +450,18 @@ regen_reason() {
   awk '/^(DRY RUN|error):/ { print; found = 1; exit } NF { last = $0 } END { if (!found) print last }'
 }
 
+# In a workspace the release changelog is a member's, and the generator
+# refuses the routing root a run without --crate would read; the same helper
+# the cut script calls decides the arguments, so the two compare one file.
 if _already_synced "$(release_changelog)" \
   && [[ -x scripts/generate-changelog.py ]] && command -v git-cliff >/dev/null 2>&1; then
-  if regen_err="$(scripts/generate-changelog.py --dry-run --tag "$VERSION" 2>&1 >/dev/null)"; then
-    echo "regen check: CHANGELOG.md matches what PR bodies would produce"
+  read -ra crate_args <<<"$(changelog_crate_args)"
+  regen_args=(--dry-run --tag "$VERSION" "${crate_args[@]}")
+  if regen_err="$(scripts/generate-changelog.py "${regen_args[@]}" 2>&1 >/dev/null)"; then
+    echo "regen check: $(release_changelog) matches what PR bodies would produce"
   else
-    echo "warning: regen check did not pass for $VERSION: $(regen_reason <<<"$regen_err")" >&2
-    echo "  re-run 'scripts/generate-changelog.py --dry-run --tag $VERSION' for its full output" >&2
+    echo "warning: regen check did not pass for $(release_changelog) at $VERSION: $(regen_reason <<<"$regen_err")" >&2
+    echo "  re-run 'scripts/generate-changelog.py ${regen_args[*]}' for its full output" >&2
   fi
 fi
 
@@ -487,8 +495,8 @@ done)"
 cat >"$PR_BODY_FILE" <<EOF
 ## Summary
 
-Backports the v${VERSION_NO_V} release-prep state from \`main\` so dev's version carriers match the released
-number and the v${VERSION_NO_V} CHANGELOG section sits at the top of dev's \`CHANGELOG.md\` going forward.
+Backports the ${VERSION} release-prep state from \`main\` so dev's version carriers match the released
+number and the ${VERSION} CHANGELOG section sits at the top of dev's \`CHANGELOG.md\` going forward.
 
 Source: tag \`${VERSION}\` at \`${TAG_SHORT}\` on \`main\`. Files synced: ${SYNC_LIST}.
 

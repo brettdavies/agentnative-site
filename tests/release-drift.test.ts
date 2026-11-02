@@ -156,10 +156,17 @@ describe('drift.sh gate 2: .github/ parity', () => {
 });
 
 describe('drift.sh --help', () => {
-  test('prints the whole header, through the dependency list', () => {
+  test('prints the whole header, through the dependency list, and exits 0', () => {
     const { status, output } = drift('--help');
     expect(output).toContain('Exit codes:');
     expect(output).toContain('Dependencies: git');
+    expect(status).toBe(0);
+  });
+
+  test('an unknown flag prints the header and exits 2', () => {
+    const { status, output } = drift('--bogus');
+    expect(output).toContain('unknown arg: --bogus');
+    expect(output).toContain('Exit codes:');
     expect(status).toBe(2);
   });
 });
