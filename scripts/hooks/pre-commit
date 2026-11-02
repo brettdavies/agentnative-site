@@ -46,6 +46,17 @@ else
   echo "  - markdownlint-cli2 (skipped: bun not installed; install via https://bun.sh)"
 fi
 
+# The checker reads every workflow, so any staged workflow change runs it.
+mapfile -t staged_wf < <(git diff --cached --name-only --diff-filter=ACM -- '.github/workflows/*.yml' '.github/workflows/*.yaml')
+bold '==> workflow concurrency namespacing (staged workflows)'
+if [ ${#staged_wf[@]} -eq 0 ]; then
+  echo "  - no staged workflow files; skipping"
+elif [ -x scripts/check-workflow-concurrency.sh ]; then
+  ./scripts/check-workflow-concurrency.sh
+else
+  echo "  - skipped: scripts/check-workflow-concurrency.sh is not in this checkout"
+fi
+
 # content/*.md is emitted as a verbatim markdown twin (and folded into
 # llms-full.txt), so a raw <form>/<input>/<button> leaks dead controls into
 # the agent-facing surface. Browser widgets go in a build-template slot

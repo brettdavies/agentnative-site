@@ -23,30 +23,45 @@
 #                       *.sh plus scripts/hooks/* (catches SC2034 / SC2086
 #                       / SC2155 class bugs; skips with a one-line note
 #                       when shellcheck isn't installed)
-#   9. prose-check    — bash scripts/prose-check.sh
+#   9. concurrency    — scripts/check-workflow-concurrency.sh
+#                       (every workflow's concurrency group starts with a
+#                       literal token, so a caller and a reusable it calls
+#                       never share one)
+#  10. prose-check    — bash scripts/prose-check.sh
 #                       (Vale + LanguageTool over *.md in scope; LT skips
 #                       cleanly when LanguageTool is unreachable)
 #
-# Stages 6-9 each redirect child stdin to </dev/null. The branch-deletion
-# short-circuit at the top of the hook consumes the hook-protocol bytes
-# from stdin (`while read -r local_ref local_sha …`); a child that read
-# stdin would either swallow protocol bytes or fight for them.
+# Stages 6-10 each redirect child stdin to </dev/null. The ref-line read at
+# the top of the hook consumes the hook-protocol bytes from stdin
+# (`while read -r local_ref local_sha …`); a child that read stdin would
+# either swallow protocol bytes or fight for them.
 #
 # To bypass intentionally (rare): `git push --no-verify`. Don't make this
 # a habit — the hook is here precisely to catch what we lost time to last.
 
 set -euo pipefail
 
-# Skip the hook for branch deletions (`git push origin --delete <branch>`),
-# which arrive with sha=0000... on stdin from the hook protocol.
-deleting_only=true
-while read -r local_ref local_sha _remote_ref remote_sha; do
-  : "$local_ref" "$local_sha" "$_remote_ref" "$remote_sha"
-  if [[ "$local_sha" != "0000000000000000000000000000000000000000" ]]; then
-    deleting_only=false
-  fi
-done
-if $deleting_only; then
+# Git passes the remote's name and URL as arguments and one line per ref on
+# stdin; a branch deletion (`git push origin --delete <branch>`) arrives with
+# sha=0000.... A hand run passes neither and checks everything.
+push_refs=0
+push_deletes=0
+if [ ! -t 0 ]; then
+  while read -r local_ref local_sha _remote_ref _remote_sha; do
+    [ -n "$local_ref" ] || continue
+    push_refs=$((push_refs + 1))
+    if [[ "$local_sha" =~ ^0+$ ]]; then
+      push_deletes=$((push_deletes + 1))
+    fi
+  done
+fi
+if [ "$push_refs" -gt 0 ] && [ "$push_deletes" -eq "$push_refs" ]; then
+  echo "Nothing to check: the push only deletes."
+  exit 0
+fi
+# With no ref lines after the remote's name and URL, no ref would update.
+if [ "$#" -ge 2 ] && [ "$push_refs" -eq 0 ]; then
+  echo "pre-push: nothing to push"
   exit 0
 fi
 
@@ -115,6 +130,13 @@ if command -v shellcheck &>/dev/null; then
   fi
 else
   echo "  - shellcheck (skipped: install via \`brew install shellcheck\` or \`apt install shellcheck\`)"
+fi
+
+bold '==> workflow concurrency namespacing'
+if [ -x scripts/check-workflow-concurrency.sh ]; then
+  ./scripts/check-workflow-concurrency.sh </dev/null
+else
+  echo "  - skipped: scripts/check-workflow-concurrency.sh is not in this checkout"
 fi
 
 bold '==> prose-check (Vale + LanguageTool)'
