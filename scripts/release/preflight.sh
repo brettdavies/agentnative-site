@@ -55,7 +55,7 @@
 #                        resolves to a GitHub owner/repo via do_fixture_repo (emoj -> sindresorhus/emoj,
 #                        cowsay -> piuccio/cowsay; otherwise sindresorhus/<name>).
 #   --mcp-binary <name>  Fresh non-registry binary for mcp audit (default: $MCP_BINARY or `figlet`)
-#   --staging-url <url>  Override staging URL (default: https://agentnative-site-staging.brettdavies.workers.dev)
+#   --staging-url <url>  Override staging URL (default: STAGING_URL_DEFAULT from release.env)
 #   --local-url <url>    Override local wrangler dev URL (default: http://localhost:8787)
 #
 # Exit codes:
@@ -77,7 +77,6 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 readonly REPO_ROOT
 # CF Service Token - Staging CLI (agentnative-site)
 readonly OP_ITEM_TOKEN="iuutxdlnh3ujmylvzmuflraeia"
-readonly DEFAULT_STAGING_URL="https://agentnative-site-staging.brettdavies.workers.dev"
 readonly DEFAULT_LOCAL_URL="http://localhost:8787"
 
 # Shared output helpers, gate counters, dependency checks ------------------
@@ -91,12 +90,14 @@ LAST_TAG=""
 BINARY="${BINARY:-emoj}"
 MCP_BINARY="${MCP_BINARY:-figlet}"
 ENV="${ENV:-staging}"
-STAGING_URL="$DEFAULT_STAGING_URL"
+STAGING_URL=""
 LOCAL_URL="$DEFAULT_LOCAL_URL"
 
+# usage [CODE]: prints the header and exits CODE, 2 (a usage error) by default;
+# --help passes 0.
 usage() {
-  sed -n '2,/^[^#]/{/^#/p}' "$0" | sed 's/^# \?//'
-  exit 2
+  print_usage_header
+  exit "${1:-2}"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -125,7 +126,7 @@ while [[ $# -gt 0 ]]; do
       LAST_TAG="$2"
       shift 2
       ;;
-    -h | --help) usage ;;
+    -h | --help) usage 0 ;;
     drift | surface | coord | build | do-smoke | mcp | dist | e2e | mechanics | all)
       SUBCMD="$1"
       shift
@@ -150,7 +151,7 @@ esac
 # Derived per-env values used by gate_do_smoke, gate_mcp, gate_dist.
 case "$ENV" in
   staging)
-    ENV_URL="$STAGING_URL"
+    ENV_URL="${STAGING_URL:-${STAGING_URL_DEFAULT:-}}"
     ENV_AUTH_NEEDED=1
     ;;
   local)
@@ -158,6 +159,10 @@ case "$ENV" in
     ENV_AUTH_NEEDED=0
     ;;
 esac
+[[ -n "$ENV_URL" ]] || {
+  echo "no $ENV URL: pass --staging-url or set STAGING_URL_DEFAULT in scripts/release/release.env" >&2
+  exit 2
+}
 
 # 1Password helpers (read-only) ---------------------------------------------
 

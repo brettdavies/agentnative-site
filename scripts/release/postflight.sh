@@ -57,8 +57,8 @@
 #                            (default: parse the most recent merged release/* PR title)
 #   --mcp-binary <binary>    Fresh non-registry binary for the live MCP audit
 #                            (default: $MCP_BINARY env var or `figlet`)
-#   --staging-url <url>      Override the staging URL
-#   --prod-url <url>         Override the prod URL
+#   --staging-url <url>      Staging URL (default: STAGING_URL_DEFAULT from release.env)
+#   --prod-url <url>         Prod URL (default: PROD_URL_DEFAULT from release.env)
 #
 # Exit codes:
 #   0 = all gates passed (or skipped with reason)
@@ -76,8 +76,6 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 readonly REPO_ROOT
 # CF Service Token - Staging CLI (agentnative-site)
 readonly OP_ITEM_TOKEN="iuutxdlnh3ujmylvzmuflraeia"
-readonly DEFAULT_STAGING_URL="https://agentnative-site-staging.brettdavies.workers.dev"
-readonly DEFAULT_PROD_URL="https://anc.dev"
 
 # Shared output helpers, gate counters, dependency checks ------------------
 
@@ -89,13 +87,15 @@ ENV="prod"
 REPO=""
 RELEASE_SLUG=""
 MCP_BINARY="${MCP_BINARY:-figlet}"
-STAGING_URL="$DEFAULT_STAGING_URL"
-PROD_URL="$DEFAULT_PROD_URL"
+STAGING_URL=""
+PROD_URL=""
 SUBCMD=""
 
+# usage [CODE]: prints the header and exits CODE, 2 (a usage error) by default;
+# --help passes 0.
 usage() {
-  sed -n '2,61p' "$0" | sed 's/^# \?//'
-  exit 2
+  print_usage_header
+  exit "${1:-2}"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -124,7 +124,7 @@ while [[ $# -gt 0 ]]; do
       PROD_URL="$2"
       shift 2
       ;;
-    -h | --help) usage ;;
+    -h | --help) usage 0 ;;
     deploy | container | pages | retired | sitemap | mcp | purge | backport | all)
       SUBCMD="$1"
       shift
@@ -142,7 +142,7 @@ done
 
 case "$ENV" in
   staging)
-    ENV_URL="$STAGING_URL"
+    ENV_URL="${STAGING_URL:-${STAGING_URL_DEFAULT:-}}"
     ENV_BRANCH="dev"
     # Wrangler appends `-staging` to env-scoped container apps even when
     # `env.staging.name` is set in wrangler.jsonc, so the deployed container
@@ -153,7 +153,7 @@ case "$ENV" in
     ENV_AUTH_NEEDED=1
     ;;
   prod)
-    ENV_URL="$PROD_URL"
+    ENV_URL="${PROD_URL:-${PROD_URL_DEFAULT:-}}"
     ENV_BRANCH="main"
     ENV_CONTAINER="agentnative-site-sandbox"
     ENV_LABEL="prod"
@@ -164,6 +164,10 @@ case "$ENV" in
     exit 2
     ;;
 esac
+[[ -n "$ENV_URL" ]] || {
+  echo "no $ENV URL: pass --${ENV}-url or set ${ENV^^}_URL_DEFAULT in scripts/release/release.env" >&2
+  exit 2
+}
 
 # Auth setup (staging only). Reads the CF Access service token from 1Password
 # and exports CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET into the env. Every
