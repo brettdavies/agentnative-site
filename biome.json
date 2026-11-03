@@ -85,5 +85,10 @@
     "linter": {
       "enabled": false
     }
+  },
+  "yaml": {
+    "formatter": {
+      "enabled": false
+    }
   }
 }
