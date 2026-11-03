@@ -2,7 +2,8 @@
 // sync-dev-after-release.sh opens against dev by the release tag in its title.
 // With no --release-slug, the tag comes from the newest release/v<version>
 // head merged into main. A stand-in `gh` on PATH answers each query from fixed
-// PR lists, applying the query's own --jq the way gh does.
+// PR lists, applying the query's own --jq the way gh does: gh renders a null
+// result as an empty line, where jq -r prints `null`.
 //
 // The gate requires jaq, which the CI runner does not install while jq ships
 // with it. When jq is on PATH, a `jaq` that runs it stands in, so every
@@ -52,34 +53,48 @@ case "$1 $2" in
   "pr list") data=$(cat "$FAKE_GH_DIR/prs-$base.json") ;;
   *) exit 1 ;;
 esac
-if [ -n "$jq_expr" ]; then printf '%s' "$data" | jaq -r "$jq_expr"; else printf '%s\\n' "$data"; fi
+if [ -n "$jq_expr" ]; then printf '%s' "$data" | jaq -r "($jq_expr) | if . == null then \\"\\" else . end"; else printf '%s\\n' "$data"; fi
 `;
 
 let dir = '';
+let missDir = '';
 
-beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), 'postflight-backport-'));
-  writeFileSync(join(dir, 'gh'), FAKE_GH);
-  chmodSync(join(dir, 'gh'), 0o755);
+/** A stand-in bin directory holding gh, a jq-backed jaq when jq is on PATH, and the PR lists. */
+function standIn(prefix: string, mainPrs: object[]): string {
+  const bin = mkdtempSync(join(tmpdir(), prefix));
+  writeFileSync(join(bin, 'gh'), FAKE_GH);
+  chmodSync(join(bin, 'gh'), 0o755);
   const jq = Bun.which('jq');
   if (jq) {
-    writeFileSync(join(dir, 'jaq'), `#!/usr/bin/env bash\nexec ${jq} "$@"\n`);
-    chmodSync(join(dir, 'jaq'), 0o755);
+    writeFileSync(join(bin, 'jaq'), `#!/usr/bin/env bash\nexec ${jq} "$@"\n`);
+    chmodSync(join(bin, 'jaq'), 0o755);
   }
-  writeFileSync(join(dir, 'prs-main.json'), JSON.stringify(MAIN_PRS));
-  writeFileSync(join(dir, 'prs-dev.json'), JSON.stringify(DEV_PRS));
+  writeFileSync(join(bin, 'prs-main.json'), JSON.stringify(mainPrs));
+  writeFileSync(join(bin, 'prs-dev.json'), JSON.stringify(DEV_PRS));
+  return bin;
+}
+
+beforeAll(() => {
+  dir = standIn('postflight-backport-', MAIN_PRS);
+  missDir = standIn('postflight-backport-miss-', [
+    { title: 'fix: mend a page on main (#480)', headRefName: 'fix/mend-a-page', mergedAt: '2026-10-31T18:00:00Z' },
+  ]);
 });
 
 afterAll(() => {
-  if (dir) rmSync(dir, { recursive: true, force: true });
+  for (const d of [dir, missDir]) if (d) rmSync(d, { recursive: true, force: true });
 });
 
 function backport(...args: string[]): { status: number; output: string } {
+  return backportWith(dir, ...args);
+}
+
+function backportWith(dataDir: string, ...args: string[]): { status: number; output: string } {
   const proc = Bun.spawnSync(
     ['bash', join(REPO_ROOT, 'scripts/release/postflight.sh'), '--env', 'prod', ...args, 'backport'],
     {
       cwd: REPO_ROOT,
-      env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, FAKE_GH_DIR: dir, NO_COLOR: '1' },
+      env: { ...process.env, PATH: `${dataDir}:${process.env.PATH}`, FAKE_GH_DIR: dataDir, NO_COLOR: '1' },
     },
   );
   return { status: proc.exitCode, output: proc.stdout.toString() + proc.stderr.toString() };
@@ -89,6 +104,13 @@ describe('postflight backport gate', () => {
   test('reads the release tag from the newest merged release/v<version> head', () => {
     const { status, output } = backport();
     expect(output).toContain(`backport PR #511 merged to dev from chore/sync-dev-after-${STAMP}`);
+    expect(status).toBe(0);
+  });
+
+  test('skips as undetected when no merged head names a release/v<version> branch', () => {
+    const { status, output } = backportWith(missDir);
+    expect(output).toContain('could not auto-detect release slug');
+    expect(output).not.toContain('null');
     expect(status).toBe(0);
   });
 
