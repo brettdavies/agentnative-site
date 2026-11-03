@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Canonical version: 2026.11.03 (generic)
+#
 # Pre-push hook — mirrors .github/workflows/ci.yml so a green local push
 # almost always means a green CI run. Saves the round-trip of pushing,
 # watching CI fail on lint or a broken test, and force-pushing a fix.
@@ -31,41 +33,46 @@
 #                       (Vale + LanguageTool over *.md in scope; LT skips
 #                       cleanly when LanguageTool is unreachable)
 #
-# Stages 6-10 each redirect child stdin to </dev/null. The ref-line read at
-# the top of the hook consumes the hook-protocol bytes from stdin
-# (`while read -r local_ref local_sha …`); a child that read stdin would
-# either swallow protocol bytes or fight for them.
+# A push that only deletes, a push with no ref to update, and a tag or new
+# branch at a commit the remote already has run nothing: none brings a commit
+# for a stage to read.
+#
+# Stages 6-10 each redirect child stdin to </dev/null. push_only_deletes in
+# scripts/hooks/_lib.sh consumes the hook-protocol ref lines from stdin; a
+# child that read stdin would either swallow protocol bytes or fight for them.
 #
 # To bypass intentionally (rare): `git push --no-verify`. Don't make this
 # a habit — the hook is here precisely to catch what we lost time to last.
 
 set -euo pipefail
 
-# Git passes the remote's name and URL as arguments and one line per ref on
-# stdin; a branch deletion (`git push origin --delete <branch>`) arrives with
-# sha=0000.... A hand run passes neither and checks everything.
-push_refs=0
-push_deletes=0
-if [ ! -t 0 ]; then
-  while read -r local_ref local_sha _remote_ref _remote_sha; do
-    [ -n "$local_ref" ] || continue
-    push_refs=$((push_refs + 1))
-    if [[ "$local_sha" =~ ^0+$ ]]; then
-      push_deletes=$((push_deletes + 1))
-    fi
-  done
-fi
-if [ "$push_refs" -gt 0 ] && [ "$push_deletes" -eq "$push_refs" ]; then
+# From a linked worktree git exports GIT_DIR, which sends a tool's git calls in
+# any directory to this repository, so a test that builds a scratch repository
+# commits onto the pushed branch instead. Pre-push has no temporary index, and
+# discovery from the hook's cwd (the worktree root) finds the same repository.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY \
+  GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PREFIX GIT_NAMESPACE
+
+cd "$(git rev-parse --show-toplevel)"
+# shellcheck source=scripts/hooks/_lib.sh disable=SC1091
+. ./scripts/hooks/_lib.sh || exit 1
+
+if push_only_deletes; then
   echo "Nothing to check: the push only deletes."
   exit 0
 fi
-# With no ref lines after the remote's name and URL, no ref would update.
-if [ "$#" -ge 2 ] && [ "$push_refs" -eq 0 ]; then
+
+# A real push passes the remote's name and URL. With no ref lines after them,
+# no ref would update. A hand run passes neither and checks everything.
+if [ "$#" -ge 2 ] && [ -z "${HOOK_PUSH_REFS:-}" ]; then
   echo "pre-push: nothing to push"
   exit 0
 fi
 
-cd "$(git rev-parse --show-toplevel)"
+if push_only_known_commits "${1:-}"; then
+  echo "Nothing to check: every pushed commit is already on $1."
+  exit 0
+fi
 
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
 
