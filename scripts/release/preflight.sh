@@ -869,16 +869,17 @@ gate_mechanics() {
   fi
 
   # The changelog's top section names the release: the deploy stamp of the dev
-  # commit the release was cut from, which site-version.sh --verify checks.
+  # commit the release was cut from, which site-version.sh --verify checks. Off
+  # a release branch the top section is the last release's, synced back to dev.
   local release_changelog changelog_version verified
   release_changelog="$REPO_ROOT/$(release_changelog)"
+  if [[ "$(git branch --show-current)" != release/* ]]; then
+    gate_skip "$(release_changelog) top section" "not a release/* branch; RELEASES.md step 4 writes this release's section on the release branch"
+    return
+  fi
   if [[ ! -f "$release_changelog" ]]; then
-    if [[ "$(git branch --show-current)" == release/* ]]; then
-      gate_fail "$(release_changelog)" "missing on a release branch
-    fix: run RELEASES.md step 4, scripts/generate-changelog.py --from-dev-prs --tag v<version>"
-    else
-      gate_skip "$(release_changelog) top section" "no $(release_changelog) here; RELEASES.md step 4 writes it on the release branch"
-    fi
+    gate_fail "$(release_changelog)" "missing on a release branch
+    fix: run RELEASES.md step 4, scripts/generate-changelog.py --from-dev-prs"
     return
   fi
   changelog_version=$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+(-g[0-9a-f]{7})?\]' "$release_changelog" | tr -d '[]## ' || true)
