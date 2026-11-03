@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# canonical: repo-owned (the site's own gates: deploy, container, pages, retired, sitemap, mcp, purge, backport)
 # Verify a freshly-deployed environment (staging OR prod) landed cleanly.
 #
 # Usage:
