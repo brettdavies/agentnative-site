@@ -744,4 +744,10 @@ describe('src/og-render/wrangler.jsonc — render Worker', () => {
       expect([file, proc.exitCode]).toEqual([file, 0]);
     }
   });
+
+  test("the render Worker's local wrangler state under src/ stays untracked", () => {
+    const file = 'src/og-render/.wrangler/state/v3/cache.sqlite';
+    const proc = Bun.spawnSync(['git', 'check-ignore', '-q', file], { cwd: join(import.meta.dir, '..') });
+    expect([file, proc.exitCode]).toEqual([file, 0]);
+  });
 });
