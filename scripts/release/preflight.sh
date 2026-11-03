@@ -801,7 +801,8 @@ gate_changelog_sections() {
   if out=$(cd "$REPO_ROOT" && scripts/generate-changelog.py --audit-sections --dev-branch dev 2>&1); then
     gate_pass "PR changelog sections: ${out%%$'\n'*}"
   else
-    gate_fail "PR changelog sections" "$out"
+    gate_fail "PR changelog sections" "$out
+    fix: give each PR listed above a ## Changelog section in its body on GitHub (an empty heading says it ships nothing user-facing), then rerun scripts/release/preflight.sh changelog-sections"
   fi
 }
 

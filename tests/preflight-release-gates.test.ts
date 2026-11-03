@@ -247,5 +247,6 @@ describe('preflight changelog-sections', () => {
     const output = sections('sections-fail', 1, "'2 PR(s): 1 without the section' '#7 feat: x: no section'");
     expect(output).toContain('✗ PR changelog sections');
     expect(output).toContain('#7 feat: x: no section');
+    expect(output).toContain('fix: give each PR listed above a ## Changelog section');
   });
 });
