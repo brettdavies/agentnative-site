@@ -5,7 +5,7 @@ custom domain. Two environments to verify per release cycle:
 
 - **staging** (`agentnative-site-staging.brettdavies.workers.dev`). Deploys on every push to `dev` per
   `.github/workflows/deploy.yml`. Run `--env staging` once dev is at the soak state for the release.
-- **prod** (`anc.dev`). Deploys on every `release/<YYYY-MM-DD>-<slug>` → `main` merge per
+- **prod** (`anc.dev`). Deploys on every `release/v<version>` → `main` merge per
   [`RELEASES.md` § Releasing dev to main](./RELEASES.md#releasing-dev-to-main). Run `--env prod` after the merge fires
   `deploy.yml` at main.
 
@@ -61,11 +61,11 @@ Flags:
 - `--env staging|prod` — target environment (default: `prod`)
 - `--repo OWNER/REPO` — override the auto-detected nameWithOwner
 - `--release-slug <slug>`: the string the backport gate looks for in merged `dev` PR titles; pass the release tag
-  (`v<version>`) to find the PR `scripts/sync-dev-after-release.sh` opens (default: parse the most recent merged PR to
-  `main` whose title starts with `release/`)
+  (`v<version>`) to find the PR `scripts/sync-dev-after-release.sh` opens (default: the tag the newest
+  `release/v<version>` branch merged into `main` names)
 - `--mcp-binary <binary>` — override the live-audit binary (default: `${MCP_BINARY:-figlet}`)
-- `--staging-url <url>` — override the staging Worker URL
-- `--prod-url <url>` — override the prod URL
+- `--staging-url <url>` — override the staging Worker URL (default: `STAGING_URL_DEFAULT` in `scripts/release/release.env`)
+- `--prod-url <url>` — override the prod URL (default: `PROD_URL_DEFAULT` in `scripts/release/release.env`)
 
 ## Checklist
 
@@ -90,7 +90,7 @@ Driven by `scripts/release/postflight.sh --env <staging|prod> deploy` and `scrip
   [`RELEASES-RATIONALE.md` § DO migrations are one-way walls](./RELEASES-RATIONALE.md#do-migrations-are-one-way-walls)).
 
 - [ ] **Env deploy green end-to-end.** The deploy gate watches `deploy.yml` on `dev` (staging) or `main` (prod). For the
-  release flow, the `release/<slug> → main` PR merge triggers the prod run. Watch with
+  release flow, the `release/v<version> → main` PR merge triggers the prod run. Watch with
   `gh run watch <run-id> --exit-status`, then verify explicitly per `~/.claude/ci-watch-prompt.sh`:
 
   ```bash
@@ -340,9 +340,10 @@ Driven by `scripts/release/postflight.sh --env prod backport`. The gate SKIPs on
 directly from `dev` — there is no `main → dev` flow to verify.
 
 - [ ] **Backport `main` → `dev`** via the **PR `scripts/sync-dev-after-release.sh v<version>` opens against `dev`.** The
-  release branch lands edits on `main` that never round-trip to `dev` (the `package.json` version, the `CHANGELOG.md`
-  section, RELEASES.md meta-edits). The script writes the released version into `package.json`, copies `CHANGELOG.md`
-  from `main`, and adopts every other release-only edit whose `dev` copy still matches the previous `v*` tag. It lists
+  release branch lands edits on `main` that never round-trip to `dev` (the `CHANGELOG.md` section, RELEASES.md
+  meta-edits). The script copies `CHANGELOG.md` from `main`, so the next release's overlay keeps it rather than deleting
+  it as a `main`-only file, and adopts every other release-only edit whose `dev` copy still matches the previous `v*`
+  tag. It writes no `package.json` version: the tag is the version. It lists
   the contested paths both branches changed since that tag and leaves them out; name the ones to take with
   `--only PATH`, or take them all with `--include-contested`. It then opens a PR titled
   `chore(release): sync dev after v<version>`; merge it once CI is green. That keeps the next release's preflight diff-B

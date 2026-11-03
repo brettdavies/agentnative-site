@@ -2,7 +2,7 @@
 
 Operational pre-flight checklist. Runs **before** step 1 of
 [`RELEASES.md` § Releasing dev to main](./RELEASES.md#releasing-dev-to-main). Gates the cut of the
-`release/<YYYY-MM-DD>-<slug>` branch, not the daily dev integration. Each box is an explicit go/no-go. If any item is
+`release/v<version>` branch, not the daily dev integration. Each box is an explicit go/no-go. If any item is
 unchecked or red, hold the release.
 
 CI (`lint · build · test · wrangler`, the post-deploy smoke against the registry-fast-path, prose-scrub on `*.md`)
@@ -62,7 +62,7 @@ Flags:
   otherwise `sindresorhus/<name>`. Add a binary to the `do_fixture_repo` map in `scripts/release/preflight.sh` when its
   source lives outside the `sindresorhus` namespace.
 - `--mcp-binary <name>` — fresh non-registry binary for the live MCP audit (default: `$MCP_BINARY` env var or `figlet`)
-- `--staging-url <url>` — override the staging Worker URL
+- `--staging-url <url>` — override the staging Worker URL (default: `STAGING_URL_DEFAULT` in `scripts/release/release.env`)
 - `--local-url <url>` — override the local `wrangler dev` URL
 - `--tag <tag>`: override `LAST_TAG` resolution for `surface` (default: newest `v*` tag)
 
@@ -102,20 +102,40 @@ Security PRs, hotfixes, and config edits land on `main` first. The release branc
 `dev`'s tree, so anything `main` holds that `dev` never received is reverted by the release or collides with it, and
 Dependabot raises the same fix again.
 
-- [ ] `dev` carries the previous release's own bookkeeping, the `package.json` version and the `CHANGELOG.md` section
-  (gate 0). Gate 0 fails when the previous release's bookkeeping never reached `dev`; run
-  `scripts/sync-dev-after-release.sh v<version>`, merge its PR, and rerun.
-- [ ] Every commit on `main` since the last release has its changes on `dev` (gate 1 lists the ones that do not, as
-  `differs` or `missing`). Backport them by PR into `dev` first, merge, and rerun. Until the first `v*` tag exists the
-  gate anchors on the newest `release:` squash on `main`; pass `--since <sha>` to anchor elsewhere.
-- [ ] Every `.github/` change on `main` is also on `dev` (gate 2 lists the paths that are not, as `differs` or
-  `missing`). A `.github/` path `dev` holds and `main` lacks is what the release delivers, not drift; a path `dev`
-  deleted counts as delivered while `main` still has the anchor's copy.
-- [ ] No lockfile package resolves newer on `main` than on `dev` (gate 3). The gate reads this repo's `bun.lock` one
-  line per package name, strips its trailing commas before parsing, and fails when it parses zero packages. Only
-  resolved versions compare: a `file:`, `workspace:`, `link:`, or git spec is left out, and a copy `main` nests under a
-  package `dev` no longer carries is not counted.
+<!-- canonical:begin drift-gate -->
+
+- [ ] The previous release's own bookkeeping reached `dev` (gate 0).
+
+  Gate 0 checks the version carriers and `CHANGELOG.md` as the release left them. It fails when a backport never ran;
+  run `scripts/sync-dev-after-release.sh v<previous>`, merge its PR, and rerun.
+
+- [ ] Every commit on `main` since the last release has its changes on `dev` (gate 1).
+
+  Gate 1 lists each commit that does not, as `differs` or `missing`. Backport them by PR into `dev` first, merge, and
+  rerun.
+
+- [ ] Nothing under `.github/` on `main` is missing from `dev` (gate 2).
+
+  `.github/` reaches `main` through the release, so config that has reached `dev` and not `main` is what this release
+  delivers, and the gate counts it. The gate fails on the other direction, where `main` holds workflow or ruleset
+  config `dev` never received, and names each path as `missing` or `differs`.
+
+- [ ] No lockfile package resolves newer on `main` than on `dev` (gate 3).
+
+  Gate 3 reads `package-lock.json`, `bun.lock`, and `Cargo.lock`. The one benign case is a version still inside the
+  local package manager's release-age window when the advisory is already patched at `dev`'s version.
+
 - [ ] `dev`-newer packages are the routine updates this release ships; the gate counts them and does not list them.
+
+<!-- canonical:end drift-gate -->
+
+In this repo the release changes one carrier, the `CHANGELOG.md` section: `package.json` carries no version
+([`RELEASES.md` § Versioning](./RELEASES.md#versioning)). Until the first `v*` tag exists, gates 0 and 1 anchor on the
+newest `release:` squash on `main`; pass `--since <sha>` to anchor elsewhere. Gate 2 counts a `.github/` path `dev`
+deleted as delivered while `main` still has the anchor's copy. Gate 3 reads `bun.lock` and `scripts/design/bun.lock` one
+line per package name, strips their trailing commas before parsing, and fails when it parses zero packages. Only
+resolved versions compare: a `file:`, `workspace:`, `link:`, or git spec is left out, and a copy `main` nests under a
+package `dev` no longer carries is not counted.
 
 ### Cross-repo coordination
 
@@ -580,12 +600,22 @@ projects consumes a wire contract, so a release that renames a request key or mo
 that asserts the old shape. Trace each failure to the source: the 2026-09-15 unified-funnel release had five stale
 consumers across the gates and the specs, and no product defect behind any of them.
 
+### PR changelog sections
+
+Driven by `scripts/release/preflight.sh changelog-sections`.
+
+- [ ] **Every PR this release carries answers its `## Changelog` section.** The gate runs
+  `scripts/generate-changelog.py --audit-sections`, which lists each PR whose entry would fall back to its title because
+  its body never offered the section, and fails while any does. Fill the section in the PR body on GitHub (it stays
+  editable after merge), or leave the heading standing with no bullets when the PR ships nothing user-facing, then
+  rerun.
+
 ### Release mechanics sanity
 
 These items duplicate steps from `RELEASES.md` deliberately: easy to skip, expensive to recover from. Confirm
 explicitly.
 
-Driven by `scripts/release/preflight.sh mechanics`. Expected to surface as a real signal only on a `release/<slug>`
+Driven by `scripts/release/preflight.sh mechanics`. Expected to surface as a real signal only on a `release/v<version>`
 branch (where the diff vs `origin/main` is the release); running on the integration `dev` branch will correctly report
 guarded planning paths as leaked.
 
@@ -613,18 +643,22 @@ guarded planning paths as leaked.
   An entry that should not ship needs both: registering in the workflow's `extra_paths`, and removing from the release
   branch.
 
-- [ ] **Diff-B filtered by the guarded set.** Files on `dev` that the release branch lacks, excluding only the guarded
-  set (not all of `docs/`, since `docs/runbooks/` ships to `main` and would hide a missed pick) and the release-only
-  files (`package.json` version, `CHANGELOG.md`):
+- [ ] **Diff-B filtered by the guarded set.** Files the release branch lacks or changes against `<dev-sha>`, the commit
+  its stamp names, excluding only the guarded set (not all of `docs/`, since `docs/runbooks/` ships to `main` and would
+  hide a missed pick) and the release's own `CHANGELOG.md` section. The gate reads `<dev-sha>` from the stamp in
+  `CHANGELOG.md`, not from `origin/dev`, which can move past it after the cut:
 
   ```bash
   git diff origin/main..HEAD --stat                                              # A: ship surface
-  git diff HEAD..origin/dev --name-only | grep -Ev "$GUARDED" \
-    | grep -Ev '^(package\.json|CHANGELOG\.md)$' || echo "(none)"                 # B: no missed picks
+  git diff HEAD..<dev-sha> --name-only | grep -Ev "$GUARDED" \
+    | grep -Ev '^CHANGELOG\.md$' || echo "(none)"                                  # B: no missed picks
   git diff origin/dev..origin/main --stat | tail -5                              # C: phantom-commits sanity
   ```
 
-- [ ] **`CHANGELOG.md` versioned section** has no `[Unreleased]` placeholder and matches the `package.json` version.
+- [ ] **`CHANGELOG.md` top section names this release.** Its heading is `[<version>]`, the stamp of the `dev` commit the
+  release was cut from, and the file has no `[Unreleased]` placeholder. The gate runs
+  `scripts/release/site-version.sh --verify v<version>`, and fails a section that is already tagged or whose stamp does
+  not match its commit on `origin/dev`.
 
 - [ ] **og:video production setup is in place.** Run `scripts/og/setup.sh production --check`; it reads `ok` once
   og:video is live in production. Before the release that first ships og:video, run `scripts/og/setup.sh production`

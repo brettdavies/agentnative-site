@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Canonical version: 2026.11.03 (generic)
+#
 # Pre-push hook — mirrors .github/workflows/ci.yml so a green local push
 # almost always means a green CI run. Saves the round-trip of pushing,
 # watching CI fail on lint or a broken test, and force-pushing a fix.
@@ -6,8 +8,8 @@
 # Activate once per clone:
 #   git config core.hooksPath scripts/hooks
 #
-# Steps mirror the CI workflow's build job, then add three prose-check
-# stages (CI does not run these — pre-push is the only enforcement):
+# Stages 1-5 and 9 mirror the CI workflow's gate job. CI does not run
+# stages 6-8 and 10, so pre-push is their only enforcement:
 #   1. lint           — biome check + markdownlint-cli2
 #   2. typecheck      — tsc --noEmit over the client + worker projects
 #   3. build          — bun src/build/build.mjs
@@ -23,34 +25,54 @@
 #                       *.sh plus scripts/hooks/* (catches SC2034 / SC2086
 #                       / SC2155 class bugs; skips with a one-line note
 #                       when shellcheck isn't installed)
-#   9. prose-check    — bash scripts/prose-check.sh
+#   9. concurrency    — scripts/check-workflow-concurrency.sh
+#                       (every workflow's concurrency group starts with a
+#                       literal token, so a caller and a reusable it calls
+#                       never share one)
+#  10. prose-check    — bash scripts/prose-check.sh
 #                       (Vale + LanguageTool over *.md in scope; LT skips
 #                       cleanly when LanguageTool is unreachable)
 #
-# Stages 6-9 each redirect child stdin to </dev/null. The branch-deletion
-# short-circuit at the top of the hook consumes the hook-protocol bytes
-# from stdin (`while read -r local_ref local_sha …`); a child that read
-# stdin would either swallow protocol bytes or fight for them.
+# A push that only deletes, a push with no ref to update, and a tag or new
+# branch at a commit the remote already has run nothing: none brings a commit
+# for a stage to read.
+#
+# Stages 6-10 each redirect child stdin to </dev/null. push_only_deletes in
+# scripts/hooks/_lib.sh consumes the hook-protocol ref lines from stdin; a
+# child that read stdin would either swallow protocol bytes or fight for them.
 #
 # To bypass intentionally (rare): `git push --no-verify`. Don't make this
 # a habit — the hook is here precisely to catch what we lost time to last.
 
 set -euo pipefail
 
-# Skip the hook for branch deletions (`git push origin --delete <branch>`),
-# which arrive with sha=0000... on stdin from the hook protocol.
-deleting_only=true
-while read -r local_ref local_sha _remote_ref remote_sha; do
-  : "$local_ref" "$local_sha" "$_remote_ref" "$remote_sha"
-  if [[ "$local_sha" != "0000000000000000000000000000000000000000" ]]; then
-    deleting_only=false
-  fi
-done
-if $deleting_only; then
+# From a linked worktree git exports GIT_DIR, which sends a tool's git calls in
+# any directory to this repository, so a test that builds a scratch repository
+# commits onto the pushed branch instead. Pre-push has no temporary index, and
+# discovery from the hook's cwd (the worktree root) finds the same repository.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY \
+  GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PREFIX GIT_NAMESPACE
+
+cd "$(git rev-parse --show-toplevel)"
+# shellcheck source=scripts/hooks/_lib.sh disable=SC1091
+. ./scripts/hooks/_lib.sh || exit 1
+
+if push_only_deletes; then
+  echo "Nothing to check: the push only deletes."
   exit 0
 fi
 
-cd "$(git rev-parse --show-toplevel)"
+# A real push passes the remote's name and URL. With no ref lines after them,
+# no ref would update. A hand run passes neither and checks everything.
+if [ "$#" -ge 2 ] && [ -z "${HOOK_PUSH_REFS:-}" ]; then
+  echo "pre-push: nothing to push"
+  exit 0
+fi
+
+if push_only_known_commits "${1:-}"; then
+  echo "Nothing to check: every pushed commit is already on $1."
+  exit 0
+fi
 
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
 
@@ -115,6 +137,13 @@ if command -v shellcheck &>/dev/null; then
   fi
 else
   echo "  - shellcheck (skipped: install via \`brew install shellcheck\` or \`apt install shellcheck\`)"
+fi
+
+bold '==> workflow concurrency namespacing'
+if [ -x scripts/check-workflow-concurrency.sh ]; then
+  ./scripts/check-workflow-concurrency.sh </dev/null
+else
+  echo "  - skipped: scripts/check-workflow-concurrency.sh is not in this checkout"
 fi
 
 bold '==> prose-check (Vale + LanguageTool)'

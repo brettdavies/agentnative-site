@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# canonical: repo-owned (the site's own gates: deploy, container, pages, retired, sitemap, mcp, purge, backport)
 # Verify a freshly-deployed environment (staging OR prod) landed cleanly.
 #
 # Usage:
@@ -7,7 +8,7 @@
 # Two environments to verify per release cycle:
 #   - staging: deploys on every push to `dev` (per `.github/workflows/deploy.yml`).
 #     Run `--env staging` once dev is at the soak state for the release.
-#   - prod: deploys on every release/<YYYY-MM-DD>-<slug> -> main merge. Run
+#   - prod: deploys on every release/v<version> -> main merge. Run
 #     `--env prod` after the merge fires deploy.yml at main.
 #
 # Same suite of gates against both environments. Differences the script handles
@@ -54,11 +55,11 @@
 #   --env staging|prod       Target environment (default: prod)
 #   --repo OWNER/REPO        Override the auto-detected nameWithOwner
 #   --release-slug <slug>    Override auto-detection for the backport gate
-#                            (default: parse the most recent merged release/* PR title)
+#                            (default: v<version> from the newest merged release/v<version> head)
 #   --mcp-binary <binary>    Fresh non-registry binary for the live MCP audit
 #                            (default: $MCP_BINARY env var or `figlet`)
-#   --staging-url <url>      Override the staging URL
-#   --prod-url <url>         Override the prod URL
+#   --staging-url <url>      Staging URL (default: STAGING_URL_DEFAULT from release.env)
+#   --prod-url <url>         Prod URL (default: PROD_URL_DEFAULT from release.env)
 #
 # Exit codes:
 #   0 = all gates passed (or skipped with reason)
@@ -76,8 +77,6 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 readonly REPO_ROOT
 # CF Service Token - Staging CLI (agentnative-site)
 readonly OP_ITEM_TOKEN="iuutxdlnh3ujmylvzmuflraeia"
-readonly DEFAULT_STAGING_URL="https://agentnative-site-staging.brettdavies.workers.dev"
-readonly DEFAULT_PROD_URL="https://anc.dev"
 
 # Shared output helpers, gate counters, dependency checks ------------------
 
@@ -89,13 +88,15 @@ ENV="prod"
 REPO=""
 RELEASE_SLUG=""
 MCP_BINARY="${MCP_BINARY:-figlet}"
-STAGING_URL="$DEFAULT_STAGING_URL"
-PROD_URL="$DEFAULT_PROD_URL"
+STAGING_URL=""
+PROD_URL=""
 SUBCMD=""
 
+# usage [CODE]: prints the header and exits CODE, 2 (a usage error) by default;
+# --help passes 0.
 usage() {
-  sed -n '2,61p' "$0" | sed 's/^# \?//'
-  exit 2
+  print_usage_header
+  exit "${1:-2}"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -124,7 +125,7 @@ while [[ $# -gt 0 ]]; do
       PROD_URL="$2"
       shift 2
       ;;
-    -h | --help) usage ;;
+    -h | --help) usage 0 ;;
     deploy | container | pages | retired | sitemap | mcp | purge | backport | all)
       SUBCMD="$1"
       shift
@@ -142,7 +143,7 @@ done
 
 case "$ENV" in
   staging)
-    ENV_URL="$STAGING_URL"
+    ENV_URL="${STAGING_URL:-${STAGING_URL_DEFAULT:-}}"
     ENV_BRANCH="dev"
     # Wrangler appends `-staging` to env-scoped container apps even when
     # `env.staging.name` is set in wrangler.jsonc, so the deployed container
@@ -153,7 +154,7 @@ case "$ENV" in
     ENV_AUTH_NEEDED=1
     ;;
   prod)
-    ENV_URL="$PROD_URL"
+    ENV_URL="${PROD_URL:-${PROD_URL_DEFAULT:-}}"
     ENV_BRANCH="main"
     ENV_CONTAINER="agentnative-site-sandbox"
     ENV_LABEL="prod"
@@ -164,6 +165,10 @@ case "$ENV" in
     exit 2
     ;;
 esac
+[[ -n "$ENV_URL" ]] || {
+  echo "no $ENV URL: pass --${ENV}-url or set ${ENV^^}_URL_DEFAULT in scripts/release/release.env" >&2
+  exit 2
+}
 
 # Auth setup (staging only). Reads the CF Access service token from 1Password
 # and exports CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET into the env. Every
@@ -223,10 +228,12 @@ resolve_release_slug() {
   fi
   local repo
   repo=$(resolve_repo)
+  # The release branch is named release/v<version>, so the newest merged
+  # release head names the tag the backport PR's title carries.
   gh pr list --repo "$repo" --base main --state merged --limit 10 \
-    --json title --jq '[.[] | select(.title | test("^release/"))][0].title' 2>/dev/null \
-    | sed -E 's|^release/([^ "]+).*|\1|' \
-    || true
+    --json headRefName,mergedAt \
+    --jq '[.[] | select(.headRefName | startswith("release/"))] | sort_by(.mergedAt) | .[-1] | .headRefName // empty' \
+    2>/dev/null | sed 's|^release/||' || true
 }
 
 # Gate: deploy ---------------------------------------------------------------
