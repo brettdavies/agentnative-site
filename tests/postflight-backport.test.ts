@@ -3,6 +3,10 @@
 // With no --release-slug, the tag comes from the newest release/v<version>
 // head merged into main. A stand-in `gh` on PATH answers each query from fixed
 // PR lists, applying the query's own --jq the way gh does.
+//
+// The gate requires jaq, which the CI runner does not install while jq ships
+// with it. When jq is on PATH, a `jaq` that runs it stands in, so every
+// machine evaluates the gate's programs with the same tool.
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -57,6 +61,11 @@ beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), 'postflight-backport-'));
   writeFileSync(join(dir, 'gh'), FAKE_GH);
   chmodSync(join(dir, 'gh'), 0o755);
+  const jq = Bun.which('jq');
+  if (jq) {
+    writeFileSync(join(dir, 'jaq'), `#!/usr/bin/env bash\nexec ${jq} "$@"\n`);
+    chmodSync(join(dir, 'jaq'), 0o755);
+  }
   writeFileSync(join(dir, 'prs-main.json'), JSON.stringify(MAIN_PRS));
   writeFileSync(join(dir, 'prs-dev.json'), JSON.stringify(DEV_PRS));
 });
