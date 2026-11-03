@@ -73,6 +73,7 @@
 #
 # Dependencies:
 #   - bun, bunx, git, gh, jq, jaq, curl, grep on PATH
+#   - uv (changelog-sections runs scripts/generate-changelog.py, which starts through `uv run --script`)
 #   - docker (optional; coord's pull-and-inspect gate skips if absent)
 #   - ~/.claude/skills/1password/scripts/read_field.sh (for --env staging CF Access token)
 #
@@ -795,6 +796,11 @@ gate_changelog_sections() {
   header "PR changelog sections"
   have_bin gh || {
     gate_skip "PR changelog sections" "gh not installed"
+    return
+  }
+  have_bin uv || {
+    gate_fail "PR changelog sections" "uv is not installed; scripts/generate-changelog.py starts through uv run --script
+    fix: install uv (brew install uv), then rerun scripts/release/preflight.sh changelog-sections"
     return
   }
   local out

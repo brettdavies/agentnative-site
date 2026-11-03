@@ -234,6 +234,7 @@ describe('preflight changelog-sections', () => {
     script(repo, 'scripts/generate-changelog.py', `printf '%s\\n' ${lines}\nexit ${exit}\n`);
     const bin = join(root, `${name}-bin`);
     script(bin, 'gh', 'exit 0\n');
+    script(bin, 'uv', 'exit 0\n');
     return preflight(repo, 'changelog-sections', bin);
   }
 
@@ -248,5 +249,40 @@ describe('preflight changelog-sections', () => {
     expect(output).toContain('✗ PR changelog sections');
     expect(output).toContain('#7 feat: x: no section');
     expect(output).toContain('fix: give each PR listed above a ## Changelog section');
+  });
+
+  test('fails with the install fix when uv is missing', () => {
+    const { repo } = fixture('sections-no-uv');
+    // A PATH of one-line wrappers for the tools the gate reaches, and no uv.
+    const bin = join(root, 'sections-no-uv-bin');
+    script(bin, 'gh', 'exit 0\n');
+    for (const tool of [
+      'bash',
+      'dirname',
+      'basename',
+      'cat',
+      'sed',
+      'awk',
+      'grep',
+      'tr',
+      'head',
+      'git',
+      'env',
+      'uname',
+    ]) {
+      const real = Bun.which(tool);
+      if (real) {
+        writeFileSync(join(bin, tool), `#!/bin/sh\nexec ${real} "$@"\n`);
+        chmodSync(join(bin, tool), 0o755);
+      }
+    }
+    const proc = Bun.spawnSync([join(bin, 'bash'), 'scripts/release/preflight.sh', 'changelog-sections'], {
+      cwd: repo,
+      env: { ...cleanEnv(), PATH: bin },
+    });
+    const output = proc.stdout.toString() + proc.stderr.toString();
+    expect(output).toContain('uv is not installed');
+    expect(output).toContain('fix: install uv');
+    expect(proc.exitCode).toBe(1);
   });
 });
