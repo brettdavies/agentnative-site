@@ -420,3 +420,22 @@ The permanent, open-format store of the site's raw telemetry events: Workers tra
 export chain into Apache Iceberg tables on the site's own R2 bucket, queried through the R2 SQL editor. It is the only
 layer that can answer months-horizon questions; the live Workers Logs window and the coarse zone rollups sit in front of
 it with platform-capped retention.
+
+## Releases
+
+### Release overlay
+
+How the site ships: a release branch is cut from main, takes dev's whole tree at one dev commit, drops the paths that
+never ship and any feature held back from that release, and merges to main as one squash commit. Main and dev share no
+recent history, so the overlay asserts the end state instead of merging. A file that exists only on main is deleted by
+the next overlay unless it was synced back to dev after its release, which is why the changelog has to reach dev.
+
+### Deploy stamp
+
+The site's release version, `<base>.<epoch>-g<sha7>`: a major.minor base that only a maintainer raises, the committer
+time of the dev commit the release overlay ships, and that commit's short hash. The same commit always yields the same
+stamp, and a stamp that would not sort above every earlier release is refused. Each release carries it in its tag,
+branch name, GitHub Release, and changelog heading; no page displays it, and the footer keeps showing the spec version.
+
+A stamp names a commit, so it holds only when the release's tree is that commit's: every step of the cut reads the one
+recorded commit, never dev's current tip.
