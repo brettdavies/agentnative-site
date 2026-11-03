@@ -15,7 +15,7 @@ because the site is the public surface. Most improvements are concrete code or c
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------- |
 | **1. Signal**   | Site bug, rendering issue, broken link, copy critique, mobile-layout regression, performance regression                                           | [`site-bug`](https://github.com/brettdavies/agentnative-site/issues/new?template=site-bug.yml) | ~5 min   |
 | **2. Proposal** | A new page or section, a scorecard renderer rework, a Worker route addition, a build-pipeline change, a live-scoring surface change               | Issue with the design before opening a PR                                                      | ~1-2 hrs |
-| **3. Code**     | Site copy or design polish, scorecard renderer improvements, Worker route or header work, build-pipeline work, accessibility fixes, OG image work | PR against `dev`; `release/<YYYY-MM-DD>-<slug>` cut from `main` for deploys                    | Variable |
+| **3. Code**     | Site copy or design polish, scorecard renderer improvements, Worker route or header work, build-pipeline work, accessibility fixes, OG image work | PR against `dev`; `release/v<version>` cut from `main` for deploys                             | Variable |
 
 **Scorecard submissions** (adding a tool to the leaderboard at [`/scorecards`](https://anc.dev/scorecards)) go through
 the cli repo's
@@ -31,15 +31,16 @@ reviewed when scope and time permit. A solo maintainer cannot promise merge wind
 
 ```text
 feat/* → PR to dev (squash merge)
-       → overlay onto release/<YYYY-MM-DD>-<slug> (cut from main)
+       → overlay onto release/v<version> (cut from main)
        → PR release/* to main (squash merge)
        → deploy.yml fires on push-to-main → Cloudflare Workers production
 ```
 
 `dev` is the integration branch. `main` is what `anc.dev` serves. The site deploys via Cloudflare's `deploy.yml` on
-push-to-main; each release also carries a `v<version>` tag and a `CHANGELOG.md` section as bookkeeping (see
-[`RELEASES.md`](./RELEASES.md)). Engineering docs (`docs/plans/`, `docs/solutions/`, `docs/brainstorms/`,
-`docs/reviews/`) live on `dev` only and are blocked from `main` by `guard-main-docs.yml`.
+push-to-main. Each release is tagged `v<version>`, the site's deploy stamp, with a GitHub Release and a `CHANGELOG.md`
+section (see [`RELEASES.md` § Versioning](./RELEASES.md#versioning)). Engineering docs (`docs/plans/`,
+`docs/solutions/`, `docs/brainstorms/`, `docs/reviews/`) live on `dev` only and are blocked from `main` by
+`guard-main-docs.yml`.
 
 ## Dev setup
 
@@ -105,9 +106,11 @@ PRs that pass the hook locally also pass CI for stages 1-4; stages 5-8 are pre-p
 
 ## Releases
 
-Cuts are CalVer date-prefixed, slugged per change: `release/2026-05-21-show-hn-cut`, `release/2026-04-30-routing-fix`,
-etc. Cherry-pick from `dev` to the release branch, open the PR against `main`, merge via squash. `deploy.yml` fires on
-push-to-main and reaches `anc.dev` within ~2 minutes. The full procedure lives in [`RELEASES.md`](./RELEASES.md).
+Each cut is named for the deploy stamp of the `dev` commit it ships, `release/v<version>`
+([`RELEASES.md` § Versioning](./RELEASES.md#versioning)). The release branch is cut from `main` with `dev`'s tree
+overlaid, and its PR against `main` merges via squash. `deploy.yml` fires on push-to-main and reaches `anc.dev` within ~2
+minutes; the tag, the GitHub Release, and the backport to `dev` follow the merge. The full procedure lives in
+[`RELEASES.md`](./RELEASES.md).
 
 ## AI disclosure
 

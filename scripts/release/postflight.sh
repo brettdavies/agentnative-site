@@ -8,7 +8,7 @@
 # Two environments to verify per release cycle:
 #   - staging: deploys on every push to `dev` (per `.github/workflows/deploy.yml`).
 #     Run `--env staging` once dev is at the soak state for the release.
-#   - prod: deploys on every release/<YYYY-MM-DD>-<slug> -> main merge. Run
+#   - prod: deploys on every release/v<version> -> main merge. Run
 #     `--env prod` after the merge fires deploy.yml at main.
 #
 # Same suite of gates against both environments. Differences the script handles
@@ -55,7 +55,7 @@
 #   --env staging|prod       Target environment (default: prod)
 #   --repo OWNER/REPO        Override the auto-detected nameWithOwner
 #   --release-slug <slug>    Override auto-detection for the backport gate
-#                            (default: parse the most recent merged release/* PR title)
+#                            (default: v<version> from the newest merged release/v<version> head)
 #   --mcp-binary <binary>    Fresh non-registry binary for the live MCP audit
 #                            (default: $MCP_BINARY env var or `figlet`)
 #   --staging-url <url>      Staging URL (default: STAGING_URL_DEFAULT from release.env)
@@ -228,10 +228,12 @@ resolve_release_slug() {
   fi
   local repo
   repo=$(resolve_repo)
+  # The release branch is named release/v<version>, so the newest merged
+  # release head names the tag the backport PR's title carries.
   gh pr list --repo "$repo" --base main --state merged --limit 10 \
-    --json title --jq '[.[] | select(.title | test("^release/"))][0].title' 2>/dev/null \
-    | sed -E 's|^release/([^ "]+).*|\1|' \
-    || true
+    --json headRefName,mergedAt \
+    --jq '[.[] | select(.headRefName | startswith("release/"))] | sort_by(.mergedAt) | .[-1] | .headRefName // empty' \
+    2>/dev/null | sed 's|^release/||' || true
 }
 
 # Gate: deploy ---------------------------------------------------------------

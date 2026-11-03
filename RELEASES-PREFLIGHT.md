@@ -2,7 +2,7 @@
 
 Operational pre-flight checklist. Runs **before** step 1 of
 [`RELEASES.md` § Releasing dev to main](./RELEASES.md#releasing-dev-to-main). Gates the cut of the
-`release/<YYYY-MM-DD>-<slug>` branch, not the daily dev integration. Each box is an explicit go/no-go. If any item is
+`release/v<version>` branch, not the daily dev integration. Each box is an explicit go/no-go. If any item is
 unchecked or red, hold the release.
 
 CI (`lint · build · test · wrangler`, the post-deploy smoke against the registry-fast-path, prose-scrub on `*.md`)
@@ -129,12 +129,13 @@ Dependabot raises the same fix again.
 
 <!-- canonical:end drift-gate -->
 
-In this repo gate 0's carriers are the `package.json` version and the `CHANGELOG.md` section. Until the first `v*` tag
-exists, gates 0 and 1 anchor on the newest `release:` squash on `main`; pass `--since <sha>` to anchor elsewhere. Gate 2
-counts a `.github/` path `dev` deleted as delivered while `main` still has the anchor's copy. Gate 3 reads `bun.lock`
-and `scripts/design/bun.lock` one line per package name, strips their trailing commas before parsing, and fails when it
-parses zero packages. Only resolved versions compare: a `file:`, `workspace:`, `link:`, or git spec is left out, and a
-copy `main` nests under a package `dev` no longer carries is not counted.
+In this repo the release changes one carrier, the `CHANGELOG.md` section: `package.json` carries no version
+([`RELEASES.md` § Versioning](./RELEASES.md#versioning)). Until the first `v*` tag exists, gates 0 and 1 anchor on the
+newest `release:` squash on `main`; pass `--since <sha>` to anchor elsewhere. Gate 2 counts a `.github/` path `dev`
+deleted as delivered while `main` still has the anchor's copy. Gate 3 reads `bun.lock` and `scripts/design/bun.lock` one
+line per package name, strips their trailing commas before parsing, and fails when it parses zero packages. Only
+resolved versions compare: a `file:`, `workspace:`, `link:`, or git spec is left out, and a copy `main` nests under a
+package `dev` no longer carries is not counted.
 
 ### Cross-repo coordination
 
@@ -599,12 +600,22 @@ projects consumes a wire contract, so a release that renames a request key or mo
 that asserts the old shape. Trace each failure to the source: the 2026-09-15 unified-funnel release had five stale
 consumers across the gates and the specs, and no product defect behind any of them.
 
+### PR changelog sections
+
+Driven by `scripts/release/preflight.sh changelog-sections`.
+
+- [ ] **Every PR this release carries answers its `## Changelog` section.** The gate runs
+  `scripts/generate-changelog.py --audit-sections`, which lists each PR whose entry would fall back to its title because
+  its body never offered the section, and fails while any does. Fill the section in the PR body on GitHub (it stays
+  editable after merge), or leave the heading standing with no bullets when the PR ships nothing user-facing, then
+  rerun.
+
 ### Release mechanics sanity
 
 These items duplicate steps from `RELEASES.md` deliberately: easy to skip, expensive to recover from. Confirm
 explicitly.
 
-Driven by `scripts/release/preflight.sh mechanics`. Expected to surface as a real signal only on a `release/<slug>`
+Driven by `scripts/release/preflight.sh mechanics`. Expected to surface as a real signal only on a `release/v<version>`
 branch (where the diff vs `origin/main` is the release); running on the integration `dev` branch will correctly report
 guarded planning paths as leaked.
 
@@ -633,17 +644,20 @@ guarded planning paths as leaked.
   branch.
 
 - [ ] **Diff-B filtered by the guarded set.** Files on `dev` that the release branch lacks, excluding only the guarded
-  set (not all of `docs/`, since `docs/runbooks/` ships to `main` and would hide a missed pick) and the release-only
-  files (`package.json` version, `CHANGELOG.md`):
+  set (not all of `docs/`, since `docs/runbooks/` ships to `main` and would hide a missed pick) and the release's own
+  `CHANGELOG.md` section:
 
   ```bash
   git diff origin/main..HEAD --stat                                              # A: ship surface
   git diff HEAD..origin/dev --name-only | grep -Ev "$GUARDED" \
-    | grep -Ev '^(package\.json|CHANGELOG\.md)$' || echo "(none)"                 # B: no missed picks
+    | grep -Ev '^CHANGELOG\.md$' || echo "(none)"                                  # B: no missed picks
   git diff origin/dev..origin/main --stat | tail -5                              # C: phantom-commits sanity
   ```
 
-- [ ] **`CHANGELOG.md` versioned section** has no `[Unreleased]` placeholder and matches the `package.json` version.
+- [ ] **`CHANGELOG.md` top section names this release.** Its heading is `[<version>]`, the stamp of the `dev` commit the
+  release was cut from, and the file has no `[Unreleased]` placeholder. The gate runs
+  `scripts/release/site-version.sh --verify v<version>`, and fails a section that is already tagged or whose stamp does
+  not match its commit on `origin/dev`.
 
 - [ ] **og:video production setup is in place.** Run `scripts/og/setup.sh production --check`; it reads `ok` once
   og:video is live in production. Before the release that first ships og:video, run `scripts/og/setup.sh production`

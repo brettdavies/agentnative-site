@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Canonical version: 2026.11.03 (generic)
+#
 # Run release preflight gates against the current checkout, plus the chosen
 # preflight target environment (--env local or --env staging; default staging).
 #
@@ -8,8 +10,9 @@
 # Subcommands:
 #   drift     Branch drift: what main carries that dev never received (delegated to drift.sh).
 #             Not env-dependent.
-#   surface   Establish surface: commits + diff vs the last tag, breaking markers. SKIPs while the
-#             repo has no tags. Not env-dependent.
+#   surface   Establish surface: dev's commits since the last release synced back, files changed
+#             since its tag, breaking markers. SKIPs while the repo has no `v*` tag. Not
+#             env-dependent.
 #   coord     Cross-repo coordination — vendored spec VERSION, skill manifest version, Dockerfile
 #             anc release URL + tarball sha, and (when docker is available) the anc each wrangler.jsonc
 #             container pin bakes (production and staging) vs the Dockerfile's, plus the staging pin's
@@ -40,9 +43,13 @@
 #             deploys a fixture Worker on fresh og-*.anc.dev hosts, audits each one, and checks the
 #             scorecard card the target draws for it; it needs wrangler logged in with Workers
 #             write on the anc.dev zone.
+#   changelog-sections
+#             No PR this release carries leaves its changelog entry to its title for want of a
+#             ## Changelog section (generate-changelog.py --audit-sections). Not env-dependent.
 #   mechanics Release mechanics sanity: leak check (no guarded paths in the diff vs origin/main),
 #             unguarded docs the release adds to main, diff-B against origin/dev filtered by the
-#             guarded set. Not env-dependent.
+#             guarded set, and CHANGELOG.md's top section names this release's deploy stamp
+#             (site-version.sh --verify). Not env-dependent.
 #   all       Run every above sequentially, drift first. Sub-gates within each section continue past
 #             individual failures so the operator sees the full picture; the script exits 1 if any
 #             gate failed.
@@ -50,7 +57,7 @@
 # Flags:
 #   --env <env>          Preflight target: `staging` (default) or `local`. Also honored as $ENV.
 #                        Drives do-smoke, mcp, and dist URL + auth selection.
-#   --tag <tag>          Override LAST_TAG resolution for `surface` (default: newest v* tag).
+#   --tag <tag>          Override LAST_TAG resolution for `surface` (default: the newest `v[0-9]*` tag).
 #   --binary <name>      Fresh non-registry binary for do-smoke (default: $BINARY or `emoj`). The name
 #                        resolves to a GitHub owner/repo via do_fixture_repo (emoj -> sindresorhus/emoj,
 #                        cowsay -> piuccio/cowsay; otherwise sindresorhus/<name>).
@@ -127,7 +134,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h | --help) usage 0 ;;
-    drift | surface | coord | build | do-smoke | mcp | dist | e2e | mechanics | all)
+    drift | surface | coord | build | do-smoke | mcp | dist | e2e | changelog-sections | mechanics | all)
       SUBCMD="$1"
       shift
       ;;
@@ -212,25 +219,70 @@ gate_drift() {
 
 # Gate: surface --------------------------------------------------------------
 #
-# Confirms what is actually changing since the last tag. Counts feed the
-# human's gut-check on release scope and the breaking-marker tally drives the
-# major-version decision.
+# Confirms what is actually changing since the last release. Counts feed the
+# human's gut-check on release scope.
+#
+# The window is read on dev. Every release squash-merges into main, so its tag
+# shares no recent history with dev, and a log from the tag counts dev's whole
+# past. When the tag is not an ancestor, the window opens at the commit that
+# synced the tag back into dev instead. A PR merged after the previous cut and
+# before that commit sits outside this window; generate-changelog.py reads
+# those PRs too, so its section, not this count, is the complete list.
+
+# The commit on REF whose subject syncs TAG back, the way generate-changelog.py
+# finds it: `chore(release): sync dev after <tag>`, or `backport <tag>` from
+# older backport scripts. Only the subject counts, because a later message can
+# quote it. Empty when no commit names the tag. awk reads the whole log rather
+# than exiting at the match: an early exit leaves git log writing into a closed
+# pipe, and under pipefail the SIGPIPE ends the script on any long history.
+release_backport_commit() {
+  git log --format='%H %s' "$1" 2>/dev/null | awk -v tag="$2" '
+    !found {
+      subject = substr($0, index($0, " ") + 1)
+      split("chore(release): sync dev after |chore(release): backport ", prefixes, "|")
+      for (i = 1; i <= 2; i++) {
+        lead = prefixes[i] tag
+        rest = substr(subject, length(lead) + 1)
+        if (index(subject, lead) == 1 && (rest == "" || substr(rest, 1, 1) == " ")) {
+          print $1
+          found = 1
+          break
+        }
+      }
+    }'
+}
 
 gate_surface() {
   header "Establish surface"
-  local last_tag commits files breaking
-  # Only v* tags are release anchors: the competition-baseline* tags mark
-  # scorecard corpus snapshots, not releases.
-  last_tag="${LAST_TAG:-$(git tag --list 'v*' --sort=-version:refname | head -n 1)}"
+  local last_tag head_ref window anchor="" commits files breaking
+  # last_release_tag reads only `v[0-9]*` tags: the competition-baseline* tags
+  # mark scorecard corpus snapshots, not releases.
+  last_tag="${LAST_TAG:-$(last_release_tag)}"
   [[ -n "$last_tag" ]] || {
     gate_skip "LAST_TAG" "no tags in repo yet (first release); surface is everything on the branch"
     return
   }
-  commits=$(git log "$last_tag..HEAD" --oneline | wc -l)
-  files=$(git diff "$last_tag..HEAD" --name-only | wc -l)
+  head_ref=origin/dev
+  git rev-parse --verify --quiet "$head_ref" >/dev/null 2>&1 || head_ref=HEAD
+  window="$last_tag..$head_ref"
+  if ! git merge-base --is-ancestor "$last_tag" "$head_ref" 2>/dev/null; then
+    anchor=$(release_backport_commit "$head_ref" "$last_tag")
+    if [[ -z "$anchor" ]]; then
+      gate_skip "LAST_TAG" \
+        "$last_tag is no ancestor of $head_ref and no commit there syncs it back; read the surface as origin/main..$head_ref"
+      return
+    fi
+    window="$anchor..$head_ref"
+  fi
+  # Files compare trees, so they read from the tag directly, minus the guarded
+  # set: dev carries engineering docs that never ship.
+  local guarded
+  guarded=$("$REPO_ROOT/scripts/release/guarded-paths.sh" 2>/dev/null) || guarded='^$'
+  commits=$(git log "$window" --oneline | wc -l | tr -d '[:space:]')
+  files=$(git diff "$last_tag" "$head_ref" --name-only | { grep -Ev "$guarded" || true; } | wc -l | tr -d '[:space:]')
   # Scoped markers count too: `feat(api)!:` is breaking as much as `feat!:`.
-  breaking=$(git log "$last_tag..HEAD" --grep '^[a-z]\+\(([^)]*)\)\?!:' --oneline | wc -l)
-  gate_pass "LAST_TAG = $last_tag  ($commits commits, $files files, $breaking breaking)"
+  breaking=$(git log "$window" --grep '^[a-z]\+\(([^)]*)\)\?!:' --oneline | wc -l | tr -d '[:space:]')
+  gate_pass "LAST_TAG = $last_tag  ($commits commits, $files files, $breaking breaking${anchor:+, counted from its backport ${anchor:0:12} on $head_ref})"
 }
 
 # Gate: coord (cross-repo coordination) -------------------------------------
@@ -733,6 +785,27 @@ gate_og_cards() {
 
 # Gate: mechanics (release mechanics sanity) --------------------------------
 
+# Gate: changelog-sections ---------------------------------------------------
+#
+# Every PR this release carries answers its changelog section, so no entry
+# falls back to the PR title. The PRs come from dev's history since the
+# previous release synced back, as the changelog itself reads them. A section
+# left empty on purpose passes.
+
+gate_changelog_sections() {
+  header "PR changelog sections"
+  have_bin gh || {
+    gate_skip "PR changelog sections" "gh not installed"
+    return
+  }
+  local out
+  if out=$(cd "$REPO_ROOT" && scripts/generate-changelog.py --audit-sections --dev-branch dev 2>&1); then
+    gate_pass "PR changelog sections: ${out%%$'\n'*}"
+  else
+    gate_fail "PR changelog sections" "$out"
+  fi
+}
+
 gate_mechanics() {
   header "Release mechanics sanity"
   require_bin git
@@ -782,10 +855,10 @@ gate_mechanics() {
     && git rev-parse --verify origin/main >/dev/null 2>&1; then
     local missed
     # Excluding all of docs/ would hide a missed pick under docs/runbooks,
-    # which ships to main; exclude only what is actually guarded. The version
-    # carrier and the regenerated changelog are release-only by design.
+    # which ships to main; exclude only what is actually guarded. The
+    # changelog section is the release's only edit of its own.
     missed=$(git diff HEAD..origin/dev --name-only 2>/dev/null | grep -Ev "$guarded" \
-      | grep -Ev '^(package\.json|CHANGELOG\.md)$' || true)
+      | grep -Ev '^CHANGELOG\.md$' || true)
     if [[ -z "$missed" ]]; then
       gate_pass "diff-B: no missed picks vs origin/dev"
     else
@@ -793,6 +866,35 @@ gate_mechanics() {
     fi
   else
     gate_skip "triple-diff" "origin/main or origin/dev not fetched"
+  fi
+
+  # The changelog's top section names the release: the deploy stamp of the dev
+  # commit the release was cut from, which site-version.sh --verify checks.
+  local release_changelog changelog_version verified
+  release_changelog="$REPO_ROOT/$(release_changelog)"
+  if [[ ! -f "$release_changelog" ]]; then
+    if [[ "$(git branch --show-current)" == release/* ]]; then
+      gate_fail "$(release_changelog)" "missing on a release branch
+    fix: run RELEASES.md step 4, scripts/generate-changelog.py --from-dev-prs --tag v<version>"
+    else
+      gate_skip "$(release_changelog) top section" "no $(release_changelog) here; RELEASES.md step 4 writes it on the release branch"
+    fi
+    return
+  fi
+  changelog_version=$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+(-g[0-9a-f]{7})?\]' "$release_changelog" | tr -d '[]## ' || true)
+  if git rev-parse --verify --quiet "refs/tags/v$changelog_version" >/dev/null; then
+    gate_fail "$(release_changelog) top section = [$changelog_version]" "v$changelog_version is already tagged, so this is a released section, not this release's
+    fix: run RELEASES.md step 4 on this branch, which writes the section for the next stamp"
+  elif verified=$("$REPO_ROOT/scripts/release/site-version.sh" --verify "v$changelog_version" 2>&1); then
+    gate_pass "$(release_changelog) top section = [$changelog_version] (site-version.sh: ${verified#v"$changelog_version" })"
+  else
+    gate_fail "$(release_changelog) top section = [${changelog_version:-none}]" "$verified"
+  fi
+  # The heading, not the text: a released section may quote `[Unreleased]`.
+  if grep -qE '^## \[Unreleased\]' "$release_changelog"; then
+    gate_fail "$(release_changelog)" "has [Unreleased] placeholder"
+  else
+    gate_pass "$(release_changelog) has no [Unreleased] placeholder"
   fi
 }
 
@@ -807,6 +909,7 @@ case "$SUBCMD" in
   mcp) gate_mcp ;;
   dist) gate_dist ;;
   e2e) gate_e2e ;;
+  changelog-sections) gate_changelog_sections ;;
   mechanics) gate_mechanics ;;
   all)
     gate_drift
@@ -817,6 +920,7 @@ case "$SUBCMD" in
     gate_mcp
     gate_dist
     gate_e2e
+    gate_changelog_sections
     gate_mechanics
     ;;
 esac
