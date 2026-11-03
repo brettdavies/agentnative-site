@@ -645,8 +645,8 @@ guarded planning paths as leaked.
 
 - [ ] **Diff-B filtered by the guarded set.** Files the release branch lacks or changes against `<dev-sha>`, the commit
   its stamp names, excluding only the guarded set (not all of `docs/`, since `docs/runbooks/` ships to `main` and would
-  hide a missed pick) and the release's own `CHANGELOG.md` section. The gate reads `<dev-sha>` from the changelog's
-  stamp, not from `origin/dev`, which can move past it after the cut:
+  hide a missed pick) and the release's own `CHANGELOG.md` section. The gate reads `<dev-sha>` from the stamp in
+  `CHANGELOG.md`, not from `origin/dev`, which can move past it after the cut:
 
   ```bash
   git diff origin/main..HEAD --stat                                              # A: ship surface
