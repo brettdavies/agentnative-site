@@ -47,9 +47,10 @@
 #             No PR this release carries leaves its changelog entry to its title for want of a
 #             ## Changelog section (generate-changelog.py --audit-sections). Not env-dependent.
 #   mechanics Release mechanics sanity: leak check (no guarded paths in the diff vs origin/main),
-#             unguarded docs the release adds to main, diff-B against origin/dev filtered by the
-#             guarded set, and CHANGELOG.md's top section names this release's deploy stamp
-#             (site-version.sh --verify). Not env-dependent.
+#             unguarded docs the release adds to main, CHANGELOG.md's top section names this
+#             release's deploy stamp (site-version.sh --verify), and diff-B against the commit
+#             that stamp names (origin/dev without one), filtered by the guarded set. Not
+#             env-dependent.
 #   all       Run every above sequentially, drift first. Sub-gates within each section continue past
 #             individual failures so the operator sees the full picture; the script exits 1 if any
 #             gate failed.
@@ -804,6 +805,43 @@ gate_changelog_sections() {
   fi
 }
 
+# check_release_changelog: the changelog's top section names the release, the
+# deploy stamp of the dev commit the release was cut from, which
+# site-version.sh --verify checks. Off a release branch the top section is
+# the last release's, synced back to dev. Sets STAMP_SHA to the commit a
+# verified stamp names, and leaves it empty otherwise.
+check_release_changelog() {
+  local release_changelog changelog_version verified
+  STAMP_SHA=""
+  release_changelog="$REPO_ROOT/$(release_changelog)"
+  if [[ "$(git branch --show-current)" != release/* ]]; then
+    gate_skip "$(release_changelog) top section" "not a release/* branch; RELEASES.md step 4 writes this release's section on the release branch"
+    return
+  fi
+  if [[ ! -f "$release_changelog" ]]; then
+    gate_fail "$(release_changelog)" "missing on a release branch
+    fix: run RELEASES.md step 4, scripts/generate-changelog.py --from-dev-prs"
+    return
+  fi
+  changelog_version=$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+(-g[0-9a-f]{7})?\]' "$release_changelog" | tr -d '[]## ' || true)
+  if git rev-parse --verify --quiet "refs/tags/v$changelog_version" >/dev/null; then
+    gate_fail "$(release_changelog) top section = [$changelog_version]" "v$changelog_version is already tagged, so this is a released section, not this release's
+    fix: run RELEASES.md step 4 on this branch, which writes the section for the next stamp"
+  elif verified=$("$REPO_ROOT/scripts/release/site-version.sh" --verify "v$changelog_version" 2>&1); then
+    gate_pass "$(release_changelog) top section = [$changelog_version] (site-version.sh: ${verified#v"$changelog_version" })"
+    STAMP_SHA=${verified#* is the stamp of }
+    STAMP_SHA=${STAMP_SHA%% *}
+  else
+    gate_fail "$(release_changelog) top section = [${changelog_version:-none}]" "$verified"
+  fi
+  # The heading, not the text: a released section may quote `[Unreleased]`.
+  if grep -qE '^## \[Unreleased\]' "$release_changelog"; then
+    gate_fail "$(release_changelog)" "has [Unreleased] placeholder"
+  else
+    gate_pass "$(release_changelog) has no [Unreleased] placeholder"
+  fi
+}
+
 # Gate: mechanics (release mechanics sanity) --------------------------------
 
 gate_mechanics() {
@@ -850,52 +888,28 @@ gate_mechanics() {
     fi
   fi
 
-  # Triple-diff sanity vs origin/main + origin/dev.
+  check_release_changelog
+
+  # Triple-diff sanity vs origin/main + origin/dev. diff-B reads the commit the
+  # changelog's stamp names: origin/dev can move past it after the cut, and a
+  # tree that differs from the stamped commit ships something the version
+  # does not name.
   if git rev-parse --verify origin/dev >/dev/null 2>&1 \
     && git rev-parse --verify origin/main >/dev/null 2>&1; then
-    local missed
+    local missed against="${STAMP_SHA:-origin/dev}" label="origin/dev"
+    [[ -z "$STAMP_SHA" ]] || label="${STAMP_SHA:0:12}, the commit the stamp names"
     # Excluding all of docs/ would hide a missed pick under docs/runbooks,
     # which ships to main; exclude only what is actually guarded. The
     # changelog section is the release's only edit of its own.
-    missed=$(git diff HEAD..origin/dev --name-only 2>/dev/null | grep -Ev "$guarded" \
+    missed=$(git diff "HEAD..$against" --name-only 2>/dev/null | grep -Ev "$guarded" \
       | grep -Ev '^CHANGELOG\.md$' || true)
     if [[ -z "$missed" ]]; then
-      gate_pass "diff-B: no missed picks vs origin/dev"
+      gate_pass "diff-B: no missed picks vs $label"
     else
-      gate_skip "diff-B" "this branch differs from dev outside the guarded set (review each): $(count_and_list "$missed")"
+      gate_skip "diff-B" "this branch differs from $label outside the guarded set (review each): $(count_and_list "$missed")"
     fi
   else
     gate_skip "triple-diff" "origin/main or origin/dev not fetched"
-  fi
-
-  # The changelog's top section names the release: the deploy stamp of the dev
-  # commit the release was cut from, which site-version.sh --verify checks. Off
-  # a release branch the top section is the last release's, synced back to dev.
-  local release_changelog changelog_version verified
-  release_changelog="$REPO_ROOT/$(release_changelog)"
-  if [[ "$(git branch --show-current)" != release/* ]]; then
-    gate_skip "$(release_changelog) top section" "not a release/* branch; RELEASES.md step 4 writes this release's section on the release branch"
-    return
-  fi
-  if [[ ! -f "$release_changelog" ]]; then
-    gate_fail "$(release_changelog)" "missing on a release branch
-    fix: run RELEASES.md step 4, scripts/generate-changelog.py --from-dev-prs"
-    return
-  fi
-  changelog_version=$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+(-g[0-9a-f]{7})?\]' "$release_changelog" | tr -d '[]## ' || true)
-  if git rev-parse --verify --quiet "refs/tags/v$changelog_version" >/dev/null; then
-    gate_fail "$(release_changelog) top section = [$changelog_version]" "v$changelog_version is already tagged, so this is a released section, not this release's
-    fix: run RELEASES.md step 4 on this branch, which writes the section for the next stamp"
-  elif verified=$("$REPO_ROOT/scripts/release/site-version.sh" --verify "v$changelog_version" 2>&1); then
-    gate_pass "$(release_changelog) top section = [$changelog_version] (site-version.sh: ${verified#v"$changelog_version" })"
-  else
-    gate_fail "$(release_changelog) top section = [${changelog_version:-none}]" "$verified"
-  fi
-  # The heading, not the text: a released section may quote `[Unreleased]`.
-  if grep -qE '^## \[Unreleased\]' "$release_changelog"; then
-    gate_fail "$(release_changelog)" "has [Unreleased] placeholder"
-  else
-    gate_pass "$(release_changelog) has no [Unreleased] placeholder"
   fi
 }
 

@@ -130,11 +130,13 @@ end-state directly:
 scripts/release/drift.sh
 
 # 1. Name the release after the dev commit it ships, then branch from main, NOT dev.
-#    site-version.sh prints <version>, the deploy stamp of origin/dev (§ Versioning). It
-#    refuses a commit already released and a version that does not sort above the
-#    newest tag. Fetch nothing between here and step 2, so the overlay ships that commit.
+#    <dev-sha> is that commit; steps 2 and 5 read it rather than origin/dev, which a
+#    later fetch can move. site-version.sh prints <version>, its deploy stamp
+#    (§ Versioning), and refuses a commit already released and a version that does
+#    not sort above the newest tag.
 git fetch origin
-scripts/release/site-version.sh
+git rev-parse origin/dev                                        # <dev-sha>
+scripts/release/site-version.sh --commit <dev-sha>              # <version>
 git checkout -B release/v<version> origin/main
 
 # 2. Overlay dev's entire tracked tree onto the main base. `checkout -- .` writes dev's
@@ -142,8 +144,8 @@ git checkout -B release/v<version> origin/main
 #    those next (the 'D' rows are main-only files dev deleted or moved). `--no-renames`
 #    lists a moved file as a deletion; rename detection would report it as an R row,
 #    and the stale copy left behind would ship to main.
-git checkout origin/dev -- .
-git diff --no-renames --name-status origin/main origin/dev | grep '^D'
+git checkout <dev-sha> -- .
+git diff --no-renames --name-status origin/main <dev-sha> | grep '^D'
 trash <each main-only file listed above>
 
 # 3. Withhold any feature `dev` carries that this release must not ship. Each one
@@ -174,7 +176,7 @@ git add -A
 #    A: staged tree equals dev's minus the changelog, the stripped guarded paths, and
 #       whatever step 3b withheld. Anything else printed here is a mistake; the
 #       withheld paths are expected and listed in § Withheld features.
-git diff --cached --name-only origin/dev | grep -Ev "$GUARDED" \
+git diff --cached --name-only <dev-sha> | grep -Ev "$GUARDED" \
   | grep -Ev '^CHANGELOG\.md$' \
   && echo "unexpected delta above; investigate" || echo "(clean: only intended deltas)"
 #    B: no guarded path in the release tree.
@@ -267,7 +269,9 @@ guarded set: that gate is how a withholding stays visible rather than becoming i
 
 The overlay is the release construction for this repo. Cherry-picking the dev squash-commits onto the `origin/main` base
 is the exception, kept only for a release with a stated reason it cannot overlay; the per-PR changelog is not such a
-reason, since `--from-dev-prs` builds it from `dev` either way. When cherry-picking, run the triple-diff verification:
+reason, since `--from-dev-prs` builds it from `dev` either way. A cherry-pick release ships no single `dev` commit's
+tree, so step 1 names it after the newest commit it picks (`site-version.sh --commit <newest picked sha>`), and
+preflight's diff-B then lists the `dev` changes it leaves out. When cherry-picking, run the triple-diff verification:
 
 ```bash
 # 2. List the dev commits not yet on main.
@@ -309,11 +313,12 @@ deploy of the release commit.
 ### After merge: tag, then sync `dev` with the release
 
 The deploy fires on the push to `main`. The tag names the release, and `drift.sh`, the changelog compare link, and the
-backport script resolve against it. Check the stamp against the dev commit it names, tag the merge commit, and publish
-the GitHub Release from the changelog section:
+backport script resolve against it. Check that the checkout is the release's merge commit and that the stamp matches the
+dev commit it names, tag that commit, and publish the GitHub Release from the changelog section:
 
 ```bash
 git checkout main && git pull
+grep -q '^## \[<version>\]' CHANGELOG.md && echo "HEAD is the release" || echo "HEAD is not v<version>: pull again"
 scripts/release/site-version.sh --verify v<version>
 git tag -a -m "Release v<version>" v<version>
 git push origin v<version>

@@ -643,13 +643,14 @@ guarded planning paths as leaked.
   An entry that should not ship needs both: registering in the workflow's `extra_paths`, and removing from the release
   branch.
 
-- [ ] **Diff-B filtered by the guarded set.** Files on `dev` that the release branch lacks, excluding only the guarded
-  set (not all of `docs/`, since `docs/runbooks/` ships to `main` and would hide a missed pick) and the release's own
-  `CHANGELOG.md` section:
+- [ ] **Diff-B filtered by the guarded set.** Files the release branch lacks or changes against `<dev-sha>`, the commit
+  its stamp names, excluding only the guarded set (not all of `docs/`, since `docs/runbooks/` ships to `main` and would
+  hide a missed pick) and the release's own `CHANGELOG.md` section. The gate reads `<dev-sha>` from the changelog's
+  stamp, not from `origin/dev`, which can move past it after the cut:
 
   ```bash
   git diff origin/main..HEAD --stat                                              # A: ship surface
-  git diff HEAD..origin/dev --name-only | grep -Ev "$GUARDED" \
+  git diff HEAD..<dev-sha> --name-only | grep -Ev "$GUARDED" \
     | grep -Ev '^CHANGELOG\.md$' || echo "(none)"                                  # B: no missed picks
   git diff origin/dev..origin/main --stat | tail -5                              # C: phantom-commits sanity
   ```
