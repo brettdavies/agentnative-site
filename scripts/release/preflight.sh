@@ -783,8 +783,6 @@ gate_og_cards() {
   printf '%s\n' "$out" | tail -25 | sed 's/^/    /'
 }
 
-# Gate: mechanics (release mechanics sanity) --------------------------------
-
 # Gate: changelog-sections ---------------------------------------------------
 #
 # Every PR this release carries answers its changelog section, so no entry
@@ -805,6 +803,8 @@ gate_changelog_sections() {
     gate_fail "PR changelog sections" "$out"
   fi
 }
+
+# Gate: mechanics (release mechanics sanity) --------------------------------
 
 gate_mechanics() {
   header "Release mechanics sanity"
