@@ -41,13 +41,13 @@ function verdict(outcome: Outcome & { kind: 'report' }, testExit: number | null)
   }
   if (count('ledgered') > 0) parts.push(`${plural(count('ledgered'), 'divergence', 'divergences')} already in the CLI ledger.`);
   if (count('closed') > 0) parts.push(`${plural(count('closed'), 'ledger entry', 'ledger entries')} no longer diverging.`);
+  const failing = plural(outcome.failedTests.length, 'CLI test fails', 'CLI tests fail');
   if (parts.length > 0) {
-    if (testExit !== 0 && outcome.failedTests.length === 0) parts.push(`The CLI tests ended with exit code ${testExit}.`);
+    if (outcome.failedTests.length > 0) parts.push(`${failing} at this contract.`);
+    else if (testExit !== 0) parts.push(`The CLI tests ended with exit code ${testExit}.`);
     return parts.join(' ');
   }
-  if (outcome.failedTests.length > 0) {
-    return `No scorecard divergence, but ${plural(outcome.failedTests.length, 'CLI test fails', 'CLI tests fail')} at this contract.`;
-  }
+  if (outcome.failedTests.length > 0) return `No scorecard divergence, but ${failing} at this contract.`;
   if (testExit !== 0) return `No scorecard divergence, but the CLI tests ended with exit code ${testExit}.`;
   return 'The CLI reproduces every conformance scenario at this contract.';
 }

@@ -43,9 +43,10 @@ const CONTRACT_REFUSED = /^error: commit \S+ (?:has no |vendors a symlink)/m;
 // The CLI's own crate only: a dependency's build failure says nothing about the contract.
 const CLI_BUILD_FAILED = /failed to run custom build command for `agentnative |could not compile `agentnative`/;
 const DUMP_TEST_PANIC = /^thread 'dump_corpus_divergences'.* panicked at /;
-// The corpus loads through tests/common, so a panic in the dump test's own file is its
-// write to the path this workflow passes.
-const DUMP_WRITE_PANIC = 'panicked at tests/web_audit_divergences.rs';
+// The dump test's own message for a failed write to the path this workflow passes.
+const DUMP_WRITE_PANIC = /^write \S+: /m;
+// A killed test binary explains nothing about the contract, whatever else failed.
+const TEST_BINARY_CRASH = /process didn't exit successfully: .*\(signal: /;
 
 export const DETAIL_CHAR_CAP = 2000;
 
@@ -66,10 +67,21 @@ function parseDump(text: string): [string, string][] | null {
   }
 }
 
+function isLedgerEntry(value: unknown): value is LedgerEntry {
+  if (typeof value !== 'object' || value === null) return false;
+  const { scenario, element, owner } = value as Partial<Record<keyof LedgerEntry, unknown>>;
+  return typeof scenario === 'string' && typeof element === 'string' && typeof owner === 'string';
+}
+
+// As strict as the CLI's own read of the file: a renamed table would otherwise parse
+// as an empty ledger and turn every ledgered divergence into a new one.
 function parseLedger(text: string): Map<string, LedgerEntry> | null {
   try {
-    const file = Bun.TOML.parse(text) as { divergence?: LedgerEntry[] };
-    return new Map((file.divergence ?? []).map((entry) => [rowKey(entry.scenario, entry.element), entry]));
+    const file = Bun.TOML.parse(text) as Record<string, unknown>;
+    if (Object.keys(file).some((key) => key !== 'site_sha' && key !== 'divergence')) return null;
+    const entries = file.divergence ?? [];
+    if (!Array.isArray(entries) || !entries.every(isLedgerEntry)) return null;
+    return new Map(entries.map((entry) => [rowKey(entry.scenario, entry.element), entry]));
   } catch {
     return null;
   }
@@ -109,7 +121,7 @@ function classifyMissingDump(input: ParityInput): Outcome {
     };
   }
   const dumpPanic = excerptFrom(log, DUMP_TEST_PANIC, 8);
-  if (dumpPanic !== null && !dumpPanic.includes(DUMP_WRITE_PANIC)) {
+  if (dumpPanic !== null && !DUMP_WRITE_PANIC.test(dumpPanic)) {
     return { kind: 'unavailable', reason: 'the CLI could not replay this contract', detail: dumpPanic };
   }
   return {
@@ -167,10 +179,19 @@ export function classify(input: ParityInput): Outcome {
   const closed: Row[] = [...ledger]
     .filter(([key]) => !observed.has(key))
     .map(([, { scenario, element, owner }]) => ({ scenario, element, status: 'closed', owner }));
+  const tests = parseTestLog(input.testLog);
+  const failureNamed = tests.failedTests.length > 0 || CLI_BUILD_FAILED.test(input.testLog);
+  if (input.testExit !== 0 && (!failureNamed || TEST_BINARY_CRASH.test(input.testLog))) {
+    return {
+      kind: 'broken',
+      reason: `the CLI tests ended with exit code ${input.testExit} and named no failure that accounts for it`,
+      detail: lastLines(input.testLog, 15),
+    };
+  }
   const order: Row['status'][] = ['new', 'ledgered', 'closed'];
   return {
     kind: 'report',
     rows: order.flatMap((status) => [...seen, ...closed].filter((row) => row.status === status)),
-    ...parseTestLog(input.testLog),
+    ...tests,
   };
 }

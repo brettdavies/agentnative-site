@@ -176,7 +176,9 @@ describe('a run that produced a dump', () => {
       }),
     );
     expect(report.exitCode).toBe(0);
-    expect(report.summary).toContain('**The next CLI bump carries 1 new divergence across 1 scenario.**');
+    expect(report.summary).toContain(
+      '**The next CLI bump carries 1 new divergence across 1 scenario. 1 CLI test fails at this contract.**',
+    );
     expect(report.summary).toContain('| `alias-unpublished-optional-absent` | `row:openapi` | new |');
     expect(report.summary).toContain(
       '- `web_audit_conformance::every_corpus_scenario_reproduces_the_site_scorecard_or_is_ledgered`',
@@ -214,17 +216,52 @@ describe('a run that produced a dump', () => {
   test('a failing test beside an empty dump is not reported as full parity', () => {
     const failed = renderParityReport(input({ testExit: 101, testLog: CHANGED_GOLDEN_LOG }));
     expect(failed.summary).toContain('**No scorecard divergence, but 1 CLI test fails at this contract.**');
-    const unnamed = renderParityReport(input({ testExit: 101, testLog: PASSING_LOG }));
-    expect(unnamed.summary).toContain('**No scorecard divergence, but the CLI tests ended with exit code 101.**');
+    const unbuilt = renderParityReport(input({ testExit: 101, testLog: CLI_COMPILE_FAILURE_LOG }));
+    expect(unbuilt.summary).toContain('**No scorecard divergence, but the CLI tests ended with exit code 101.**');
   });
 
-  test('a crash that names no failing test is stated beside the rows', () => {
+  test('the headline names failing tests beside a ledgered row, so it never reads as all clear', () => {
     const report = renderParityReport(
-      input({ testExit: 101, dump: '[["a","row:one"]]', ledger: ledgerOf(['a', 'row:one', '#504']) }),
+      input({
+        testExit: 101,
+        testLog: CHANGED_GOLDEN_LOG,
+        dump: '[["a","row:one"]]',
+        ledger: ledgerOf(['a', 'row:one', '#504']),
+      }),
     );
+    expect(report.exitCode).toBe(0);
+    expect(report.summary).toContain(
+      '**No new divergence. 1 divergence already in the CLI ledger. 1 CLI test fails at this contract.**',
+    );
+  });
+
+  test('a bump suite the contract stops compiling stays a report and states the exit code', () => {
+    const report = renderParityReport(
+      input({
+        testExit: 101,
+        testLog: CLI_COMPILE_FAILURE_LOG,
+        dump: '[["a","row:one"]]',
+        ledger: ledgerOf(['a', 'row:one', '#504']),
+      }),
+    );
+    expect(report.exitCode).toBe(0);
     expect(report.summary).toContain(
       '**No new divergence. 1 divergence already in the CLI ledger. The CLI tests ended with exit code 101.**',
     );
+  });
+
+  test('a nonzero exit that names no failure beside a dump fails the run: a target gone, a download, a crash', () => {
+    for (const testLog of [
+      PASSING_LOG,
+      `${PASSING_LOG}${NO_TARGET_LOG}`,
+      `${PASSING_LOG}error: failed to download \`ring v0.17.8\`\n`,
+      `${CHANGED_GOLDEN_LOG}error: test failed, to rerun pass \`--test web_audit_handlers\`\n\nCaused by:\n  process didn't exit successfully: \`target/debug/deps/web_audit_handlers-1\` (signal: 11, SIGSEGV: invalid memory reference)\n`,
+    ]) {
+      const report = renderParityReport(input({ testExit: 101, testLog, dump: '[["a","row:one"]]' }));
+      expect(report.exitCode).toBe(1);
+      expect(report.summary).toContain('named no failure that accounts for it');
+      expect(report.summary).not.toContain('| Scenario |');
+    }
   });
 
   test('a failure in the unit tests names its suite, and the report counts the suites that ran', () => {
@@ -269,10 +306,16 @@ test scorecard::audience::tests::rejects_a_duplicate_signal - should panic ... F
       input({ testExit: 101, testLog: CHANGED_GOLDEN_LOG, dump: JSON.stringify(pairs) }),
     );
     expect(report.comment.length).toBeLessThan(65536);
-    expect(report.comment).toContain('**The next CLI bump carries 5000 new divergences across 5000 scenarios.**');
+    expect(report.comment).toContain('The next CLI bump carries 5000 new divergences across 5000 scenarios.');
     expect(report.comment).toContain('4800 more rows in the [job summary]');
     expect(report.summary).toContain('3000 more rows not shown.');
     expect(new TextEncoder().encode(report.summary).length).toBeLessThan(1024 * 1024);
+  });
+
+  test('log text cannot close the fence it is quoted in', () => {
+    const syncLog = 'error: commit abc has no ```\n## injected heading\n';
+    const report = renderParityReport(input({ syncExit: 1, syncLog, testExit: null, testLog: '', dump: null }));
+    expect(report.summary.match(/```/g)).toHaveLength(2);
   });
 
   test('a table cell cannot break out of its row', () => {
@@ -434,8 +477,10 @@ describe('a run with no dump never reads as zero divergences', () => {
     }
   });
 
-  test('a dump beside a ledger that will not parse fails the run instead of calling everything new', () => {
-    for (const ledger of [null, 'site_sha = ']) {
+  test('a dump beside a ledger of the wrong shape fails the run instead of calling everything new', () => {
+    const renamedTable = '[[divergences]]\nscenario = "a"\nelement = "row:one"\nowner = "#504"\n';
+    const noOwner = '[[divergence]]\nscenario = "a"\nelement = "row:one"\n';
+    for (const ledger of [null, 'site_sha = ', renamedTable, noOwner, 'divergence = 1\n']) {
       const report = renderParityReport(input({ dump: '[["a","row:one"]]', ledger }));
       expect(report.exitCode).toBe(1);
       expectUnavailable(report.summary, 'the CLI divergence ledger is missing or unreadable');
@@ -511,6 +556,7 @@ describe('the workflow', () => {
     uses?: string;
     if?: string;
     env?: Record<string, string>;
+    with?: Record<string, unknown>;
   }
   interface Job {
     permissions?: Record<string, string>;
@@ -574,6 +620,15 @@ describe('the workflow', () => {
     const gate = run.indexOf('if [ -f "$RUNNER_TEMP/divergences.json" ]; then');
     expect(gate).toBeGreaterThan(-1);
     expect(run.indexOf("--test 'web_audit_*'")).toBeGreaterThan(gate);
+  });
+
+  test('neither checkout leaves a credential behind, and the comment reaches the shell only through env', () => {
+    const checkouts = doc.jobs.report.steps.filter((step) => step.uses?.startsWith('actions/checkout@'));
+    expect(checkouts).toHaveLength(2);
+    for (const step of checkouts) expect(step.with?.['persist-credentials']).toBe(false);
+    const [post] = doc.jobs.comment.steps;
+    expect(post?.env?.BODY).toContain('needs.report.outputs.comment');
+    expect(post?.run).not.toContain('needs.report.outputs');
   });
 
   test('crate downloads stay on HTTP/1.1, as the CLI needs on hosted runners', () => {

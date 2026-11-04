@@ -113,9 +113,9 @@ jobs:
 
       # The dump's suite runs alone with the dump paths set: tests/web_audit_bump.rs
       # drives a cargo shim that writes fixture data to whatever those variables name,
-      # which would pass for a real dump. Then the suites the CLI's next bump runs, so
-      # a clean report means a clean bump; sync_web_audit is left out because it holds
-      # the vendored copies to the pin this run leaves alone. --features web is explicit
+      # which would pass for a real dump. Then the suites the CLI's next bump runs (its
+      # WEB_SUITES in scripts/web-audit-bump.sh), minus sync_web_audit, which holds the
+      # vendored copies to the pin this run leaves alone. --features web is explicit
       # because tests/web_audit_divergences.rs compiles to nothing without it, which
       # passes and looks like a clean run.
       - name: Replay the corpus through the CLI
