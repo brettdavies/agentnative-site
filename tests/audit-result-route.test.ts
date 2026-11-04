@@ -962,7 +962,7 @@ describe('WebMCP script through the real shell template', () => {
     const { status, scripts } = await scriptsOf('/score/anc.dev');
     expect(status).toBe(200);
     expect(scripts).toContain('/js/theme.js');
-    expect(scripts.filter((src) => src === WEBMCP_SCRIPT)).toHaveLength(1);
+    expect(scripts.filter((src) => src.includes('webmcp'))).toEqual([WEBMCP_SCRIPT]);
   });
 
   // The status and the shell's own script tell a real page from the plain-text
@@ -970,12 +970,13 @@ describe('WebMCP script through the real shell template', () => {
   test.each([
     ['a live CLI result', '/score/ouch', 200],
     ['a branch-scoped result', '/score/o/r@feature', 200],
-    ['the no-audit page', '/score/no-such-target', 404],
+    ['the no-audit page for a CLI target', '/score/no-such-target', 404],
+    ['the no-audit page for a website target', '/score/never-audited.dev', 404],
   ])('%s publishes no tools', async (_name, path, expected) => {
     const { status, scripts } = await scriptsOf(path);
     expect(status).toBe(expected);
     expect(scripts).toContain('/js/theme.js');
-    expect(scripts).not.toContain(WEBMCP_SCRIPT);
+    expect(scripts.filter((src) => src.includes('webmcp'))).toEqual([]);
   });
 });
 

@@ -7,7 +7,6 @@ import {
   rowHostPhrase,
   webReadingLine,
 } from '../src/shared/scoring-copy';
-import { WEBMCP_SCRIPT } from '../src/shared/webmcp-script';
 import { handleScoringPage, type ScoringPageEnv } from '../src/worker/audit/scoring-page';
 import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
 import { _resetShellTemplateCache } from '../src/worker/shell-template';
@@ -68,7 +67,7 @@ describe('GET /scoring through the real shell template', () => {
     const { html } = await page(path, env(SITEKEY, emitShellTemplate()));
     const scripts = await scriptSources(html);
     expect(scripts).toContain('/js/theme.js');
-    expect(scripts).not.toContain(WEBMCP_SCRIPT);
+    expect(scripts.filter((src) => src.includes('webmcp'))).toEqual([]);
   });
 });
 

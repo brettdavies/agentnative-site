@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { emitShell } from '../src/build/shell.mjs';
 import { AUDIT_PATH } from '../src/shared/audit-routes';
 import { MCP_DISCOVERY_DOCUMENTS } from '../src/shared/mcp-discovery';
+import { WEBMCP_SCRIPT } from '../src/shared/webmcp-script';
 import worker from '../src/worker/index';
 import { MCP_DESCRIPTOR_ALIAS_PATHS, MCP_DESCRIPTOR_CANONICAL_PATH } from '../src/worker/mcp/descriptor-paths';
 
@@ -233,12 +234,12 @@ describe('agent-readiness cross-surface drift (built dist/)', () => {
   test('shell HTML pages load /js/webmcp.js on the entry and spec surfaces', async () => {
     for (const page of ['index.html', 'audit.html', 'mcp-docs.html', 'p1.html']) {
       const html = await readFile(join(DIST_DIR, page), 'utf8');
-      expect(html).toContain('/js/webmcp.js');
+      expect(html).toContain(WEBMCP_SCRIPT);
     }
     const about = await readFile(join(DIST_DIR, 'about.html'), 'utf8');
-    expect(about).not.toContain('/js/webmcp.js');
+    expect(about).not.toContain(WEBMCP_SCRIPT);
     const scorecard = await readFile(join(DIST_DIR, 'score', 'curl.html'), 'utf8');
-    expect(scorecard).not.toContain('/js/webmcp.js');
+    expect(scorecard).not.toContain(WEBMCP_SCRIPT);
   });
 });
 
