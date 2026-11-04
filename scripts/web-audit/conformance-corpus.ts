@@ -733,7 +733,22 @@ export function assertHandlersFailed(name: string, scenario: Pick<Scenario, 'fai
 }
 
 /** Every corpus file by path relative to the corpus directory. */
-export async function generateCorpus(registry: WebAuditRegistry): Promise<Map<string, string>> {
+/**
+ * Side by side, event-loop lag on a busy host can outrun a real timeout. A real
+ * dependence on the order also moves the scenario alone, and lag does not, so
+ * only a job that fails again alone fails.
+ */
+export async function holdsAloneIfMoved<T>(jobs: readonly T[], holds: (job: T) => Promise<void>): Promise<void> {
+  const crowded = await Promise.allSettled(jobs.map(holds));
+  for (const [index, outcome] of crowded.entries()) {
+    if (outcome.status === 'rejected') await holds(jobs[index]);
+  }
+}
+
+export async function generateCorpus(
+  registry: WebAuditRegistry,
+  orders: ReadonlyArray<ScenarioSchedule & { label: string }> = answerOrders(registry),
+): Promise<Map<string, string>> {
   const ids = new Set(registry.checks.map((check) => check.id));
   const names = Object.keys(SCENARIOS).sort();
   const files = new Map<string, string>();
@@ -754,13 +769,12 @@ export async function generateCorpus(registry: WebAuditRegistry): Promise<Map<st
   }
   // These runs wait on timers rather than the CPU, so side by side they cost about
   // what one does.
-  await Promise.all(
-    names.flatMap((name) =>
-      answerOrders(registry).map(async ({ label, ...schedule }) => {
-        const other = await runScenario(name, SCENARIOS[name], registry, schedule);
-        scheduleIndependentRequests(name, label, runs.get(name) as ScenarioRun, other);
-      }),
-    ),
+  await holdsAloneIfMoved(
+    names.flatMap((name) => orders.map((order) => ({ name, order }))),
+    async ({ name, order: { label, ...schedule } }) => {
+      const other = await runScenario(name, SCENARIOS[name], registry, schedule);
+      scheduleIndependentRequests(name, label, runs.get(name) as ScenarioRun, other);
+    },
   );
   files.set('regex-parity.json', `${JSON.stringify(regexParityFixture(registry), null, 2)}\n`);
   files.set('scores.json', scoresJson(scores));

@@ -8,6 +8,8 @@ import { join } from 'node:path';
 import {
   answerOrders,
   assertHandlersFailed,
+  generateCorpus,
+  holdsAloneIfMoved,
   loadRegistry,
   stubFetchFor,
 } from '../scripts/web-audit/conformance-corpus';
@@ -128,6 +130,33 @@ describe("each scenario's requests.json", () => {
       slowRoot.perCheckTimeoutMs as number,
     );
   });
+
+  test('a job that moved in the crowd passes once it holds alone, and the others run once', async () => {
+    const attempts = new Map<string, number>();
+    await holdsAloneIfMoved(['moved', 'held'], async (job) => {
+      const attempt = (attempts.get(job) ?? 0) + 1;
+      attempts.set(job, attempt);
+      if (job === 'moved' && attempt === 1) throw new Error('moved under load');
+    });
+    expect([...attempts]).toEqual([
+      ['moved', 2],
+      ['held', 1],
+    ]);
+  });
+
+  test('a job that moves again alone fails', async () => {
+    const moved = holdsAloneIfMoved(['moved'], async () => {
+      throw new Error('moved in this order too');
+    });
+    await expect(moved).rejects.toThrow('moved in this order too');
+  });
+
+  // Rejects only if the delay is applied, the stub honors the abort, the timeout
+  // reaches the engine and the comparison runs, so losing any of them fails here.
+  test('generation fails an order no scenario can hold under, naming it', async () => {
+    const alwaysLate = { label: 'with every answer late', perCheckTimeoutMs: 20, answerDelayMs: () => 200 };
+    await expect(generateCorpus(registry, [alwaysLate])).rejects.toThrow(/with every answer late/);
+  }, 120_000);
 
   test('a scenario whose failing handler never ran fails generation, naming it', () => {
     const evidence = 'handler error: no handler registered for "corpus-failing-handler"';
