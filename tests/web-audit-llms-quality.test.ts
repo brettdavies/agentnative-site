@@ -235,8 +235,8 @@ describe('llms.txt quality trio', () => {
         return new Response('', { status: 200 });
       });
       const slots = createAuditSlots(3);
-      const outcome = await slots.run(() => runLlmsTxtQuality(LINKS, context(fetchImpl, slots.fanOut)));
-      expect(peak).toBe(3);
+      const outcome = await slots.run(() => runLlmsTxtQuality(LINKS, context(fetchImpl, slots.fanOut)), 0);
+      expect(peak).toBe(2);
       expect(answered).not.toEqual(hrefs);
       expect(outcome.evidence.map((row) => row.url)).toEqual(hrefs);
       expect(outcome.status).toBe('pass');
@@ -249,10 +249,10 @@ describe('llms.txt quality trio', () => {
         return new Response('', { status: 200 });
       });
       const slots = createAuditSlots(1);
-      const outcome = await slots.run(() => runLlmsTxtQuality(LINKS, context(fetchImpl, slots.fanOut)));
+      const outcome = await slots.run(() => runLlmsTxtQuality(LINKS, context(fetchImpl, slots.fanOut)), 0);
       expect(asked).toEqual(hrefs);
       expect(outcome.status).toBe('pass');
-      expect(await slots.run(async () => 'slot came back')).toBe('slot came back');
+      expect(await slots.run(async () => 'slot came back', 0)).toBe('slot came back');
     });
 
     test('a link unanswered at the deadline reads as the budget running out, and every other link still counts', async () => {
@@ -260,7 +260,7 @@ describe('llms.txt quality trio', () => {
         url === hrefs[2] ? hangsUntilAborted(init) : new Response('', { status: url === hrefs[4] ? 404 : 200 }),
       );
       const slots = createAuditSlots(6);
-      const outcome = await slots.run(() => runLlmsTxtQuality(LINKS, context(fetchImpl, slots.fanOut, 60)));
+      const outcome = await slots.run(() => runLlmsTxtQuality(LINKS, context(fetchImpl, slots.fanOut, 60)), 0);
       expect(outcome.evidence.map((row) => row.url)).toEqual(hrefs);
       expect(outcome.evidence[2]).toEqual({
         url: hrefs[2],
@@ -279,7 +279,7 @@ describe('llms.txt quality trio', () => {
         return hangsUntilAborted(init);
       });
       const slots = createAuditSlots(1);
-      const outcome = await slots.run(() => runLlmsTxtQuality(LINKS, context(fetchImpl, slots.fanOut, 40)));
+      const outcome = await slots.run(() => runLlmsTxtQuality(LINKS, context(fetchImpl, slots.fanOut, 40)), 0);
       expect(asked[0]).toBe(hrefs[0]);
       expect(asked.length).toBeLessThan(LINK_COUNT);
       expect(outcome.evidence.map((row) => row.why)).toEqual(hrefs.map(() => ['nested-probe budget exhausted']));

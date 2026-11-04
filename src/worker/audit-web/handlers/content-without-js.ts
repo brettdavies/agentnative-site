@@ -7,7 +7,7 @@
 
 import type { WebCheck } from '../registry';
 import { AUDIT_PROBE_MAX_BODY_BYTES, guardedFetch, validatePublicUrl } from '../ssrf';
-import { markdownHrefs, remainingDeadlineMs, timeoutMsFor } from './shared';
+import { markdownHrefs, NESTED_BUDGET_EXHAUSTED_WHY, remainingDeadlineMs, timeoutMsFor } from './shared';
 import type { HandlerContext, ProbeOutcome } from './types';
 
 export const MIN_VISIBLE_CHARS = 200;
@@ -99,7 +99,7 @@ export async function runContentWithoutJs(check: WebCheck, ctx: HandlerContext):
   for (const href of hrefs) {
     const slice = remainingDeadlineMs(deadlineAt);
     if (slice <= 0) {
-      evidence.push({ why: ['nested-probe budget exhausted'] });
+      evidence.push({ why: [NESTED_BUDGET_EXHAUSTED_WHY] });
       break;
     }
     const validation = validatePublicUrl(href);
@@ -127,7 +127,7 @@ export async function runContentWithoutJs(check: WebCheck, ctx: HandlerContext):
     }
   }
 
-  const exhausted = evidence.some((row) => Array.isArray(row.why) && row.why.includes('nested-probe budget exhausted'));
+  const exhausted = evidence.some((row) => Array.isArray(row.why) && row.why.includes(NESTED_BUDGET_EXHAUSTED_WHY));
   return {
     status: 'absent',
     evidence: [

@@ -13,7 +13,7 @@ import { normalizeWebAuditRegistry } from '../../src/build/13-web-audit-registry
 import type { ExpectBlock } from '../../src/worker/audit-web/assert';
 import { runWebAudit } from '../../src/worker/audit-web/engine';
 import { ALWAYS_ADMIT_BUDGET } from '../../src/worker/audit-web/follow-requests';
-import type { WebAuditRegistry, WebSiteType } from '../../src/worker/audit-web/registry';
+import type { WebAuditRegistry, WebCheck, WebSiteType } from '../../src/worker/audit-web/registry';
 import { SOURCE_CHECKS } from '../../src/worker/audit-web/antecedents';
 import type { HopRequest } from '../../src/worker/audit-web/request-hop';
 import type { NaReason, ScorecardStatus, WebScorecard } from '../../src/worker/audit-web/scorecard';
@@ -49,6 +49,8 @@ export type Scenario = {
   spec_version: string;
   /** Whether the run follows the hosts the target declares; absent means it does. */
   follow_declarations?: boolean;
+  /** Checks whose handler throws instead of probing; no target's answer can make one do that. */
+  failing_handlers?: string[];
   unmatched: ExchangeResponse;
   allow_unmatched: boolean;
   exchanges: Exchange[];
@@ -152,6 +154,9 @@ export type ScenarioRun = {
   requests: HopRequest[];
 };
 
+// A name no engine registers, which is what makes a check's handler throw.
+const FAILING_HANDLER = 'corpus-failing-handler';
+
 /** How long to hold an answer back, given the request's URL and its place in the order sent. */
 export type AnswerDelay = (url: string, sentIndex: number) => number;
 
@@ -170,6 +175,13 @@ export async function runScenario(
   const sent: HopRequest[] = [];
   const log: StubLog = { unmatched: [], sent };
   const stub = stubFetchFor(scenario, log);
+  const failing = new Set(scenario.failing_handlers ?? []);
+  const audited: WebAuditRegistry = {
+    ...registry,
+    checks: registry.checks.map((check) =>
+      failing.has(check.id) ? { ...check, handler: FAILING_HANDLER as WebCheck['handler'], eval: undefined } : check,
+    ),
+  };
   let sentCount = 0;
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     // The stub records the request now; a transport failure it answers with stays
@@ -183,7 +195,7 @@ export async function runScenario(
   }) as typeof fetch;
   const audit = runWebAudit({
     url: scenario.target,
-    registry,
+    registry: audited,
     siteType: scenario.site_type,
     specVersion: scenario.spec_version,
     concurrency,
@@ -440,6 +452,9 @@ function scoresJson(entries: ReadonlyArray<[string, ScoreIndexEntry]>): string {
 function validateScenario(name: string, scenario: Scenario, ids: ReadonlySet<string>): void {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error(`scenario name ${JSON.stringify(name)} is not kebab-case`);
   if (scenario.covers.length === 0) throw new Error(`scenario ${name} covers no check`);
+  for (const id of scenario.failing_handlers ?? []) {
+    if (!ids.has(id)) throw new Error(`scenario ${name} fails the handler of unknown check ${JSON.stringify(id)}`);
+  }
   for (const id of scenario.covers) {
     if (!ids.has(id)) throw new Error(`scenario ${name} covers unknown check ${JSON.stringify(id)}`);
   }
@@ -469,6 +484,7 @@ function scenarioJson(scenario: Scenario): string {
     site_type: scenario.site_type,
     spec_version: scenario.spec_version,
     ...(scenario.follow_declarations !== undefined ? { follow_declarations: scenario.follow_declarations } : {}),
+    ...(scenario.failing_handlers !== undefined ? { failing_handlers: scenario.failing_handlers } : {}),
     unmatched: scenario.unmatched,
     allow_unmatched: scenario.allow_unmatched,
     exchanges: scenario.exchanges,
@@ -514,6 +530,9 @@ ${relative(REPO_ROOT, CORPUS_DIR)}/
   budget that admits every domain, so no budget state reaches a golden.
 - \`unmatched\`: the response for a request no exchange matches, either a transport failure
   (\`{"error": "Name: message"}\`) or a full response.
+- \`failing_handlers\` (optional): check ids whose handler throws instead of probing, since no target's answer can
+  make one do that. Each sends no request, and its row reads \`error\` with the evidence
+  \`handler error: no handler registered for "corpus-failing-handler"\`.
 - \`allow_unmatched\`: when false, generation fails if any request reaches the unmatched policy.
 - \`exchanges\`: ordered rules; the first match wins and a rule may match repeatedly.
 
@@ -543,8 +562,21 @@ keep the scheme, host, and port, and a redirect to another origin is its answer.
 Every request the engine sent for the scenario, recorded where the stub fetch receives it, before matching. An engine
 under comparison sends the same set, whatever order its requests complete in. The root request and the first document
 reads (the \`well_known\` cards, the AI catalog, the API catalog) go out together, before any of them is answered, so
-they are in the set of every https target, a run that ends on the root's answer included. Every other request waits
-for the root's answer.
+they are in the set of every https target, a run that ends on the root's answer included. Every other request, a redirect hop of one of
+those reads included, waits for the root's answer.
+
+The set is unordered, so some rules it cannot show, and an engine under comparison keeps them anyway:
+
+- Every request carrying the session goes out after the \`notifications/initialized\` request has settled.
+- A root that fails at the network level cuts the first document reads still in flight to the degraded 2 s budget,
+  measured from their start. The discovery budget counts from when the root settled.
+- Six requests are in flight at most, not counting a check's own second request. A free slot goes to the MCP steps,
+  then the source checks, then the rows in registry order, then a fan-out's extra probes, and one row's fan-out always
+  leaves a slot free. This decides which rows go unprobed when the per-audit deadline passes.
+- A link in \`llms-txt-links\` not answered by the check's deadline reads as budget-exhausted and marks the run
+  incomplete, whether or not it was the last link.
+- A source check that measured nothing, because its handler threw or the deadline came first, keeps its own row. The
+  checks gated on it read as they do on any failed antecedent.
 
 - \`method\`: uppercase.
 - \`url\`: as the URL parser writes it.

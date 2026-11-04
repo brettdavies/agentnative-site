@@ -20,7 +20,7 @@ import {
   resolveProtectedResourceMetadata,
   resourceMetadataFromChallenge,
 } from './reciprocity';
-import { type AuditFetchOptions, guardedFetch } from './ssrf';
+import { type DiscoveryFetchOptions, guardedFetch } from './ssrf';
 
 /** The wire probes whose answer decides it, in the order a 401's challenge is read, with the lane each asks on. */
 const WIRE_PROBES = [
@@ -61,7 +61,10 @@ export function laneRefused(sources: ReadonlyMap<string, ProbeOutcome>, lane: Mc
  * redirects disabled, under the timeout `timeout` hands out. Once it hands
  * out null, nothing more is sent.
  */
-export function directArtifactSource(timeout: () => number | null, fetchOptions?: AuditFetchOptions): ArtifactSource {
+export function directArtifactSource(
+  timeout: () => number | null,
+  fetchOptions?: DiscoveryFetchOptions,
+): ArtifactSource {
   return {
     get: async (url, read) => {
       const timeoutMs = timeout();

@@ -1,17 +1,20 @@
 // One audit's concurrency cap. A check holds a slot while it probes; a check
-// gated without a request never takes one. Slots go out first come, first
-// served, so what became ready first runs first.
+// gated without a request never takes one. A free slot goes to the waiter that
+// ranks first, earliest first within a rank, so what other work waits on goes
+// ahead of what waits on it, and when the audit's deadline runs out the rows
+// left unprobed are the ones late in the registry, whatever finished when.
 
 /** `probe` over `items`, results in item order however the probes finish. */
 export type FanOut = <T, R>(items: readonly T[], probe: (item: T) => Promise<R>) => Promise<R[]>;
 
 export interface AuditSlots {
-  /** `task` once a slot is free, holding that slot until it settles. */
-  run<T>(task: () => Promise<T>): Promise<T>;
+  /** `task` once a slot is free, holding that slot until it settles. A lower rank goes first. */
+  run<T>(task: () => Promise<T>, rank: number): Promise<T>;
   /**
-   * For a check already holding a slot: probes on that slot, joined by any
-   * other that frees while items remain. It never waits on a slot it does not
-   * yet have, so a check always finishes on its own slot at a cap of 1.
+   * For a check already holding a slot: probes on that slot, joined by others
+   * as they free once no ranked work is waiting. It never waits on a slot it
+   * does not yet have, so a check finishes on its own slot at any cap, and it
+   * always leaves one slot free, so hung probes cannot stall every other check.
    */
   fanOut: FanOut;
 }
@@ -25,19 +28,20 @@ export const oneAtATime: FanOut = async (items, probe) => {
 
 export function createAuditSlots(cap: number): AuditSlots {
   let free = cap;
-  const waiting: Array<() => void> = [];
-  const acquire = (): Promise<void> =>
-    new Promise((resolve) => {
+  const waiting: Array<{ rank: number; resume: () => void }> = [];
+  const acquire = (rank: number): Promise<void> =>
+    new Promise((resume) => {
       if (free > 0) {
         free -= 1;
-        resolve();
-      } else {
-        waiting.push(resolve);
+        resume();
+        return;
       }
+      const after = waiting.findIndex((waiter) => waiter.rank > rank);
+      waiting.splice(after === -1 ? waiting.length : after, 0, { rank, resume });
     });
   const release = (): void => {
     const next = waiting.shift();
-    if (next) next();
+    if (next) next.resume();
     else free += 1;
   };
   const fanOut: FanOut = async <T, R>(items: readonly T[], probe: (item: T) => Promise<R>) => {
@@ -52,7 +56,7 @@ export function createAuditSlots(cap: number): AuditSlots {
     };
     const joined = new Set<Promise<void>>();
     const join = async (): Promise<void> => {
-      await acquire();
+      await acquire(Number.POSITIVE_INFINITY);
       if (next >= items.length) {
         release();
         return;
@@ -62,14 +66,16 @@ export function createAuditSlots(cap: number): AuditSlots {
       helper.catch(() => {});
       joined.add(helper);
     };
-    for (let i = 1; i < items.length; i += 1) void join();
+    // The caller's slot plus these, which leaves one for every other check.
+    const helpers = Math.min(items.length - 1, Math.max(0, cap - 2));
+    for (let i = 0; i < helpers; i += 1) void join();
     await drain();
     await Promise.all(joined);
     return results;
   };
   return {
-    run: async (task) => {
-      await acquire();
+    run: async (task, rank) => {
+      await acquire(rank);
       try {
         return await task();
       } finally {

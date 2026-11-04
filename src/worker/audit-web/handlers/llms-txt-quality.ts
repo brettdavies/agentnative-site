@@ -11,16 +11,17 @@ import type { WebCheck } from '../registry';
 import { guardedFetch, STATUS_ONLY_BODY_BYTES, validatePublicUrl } from '../ssrf';
 import {
   markdownHrefs,
+  NESTED_BUDGET_EXHAUSTED_WHY,
   plaintextItem,
   redirectsToHttp,
   redirectsToHttpItem,
   remainingDeadlineMs,
+  timedOut,
   timeoutMsFor,
 } from './shared';
 import type { EvidenceItem, HandlerContext, ProbeOutcome, ProbeStatus } from './types';
 
 export const DEFAULT_MAX_LINKS = 8;
-const BUDGET_EXHAUSTED_WHY = 'nested-probe budget exhausted';
 const WHEN_TO_USE_HEADING = /^#{1,3}\s+.*(when\s+to\s+use|programmatic access|when to (?:connect|call) (?:the )?mcp)/im;
 
 type QualityOp = 'format' | 'links' | 'when-to-use';
@@ -65,7 +66,7 @@ function hrefsFrom(body: string, base: string): string[] {
 type LinkProbe = { verdict: Exclude<ProbeStatus, 'na'>; item: EvidenceItem; exhausted?: true };
 
 function budgetExhausted(href: string): LinkProbe {
-  return { verdict: 'error', item: { url: href, ok: false, why: [BUDGET_EXHAUSTED_WHY] }, exhausted: true };
+  return { verdict: 'error', item: { url: href, ok: false, why: [NESTED_BUDGET_EXHAUSTED_WHY] }, exhausted: true };
 }
 
 /** One link's evidence and its own verdict, which the row's evidence line reads to name the link that decided it. */
@@ -81,7 +82,7 @@ async function probeLink(href: string, deadlineAt: number, ctx: HandlerContext):
   const timeoutMs = remainingDeadlineMs(deadlineAt);
   if (timeoutMs <= 0) return budgetExhausted(href);
   const resp = await guardedFetch(href, {}, { ...ctx.fetchOptions, timeoutMs, maxBodyBytes: STATUS_ONLY_BODY_BYTES });
-  if (resp.error?.startsWith('TimeoutError')) return budgetExhausted(href);
+  if (timedOut(resp)) return budgetExhausted(href);
   if (redirectsToHttp(resp)) return { verdict: 'noncompliant', item: redirectsToHttpItem(href, resp.status) };
   if (resp.error !== null || resp.status === null) {
     return { verdict: 'error', item: { url: href, status: resp.status, error: resp.error, ok: false } };

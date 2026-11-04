@@ -433,6 +433,7 @@ function scenario(
     unmatched?: ExchangeResponse;
     allow_unmatched?: boolean;
     follow_declarations?: boolean;
+    failing_handlers?: string[];
   } = {},
 ): Scenario {
   return {
@@ -442,6 +443,7 @@ function scenario(
     site_type: opts.site_type ?? null,
     spec_version: SPEC_VERSION,
     ...(opts.follow_declarations !== undefined ? { follow_declarations: opts.follow_declarations } : {}),
+    ...(opts.failing_handlers !== undefined ? { failing_handlers: opts.failing_handlers } : {}),
     unmatched: opts.unmatched ?? NOT_FOUND,
     allow_unmatched: opts.allow_unmatched ?? true,
     exchanges,
@@ -701,6 +703,29 @@ export const SCENARIOS: Record<string, Scenario> = {
       ),
     ],
     { allow_unmatched: false },
+  ),
+  'run-root-redirects-to-http-document-redirect': scenario(
+    'the root redirects to http while a first-pass document redirects to another https path: the run ends unreachable on the root answer, and the document hop is never requested, whichever of the two answers first',
+    ['agent-ua-reachable', 'mcp-server-card'],
+    [
+      get('/', redirect('http://example.com/')),
+      get('/.well-known/mcp.json', redirect('/moved-card.json')),
+      get('/moved-card.json', json(SERVER_CARD)),
+      ...FIRST_DOCUMENT_READS.filter((path) => path !== '/.well-known/mcp.json').map((path) => get(path, NOT_FOUND)),
+    ],
+    { allow_unmatched: false },
+  ),
+  'run-source-handlers-fail': scenario(
+    'three source checks whose antecedents would not hold throw in their handlers: each keeps its own error row rather than reading not applicable, sends no request, and the checks gated on it read as on any failed antecedent',
+    ['openapi', 'llms-full-txt', 'oauth-discovery', 'llms-full-txt-scoped', 'json-schemas', 'auth-md'],
+    [...baseline()],
+    { failing_handlers: ['openapi', 'llms-full-txt', 'oauth-discovery'] },
+  ),
+  'run-mcp-wire-probe-handler-fails': scenario(
+    'the initialize wire probe throws in its handler on a server that answers everything else: its row stays an error, the session never starts, and the modern lane still scores',
+    ['mcp-initialize', 'mcp-server-discover', 'mcp-modern-tools-list'],
+    [...baseline(), ...cardSurface(), ...dualStackMcp({ cors: 'full' })],
+    { failing_handlers: ['mcp-initialize'] },
   ),
   'run-body-over-cap': scenario(
     'bodies past the 64 KiB probe cap are truncated: a huge tools/list no longer parses and a huge JSON error body reads as non-JSON',

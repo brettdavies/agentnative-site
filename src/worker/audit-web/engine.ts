@@ -73,6 +73,9 @@ import { buildWebScorecard, type EngineResult, type ScorecardStatus, type WebSco
 import { type AuditFetchOptions, type GuardedFetchOptions, guardedFetch, isEdgeErrorStatus } from './ssrf';
 
 export const DEFAULT_CONCURRENCY = 6;
+// Who a free slot goes to, lowest first: a row's rank is its registry index.
+const MCP_STEP_RANK = -2;
+const SOURCE_RANK = -1;
 export const DEFAULT_PER_CHECK_TIMEOUT_MS = 8_000;
 export const DEFAULT_PER_AUDIT_DEADLINE_MS = 25_000;
 // Per-probe timeout once the root fetch has already failed at the network
@@ -505,7 +508,9 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
     retainedBodies,
     retainedDocuments: discovery.documents,
     apiTargets: api,
-    apiDescriptionBodies: apiDescriptionBodies(sources.get('openapi')?.evidence ?? []),
+    get apiDescriptionBodies(): ReadonlyMap<string, string> {
+      return apiDescriptionBodies(sources.get('openapi')?.evidence ?? []);
+    },
     apiHostProbes,
     fetchOptions,
     fanOut: slots.fanOut,
@@ -549,7 +554,9 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
     const body = retainedBody(sources, check.id);
     if (body.length > 0) retainedBodies.set(check.id, body);
   };
-  const sourceProbes = new Map(sourceChecks.map((check) => [check.id, slots.run(() => probeSource(check))]));
+  const sourceProbes = new Map(
+    sourceChecks.map((check) => [check.id, slots.run(() => probeSource(check), SOURCE_RANK)]),
+  );
 
   // Whether the endpoint requires sign-in is settled once the wire probes have
   // answered, from their 401 or, when they drew none and were served nothing,
@@ -587,11 +594,13 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
     });
     if (deadline - now() <= 0) incomplete = true;
   };
-  const mcpSettled = Promise.all(WIRE_PROBE_IDS.map((id) => sourceProbes.get(id))).then(() => slots.run(settleMcp));
+  const mcpSettled = Promise.all(WIRE_PROBE_IDS.map((id) => sourceProbes.get(id))).then(() =>
+    slots.run(settleMcp, MCP_STEP_RANK),
+  );
   const mcpNotified = mcpSettled.then(async () => {
     const { endpoint } = declared;
     const sessionId = mcpSessionId;
-    if (sessionId && endpoint) await slots.run(() => notifyMcp(endpoint, sessionId));
+    if (sessionId && endpoint) await slots.run(() => notifyMcp(endpoint, sessionId), MCP_STEP_RANK);
   });
   const settled = (prerequisite: Prerequisite): Promise<void> | undefined => {
     if (prerequisite === MCP_SETTLED) return mcpSettled;
@@ -609,14 +618,18 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
 
   // Every row gates once its prerequisites settle. A source row then reads the
   // probe it already made; any other row takes a slot and probes if it applies.
-  const finishRow = async (check: WebCheck): Promise<EngineResult> => {
+  // A source that measured nothing, because its handler threw or the deadline
+  // came first, keeps its own row: the gate would read that silence as the
+  // surface not being there, which can lift the score of a run that never looked.
+  const finishRow = async (check: WebCheck, rank: number): Promise<EngineResult> => {
     await Promise.all([sourceProbes.get(check.id), ...rowPrerequisites(check).map(settled)]);
+    const sourceRow = SOURCE_CHECKS.has(check.id)
+      ? (sourceRows.get(check.id) ?? errorResult(check, 'missing source result'))
+      : null;
+    if (sourceRow !== null && !sources.has(check.id)) return sourceRow;
     const gated = gate(check);
     if (gated !== null) return finalizeOptional(check, gated);
-    const row = SOURCE_CHECKS.has(check.id)
-      ? (sourceRows.get(check.id) ?? errorResult(check, 'missing source result'))
-      : (await slots.run(() => probeOne(check))).result;
-    return finalizeOptional(check, row);
+    return finalizeOptional(check, sourceRow ?? (await slots.run(() => probeOne(check), rank)).result);
   };
 
   const results = new Array<EngineResult>(checks.length);
@@ -628,7 +641,7 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
   for (const [index, check] of checks.entries()) {
     pending.set(
       index,
-      finishRow(check).then((result) => ({ index, result })),
+      finishRow(check, index).then((result) => ({ index, result })),
     );
   }
   while (pending.size > 0) {

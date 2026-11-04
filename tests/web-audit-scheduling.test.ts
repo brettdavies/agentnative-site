@@ -371,6 +371,106 @@ describe('the session notification', () => {
   });
 });
 
+describe('which work a free slot goes to', () => {
+  const card = JSON.stringify({ mcp_endpoint: 'https://example.com/mcp' });
+
+  test('MCP rows go ahead of later rows that were ready first, as the MCP steps go ahead of both', async () => {
+    const order: string[] = [];
+    const fetchImpl = stubFetch(async (url, init) => {
+      const path = pathOf(url);
+      if (path === '/.well-known/mcp.json') {
+        return new Response(card, { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (path === '/mcp') {
+        const body = String(init?.body ?? '');
+        order.push(body.includes('"tools/list"') ? 'tools/list' : 'handshake');
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [] } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (path.startsWith('/static-')) {
+        order.push(path);
+        await Bun.sleep(5);
+      }
+      return new Response('ok', { status: path === '/' ? 200 : 404, headers: HTML });
+    });
+    await collect(
+      audit(
+        [
+          makeCheck({ id: 'mcp-initialize', handler: 'mcp', antecedent: 'mcp-present', with: { op: 'initialize' } }),
+          makeCheck({
+            id: 'mcp-server-discover',
+            handler: 'mcp',
+            antecedent: 'mcp-session',
+            with: { op: 'server-discover' },
+          }),
+          makeCheck({ id: 'mcp-tools-list', handler: 'mcp', antecedent: 'mcp-session', with: { op: 'tools-list' } }),
+          ...Array.from({ length: 8 }, (_, i) => pathRow(`static-${i}`, `/static-${i}`)),
+        ],
+        fetchImpl,
+        2,
+      ),
+    );
+    // Both slots are busy with the wire probes while the rows queue, so at most
+    // the two that take them as the wire probes end can start first.
+    expect(order.indexOf('tools/list')).toBeLessThan(order.indexOf('/static-3'));
+  });
+
+  test('a source whose handler throws keeps its error row, and what is gated on it reads not applicable', async () => {
+    const fetchImpl = stubFetch(
+      async (url) => new Response('ok', { status: pathOf(url) === '/' ? 200 : 404, headers: HTML }),
+    );
+    const events = await collect(
+      audit(
+        [
+          pathRow('llms-txt', '/llms.txt', { antecedent: 'none' }),
+          makeCheck({
+            id: 'llms-full-txt',
+            antecedent: 'docs-site',
+            handler: 'not-a-handler' as WebCheck['handler'],
+            with: { path: '/llms-full.txt', expect: { status: [200] } },
+          }),
+          pathRow('scoped', '/scoped', { antecedent: 'root-llms-full-txt' }),
+        ],
+        fetchImpl,
+      ),
+    );
+    const rows = new Map(events.flatMap((e) => (e.type === 'result' ? [[e.result.id, e.result]] : [])));
+    expect(rows.get('llms-full-txt')).toMatchObject({
+      status: 'error',
+      evidence: 'handler error: no handler registered for "not-a-handler"',
+    });
+    expect(rows.get('scoped')?.status).toBe('n_a');
+  });
+
+  test('a source the deadline got to first keeps its skip row', async () => {
+    let clock = 1_000_000;
+    const fetchImpl = stubFetch(async (url) => {
+      if (pathOf(url) === '/') clock += 60_000;
+      return new Response('ok', { status: 404, headers: HTML });
+    });
+    const events = [];
+    for await (const event of runWebAudit({
+      url: BASE,
+      registry: registryOf([
+        makeCheck({
+          id: 'llms-full-txt',
+          antecedent: 'docs-site',
+          with: { path: '/llms-full.txt', expect: { status: [200] } },
+        }),
+      ]),
+      now: () => clock,
+      fetchOptions: { fetchImpl },
+      domainBudget: ALWAYS_ADMIT_BUDGET,
+    })) {
+      events.push(event);
+    }
+    const row = events.flatMap((e) => (e.type === 'result' ? [e.result] : []))[0];
+    expect(row?.status).toBe('skip');
+  });
+});
+
 describe('what the schedule leaves unchanged', () => {
   test('the scorecard lists rows in registry order however the probes finish', async () => {
     // Later rows answer first, and a source sits after rows that do not read it.

@@ -58,6 +58,8 @@ export type GuardedFetchOptions = {
   timeoutMs?: number;
   /** Shortens that deadline while the request is in flight; it never lengthens it. */
   cut?: RequestCut;
+  /** Holds every redirect hop until this settles; the first request goes out regardless. */
+  laterHopsAfter?: Promise<unknown>;
   /**
    * Cap on response body bytes. `0` skips the body (status/headers only).
    * Unset keeps the historical full `response.text()` read.
@@ -91,7 +93,10 @@ export type GuardedFetchOptions = {
 };
 
 /** The fetch options an audit hands every probe: the caller's transport plus the audit's request memo. */
-export type AuditFetchOptions = Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects' | 'memo' | 'cut'>;
+export type AuditFetchOptions = Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects' | 'memo'>;
+
+/** What discovery's requests run with: an audit's fetch options, plus the cut a failed root applies. */
+export type DiscoveryFetchOptions = AuditFetchOptions & Pick<GuardedFetchOptions, 'cut'>;
 
 export const DEFAULT_TIMEOUT_MS = 8_000;
 export const DEFAULT_MAX_REDIRECTS = 4;
@@ -353,6 +358,10 @@ export async function guardedFetch(
     const origin = current.url.origin;
 
     for (let hop = 0; hop <= maxRedirects; hop++) {
+      if (hop > 0 && opts.laterHopsAfter !== undefined) {
+        await opts.laterHopsAfter;
+        if (auditEnded?.aborted) return fail('audit ended');
+      }
       const request = {
         url: current.url.toString(),
         method: init.method ?? 'GET',

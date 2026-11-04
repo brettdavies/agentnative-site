@@ -33,8 +33,9 @@
 // deadline and the discovery budget, so the passes together cannot outrun
 // the audit budget even against a target that never answers. The first pass
 // runs beside the root fetch, whose fate decides how long its reads keep (a
-// RequestCut) and when the budget starts; every later request waits for the
-// root, so what a run sends does not depend on which answers first.
+// RequestCut) and when the budget starts; every later request, a redirect hop
+// of that pass included, waits for the root, so what a run sends does not depend
+// on which answers first.
 
 import type { RetainedDocumentKey } from '../../shared/web-audit-documents';
 import { API_CATALOG_PATH, type CatalogAnchor, catalogAnchors } from './api-catalog';
@@ -65,11 +66,11 @@ import type { EvidenceItem } from './handlers/types';
 import { directArtifactSource, type SignInChallenge, signInEndpoint } from './mcp-auth';
 import type { MetadataMatch } from './reciprocity';
 import type { WebAuditDiscoveryConfig } from './registry';
-import { type AuditFetchOptions, DOCUMENT_MAX_BODY_BYTES, guardedFetch } from './ssrf';
+import { type DiscoveryFetchOptions, DOCUMENT_MAX_BODY_BYTES, guardedFetch } from './ssrf';
 
 export interface DiscoveryOptions {
   timeoutMs: number;
-  fetchOptions?: AuditFetchOptions;
+  fetchOptions?: DiscoveryFetchOptions;
   /** Absolute per-audit deadline in ms; hops stop once it is spent. */
   deadlineAt?: number;
   /** Injectable clock, matching the engine's deterministic deadline tests. */
@@ -144,8 +145,8 @@ export async function readDiscoveryDocuments(
 ): Promise<DiscoveryDocuments> {
   const clock = { deadlineAt: opts.deadlineAt, now: opts.now ?? Date.now };
   let budget = phaseBudget(DISCOVERY_BUDGET_MS, opts.timeoutMs, clock);
-  // A slow root must not leave the POSTs less time than they would have had
-  // with the reads waiting for it, or a slow site could lose its MCP endpoint.
+  // Counted from when the root settled, so a slow root does not spend the POSTs'
+  // share, which would cost a slow site its MCP endpoint.
   void opts.rootSettled?.then(() => {
     budget = phaseBudget(DISCOVERY_BUDGET_MS, opts.timeoutMs, clock);
   });
@@ -155,6 +156,7 @@ export async function readDiscoveryDocuments(
       ...opts.fetchOptions,
       timeoutMs,
       maxBodyBytes: DOCUMENT_MAX_BODY_BYTES,
+      laterHopsAfter: opts.rootSettled,
     });
 
   let wellKnown: CardRead[] = [];

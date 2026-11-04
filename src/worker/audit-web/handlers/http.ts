@@ -15,6 +15,7 @@ import {
   retryShapedWhy,
   sameOriginRecoveryLink,
   substituteEndpoint,
+  timedOut,
   timeoutMsFor,
 } from './shared';
 import type { EvidenceItem, HandlerContext, ProbeOutcome, ProbeStatus } from './types';
@@ -50,7 +51,7 @@ export function classifyMiss(
 ): Exclude<ProbeStatus, 'pass' | 'na'> {
   if (redirectsToHttp(resp)) return 'absent';
   if (resp.error !== null) {
-    return resp.error.startsWith('TimeoutError') && hasExplicitTimeout ? 'broken' : 'error';
+    return timedOut(resp) && hasExplicitTimeout ? 'broken' : 'error';
   }
   if (resp.status === 404 || resp.status === 410) return 'absent';
   const hasStatusExpectation = expect.status !== undefined || expect.status_below !== undefined;

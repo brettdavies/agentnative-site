@@ -313,7 +313,7 @@ A tally of every check by its final status.
 
 ## `results`
 
-One object per check.
+One object per check, in the order the registry lists the checks.
 
 ```json
 {
