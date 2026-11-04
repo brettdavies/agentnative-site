@@ -12,9 +12,10 @@ export interface AuditSlots {
   run<T>(task: () => Promise<T>, rank: number): Promise<T>;
   /**
    * For a check already holding a slot: probes on that slot, joined by others
-   * as they free once no ranked work is waiting. It never waits on a slot it
-   * does not yet have, so a check finishes on its own slot at any cap, and it
-   * always leaves one slot free, so hung probes cannot stall every other check.
+   * one item at a time as they free with no ranked work waiting. It never waits
+   * on a slot it does not yet have, so a check finishes on its own slot at any
+   * cap, and it always leaves one slot free, so hung probes cannot stall every
+   * other check.
    */
   fanOut: FanOut;
 }
@@ -49,29 +50,30 @@ export function createAuditSlots(cap: number): AuditSlots {
   const fanOut: FanOut = async <T, R>(items: readonly T[], probe: (item: T) => Promise<R>) => {
     const results = new Array<R>(items.length);
     let next = 0;
-    const drain = async (): Promise<void> => {
-      while (next < items.length) {
-        const index = next;
-        next += 1;
-        results[index] = await probe(items[index]);
-      }
+    const probeNext = async (): Promise<void> => {
+      const index = next;
+      next += 1;
+      results[index] = await probe(items[index]);
     };
     const joined = new Set<Promise<void>>();
-    const join = async (): Promise<void> => {
+    // One item per slot, so ranked work that arrives between items goes first.
+    const help = async (): Promise<void> => {
       await acquire(Number.POSITIVE_INFINITY);
       if (next >= items.length) {
         release();
         return;
       }
-      const helper = drain().finally(release);
-      // Awaited below once the caller's own drain ends; a failure before then is not unhandled.
-      helper.catch(() => {});
-      joined.add(helper);
+      const probing = probeNext().finally(release);
+      // Awaited below once the caller's own items end; a failure before then is not unhandled.
+      probing.catch(() => {});
+      joined.add(probing);
+      await probing;
+      await help();
     };
     // The caller's slot plus these, which leaves one for every other check.
     const helpers = Math.min(items.length - 1, Math.max(0, cap - 2));
-    for (let i = 0; i < helpers; i += 1) void join();
-    await drain();
+    for (let i = 0; i < helpers; i += 1) help().catch(() => {});
+    while (next < items.length) await probeNext();
     await Promise.all(joined);
     return results;
   };

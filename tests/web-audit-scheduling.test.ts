@@ -86,6 +86,23 @@ function pathOf(url: string): string {
 }
 
 describe('a check starts when what it reads has settled', () => {
+  test('a cap below one is refused before any request goes out', async () => {
+    const requested: string[] = [];
+    const fetchImpl = stubFetch(async (url) => {
+      requested.push(url);
+      return new Response('', { status: 200 });
+    });
+    const audit = runWebAudit({
+      url: BASE,
+      registry: registryOf([pathRow('only', '/only')]),
+      concurrency: 0,
+      fetchOptions: { fetchImpl },
+      domainBudget: ALWAYS_ADMIT_BUDGET,
+    });
+    await expect(audit.next()).rejects.toThrow(RangeError);
+    expect(requested).toEqual([]);
+  });
+
   test('a check with nothing to read starts while a source is still reading', async () => {
     const seen = gate();
     let sourceOpen = false;

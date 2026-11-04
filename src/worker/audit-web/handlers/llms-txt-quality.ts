@@ -65,8 +65,14 @@ function hrefsFrom(body: string, base: string): string[] {
 
 type LinkProbe = { verdict: Exclude<ProbeStatus, 'na'>; item: EvidenceItem; exhausted?: true };
 
-function budgetExhausted(href: string): LinkProbe {
-  return { verdict: 'error', item: { url: href, ok: false, why: [NESTED_BUDGET_EXHAUSTED_WHY] }, exhausted: true };
+/** `blocked` marks a link no request went out for, so the row names no host it never contacted. */
+function budgetExhausted(href: string, requested: boolean): LinkProbe {
+  const item = { url: href, ok: false, why: [NESTED_BUDGET_EXHAUSTED_WHY] };
+  return {
+    verdict: 'error',
+    item: requested ? item : { ...item, blocked: NESTED_BUDGET_EXHAUSTED_WHY },
+    exhausted: true,
+  };
 }
 
 /** One link's evidence and its own verdict, which the row's evidence line reads to name the link that decided it. */
@@ -80,9 +86,9 @@ async function probeLink(href: string, deadlineAt: number, ctx: HandlerContext):
     };
   }
   const timeoutMs = remainingDeadlineMs(deadlineAt);
-  if (timeoutMs <= 0) return budgetExhausted(href);
+  if (timeoutMs <= 0) return budgetExhausted(href, false);
   const resp = await guardedFetch(href, {}, { ...ctx.fetchOptions, timeoutMs, maxBodyBytes: STATUS_ONLY_BODY_BYTES });
-  if (timedOut(resp)) return budgetExhausted(href);
+  if (timedOut(resp)) return budgetExhausted(href, true);
   if (redirectsToHttp(resp)) return { verdict: 'noncompliant', item: redirectsToHttpItem(href, resp.status) };
   if (resp.error !== null || resp.status === null) {
     return { verdict: 'error', item: { url: href, status: resp.status, error: resp.error, ok: false } };

@@ -313,7 +313,8 @@ A tally of every check by its final status.
 
 ## `results`
 
-One object per check, in the order the registry lists the checks.
+One object per check, which a reader finds by `id`. A fresh audit lists them in the order the registry lists the checks,
+and a stored scorecard keeps the order it was written in.
 
 ```json
 {

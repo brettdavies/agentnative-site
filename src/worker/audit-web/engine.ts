@@ -379,7 +379,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
 async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGenerator<AuditEvent> {
   const { base, host, domain } = normalizeBase(input.url);
   const now = input.now ?? Date.now;
-  const concurrency = input.concurrency ?? DEFAULT_CONCURRENCY;
+  const slots = createAuditSlots(input.concurrency ?? DEFAULT_CONCURRENCY);
   const configuredTimeoutMs = input.perCheckTimeoutMs ?? DEFAULT_PER_CHECK_TIMEOUT_MS;
   const perAuditDeadlineMs = input.perAuditDeadlineMs ?? DEFAULT_PER_AUDIT_DEADLINE_MS;
   const deadline = now() + perAuditDeadlineMs;
@@ -520,26 +520,23 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
     mcpSignIn,
   });
 
-  const probeOne = async (
-    check: WebCheck,
-  ): Promise<{ check: WebCheck; outcome: ProbeOutcome | null; result: EngineResult }> => {
+  const probeOne = async (check: WebCheck): Promise<{ outcome: ProbeOutcome | null; result: EngineResult }> => {
     if (deadline - now() <= 0) {
       incomplete = true;
-      return { check, outcome: null, result: skipResult(check) };
+      return { outcome: null, result: skipResult(check) };
     }
     try {
       const handler = handlerFor(check);
       if (!handler) throw new Error(`no handler registered for "${check.handler}"`);
       const outcome = await handler(check, handlerCtx());
       if (outcome.incomplete || deadline - now() <= 0) incomplete = true;
-      return { check, outcome, result: toResult(check, outcome) };
+      return { outcome, result: toResult(check, outcome) };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return { check, outcome: null, result: errorResult(check, `handler error: ${message}`) };
+      return { outcome: null, result: errorResult(check, `handler error: ${message}`) };
     }
   };
 
-  const slots = createAuditSlots(concurrency);
   const checks = input.registry.checks;
   const sourceChecks = checks.filter((c) => SOURCE_CHECKS.has(c.id));
   const sourceRows = new Map<string, EngineResult>();

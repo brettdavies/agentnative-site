@@ -282,9 +282,37 @@ describe('llms.txt quality trio', () => {
       const outcome = await slots.run(() => runLlmsTxtQuality(LINKS, context(fetchImpl, slots.fanOut, 40)), 0);
       expect(asked[0]).toBe(hrefs[0]);
       expect(asked.length).toBeLessThan(LINK_COUNT);
+      const neverSent = outcome.evidence.filter((row) => !asked.includes(String(row.url)));
+      expect(neverSent.length).toBeGreaterThan(0);
+      for (const row of neverSent) expect(row.blocked).toBe('nested-probe budget exhausted');
+      expect(outcome.evidence[0]).not.toHaveProperty('blocked');
       expect(outcome.evidence.map((row) => row.why)).toEqual(hrefs.map(() => ['nested-probe budget exhausted']));
       expect(outcome.status).toBe('error');
       expect(outcome.incomplete).toBe(true);
+    });
+
+    test('the audit hands the row its fan-out, so link probes overlap', async () => {
+      let inFlight = 0;
+      let peak = 0;
+      const fetchImpl = stubFetch(async (url) => {
+        const { pathname } = new URL(url);
+        if (pathname === '/llms.txt') return new Response(body, { status: 200 });
+        if (!/^\/p\d$/.test(pathname)) return new Response('', { status: 404 });
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await Bun.sleep(5);
+        inFlight -= 1;
+        return new Response('', { status: 200 });
+      });
+      await collect(
+        runWebAudit({
+          url: 'https://example.com/',
+          registry: registryOf([CHECKS[0], LINKS]),
+          fetchOptions: { fetchImpl },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
+        }),
+      );
+      expect(peak).toBeGreaterThan(1);
     });
 
     test('the audit counts link probes against the cap it runs every other check under', async () => {

@@ -106,6 +106,42 @@ describe('a fan-out', () => {
     expect(order.indexOf('ranked row')).toBeLessThan(order.indexOf('b'));
   });
 
+  test('a helper gives its slot up between items, so ranked work that arrives meanwhile goes first', async () => {
+    const slots = createAuditSlots(3);
+    const order: string[] = [];
+    const fan = slots.run(
+      () =>
+        slots.fanOut(['a', 'b', 'c', 'd'], async (item) => {
+          order.push(item);
+          await Bun.sleep(5);
+        }),
+      0,
+    );
+    await Bun.sleep(1);
+    const blocker = slots.run(async () => {
+      order.push('first ranked row');
+      await Bun.sleep(10);
+    }, 1);
+    const ranked = slots.run(async () => {
+      order.push('second ranked row');
+    }, 2);
+    await Promise.all([fan, blocker, ranked]);
+    expect(order.indexOf('second ranked row')).toBeLessThan(order.indexOf('d'));
+  });
+
+  test('a helper that gets its slot after the items ran out gives it straight back', async () => {
+    const slots = createAuditSlots(3);
+    const hold = deferred();
+    const held = [slots.run(() => hold.done, 0), slots.run(() => hold.done, 0)];
+    await slots.run(() => slots.fanOut([1, 2], async (item) => item), 0);
+    hold.finish();
+    await Promise.all(held);
+    await Bun.sleep(1);
+    const log = { inFlight: 0, peak: 0 };
+    await Promise.all([1, 2, 3].map((item) => slots.run(() => probing(log, 5)(item), 0)));
+    expect(log.peak).toBe(3);
+  });
+
   test('a probe that throws on a helper rejects it and every slot comes back', async () => {
     const slots = createAuditSlots(4);
     const rejected = slots.run(
