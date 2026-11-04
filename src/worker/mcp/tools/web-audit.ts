@@ -39,12 +39,13 @@ import {
   scorecardWithPublicListing,
   WEB_AUDIT_STALE_AFTER_MS,
 } from '../../audit-web/cache';
-import { prepareWebTarget, type WebTarget, webEnvelope } from '../../audit-web/core';
+import { prepareWebTarget, type WebTarget, type WebTargetRefusal, webEnvelope } from '../../audit-web/core';
 import type { DomainBudgetEnv } from '../../audit-web/domain-budget';
 import { FOLLOW_DISCLOSURE } from '../../audit-web/follow-disclosure';
 import type { FollowSwitchEnv } from '../../audit-web/follow-switch';
 import { queueHitMinPurge, webTag } from '../../audit-web/hit-min-purge';
 import { consumeWebAuditHourlyBudget } from '../../audit-web/limiter';
+import { localTargetRefusal } from '../../audit-web/local-target';
 import {
   decidePublicListingWrite,
   enforcePublicListingFlipLimit,
@@ -73,6 +74,10 @@ export interface WebAuditToolsEnv extends AuditLogEnv, NotifyEnv, InFlightEnv, F
 // payload, so the user-cache enumeration is capped rather than dumped whole.
 // Parity with /web?view=all holds for any user set within this cap.
 const LIST_ALL_MAX_USER_ROWS = 100;
+
+const LOCAL_TARGET_DISCLOSURE =
+  'A local, private, or internal target returns isError:true with a JSON { error } object whose reason is ' +
+  '"local-target" and whose next_step.command is the anc web invocation that audits it from the caller\'s own network.';
 
 function textContent(value: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }] };
@@ -131,13 +136,19 @@ function freshResult(terminal: TerminalEvent | null) {
 }
 
 /** The tool input's host at its https origin, behind the SSRF gate; a scheme other than http(s) is refused. */
-function siteTarget(url: string): { ok: true; target: WebTarget } | { ok: false; reason: string } {
+function siteTarget(url: string): { ok: true; target: WebTarget } | WebTargetRefusal {
   const parsed = coerceUrl(url);
-  if (!parsed) return { ok: false, reason: 'invalid url' };
+  if (!parsed) return { ok: false, refused: 'url', reason: 'invalid url' };
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return { ok: false, reason: `scheme ${parsed.protocol} is not http(s)` };
+    return { ok: false, refused: 'url', reason: `scheme ${parsed.protocol} is not http(s)` };
   }
   return prepareWebTarget(parsed.host);
+}
+
+/** A refused target: the error object `POST /api/score` returns when it names a next step, else the gate's reason. */
+function refusedResult(site: WebTargetRefusal) {
+  const refusal = localTargetRefusal(site, siteOrigin());
+  return refusal ? { ...textContent(refusal), isError: true } : isError(site.reason);
 }
 
 /** The site's stored audit at its https key; null on a miss. */
@@ -159,7 +170,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         'freshness.scored_at is when the audit ran (null on a legacy entry) and freshness.refresh_after is the ' +
         'earliest time the entry leaves the 1-minute cache-reuse window, which is eligibility only, not a promise a ' +
         'fresh audit will be available, since kill switches, rate limits, and service failures still apply. The ' +
-        'companion tool audit_website runs a fresh audit on a miss.',
+        `companion tool audit_website runs a fresh audit on a miss. ${LOCAL_TARGET_DISCLOSURE}`,
       inputSchema: {
         url: z
           .string()
@@ -173,7 +184,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
     async ({ url }) => {
       const siteUrl = siteOrigin();
       const site = siteTarget(url);
-      if (!site.ok) return isError(site.reason);
+      if (!site.ok) return refusedResult(site);
       const domain = site.target.host;
       const hit = await readCachedAudit(env, site.target);
       if (hit) {
@@ -212,7 +223,8 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         '1-minute cache-reuse window — eligibility only, not a promise a fresh audit will be available, since kill ' +
         'switches, rate limits, and service failures still apply. A fresh audit is gated like score_cli: disabled when ' +
         'WEB_AUDIT_ENABLED or MCP_ENABLED is not "true"; a request without cf-connecting-ip returns -32099 (no anon ' +
-        `fallback); a per-IP burst limiter plus a 30-fresh-audits-per-hour-per-IP window apply. ${FOLLOW_DISCLOSURE}`,
+        `fallback); a per-IP burst limiter plus a 30-fresh-audits-per-hour-per-IP window apply. ${FOLLOW_DISCLOSURE} ` +
+        LOCAL_TARGET_DISCLOSURE,
       inputSchema: {
         url: z
           .string()
@@ -251,7 +263,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       // the cache read and the kill switch).
       const siteUrl = siteOrigin();
       const site = siteTarget(url);
-      if (!site.ok) return isError(site.reason);
+      if (!site.ok) return refusedResult(site);
       const target = site.target;
       const domain = target.host;
       // A run that does not follow declared hosts is never saved, so no

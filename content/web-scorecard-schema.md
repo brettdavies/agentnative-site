@@ -404,8 +404,9 @@ established was needed. A stored row whose check id is retired keeps its status 
 replaced it, and no remediation, because a re-audit scores the successor instead.
 
 A row with one of the six declared-host reasons also carries `access_remedy`: why the public audit could not evaluate
-it. A scorecard holding any such row carries `access_note` beside `results`: the sentence saying global keeps those rows
-in its maximum. Both are the sentences the result page shows.
+it, and the `anc web` command that evaluates it from the reader's own network. A scorecard holding any such row carries
+`access_note` beside `results`: the sentence saying global keeps those rows in its maximum and naming that command. Both
+are the sentences the result page shows.
 
 ```json
 "remediation": {

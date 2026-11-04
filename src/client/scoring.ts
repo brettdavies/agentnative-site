@@ -339,7 +339,9 @@ class ScoringRun {
     this.view.state('failed');
     this.view.bounce(panel);
     this.view.say(panel.headline, 'error');
-    this.view.actions({ start: 'Run again', other: true });
+    // The line about how long a run takes would describe a run that never starts.
+    if (panel.final) this.view.subline('');
+    this.view.actions({ start: panel.final ? null : 'Run again', other: true });
     this.bindStart();
     this.view.focusHeading();
   }

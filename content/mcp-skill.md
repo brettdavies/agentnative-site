@@ -243,10 +243,10 @@ A read also carries where each row's evidence came from and what the audit could
   host ([results](/web-scorecard-schema#results)).
 - `hosts[]`: every host a row's evidence came from, as `{ host }`, with each one's own `status` and `na_reason` on a row
   over several hosts ([results](/web-scorecard-schema#results)).
-- `access_remedy`: on a row the public audit could not run, why it could not
-  ([remediation](/web-scorecard-schema#remediation-on-the-mcp-surface)).
+- `access_remedy`: on a row the public audit could not run, why it could not and the `anc web` command that evaluates it
+  from your own network ([remediation](/web-scorecard-schema#remediation-on-the-mcp-surface)).
 - `access_note`: beside `results` when any row could not run, the sentence saying global keeps those rows in its maximum
-  ([remediation](/web-scorecard-schema#remediation-on-the-mcp-surface)).
+  and naming that command ([remediation](/web-scorecard-schema#remediation-on-the-mcp-surface)).
 - `successor`: on a stored row whose check id is retired, the check that replaced it; the row carries no remediation,
   and a re-audit scores the successor ([remediation](/web-scorecard-schema#remediation-on-the-mcp-surface)).
 - `follow_declarations`: whether the audit followed the hosts the site declares; absent means not recorded
@@ -441,7 +441,16 @@ Two error layers. The discriminator is whether the JSON-RPC envelope itself succ
   "type": "text",
   "text": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32099,\"message\":\"rate limit exceeded\"}}"
 }]}
+
+// get_website_audit or audit_website with a local, private, or internal target
+{ "isError": true, "content": [{
+  "type": "text",
+  "text": "{\"error\":{\"code\":\"invalid_target\",\"reason\":\"local-target\",\"value\":\"localhost:3000\",\"next_step\":{\"action\":\"run\",\"command\":\"anc web localhost:3000\",\"docs\":\"https://anc.dev/install#audit-a-local-site\"}}}"
+}]}
 ```
+
+A `local-target` refusal is final for that host: the public audit never contacts it. Run `next_step.command` on a machine
+that can reach the host. `POST /api/score` returns the same `error` object at HTTP 400.
 
 **Always check `isError` before parsing content as a result.** A `found: false` body with `isError: false` is a typed
 redirect carrying a `next_tool` pointer; treating it as an error and giving up is the most common client bug.

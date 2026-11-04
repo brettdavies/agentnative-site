@@ -71,21 +71,30 @@ export type WebTarget = {
   canonical: string;
 };
 
+export type WebTargetRefusal =
+  | { ok: false; refused: 'url'; reason: string }
+  | { ok: false; refused: 'host'; reason: string; url: URL };
+
 /**
  * The website lane's server-side target: the shared classifier's host,
  * fixed to the https scheme, then the SSRF gate on that origin before any
- * cache read. A refused origin returns the gate's reason.
+ * cache read. A refused origin returns the gate's reason and what it refused:
+ * input that names no host, or a host, which `url` carries.
  */
-export function prepareWebTarget(host: string): { ok: true; target: WebTarget } | { ok: false; reason: string } {
+export function prepareWebTarget(host: string): { ok: true; target: WebTarget } | WebTargetRefusal {
   let url: URL;
   try {
     url = new URL(`https://${host}/`);
   } catch {
-    return { ok: false, reason: 'invalid host' };
+    return { ok: false, refused: 'url', reason: 'invalid host' };
   }
   const canonical = canonicalTargetOf(url);
   const validation = validatePublicUrl(canonical);
-  if (!validation.ok) return { ok: false, reason: validation.reason };
+  if (!validation.ok) {
+    return validation.refused === 'host'
+      ? { ok: false, refused: 'host', reason: validation.reason, url }
+      : { ok: false, refused: 'url', reason: validation.reason };
+  }
   return { ok: true, target: { host: url.host, canonical } };
 }
 

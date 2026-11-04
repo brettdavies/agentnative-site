@@ -121,6 +121,9 @@ const BLOCKED_IPV4_RANGES: Array<[number, number]> = [
   [ipv4('192.168.0.0'), 16],
 ];
 
+// fd00:ec2::254, the AWS instance-metadata address over IPv6.
+const IMDS_IPV6 = Uint8Array.from([0xfd, 0, 0x0e, 0xc2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02, 0x54]);
+
 function ipv4(dotted: string): number {
   const parts = dotted.split('.').map(Number);
   return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
@@ -257,6 +260,27 @@ export function blockedHostReason(rawHostname: string): string | null {
   const v4 = parseIpv4Literal(hostname);
   if (v4 !== null) return blockedIpv4Reason(v4);
   return null;
+}
+
+/**
+ * Cloud instance-metadata destinations: the one class of host this gate
+ * blocks that `anc web` also refuses, from any network. `anc web` classifies
+ * them the same way: 169.254.0.0/16, its IPv4-mapped and IPv4-compatible
+ * IPv6 forms, fd00:ec2::254, and the GCP metadata name.
+ */
+export function isMetadataHost(rawHostname: string): boolean {
+  const hostname = rawHostname.toLowerCase().replace(/\.+$/, '');
+  if (hostname === 'metadata.google.internal') return true;
+  const inLinkLocal = (v4: number) => v4 >>> 16 === 0xa9fe;
+  const v6 = parseIpv6Literal(hostname.replace(/^\[|\]$/g, ''));
+  if (v6) {
+    if (v6.every((b, i) => b === IMDS_IPV6[i])) return true;
+    const embedded =
+      v6.slice(0, 10).every((b) => b === 0) && ((v6[10] === 0xff && v6[11] === 0xff) || (v6[10] === 0 && v6[11] === 0));
+    return embedded && inLinkLocal(((v6[12] << 24) | (v6[13] << 16) | (v6[14] << 8) | v6[15]) >>> 0);
+  }
+  const v4 = parseIpv4Literal(hostname);
+  return v4 !== null && inLinkLocal(v4);
 }
 
 /**

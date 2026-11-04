@@ -44,7 +44,14 @@ import { budgetKeyPrefix, memoryKv, memoryRateLimit } from './helpers/domain-bud
 import { aiCatalog, cardEntry, html, requestsTo, router, type Seen, sep2127Card } from './helpers/follow-fixtures';
 import { parseHtml } from './helpers/html-elements';
 import { withLogCapture } from './helpers/log-capture';
-import { getJsonToolContent, type JsonRpcBody, mcpInitialize, mcpRpc, resetMcpTestState } from './helpers/mcp-rpc';
+import {
+  CANONICAL_TEST_ORIGIN,
+  getJsonToolContent,
+  type JsonRpcBody,
+  mcpInitialize,
+  mcpRpc,
+  resetMcpTestState,
+} from './helpers/mcp-rpc';
 import { fakeRender } from './helpers/og-site-fakes';
 import { stubFetch } from './helpers/stub-fetch';
 
@@ -296,7 +303,50 @@ describe('get_website_audit', () => {
     const env = await makeEnv();
     const res = await callTool(env, 'get_website_audit', { url: 'http://169.254.169.254/' });
     expect(res.result?.isError).toBe(true);
+    // anc web refuses a metadata endpoint too, so this refusal names no command.
+    expect(res.result?.content?.[0].text).toBe('blocked: ipv4 169.254.169.254 is in blocked range 169.254.0.0/16');
   });
+});
+
+describe('a local, private, or internal target', () => {
+  for (const tool of ['get_website_audit', 'audit_website']) {
+    test(`${tool} returns the error object POST /api/score returns, naming anc web`, async () => {
+      const env = await makeEnv();
+      const res = await callTool(env, tool, { url: 'http://localhost:3000/' });
+      expect(res.result?.isError).toBe(true);
+      expect(JSON.parse(res.result?.content?.[0].text ?? '{}')).toEqual({
+        error: {
+          code: 'invalid_target',
+          message: "anc's public audit never contacts localhost:3000, a local, private, or internal host.",
+          cta: 'Run anc web localhost:3000 to audit it from your own network.',
+          details: 'blocked: localhost is not a public host',
+          reason: 'local-target',
+          value: 'localhost:3000',
+          next_step: {
+            action: 'run',
+            command: 'anc web localhost:3000',
+            docs: `${CANONICAL_TEST_ORIGIN}/install#audit-a-local-site`,
+          },
+        },
+      });
+    });
+
+    test(`${tool} never prints a host a shell or a flag parser would read as anything else`, async () => {
+      const env = await makeEnv();
+      for (const url of ['https://a$(id).internal/', 'https://--ca-cert=x.internal/', 'https://a;b.internal/']) {
+        const res = await callTool(env, tool, { url });
+        expect(res.result?.isError).toBe(true);
+        expect(res.result?.content?.[0].text).toBe('blocked: internal metadata hostnames are blocked');
+      }
+    });
+
+    test(`${tool} keeps the bare reason for input that names no host`, async () => {
+      const env = await makeEnv();
+      const res = await callTool(env, tool, { url: 'ftp://example.com/' });
+      expect(res.result?.isError).toBe(true);
+      expect(res.result?.content?.[0].text).toBe('scheme ftp: is not http(s)');
+    });
+  }
 });
 
 describe('get_website_audit read-time enrichment', () => {
@@ -2115,10 +2165,14 @@ describe('provenance reaches every reader of a stored website result', () => {
   test('the MCP read carries the not-run sentences the page and the twin show', async () => {
     const { scorecard } = await read('stripe.dev', stripeShaped());
     const { md } = rendered('stripe.dev', stripeShaped());
-    expect(scorecard.access_note).toBe('Global keeps the 18 checks this audit could not run in its maximum.');
+    expect(scorecard.access_note).toBe(
+      'Global keeps the 18 checks this audit could not run in its maximum; run `anc web stripe.dev` to evaluate them from your own network, with `ANC_WEB_TOKEN` set for the ones that need sign-in.',
+    );
     expect(md).toContain(scorecard.access_note ?? 'missing');
     const corsActual = scorecard.results.find((r) => r.id === 'mcp-cors-actual');
-    expect(corsActual?.access_remedy).toBe("anc's public audit holds no sign-in for mcp.stripe.com.");
+    expect(corsActual?.access_remedy).toBe(
+      "anc's public audit holds no sign-in for mcp.stripe.com. Run `anc web stripe.dev` with `ANC_WEB_TOKEN` set to a token for mcp.stripe.com to evaluate this check from your own network.",
+    );
     expect(md).toContain(`- Note: ${corsActual?.access_remedy}`);
     expect(scorecard.results.filter((r) => r.access_remedy !== undefined)).toHaveLength(18);
   });

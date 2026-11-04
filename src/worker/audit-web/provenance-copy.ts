@@ -147,10 +147,25 @@ const NOT_RUN_CAUSES: Readonly<Partial<Record<NaReason, (host: string, domain: s
   'auth-required': (host) => `anc's public audit holds no sign-in for ${host}.`,
 };
 
-// No published anc release includes `anc web`, so a remedy that named it
-// would send a reader to a command that fails; the reason a check did not
-// run is stated either way.
-export const ANC_WEB_RELEASED = false;
+// Whether a published anc release includes `anc web`. Copy that names the
+// command reads this, so a reader is never sent to a command that fails; the
+// reason a check did not run or a target was refused is stated either way.
+export const ANC_WEB_RELEASED = true;
+
+// A URL host admits `$(...)`, `;`, backticks, and a leading `-`, and the MCP
+// tools read theirs from a URL no classifier has seen. Only a host that reads
+// as neither shell syntax nor a flag is printed as a command an agent may run.
+const COMMAND_SAFE_HOST = /^(?:[a-z0-9_][a-z0-9_.-]*|\[[0-9a-f:.]+\])(?::\d+)?$/i;
+
+/**
+ * The `anc web` invocation for a host, runnable as printed, or null when no
+ * published release has the command or the host cannot be printed safely. A
+ * bracketed IPv6 literal is quoted because zsh reads brackets as a glob.
+ */
+export function ancWebCommand(host: string, commandReleased: boolean = ANC_WEB_RELEASED): string | null {
+  if (!commandReleased || !COMMAND_SAFE_HOST.test(host)) return null;
+  return `anc web ${host.startsWith('[') ? `'${host}'` : host}`;
+}
 
 /**
  * Why the public audit could not evaluate a not-run row or group, and, when
@@ -166,9 +181,10 @@ export function notRunRemedy(
 ): Rich {
   const cause = NOT_RUN_CAUSES[reason]?.(host, domain);
   const what = count === 1 ? 'this check' : 'these checks';
-  if (!commandReleased) return [cause ?? `anc's public audit could not run ${what}.`];
+  const invocation = ancWebCommand(domain, commandReleased);
+  if (invocation === null) return [cause ?? `anc's public audit could not run ${what}.`];
   const run = cause === undefined ? 'Run ' : `${cause} Run `;
-  const command = { code: `anc web ${domain}` };
+  const command = { code: invocation };
   const tail = ` to evaluate ${what} from your own network.`;
   return reason === 'auth-required'
     ? [run, command, ' with ', { code: 'ANC_WEB_TOKEN' }, ` set to a token for ${host}${tail}`]
@@ -183,12 +199,13 @@ export function notRunScoreNote(
   commandReleased: boolean = ANC_WEB_RELEASED,
 ): Rich {
   const rows = count === 1 ? '1 check' : `${count} checks`;
-  if (!commandReleased) return [`Global keeps the ${rows} this audit could not run in its maximum.`];
+  const invocation = ancWebCommand(domain, commandReleased);
+  if (invocation === null) return [`Global keeps the ${rows} this audit could not run in its maximum.`];
   const them = count === 1 ? 'it' : 'them';
   const signIn: Rich = needsSignIn ? [', with ', { code: 'ANC_WEB_TOKEN' }, ' set for the ones that need sign-in'] : [];
   return [
     `Global keeps the ${rows} this audit could not run in its maximum; run `,
-    { code: `anc web ${domain}` },
+    { code: invocation },
     ` to evaluate ${them} from your own network`,
     ...signIn,
     '.',

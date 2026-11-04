@@ -265,6 +265,44 @@ test.describe('/scoring progress page', () => {
     await expect(page).toHaveURL(/\/scoring\?target=ouch$/);
   });
 
+  test('a local target refused by name shows the command and offers no Run again', async ({ page }) => {
+    await mockTurnstile(page);
+    await mockScore(page, [
+      json(400, {
+        error: {
+          code: 'invalid_target',
+          message: "anc's public audit never contacts localhost:3000, a local, private, or internal host.",
+          cta: 'Run anc web localhost:3000 to audit it from your own network.',
+          details: 'blocked: localhost is not a public host',
+          reason: 'local-target',
+          value: 'localhost:3000',
+          next_step: { action: 'run', command: 'anc web localhost:3000', docs: 'https://anc.dev/install' },
+        },
+      }),
+    ]);
+    await page.goto('/scoring?target=localhost%3A3000');
+    await expect(page.locator('.scoring__bounce code')).toHaveText('anc web localhost:3000');
+    await expect(page.locator('.scoring__bounce a')).toHaveAttribute('href', '/install');
+    await expect(page.locator('[data-scoring-start]')).toBeHidden();
+    await expect(page.locator('[data-scoring-other]')).toBeVisible();
+    await expect(page.locator('[data-scoring-subline]')).toBeEmpty();
+    await expect(page.locator('.live-score__bounce-stderr')).toHaveCount(0);
+    // Without its own rule the link keeps the browser's default blue, which disappears on the dark ground.
+    const linkMatchesAccent = () =>
+      page.locator('.scoring__bounce a').evaluate((a) => {
+        const probe = document.createElement('span');
+        probe.style.color = 'var(--accent)';
+        document.body.appendChild(probe);
+        const matches = getComputedStyle(a).color === getComputedStyle(probe).color;
+        probe.remove();
+        return matches;
+      });
+    expect(await linkMatchesAccent()).toBe(true);
+    await page.locator('[data-theme-cycle]').click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    expect(await linkMatchesAccent()).toBe(true);
+  });
+
   test('verification being unavailable holds Start through the countdown, then says Ready to retry, never that it failed', async ({
     page,
   }) => {

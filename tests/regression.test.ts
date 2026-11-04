@@ -23,6 +23,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { ANC_WEB_DOCS_PATH } from '../src/worker/audit-web/local-target';
 
 const REPO_ROOT = join(import.meta.dir, '..');
 const DIST = join(REPO_ROOT, 'dist');
@@ -256,6 +257,12 @@ describe('regression #5 — /skill.json (skill-distribution canonical surface)',
   test('dist/install.json does NOT exist (404 contract via asset absence)', async () => {
     const path = join(DIST, 'install.json');
     await expect(readFile(path, 'utf8')).rejects.toThrow(/ENOENT/);
+  });
+
+  test('the anc web docs link lands on a heading the built install page carries', async () => {
+    const [path, fragment] = ANC_WEB_DOCS_PATH.split('#');
+    const html = await readFile(join(DIST, `${path.slice(1)}.html`), 'utf8');
+    expect(html).toContain(`id="${fragment}"`);
   });
 
   test('llms.txt contains /skill.md and /skill.json links under ## Skill', async () => {

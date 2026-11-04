@@ -29,6 +29,19 @@ Platform archives, including Windows builds and SHA256 checksums, live at
 [github.com/brettdavies/agentnative-cli/releases](https://github.com/brettdavies/agentnative-cli/releases). Download the
 archive for your platform, extract, and put the `anc` binary on `$PATH`.
 
+## Audit a local site
+
+The website audit on this site contacts public hosts only. `anc web` runs the same checks from your own network, so it
+reaches a localhost port, a private address, or an internal hostname:
+
+```bash
+anc web localhost:8787
+```
+
+`anc web` sends HTTPS only, local targets included. A server whose certificate comes from a private or development CA
+needs `--ca-cert <FILE>`, or that CA in the OS trust store. The
+[anc README](https://github.com/brettdavies/agentnative-cli#auditing-a-website) covers every option.
+
 ## What's next
 
 Once installed, invoke the CLI as `anc`. See [/audit](/audit) for usage: flags, output shapes, and how to interpret the
