@@ -48,7 +48,7 @@ WRANGLER_ENV_FLAG=()
 
 NOW="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
-WOULD_RUN="bun x wrangler kv key get --binding=SCORE_KV${WRANGLER_ENV_FLAG[*]:+ ${WRANGLER_ENV_FLAG[*]}} scoring_disabled"
+WOULD_RUN="bun x wrangler kv key list --remote --binding=SCORE_KV${WRANGLER_ENV_FLAG[*]:+ ${WRANGLER_ENV_FLAG[*]}} --prefix scoring_disabled"
 
 if [ "$DRY_RUN" = true ]; then
   "$JQ_BIN" -n \
@@ -68,9 +68,20 @@ fi
 STDERR_FILE="$(mktemp)"
 trap 'rm -f "$STDERR_FILE"' EXIT
 
+# Without --remote wrangler reads a local store and exits 0 on every key, which says
+# nothing about deployed KV. `kv key get --remote` answers an absent key and a missing
+# namespace with the same 404, so the key's presence comes from `kv key list`, which
+# exits non-zero only when the read itself fails. A listing that does not parse goes on
+# to the get, whose 404 reads as an error rather than as an absent key.
+WRANGLER_STDOUT=""
 set +e
-WRANGLER_STDOUT="$(bun x wrangler kv key get --binding=SCORE_KV "${WRANGLER_ENV_FLAG[@]}" scoring_disabled 2>"$STDERR_FILE")"
+LISTING="$(bun x wrangler kv key list --remote --binding=SCORE_KV "${WRANGLER_ENV_FLAG[@]}" --prefix scoring_disabled 2>"$STDERR_FILE")"
 WRANGLER_EXIT=$?
+if [ "$WRANGLER_EXIT" -eq 0 ] \
+  && ! "$JQ_BIN" -e 'any(.[]; .name == "scoring_disabled") | not' <<<"$LISTING" >/dev/null 2>&1; then
+  WRANGLER_STDOUT="$(bun x wrangler kv key get --remote --binding=SCORE_KV "${WRANGLER_ENV_FLAG[@]}" scoring_disabled 2>"$STDERR_FILE")"
+  WRANGLER_EXIT=$?
+fi
 set -e
 WRANGLER_STDERR="$(cat "$STDERR_FILE")"
 VALUE="$(printf '%s' "$WRANGLER_STDOUT" | tr -d '\n')"
@@ -81,8 +92,6 @@ if [ "$WRANGLER_EXIT" -eq 0 ]; then
     ""|false|0) STATUS="ok";    DISABLED="false";   EXIT_CODE=0 ;;
     *)          STATUS="warn";  DISABLED="unknown"; EXIT_CODE=1 ;;
   esac
-elif grep -qiE "not found|does not exist|key.*does.*not" <<<"$WRANGLER_STDERR"; then
-  STATUS="ok"; DISABLED="false"; EXIT_CODE=0
 else
   STATUS="error"; DISABLED="unknown"; EXIT_CODE=4
 fi

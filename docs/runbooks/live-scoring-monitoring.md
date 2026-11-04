@@ -238,10 +238,10 @@ Raw wrangler path (equivalent; what the wrapper calls under the hood):
 
 ```bash
 # Flip ON.
-bun x wrangler kv key put --binding=SCORE_KV --env staging scoring_disabled true
+bun x wrangler kv key put --remote --binding=SCORE_KV --env staging scoring_disabled true
 
 # Flip OFF.
-bun x wrangler kv key delete --binding=SCORE_KV --env staging scoring_disabled
+bun x wrangler kv key delete --remote --binding=SCORE_KV --env staging scoring_disabled
 ```
 
 The Worker caches the flag in-isolate for 30 s, and KV propagates globally within ~60 s, so allow up to a minute for the
@@ -322,11 +322,8 @@ within the last 7 days). Pre-hit rate craters across all inputs.
 Diagnostic:
 
 ```bash
-# Confirm R2 is reachable from your laptop and the bucket has objects.
-bun x wrangler r2 object list anc-score-cache-staging --prefix=scores/ | head -20
-
-# Confirm the lifecycle rule is intact.
-bun x wrangler r2 bucket lifecycle list anc-score-cache-staging
+# Confirm R2 is reachable from your laptop, the bucket has objects, and the lifecycle rule is intact.
+scripts/monitoring/check-r2-cache.sh --env staging
 ```
 
 Resolution: cache reads and writes are best-effort in `src/worker/score/cache.ts`; a missing cache makes `live` runs

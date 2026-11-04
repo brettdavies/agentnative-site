@@ -75,9 +75,9 @@ WRANGLER_ENV_FLAG=()
 NOW="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
 if [ "$ACTION" = "on" ]; then
-  WOULD_RUN="bun x wrangler kv key put --binding=SCORE_KV${WRANGLER_ENV_FLAG[*]:+ ${WRANGLER_ENV_FLAG[*]}} scoring_disabled true"
+  WOULD_RUN="bun x wrangler kv key put --remote --binding=SCORE_KV${WRANGLER_ENV_FLAG[*]:+ ${WRANGLER_ENV_FLAG[*]}} scoring_disabled true"
 else
-  WOULD_RUN="bun x wrangler kv key delete --binding=SCORE_KV${WRANGLER_ENV_FLAG[*]:+ ${WRANGLER_ENV_FLAG[*]}} scoring_disabled"
+  WOULD_RUN="bun x wrangler kv key delete --remote --binding=SCORE_KV${WRANGLER_ENV_FLAG[*]:+ ${WRANGLER_ENV_FLAG[*]}} scoring_disabled"
 fi
 
 if [ "$DRY_RUN" = true ]; then
@@ -99,11 +99,13 @@ fi
 STDERR_FILE="$(mktemp)"
 trap 'rm -f "$STDERR_FILE"' EXIT
 
+# Without --remote wrangler writes a local store and exits 0, so the flip would report
+# ok and leave the deployed Worker as it was.
 set +e
 if [ "$ACTION" = "on" ]; then
-  WRANGLER_STDOUT="$(bun x wrangler kv key put --binding=SCORE_KV "${WRANGLER_ENV_FLAG[@]}" scoring_disabled true 2>"$STDERR_FILE")"
+  WRANGLER_STDOUT="$(bun x wrangler kv key put --remote --binding=SCORE_KV "${WRANGLER_ENV_FLAG[@]}" scoring_disabled true 2>"$STDERR_FILE")"
 else
-  WRANGLER_STDOUT="$(bun x wrangler kv key delete --binding=SCORE_KV "${WRANGLER_ENV_FLAG[@]}" scoring_disabled 2>"$STDERR_FILE")"
+  WRANGLER_STDOUT="$(bun x wrangler kv key delete --remote --binding=SCORE_KV "${WRANGLER_ENV_FLAG[@]}" scoring_disabled 2>"$STDERR_FILE")"
 fi
 WRANGLER_EXIT=$?
 set -e
