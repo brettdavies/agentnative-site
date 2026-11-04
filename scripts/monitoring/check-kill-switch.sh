@@ -81,7 +81,7 @@ if [ "$WRANGLER_EXIT" -eq 0 ]; then
     ""|false|0) STATUS="ok";    DISABLED="false";   EXIT_CODE=0 ;;
     *)          STATUS="warn";  DISABLED="unknown"; EXIT_CODE=1 ;;
   esac
-elif printf '%s' "$WRANGLER_STDERR" | grep -qiE "not found|does not exist|key.*does.*not"; then
+elif grep -qiE "not found|does not exist|key.*does.*not" <<<"$WRANGLER_STDERR"; then
   STATUS="ok"; DISABLED="false"; EXIT_CODE=0
 else
   STATUS="error"; DISABLED="unknown"; EXIT_CODE=4

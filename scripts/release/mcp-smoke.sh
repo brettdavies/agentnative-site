@@ -74,6 +74,15 @@
 #   - curl, jq on PATH
 
 set -uo pipefail
+{ set +x; } 2>/dev/null
+
+# Captured and unset before the first child starts, so no child's environment holds them.
+ACCESS_HEADERS=""
+if [[ -n "${CF_ACCESS_CLIENT_ID:-}" && -n "${CF_ACCESS_CLIENT_SECRET:-}" ]]; then
+  printf -v ACCESS_HEADERS 'header = "CF-Access-Client-Id: %s"\nheader = "CF-Access-Client-Secret: %s"\n' \
+    "$CF_ACCESS_CLIENT_ID" "$CF_ACCESS_CLIENT_SECRET"
+fi
+unset CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 readonly REPO_ROOT
@@ -99,8 +108,8 @@ CORE_ONLY=0
 # the sandbox correctly returns chain_resolved_no_binary_produced for them.
 readonly MCP_BINARY_ALLOWLIST=(figlet prettier tsx nodemon npm-check-updates)
 
-# Hostnames considered "prod" for the --full-cache-coverage refusal rule. Grow
-# this list if additional production surfaces are added.
+# Hostnames considered "prod", for the --full-cache-coverage refusal rule and for dropping
+# Access credentials. Grow this list if additional production surfaces are added.
 readonly MCP_PROD_HOSTS=(anc.dev www.anc.dev)
 
 usage() {
@@ -169,34 +178,37 @@ if ! in_allowlist "$MCP_BINARY"; then
   exit 2
 fi
 
+base_host=$(printf '%s' "$BASE_URL" | sed -E 's|^[a-zA-Z]+://||; s|/.*$||; s|^.*@||; s|:.*$||; s|\.$||' | tr '[:upper:]' '[:lower:]')
+target_is_prod=0
+for prod_host in "${MCP_PROD_HOSTS[@]}"; do
+  [[ "$base_host" == "$prod_host" ]] && target_is_prod=1
+done
+
 # Refuse --full-cache-coverage against prod surfaces. The script-side hostname
 # match is the first layer; the second layer is the Worker-side gating
 # (MCP_CACHE_BYPASS_ALLOWED env var bound only on staging), so even if a caller
 # bypasses the script and forges `bypass_cache: true` against prod the Worker
 # silently ignores it.
-if [[ "$FULL_CACHE_COVERAGE" -eq 1 ]]; then
-  base_host=$(printf '%s' "$BASE_URL" | sed -E 's|^[a-z]+://||; s|/.*$||; s|:.*$||')
-  for prod_host in "${MCP_PROD_HOSTS[@]}"; do
-    if [[ "$base_host" == "$prod_host" ]]; then
-      echo "--full-cache-coverage is refused against prod ($base_host)." >&2
-      echo "Prod runs accept live-cache; the cache-miss-via-bypass leg requires" >&2
-      echo "MCP_CACHE_BYPASS_ALLOWED bound at the Worker, which is staging-only." >&2
-      exit 2
-    fi
-  done
+if [[ "$FULL_CACHE_COVERAGE" -eq 1 && "$target_is_prod" -eq 1 ]]; then
+  echo "--full-cache-coverage is refused against prod ($base_host)." >&2
+  echo "Prod runs accept live-cache; the cache-miss-via-bypass leg requires" >&2
+  echo "MCP_CACHE_BYPASS_ALLOWED bound at the Worker, which is staging-only." >&2
+  exit 2
 fi
 
-# Response capture dir and auth headers (optional). Staged into a mode-600 curl
-# config file when both CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET are
-# present; every curl invocation passes `-K "$CF_CONFIG"`.
+# Production sits behind no Access, so credentials exported for staging must not reach it.
+[[ "$target_is_prod" -eq 1 ]] && ACCESS_HEADERS=""
+
 OUT="$(mktemp -d)"
-CF_CONFIG="$(mktemp)"
-chmod 600 "$CF_CONFIG"
-trap 'rm -rf "$OUT" "$CF_CONFIG"' EXIT
-if [[ -n "${CF_ACCESS_CLIENT_ID:-}" && -n "${CF_ACCESS_CLIENT_SECRET:-}" ]]; then
-  printf 'header = "CF-Access-Client-Id: %s"\n' "$CF_ACCESS_CLIENT_ID" >>"$CF_CONFIG"
-  printf 'header = "CF-Access-Client-Secret: %s"\n' "$CF_ACCESS_CLIENT_SECRET" >>"$CF_CONFIG"
-fi
+trap 'rm -rf "$OUT"' EXIT
+
+# Handed to curl through a process substitution, because an EXIT trap cannot clean up a
+# file after a SIGKILL, and config lines never reach argv. An empty config is a no-op. -q
+# comes first because curl otherwise reads .curlrc, whose location option would follow
+# redirects with the secret.
+ecurl() {
+  curl -q -K <(printf '%s' "$ACCESS_HEADERS") "$@"
+}
 
 emit_summary_or_result() {
   if [[ -n "$RESULT_FILE" ]]; then
@@ -223,7 +235,7 @@ report() {
 
 run_check_1_server_card() {
   local http_code protocol endpoint
-  http_code=$(curl -sS -w '%{http_code}' -o "$OUT/1-card.json" -K "$CF_CONFIG" -m 15 \
+  http_code=$(ecurl -sS -w '%{http_code}' -o "$OUT/1-card.json" -m 15 \
     "${BASE_URL}/.well-known/mcp/server-card.json" 2>/dev/null || echo "000")
   protocol=$(jq -r '.protocolVersion // empty' "$OUT/1-card.json" 2>/dev/null || true)
   endpoint=$(jq -r '.mcp_endpoint // empty' "$OUT/1-card.json" 2>/dev/null || true)
@@ -242,7 +254,7 @@ run_check_1_server_card() {
 
 run_check_2_legacy_initialize() {
   local http_code server instructions
-  http_code=$(curl -sS -w '%{http_code}' -o "$OUT/2-init.json" -K "$CF_CONFIG" -m 15 \
+  http_code=$(ecurl -sS -w '%{http_code}' -o "$OUT/2-init.json" -m 15 \
     -H 'Content-Type: application/json' -H 'Accept: application/json' \
     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"anc-mcp-smoke","version":"0"}}}' \
     "${BASE_URL}/mcp" 2>/dev/null || echo "000")
@@ -263,7 +275,7 @@ run_check_2_legacy_initialize() {
 
 run_check_3_legacy_tools_list() {
   local http_code tool_count missing=() name
-  http_code=$(curl -sS -w '%{http_code}' -o "$OUT/3-tools-list.json" -K "$CF_CONFIG" -m 15 \
+  http_code=$(ecurl -sS -w '%{http_code}' -o "$OUT/3-tools-list.json" -m 15 \
     -H 'Content-Type: application/json' -H 'Accept: application/json' \
     -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
     "${BASE_URL}/mcp" 2>/dev/null || echo "000")
@@ -288,7 +300,7 @@ run_check_3_legacy_tools_list() {
 
 run_check_4_legacy_get_scorecard() {
   local http_code inner tier has_scorecard
-  http_code=$(curl -sS -w '%{http_code}' -o "$OUT/4-get-scorecard.json" -K "$CF_CONFIG" -m 15 \
+  http_code=$(ecurl -sS -w '%{http_code}' -o "$OUT/4-get-scorecard.json" -m 15 \
     -H 'Content-Type: application/json' -H 'Accept: application/json' \
     -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_scorecard","arguments":{"slug":"ripgrep"}}}' \
     "${BASE_URL}/mcp" 2>/dev/null || echo "000")
@@ -309,7 +321,7 @@ run_check_4_legacy_get_scorecard() {
 
 run_check_5_modern_tools_list() {
   local http_code tool_count ttl cache_scope
-  http_code=$(curl -sS -w '%{http_code}' -o "$OUT/5-modern-list.json" -K "$CF_CONFIG" -m 15 \
+  http_code=$(ecurl -sS -w '%{http_code}' -o "$OUT/5-modern-list.json" -m 15 \
     -H 'Content-Type: application/json' -H 'Accept: application/json' \
     -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: tools/list' \
     -d "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"tools/list\",\"params\":{$META}}" \
@@ -333,7 +345,7 @@ run_check_5_modern_tools_list() {
 
 run_check_6_modern_get_scorecard() {
   local http_hit http_miss inner_hit inner_miss tier has_sc found hit_ok miss_ok
-  http_hit=$(curl -sS -w '%{http_code}' -o "$OUT/6-modern-hit.json" -K "$CF_CONFIG" -m 15 \
+  http_hit=$(ecurl -sS -w '%{http_code}' -o "$OUT/6-modern-hit.json" -m 15 \
     -H 'Content-Type: application/json' -H 'Accept: application/json' \
     -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: tools/call' -H 'Mcp-Name: get_scorecard' \
     -d "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"tools/call\",\"params\":{\"name\":\"get_scorecard\",\"arguments\":{\"slug\":\"ripgrep\"},$META}}" \
@@ -342,7 +354,7 @@ run_check_6_modern_get_scorecard() {
   tier=$(printf '%s' "$inner_hit" | jq -r '.tier // empty' 2>/dev/null || true)
   has_sc=$(printf '%s' "$inner_hit" | jq -r '.scorecard != null' 2>/dev/null || echo "false")
 
-  http_miss=$(curl -sS -w '%{http_code}' -o "$OUT/6-modern-miss.json" -K "$CF_CONFIG" -m 15 \
+  http_miss=$(ecurl -sS -w '%{http_code}' -o "$OUT/6-modern-miss.json" -m 15 \
     -H 'Content-Type: application/json' -H 'Accept: application/json' \
     -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: tools/call' -H 'Mcp-Name: get_scorecard' \
     -d "{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"tools/call\",\"params\":{\"name\":\"get_scorecard\",\"arguments\":{\"github_url\":\"https://github.com/example/anc-smoke-no-scorecard\"},$META}}" \
@@ -381,7 +393,7 @@ run_check_6_modern_get_scorecard() {
 # it, so only a probe over real HTTP exercises this contract.
 run_check_7_malformed_body() {
   local http_code error_code
-  http_code=$(curl -sS -w '%{http_code}' -o "$OUT/7-malformed.json" -K "$CF_CONFIG" -m 15 \
+  http_code=$(ecurl -sS -w '%{http_code}' -o "$OUT/7-malformed.json" -m 15 \
     -H 'Content-Type: application/json' -H 'Accept: application/json' \
     --data-binary 'not json at all' \
     "${BASE_URL}/mcp" 2>/dev/null || echo "000")
@@ -407,7 +419,7 @@ symmetry_probe() {
   local tool=$1 extra=$2 filter
   filter=".tier // \"\""
   [[ -n "$extra" ]] && filter="$filter, (.${extra} // \"\")"
-  curl -fsSL -K "$CF_CONFIG" -m 15 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  ecurl -fsS -m 15 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
     -d "{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"tools/call\",\"params\":{\"name\":\"${tool}\",\"arguments\":{\"slug\":\"ripgrep\"}}}" \
     "${BASE_URL}/mcp" 2>/dev/null \
     | jq -r '.result.content[0].text' 2>/dev/null \
@@ -457,7 +469,7 @@ do_score_cli_call() {
   local bypass_json=false
   [[ "$bypass" -eq 1 ]] && bypass_json=true
   local body
-  body=$(curl -fsSL -K "$CF_CONFIG" -m 60 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  body=$(ecurl -fsS -m 60 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
     -d "{\"jsonrpc\":\"2.0\",\"id\":${rpc_id},\"method\":\"tools/call\",\"params\":{\"name\":\"score_cli\",\"arguments\":{\"install\":\"npm install -g ${MCP_BINARY}\",\"bypass_cache\":${bypass_json}}}}" \
     "${BASE_URL}/mcp" 2>/dev/null || true)
   SCORE_CLI_RAW=$body

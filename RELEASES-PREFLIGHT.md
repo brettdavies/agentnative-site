@@ -305,7 +305,7 @@ Driven by `scripts/release/preflight.sh do-smoke`. The fresh-binary picker is th
   (see [`RELEASES.md` § Staging access](./RELEASES.md#staging-access-cloudflare-access)):
 
   ```bash
-  curl -fSsL -H "Content-Type: application/json" \
+  curl -fSs -H "Content-Type: application/json" \
     -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
     -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
     -d "{\"target\":\"https://github.com/<owner>/${BINARY}\",\"turnstile_token\":\"x\"}" \
@@ -342,7 +342,7 @@ Driven by `scripts/release/preflight.sh do-smoke`. The fresh-binary picker is th
 - [ ] **The result page renders the full scorecard.** Confirm the `scorecard_url` the smoke just minted renders:
 
   ```bash
-  curl -fSsL -H 'Accept: text/html' \
+  curl -fSs -H 'Accept: text/html' \
     -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
     -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
     https://agentnative-site-staging.brettdavies.workers.dev/score/${BINARY} \
@@ -407,7 +407,7 @@ The curl recipes below show the **staging** shape (with CF Access headers). For 
 
   ```bash
   # Legacy initialize — client sends 2025-06-18; server declares 2026-07-28 in instructions
-  curl -fsSL -H 'Content-Type: application/json' \
+  curl -fsS -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"preflight","version":"1"}}}' \
     -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
@@ -417,7 +417,7 @@ The curl recipes below show the **staging** shape (with CF Access headers). For 
   # expect: server: "anc", instructions: true
 
   # Legacy tools/list — 13 tools
-  curl -fsSL -H 'Content-Type: application/json' \
+  curl -fsS -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
     -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
@@ -428,7 +428,7 @@ The curl recipes below show the **staging** shape (with CF Access headers). For 
 
   META='"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"preflight","version":"1"},"io.modelcontextprotocol/clientCapabilities":{}}'
   # Modern tools/list — no initialize; cache hints on result
-  curl -fsSL -H 'Content-Type: application/json' \
+  curl -fsS -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: tools/list' \
     -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
@@ -449,7 +449,7 @@ The curl recipes below show the **staging** shape (with CF Access headers). For 
 
   ```bash
   # get_scorecard hits lookupOnly's curated branch
-  curl -fsSL -H 'Content-Type: application/json' \
+  curl -fsS -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_scorecard","arguments":{"slug":"ripgrep"}}}' \
     -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
@@ -459,7 +459,7 @@ The curl recipes below show the **staging** shape (with CF Access headers). For 
   # expect: source: "registry", scorecard_url: "https://anc.dev/score/ripgrep"
 
   # score_cli hits runFreshOnly's registry pre-check and bounces to get_scorecard
-  curl -fsSL -H 'Content-Type: application/json' \
+  curl -fsS -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"score_cli","arguments":{"slug":"ripgrep"}}}' \
     -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
@@ -482,7 +482,7 @@ The curl recipes below show the **staging** shape (with CF Access headers). For 
                       # (figlet, prettier, tsx, nodemon, npm-check-updates) and distinct from $BINARY
   grep -E "^- name: ${MCP_BINARY}$" registry.yaml && echo "FAIL: already in registry, pick another" || echo "ok"
 
-  curl -fsSL -H 'Content-Type: application/json' \
+  curl -fsS -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"score_cli\",\"arguments\":{\"install\":\"npm install -g ${MCP_BINARY}\"}}}" \
     -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
@@ -517,7 +517,7 @@ Driven by `scripts/release/preflight.sh dist`.
 - [ ] **Skill manifest endpoint serves the bumped version.** If `src/data/skill/skill.json` changed in this release:
 
   ```bash
-  curl -fSsL -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+  curl -fSs -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
     -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
     https://agentnative-site-staging.brettdavies.workers.dev/skill.json | jq '.version, .name'
   ```

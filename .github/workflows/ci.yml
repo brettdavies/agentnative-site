@@ -159,7 +159,7 @@ jobs:
           fi
           fail=0
 
-          if echo "$images" | grep -qE "anc-sandbox[[:space:]]+${prod_tag}\b"; then
+          if grep -qE "anc-sandbox[[:space:]]+${prod_tag}\b" <<<"$images"; then
             echo "verified: top-level pin anc-sandbox:${prod_tag} is in the CF managed registry"
           else
             echo "::error::top-level pin anc-sandbox:${prod_tag} not found in CF managed registry"
@@ -169,7 +169,7 @@ jobs:
 
           if [ "$prod_tag" = "$stg_tag" ]; then
             echo "verified: env.staging pin equals top-level pin (lockstep)"
-          elif echo "$images" | grep -qE "anc-sandbox[[:space:]]+${stg_tag}\b"; then
+          elif grep -qE "anc-sandbox[[:space:]]+${stg_tag}\b" <<<"$images"; then
             echo "verified: env.staging pin anc-sandbox:${stg_tag} is in the CF managed registry"
           else
             echo "::error::env.staging pin anc-sandbox:${stg_tag} not found in CF managed registry"
