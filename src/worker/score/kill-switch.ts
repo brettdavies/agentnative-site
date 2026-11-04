@@ -4,7 +4,7 @@
 // "Cost ceiling and abuse mitigation" step 3): the Worker reads
 // `env.SCORE_KV.get("scoring_disabled")` first thing in /api/score.
 // Truthy → 503 with Retry-After: 3600. Operator flips via
-// `wrangler kv:key put SCORE_KV scoring_disabled true` in seconds.
+// `scripts/ops/flip-kill-switch.sh --on` in seconds.
 //
 // In-memory cache for the lifetime of a single Worker invocation only.
 // Workers isolates are short-lived and re-instantiate frequently, so a
