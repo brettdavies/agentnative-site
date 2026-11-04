@@ -541,14 +541,53 @@ describe('provenance on stored scorecards', () => {
     );
   });
 
+  test('on a row over several hosts, the remedy is about the host that carries the reason', () => {
+    const out = attachInlineRemediation(
+      {
+        target_url: 'https://example.com/',
+        results: [
+          {
+            id: 'mcp-tools-list',
+            status: 'n_a',
+            na_reason: 'declared-host-unreachable',
+            evidence: null,
+            hosts: [
+              { host: 'a.test', status: 'pass' },
+              { host: 'b.test', status: 'n_a', na_reason: 'declared-host-unreachable' },
+            ],
+          },
+        ],
+      },
+      CATALOG,
+      'https://anc.dev',
+    ) as { results: Array<{ access_remedy?: string }> };
+    expect(out.results[0].access_remedy).toStartWith("b.test did not answer anc's public audit.");
+  });
+
+  test('a sign-in row on the site counts toward the site command alongside rows no run can evaluate', () => {
+    expect(
+      richMarkdown(
+        notRunScoreNote(
+          [
+            { reason: 'auth-required', host: 'example.com' },
+            { reason: 'declared-host-blocked', host: '10.0.0.1' },
+          ],
+          'example.com',
+        ),
+      ),
+    ).toBe(
+      'Global keeps the 2 checks this audit could not run in its maximum; run `anc web example.com` to evaluate 1 of them from your own network, with `ANC_WEB_TOKEN` set for the ones that need sign-in.',
+    );
+  });
+
   test('a reason anc web also refuses names no command, and the note counts only the rows a run can evaluate', () => {
-    for (const reason of ['declared-host-blocked', 'reciprocity-refused'] as const) {
+    for (const reason of ['declared-host-blocked', 'reciprocity-refused', 'declared-host-budget-exceeded'] as const) {
       expect(richMarkdown(notRunRemedy(reason, 'mcp.example.net', 'example.com', 1))).not.toContain('anc web');
       expect(richMarkdown(notRunScoreNote([{ reason, host: 'mcp.example.net' }], 'example.com'))).toBe(
         'Global keeps the 1 check this audit could not run in its maximum.',
       );
     }
-    for (const reason of ['follow-disabled', 'declared-host-unreachable', 'declared-host-budget-exceeded'] as const) {
+    for (const reason of ['follow-disabled', 'declared-host-unreachable'] as const) {
       expect(richMarkdown(notRunRemedy(reason, 'mcp.example.net', 'example.com', 1))).toContain(
         'Run `anc web example.com` to evaluate this check from your own network.',
       );

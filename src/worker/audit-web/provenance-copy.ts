@@ -147,9 +147,10 @@ const NOT_RUN_CAUSES: Readonly<Partial<Record<NaReason, (host: string, domain: s
   'auth-required': (host) => `anc's public audit holds no sign-in for ${host}.`,
 };
 
-// Whether a published anc release includes `anc web`. Copy that names the
-// command reads this, so a reader is never sent to a command that fails; the
-// reason a check did not run or a target was refused is stated either way.
+// Whether a published anc release includes `anc web`. Every Worker surface that
+// names the command reads this, so a reader is never sent to a command that
+// fails; the reason a check did not run or a target was refused is stated either
+// way. Pages under content/ name the command regardless.
 export const ANC_WEB_RELEASED = true;
 
 // A URL host admits `$(...)`, `;`, backticks, and a leading `-`, and the MCP
@@ -168,10 +169,16 @@ export function ancWebCommand(host: string, commandReleased: boolean = ANC_WEB_R
 }
 
 // `anc web` holds a declared host to the same rules the public audit does: it
-// never probes an IP literal or a host of another class than the target's, and
-// it needs the same confirmation from a declared host. Naming the command for
-// these two would promise a result it will not produce.
-const ANC_WEB_ALSO_REFUSES: readonly NaReason[] = ['declared-host-blocked', 'reciprocity-refused'];
+// never probes an IP literal or a host of another class than the target's, it
+// needs the same confirmation from a declared host, and it stops at the same
+// per-audit cap, which a budget row does not tell apart from the hourly limit a
+// local run escapes. Naming the command for these would promise a result it may
+// not produce.
+const ANC_WEB_ALSO_REFUSES: readonly NaReason[] = [
+  'declared-host-blocked',
+  'reciprocity-refused',
+  'declared-host-budget-exceeded',
+];
 
 /**
  * The command that evaluates a not-run row from the reader's own network, or

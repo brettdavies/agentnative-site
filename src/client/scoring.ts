@@ -342,7 +342,7 @@ class ScoringRun {
     // The line about how long a run takes would describe a run that never starts.
     if (panel.final) this.view.subline('');
     this.view.actions({ start: panel.final ? null : 'Run again', other: true });
-    this.bindStart();
+    if (!panel.final) this.bindStart();
     this.view.focusHeading();
   }
 

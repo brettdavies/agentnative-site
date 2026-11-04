@@ -613,7 +613,7 @@ main .anchor-icon {
   .site-nav {
     display: none;
     position: absolute;
-    inset: 62px 0 auto;
+    inset: var(--site-header-h) 0 auto;
     flex-direction: column;
     gap: 0;
     margin: 0;
