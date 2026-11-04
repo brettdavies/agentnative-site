@@ -108,8 +108,8 @@ CORE_ONLY=0
 # the sandbox correctly returns chain_resolved_no_binary_produced for them.
 readonly MCP_BINARY_ALLOWLIST=(figlet prettier tsx nodemon npm-check-updates)
 
-# Hostnames considered "prod" for the --full-cache-coverage refusal rule. Grow
-# this list if additional production surfaces are added.
+# Hostnames considered "prod", for the --full-cache-coverage refusal rule and for dropping
+# Access credentials. Grow this list if additional production surfaces are added.
 readonly MCP_PROD_HOSTS=(anc.dev www.anc.dev)
 
 usage() {
@@ -178,31 +178,36 @@ if ! in_allowlist "$MCP_BINARY"; then
   exit 2
 fi
 
+base_host=$(printf '%s' "$BASE_URL" | sed -E 's|^[a-zA-Z]+://||; s|/.*$||; s|^.*@||; s|:.*$||; s|\.$||' | tr '[:upper:]' '[:lower:]')
+target_is_prod=0
+for prod_host in "${MCP_PROD_HOSTS[@]}"; do
+  [[ "$base_host" == "$prod_host" ]] && target_is_prod=1
+done
+
 # Refuse --full-cache-coverage against prod surfaces. The script-side hostname
 # match is the first layer; the second layer is the Worker-side gating
 # (MCP_CACHE_BYPASS_ALLOWED env var bound only on staging), so even if a caller
 # bypasses the script and forges `bypass_cache: true` against prod the Worker
 # silently ignores it.
-if [[ "$FULL_CACHE_COVERAGE" -eq 1 ]]; then
-  base_host=$(printf '%s' "$BASE_URL" | sed -E 's|^[a-z]+://||; s|/.*$||; s|:.*$||')
-  for prod_host in "${MCP_PROD_HOSTS[@]}"; do
-    if [[ "$base_host" == "$prod_host" ]]; then
-      echo "--full-cache-coverage is refused against prod ($base_host)." >&2
-      echo "Prod runs accept live-cache; the cache-miss-via-bypass leg requires" >&2
-      echo "MCP_CACHE_BYPASS_ALLOWED bound at the Worker, which is staging-only." >&2
-      exit 2
-    fi
-  done
+if [[ "$FULL_CACHE_COVERAGE" -eq 1 && "$target_is_prod" -eq 1 ]]; then
+  echo "--full-cache-coverage is refused against prod ($base_host)." >&2
+  echo "Prod runs accept live-cache; the cache-miss-via-bypass leg requires" >&2
+  echo "MCP_CACHE_BYPASS_ALLOWED bound at the Worker, which is staging-only." >&2
+  exit 2
 fi
 
-# Response capture dir.
+# Production sits behind no Access, so credentials exported for staging must not reach it.
+[[ "$target_is_prod" -eq 1 ]] && ACCESS_HEADERS=""
+
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 
 # Handed to curl through a process substitution, because an EXIT trap cannot clean up a
-# file after a SIGKILL, and config lines never reach argv. An empty config is a no-op.
+# file after a SIGKILL, and config lines never reach argv. An empty config is a no-op. -q
+# comes first because curl otherwise reads .curlrc, whose location option would follow
+# redirects with the secret.
 ecurl() {
-  curl -K <(printf '%s' "$ACCESS_HEADERS") "$@"
+  curl -q -K <(printf '%s' "$ACCESS_HEADERS") "$@"
 }
 
 emit_summary_or_result() {

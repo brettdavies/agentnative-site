@@ -14,7 +14,8 @@ Same gates run against both environments. Differences the script handles transpa
 - URL: staging Worker (workers.dev) vs `anc.dev` custom domain.
 - Branch the deploy gate watches: `dev` (staging deploy) vs `main` (prod deploy).
 - Container app name: `agentnative-site-staging-sandbox` vs `agentnative-site-sandbox`.
-- Auth: staging is gated by CF Access (service token auto-staged from 1Password); prod is unauthenticated.
+- Auth: staging is gated by CF Access (service token from `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` when both
+  are exported, otherwise auto-staged from 1Password); prod is unauthenticated.
 - Backport: the `main → dev` backport concept applies only to prod (the release branch can land edits on `main` that did
   not round-trip to `dev`); staging deploys from `dev` directly so the gate SKIPs there.
 

@@ -179,15 +179,26 @@ esac
 # Auth setup (staging only). Holds the CF Access service token, from the exported
 # variables or 1Password, in ACCESS_HEADERS as curl config lines. ecurl hands those to
 # curl through a process substitution, because an EXIT trap cannot clean up a file after
-# a SIGKILL, and config lines never reach argv. mcp-smoke.sh alone gets the values in its
+# a SIGKILL, and config lines never reach argv. mcp-smoke.sh gets the values in its
 # environment, from gate_mcp.
 
 ACCESS_HEADERS=""
 FETCH_BODY=$(mktemp)
 trap 'rm -f "$FETCH_BODY"' EXIT
+
+# A local preview sits behind no Access.
+is_local_preview() {
+  [[ "$ENV_URL" =~ ^http://(localhost|127\.0\.0\.1)(:[0-9]+)?(/|$) ]]
+}
+
 maybe_stage_cf_access() {
-  [[ "$ENV_AUTH_NEEDED" -eq 1 ]] || return 0
+  if [[ "$ENV_AUTH_NEEDED" -ne 1 ]]; then
+    # Values exported for staging must not reach a target behind no Access.
+    ACCESS_ID="" ACCESS_SECRET=""
+    return 0
+  fi
   if [[ -z "$ACCESS_ID" || -z "$ACCESS_SECRET" ]]; then
+    is_local_preview && return 0
     [[ -x "$OP_SKILL/read_field.sh" ]] || {
       echo "warn: 1Password skill not found at $OP_SKILL; staging gates that read the site through CF Access fail" >&2
       return 0
@@ -200,25 +211,26 @@ maybe_stage_cf_access() {
     "$ACCESS_ID" "$ACCESS_SECRET"
 }
 
-# Curl wrapper that attaches CF Access headers when staging.
+# Curl wrapper that attaches CF Access headers when staging. -q comes first because curl
+# otherwise reads .curlrc, whose location option would follow redirects with the secret and
+# whose verbose option would print it.
 ecurl() {
   if [[ -n "$ACCESS_HEADERS" ]]; then
-    curl -K <(printf '%s' "$ACCESS_HEADERS") "$@"
+    curl -q -K <(printf '%s' "$ACCESS_HEADERS") "$@"
   else
-    curl "$@"
+    curl -q "$@"
   fi
 }
 
 # Common helpers ------------------------------------------------------------
 
 # Without the token, staging answers with its Access login redirect, so every row would
-# report the redirect rather than the missing token. A local preview sits behind no Access.
+# report the redirect rather than the missing token.
 require_access() {
-  [[ "$ENV_AUTH_NEEDED" -eq 0 || -n "$ACCESS_HEADERS" ]] && return 0
-  case "$ENV_URL" in
-    http://localhost* | http://127.0.0.1*) return 0 ;;
-  esac
-  gate_fail "$ENV_URL $1" "no CF Access service token loaded from 1Password (OP_SKILL=$OP_SKILL), so staging cannot be read"
+  if [[ "$ENV_AUTH_NEEDED" -eq 0 || -n "$ACCESS_HEADERS" ]] || is_local_preview; then
+    return 0
+  fi
+  gate_fail "$ENV_URL $1" "no CF Access service token, exported or from 1Password (OP_SKILL=$OP_SKILL), so staging cannot be read"
   return 1
 }
 
@@ -323,9 +335,10 @@ gate_container() {
 # Fetches into FETCH_BODY with the given curl arguments, setting FETCH_STATUS (curl's
 # exit), FETCH_CODE and FETCH_REDIRECT. To a file because curl truncates a file between
 # retries; on stdout a failed attempt's bytes stay ahead of the next attempt's, so the
-# marker from a dropped transfer would pass the row. --retry-max-time bounds a long
-# Retry-After, which curl otherwise sleeps through. No -L: curl keeps custom headers
-# across hosts, so following a redirect hands the Access secret to wherever it points.
+# marker from a dropped transfer would pass the row. --retry-max-time refuses a Retry-After
+# over 30 s, which curl otherwise sleeps through; the site's own 30 s is one wait per row,
+# and a page that recovers in it passes. No -L: curl keeps custom headers across hosts, so
+# following a redirect hands the Access secret to wherever it points.
 # A GET adds --retry-all-errors; a POST goes without, so a permanent error is not re-sent.
 fetch_to() {
   local out
@@ -496,6 +509,13 @@ gate_sitemap() {
 # Gate: mcp -----------------------------------------------------------------
 # Thin wrapper around scripts/release/mcp-smoke.sh.
 
+# A prefix on delegate_to_subscript itself would reach its mktemp and rm as well. Both
+# values are empty on a target behind no Access, which mcp-smoke.sh reads as no token.
+mcp_smoke_with_access() {
+  CF_ACCESS_CLIENT_ID="$ACCESS_ID" CF_ACCESS_CLIENT_SECRET="$ACCESS_SECRET" \
+    "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$@"
+}
+
 gate_mcp() {
   require_access mcp || return 0
 
@@ -512,15 +532,7 @@ gate_mcp() {
   if [[ "$ENV" == "staging" ]]; then
     extra+=(--full-cache-coverage)
   fi
-  # The credentials go to this child alone, and only for a target behind Access.
-  if [[ -n "$ACCESS_HEADERS" ]]; then
-    CF_ACCESS_CLIENT_ID="$ACCESS_ID" CF_ACCESS_CLIENT_SECRET="$ACCESS_SECRET" \
-      delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" \
-      --mcp-binary "$MCP_BINARY" "${extra[@]}"
-  else
-    delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" \
-      --mcp-binary "$MCP_BINARY" "${extra[@]}"
-  fi
+  delegate_to_subscript mcp_smoke_with_access "$ENV_URL" --mcp-binary "$MCP_BINARY" "${extra[@]}"
 }
 
 # Gate: purge ----------------------------------------------------------------

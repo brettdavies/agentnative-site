@@ -22,7 +22,7 @@ const QUOTED_TEXT = /'[^']*'|"[^"]*"/g;
 // A real pipe, never the `||` operator, into a stage holding grep or rg with a quiet
 // flag, whatever wrapper, path or assignment sits in front of the command.
 const PIPE_INTO_QUIET_GREP =
-  /(?<!\|)\|(?!\|)&?[^|;&]*\b(?:[ef]?grep|rg)\b[^|;&]*\s(?:-[a-zA-Z0-9]*q[a-zA-Z0-9]*|--quiet|--silent)(?=[\s;)&|]|$)/;
+  /(?<!\|)\|(?!\|)&?[^|;&]*\b(?:[ef]?grep|rg)\b[^|;&]*\s(?:-[a-zA-Z0-9]*q[a-zA-Z0-9]*|--quiet|--silent)(?=[\s;)&|>]|$)/;
 
 /**
  * The pipelines in `script` that end in a quiet grep, each joined onto one line. Each line
@@ -99,6 +99,7 @@ describe('offendingPipelines', () => {
     `producer | grep -E 'a|b' -q`,
     'producer | grep --quiet marker',
     'producer | grep -qm1 marker',
+    'producer | grep -q>/dev/null',
     'producer | egrep -q marker',
     'producer | rg -q marker',
     'producer |& grep -q marker',

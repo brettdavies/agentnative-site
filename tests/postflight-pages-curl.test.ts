@@ -4,7 +4,7 @@
 // custom headers across hosts, so following one hands the secret to wherever it points.
 
 import { describe, expect, test } from 'bun:test';
-import { chmodSync, lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { REPO_ROOT, trackedPaths } from './helpers/workflows';
@@ -34,6 +34,7 @@ interface Plan {
   score?: Answer[];
   token?: boolean;
   staging?: boolean;
+  curlrc?: string;
 }
 
 function respond(status: string, body: string, headers = ''): string {
@@ -41,7 +42,7 @@ function respond(status: string, body: string, headers = ''): string {
 }
 
 /** The real gate and real curl against a socket that answers `/` and `/api/score` in turn from `plan`. */
-async function gate({ home = ['page'], score = ['score'], token = false, staging = token }: Plan) {
+async function gate({ home = ['page'], score = ['score'], token = false, staging = token, curlrc = '' }: Plan) {
   const elsewhere: string[] = [];
   const otherHost = Bun.listen({
     hostname: '127.0.0.1',
@@ -93,20 +94,20 @@ async function gate({ home = ['page'], score = ['score'], token = false, staging
       },
     },
   });
-  const op = mkdtempSync(join(tmpdir(), 'postflight-pages-curl-'));
+  const curlHome = mkdtempSync(join(tmpdir(), 'postflight-pages-curl-'));
   const started = Date.now();
   try {
-    writeFileSync(join(op, 'read_field.sh'), `#!/usr/bin/env bash\necho ${SECRET}\n`);
-    chmodSync(join(op, 'read_field.sh'), 0o755);
+    writeFileSync(join(curlHome, '.curlrc'), curlrc);
     const url = `http://127.0.0.1:${server.port}`;
     const target = staging ? ['--env', 'staging', '--staging-url', url] : ['--env', 'prod', '--prod-url', url];
     const proc = Bun.spawn(['bash', POSTFLIGHT, ...target, 'pages'], {
       cwd: REPO_ROOT,
       env: {
         ...process.env,
-        OP_SKILL: token ? op : '/nonexistent',
-        CF_ACCESS_CLIENT_ID: '',
-        CF_ACCESS_CLIENT_SECRET: '',
+        OP_SKILL: '/nonexistent',
+        CURL_HOME: curlHome,
+        CF_ACCESS_CLIENT_ID: token ? SECRET : '',
+        CF_ACCESS_CLIENT_SECRET: token ? SECRET : '',
       },
       stdout: 'pipe',
       stderr: 'pipe',
@@ -120,7 +121,7 @@ async function gate({ home = ['page'], score = ['score'], token = false, staging
   } finally {
     server.stop(true);
     otherHost.stop(true);
-    rmSync(op, { recursive: true, force: true });
+    rmSync(curlHome, { recursive: true, force: true });
   }
 }
 
@@ -179,6 +180,20 @@ describe('postflight pages gate over real curl', () => {
     const { elsewhere, otherPort, output } = await gate({ home: ['redirect'], token: true });
     expect(elsewhere).toEqual([]);
     expect(output).toContain(`(HTTP 302 to http://127.0.0.1:${otherPort}/)`);
+    expect(output).not.toContain(SECRET);
+  }, 30_000);
+});
+
+describe("an operator's .curlrc", () => {
+  test('cannot turn redirects back on, or print the secret', async () => {
+    const { output, elsewhere } = await gate({ home: ['redirect'], token: true, curlrc: 'location\nverbose\n' });
+    expect(elsewhere).toEqual([]);
+    expect(output).not.toContain(SECRET);
+  }, 30_000);
+
+  test('cannot print the secret on a page that answers', async () => {
+    const { output } = await gate({ token: true, curlrc: 'verbose\n' });
+    expect(output).toContain('home page renders (has hero__title)');
     expect(output).not.toContain(SECRET);
   }, 30_000);
 });
@@ -248,6 +263,29 @@ describe('fetches carrying the CF Access credentials', () => {
     const offenders = sources
       .filter((path) => path.startsWith('scripts/release/') && path.endsWith('.sh'))
       .filter((path) => pattern.test(readFileSync(join(REPO_ROOT, path), 'utf8')));
+    expect(offenders).toEqual([]);
+  });
+
+  test('every curl handed the credentials ignores .curlrc, whose location option would follow redirects', () => {
+    const handedTheConfig = sources
+      .filter((path) => /\.(?:sh|bash)$/.test(path))
+      .flatMap((path) =>
+        readFileSync(join(REPO_ROOT, path), 'utf8')
+          .replace(/\\\n\s*/g, ' ')
+          .split('\n')
+          .filter((line) => /\bcurl\b.*\s-K\s*<\(/.test(line))
+          .map((line) => ({ path, line })),
+      );
+    expect(handedTheConfig.map(({ path }) => path)).toEqual(
+      expect.arrayContaining([
+        'scripts/release/postflight.sh',
+        'scripts/release/preflight.sh',
+        'scripts/release/mcp-smoke.sh',
+      ]),
+    );
+    const offenders = handedTheConfig
+      .filter(({ line }) => !/\bcurl -q\s/.test(line))
+      .map(({ path, line }) => `${path}: ${line.trim().slice(0, 90)}`);
     expect(offenders).toEqual([]);
   });
 

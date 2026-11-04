@@ -15,7 +15,7 @@ case " $* " in *" fixture-secret "*) echo 'secret in argv' >>"$FAKE_CURL_DIR/cre
 env | grep -q '^CF_ACCESS_' && echo 'secret in environment' >>"$FAKE_CURL_DIR/credentials.log"
 while [ $# -gt 0 ]; do
   case "$1" in
-    https://*) url="$1" ;;
+    http://* | https://* | HTTPS://*) url="$1" ;;
     'Accept: text/html') html=1 ;;
     -o) out="$2"; shift ;;
     -w) format="$2"; shift ;;
@@ -50,6 +50,12 @@ else
 fi
 printf '%s ' "\${FAKE_CURL_CODE:-200}"
 exit "\${FAKE_CURL_EXIT:-0}"
+`;
+
+// The helpers a gate runs around its fetches, which have no business holding the secret.
+const recordsItsEnvironment = (tool: string): string => `#!/usr/bin/env bash
+env | grep -q '^CF_ACCESS_' && echo 'secret in environment' >>"$FAKE_CURL_DIR/credentials.log"
+PATH="$REAL_PATH" exec ${tool} "$@"
 `;
 
 const SCORE = JSON.stringify({
@@ -89,6 +95,7 @@ const SCORECARDS = largePage('<div class="lrow">');
 const LOGIN = '<title>Sign in</title>';
 
 interface Run {
+  script?: string;
   gate?: string;
   sitemap?: string;
   args?: string[];
@@ -99,12 +106,16 @@ interface Run {
 function postflight(
   home: string,
   scorecards: string,
-  { gate = 'pages', sitemap = SITEMAP, args = PROD, env = {}, token = false }: Run = {},
+  { script = 'postflight.sh', gate = 'pages', sitemap = SITEMAP, args = PROD, env = {}, token = false }: Run = {},
 ): { status: number; output: string; urls: string[]; credentials: string } {
   const bin = mkdtempSync(join(tmpdir(), 'postflight-pages-'));
   try {
     writeFileSync(join(bin, 'curl'), FAKE_CURL);
     chmodSync(join(bin, 'curl'), 0o755);
+    for (const tool of ['mktemp', 'rm']) {
+      writeFileSync(join(bin, tool), recordsItsEnvironment(tool));
+      chmodSync(join(bin, tool), 0o755);
+    }
     writeFileSync(join(bin, 'read_field.sh'), '#!/usr/bin/env bash\necho fixture-secret\n');
     chmodSync(join(bin, 'read_field.sh'), 0o755);
     writeFileSync(join(bin, 'home.html'), home);
@@ -113,11 +124,12 @@ function postflight(
     writeFileSync(join(bin, 'sitemap.xml'), sitemap);
     writeFileSync(join(bin, 'urls.log'), '');
     writeFileSync(join(bin, 'credentials.log'), '');
-    const proc = Bun.spawnSync(['bash', join(REPO_ROOT, 'scripts/release/postflight.sh'), ...args, gate], {
+    const proc = Bun.spawnSync(['bash', join(REPO_ROOT, 'scripts/release', script), ...args, gate], {
       cwd: REPO_ROOT,
       env: {
         ...process.env,
         PATH: `${bin}:${process.env.PATH}`,
+        REAL_PATH: process.env.PATH,
         FAKE_CURL_DIR: bin,
         OP_SKILL: token ? bin : '/nonexistent',
         CF_ACCESS_CLIENT_ID: '',
@@ -216,7 +228,7 @@ describe('a run killed before its EXIT trap', () => {
 describe('postflight gates that read staging through CF Access', () => {
   test.each(['pages', 'retired', 'sitemap', 'purge', 'mcp'])('%s fails and names a missing token', (gate) => {
     const { status, output } = postflight(LOGIN, LOGIN, { gate, args: STAGING });
-    expect(output).toContain('no CF Access service token');
+    expect(output).toContain('no CF Access service token, exported or from 1Password');
     expect(output).not.toContain('renders (has');
     expect(status).toBe(1);
   });
@@ -296,6 +308,74 @@ describe('postflight gates that read staging through CF Access', () => {
       expect(credentials).not.toContain('secret in environment');
     },
   );
+
+  test.each(['mcp', 'dist'])(
+    "preflight %s holds the credentials off disk, out of argv and out of curl's environment",
+    (gate) => {
+      const { urls, credentials } = postflight(HOME, SCORECARDS, {
+        script: 'preflight.sh',
+        gate,
+        args: STAGING,
+        token: true,
+      });
+      expect(urls.length).toBeGreaterThan(0);
+      expect(credentials).toContain('config through a pipe');
+      expect(credentials).toContain('config carries the secret');
+      expect(credentials).not.toContain('config in a file');
+      expect(credentials).not.toContain('secret in argv');
+      expect(credentials).not.toContain('secret in environment');
+    },
+  );
+
+  test.each([['pages'], ['mcp']])('%s against a local preview asks 1Password for no token to send it', (gate) => {
+    const { urls, credentials } = postflight(HOME, SCORECARDS, {
+      gate,
+      args: ['--env', 'staging', '--staging-url', 'http://127.0.0.1:8787'],
+      token: true,
+    });
+    expect(urls.length).toBeGreaterThan(0);
+    expect(credentials).not.toContain('config carries the secret');
+  });
+
+  test('a local preview still receives credentials the operator exported', () => {
+    const { credentials } = postflight(HOME, SCORECARDS, {
+      args: ['--env', 'staging', '--staging-url', 'http://127.0.0.1:8787'],
+      env: { CF_ACCESS_CLIENT_ID: 'fixture-id', CF_ACCESS_CLIENT_SECRET: 'fixture-secret' },
+    });
+    expect(credentials).toContain('config carries the secret');
+  });
+
+  test('a host that only starts like a local preview still needs a token', () => {
+    const { status, output } = postflight(HOME, SCORECARDS, {
+      args: ['--env', 'staging', '--staging-url', 'http://localhost.fixture.invalid'],
+    });
+    expect(output).toContain('no CF Access service token');
+    expect(status).toBe(1);
+  });
+
+  test.each([['https://anc.dev'], ['https://www.anc.dev/'], ['HTTPS://ANC.dev'], ['https://anc.dev:443']])(
+    'mcp-smoke.sh pointed at %s drops exported staging credentials',
+    (url) => {
+      const { urls, credentials } = postflight(HOME, SCORECARDS, {
+        script: 'mcp-smoke.sh',
+        gate: '--core-only',
+        args: [url],
+        env: { CF_ACCESS_CLIENT_ID: 'fixture-id', CF_ACCESS_CLIENT_SECRET: 'fixture-secret' },
+      });
+      expect(urls.length).toBeGreaterThan(0);
+      expect(credentials).not.toContain('config carries the secret');
+    },
+  );
+
+  test('mcp-smoke.sh pointed anywhere else keeps them', () => {
+    const { credentials } = postflight(HOME, SCORECARDS, {
+      script: 'mcp-smoke.sh',
+      gate: '--core-only',
+      args: ['https://fixture.invalid'],
+      env: { CF_ACCESS_CLIENT_ID: 'fixture-id', CF_ACCESS_CLIENT_SECRET: 'fixture-secret' },
+    });
+    expect(credentials).toContain('config carries the secret');
+  });
 
   test.each(['pages', 'mcp'])('%s against production sends exported staging credentials nowhere', (gate) => {
     const { output, credentials } = postflight(HOME, SCORECARDS, {
