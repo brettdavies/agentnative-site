@@ -12,6 +12,7 @@ import {
   sourceEvidence,
   sourcePassed,
 } from './context';
+import type { Prerequisite } from './sources';
 
 const SCHEMAS_RE = /application\/schema\+json|json-?schema|\/schema\.json/i;
 
@@ -85,6 +86,11 @@ export const apiResolvers = {
   'api-surface': apiSurface,
   'schemas-ref': schemasRef,
 } satisfies Partial<Record<AntecedentToken, AntecedentResolver>>;
+
+export const apiPrerequisites = {
+  'api-surface': ['openapi', 'llms-txt', 'sitemap'],
+  'schemas-ref': ['openapi'],
+} satisfies Partial<Record<AntecedentToken, readonly Prerequisite[]>>;
 
 export const apiEvidence = {
   'api-surface': 'no API surface detected',

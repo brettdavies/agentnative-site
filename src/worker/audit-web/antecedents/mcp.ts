@@ -16,6 +16,7 @@ import {
   noMcpEndpoint,
   sourceEvidence,
 } from './context';
+import { MCP_SETTLED, type Prerequisite } from './sources';
 
 const NO_ENDPOINT = 'no MCP endpoint discovered';
 
@@ -83,6 +84,14 @@ export const mcpResolvers = {
   'mcp-auth-required': mcpAuthRequired,
   'mcp-resources': mcpResources,
 } satisfies Partial<Record<AntecedentToken, AntecedentResolver>>;
+
+export const mcpPrerequisites = {
+  'mcp-present': [MCP_SETTLED],
+  'mcp-auth': [MCP_SETTLED],
+  'mcp-session': [MCP_SETTLED],
+  'mcp-auth-required': [MCP_SETTLED],
+  'mcp-resources': [MCP_SETTLED],
+} satisfies Partial<Record<AntecedentToken, readonly Prerequisite[]>>;
 
 export const mcpEvidence = {
   'mcp-present': NO_ENDPOINT,

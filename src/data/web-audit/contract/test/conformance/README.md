@@ -72,10 +72,9 @@ concurrency 1 differs from the default run.
 
 ## scorecard.json
 
-The engine's terminal scorecard as `JSON.stringify(scorecard, null, 2)` plus a trailing newline, with one
-normalization applied before writing and expected of any engine under comparison: `results` is sorted into
-registry order, because wave-2 rows arrive in the order the concurrent probes resolve, which carries no
-meaning and which a second engine cannot reproduce. Rows carry the summarized `evidence` line, never the raw
+The engine's terminal scorecard as `JSON.stringify(scorecard, null, 2)` plus a trailing newline. `results` is
+in registry order whatever order the concurrent probes finished in, which carries no meaning and which a second
+engine cannot reproduce. Rows carry the summarized `evidence` line, never the raw
 evidence, so no wall-clock value reaches the file. Key order is otherwise the engine's emission order and
 every number is an integer. A scenario that ends in
 the engine's `unreachable` event writes `{"unreachable": "<reason>"}` instead of a scorecard. The engine runs

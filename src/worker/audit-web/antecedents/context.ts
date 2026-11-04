@@ -10,6 +10,7 @@ import type { DeclaredHostReason } from '../endpoint-of-record';
 import type { EvidenceItem, McpAuthRequired, ProbeOutcome } from '../handlers/types';
 import { wireProbeEvidence } from '../mcp-auth';
 import type { WebSiteType } from '../registry';
+import type { SourceCheckId } from './sources';
 
 export interface AntecedentContext {
   /** Declared site type from the entry point; null/undefined = run everything. */
@@ -18,7 +19,7 @@ export interface AntecedentContext {
   discoveryEvidence: EvidenceItem[];
   /** The canonical plain GET `/` response; null when it failed at the network level. */
   root: ProbeResponse | null;
-  /** Wave-1 probe outcomes keyed by check id. */
+  /** Source-check probe outcomes keyed by check id; a resolver reads only those its prerequisites name. */
   sources: ReadonlyMap<string, ProbeOutcome>;
   /** What following the declared hosts settled; absent when the audit followed none. */
   follow?: { unmet: DeclaredHostReason | null };
@@ -44,7 +45,7 @@ export type AntecedentResolution =
   | AntecedentOutcome
   | { outcome: 'n_a'; reason: NaReason; host?: string; evidence?: string };
 
-/** Resolves one antecedent token against the wave-1 context. */
+/** Resolves one antecedent token, once its prerequisites have settled. */
 export type AntecedentResolver = (ctx: AntecedentContext) => AntecedentResolution;
 
 export function rootContentType(ctx: AntecedentContext): string {
@@ -62,20 +63,20 @@ export function htmlRootGate(ctx: AntecedentContext): Exclude<AntecedentOutcome,
   return null;
 }
 
-export function sourcePassed(ctx: AntecedentContext, checkId: string): boolean {
+export function sourcePassed(ctx: AntecedentContext, checkId: SourceCheckId): boolean {
   return ctx.sources.get(checkId)?.status === 'pass';
 }
 
-export function sourceEvidence(ctx: AntecedentContext, checkId: string): EvidenceItem[] {
+export function sourceEvidence(ctx: AntecedentContext, checkId: SourceCheckId): EvidenceItem[] {
   return ctx.sources.get(checkId)?.evidence ?? [];
 }
 
-/** A wave-1 row's evidence from the audited origin, without what it read from hosts the site declares. */
-export function ownOriginEvidence(ctx: AntecedentContext, checkId: string): EvidenceItem[] {
+/** A source row's evidence from the audited origin, without what it read from hosts the site declares. */
+export function ownOriginEvidence(ctx: AntecedentContext, checkId: SourceCheckId): EvidenceItem[] {
   return sourceEvidence(ctx, checkId).filter((item) => item.off_origin !== true);
 }
 
-export function retainedBody(ctx: AntecedentContext, checkId: string): string {
+export function retainedBody(ctx: AntecedentContext, checkId: SourceCheckId): string {
   for (const item of sourceEvidence(ctx, checkId)) {
     if (typeof item.body === 'string') return item.body;
   }
@@ -91,7 +92,7 @@ export function evidenceShowsAuthChallenge(items: EvidenceItem[]): boolean {
   return anyEvidenceStatus(items, 401) || items.some((item) => typeof item.www_authenticate === 'string');
 }
 
-/** A 401 or WWW-Authenticate challenge on either wave-1 MCP handshake, legacy or modern. */
+/** A 401 or WWW-Authenticate challenge on either MCP wire probe, legacy or modern. */
 export function handshakeShowsAuthChallenge(ctx: AntecedentContext): boolean {
   return evidenceShowsAuthChallenge(wireProbeEvidence(ctx.sources));
 }

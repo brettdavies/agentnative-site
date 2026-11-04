@@ -7,7 +7,8 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { generateCorpus, loadRegistry } from '../scripts/web-audit/conformance-corpus';
+import { generateCorpus, loadRegistry, runScenario } from '../scripts/web-audit/conformance-corpus';
+import { requestsJson } from '../scripts/web-audit/conformance-requests';
 import { SCENARIOS } from '../scripts/web-audit/conformance-scenarios';
 import {
   CORPUS_DIR,
@@ -15,6 +16,7 @@ import {
   SCENARIOS_DIR,
   WEB_AUDIT_REGISTRY_PATH,
 } from '../src/build/web-audit-contract-paths.mjs';
+import { SOURCE_CHECKS } from '../src/worker/audit-web/antecedents';
 import { scoreWebAudit, universeMaxOf } from '../src/worker/audit-web/score';
 import type { WebScorecard } from '../src/worker/audit-web/scorecard';
 
@@ -61,6 +63,44 @@ describe('web-audit conformance corpus', () => {
     expect(naming).toEqual([]);
     expect(Object.values(SCENARIOS).some((scenario) => scenario.covers.includes('mcp-server-card'))).toBe(true);
   });
+
+  // A row reading a source its prerequisites do not name passes whenever that
+  // source happens to answer first, so these hold each answer back: by a time
+  // drawn from its URL, and with the source documents answering after everything
+  // else. Such a row then reads nothing and the scenario's scorecard or request
+  // set moves.
+  const sourcePaths = new Set(
+    registry.checks
+      .filter((check) => SOURCE_CHECKS.has(check.id))
+      .flatMap((check) => {
+        const { path, path_any } = check.with as { path?: string; path_any?: string[] };
+        return [...(path === undefined ? [] : [path]), ...(path_any ?? [])];
+      }),
+  );
+  const jitter = (url: string): number => {
+    let hash = 11;
+    for (const char of url) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+    return hash % 5;
+  };
+  const sourcesLast = (url: string): number => (sourcePaths.has(new URL(url).pathname) ? 20 : 0);
+
+  test.each([
+    ['jittered', jitter],
+    ['source-documents-last', sourcesLast],
+  ])(
+    'every scenario holds its scorecard and request set when answers arrive %s',
+    async (_order, delayFor) => {
+      const moved: string[] = [];
+      for (const [name, scenario] of Object.entries(SCENARIOS)) {
+        const run = await runScenario(name, scenario, registry, undefined, delayFor);
+        const committed = (file: string): string => readFileSync(join(SCENARIOS_DIR, name, file), 'utf8');
+        if (run.output !== committed('scorecard.json')) moved.push(`${name}: scorecard`);
+        if (requestsJson(run.requests) !== committed('requests.json')) moved.push(`${name}: requests`);
+      }
+      expect(moved).toEqual([]);
+    },
+    120_000,
+  );
 
   test('the committed corpus is byte-identical to a fresh generation', async () => {
     expect(existsSync(SCENARIOS_DIR)).toBe(true);

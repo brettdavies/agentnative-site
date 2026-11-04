@@ -22,7 +22,7 @@ import {
 } from './reciprocity';
 import { type AuditFetchOptions, guardedFetch } from './ssrf';
 
-/** The wave-1 wire probes whose answer decides it, in the order a 401's challenge is read, with the lane each asks on. */
+/** The wire probes whose answer decides it, in the order a 401's challenge is read, with the lane each asks on. */
 const WIRE_PROBES = [
   { id: 'mcp-initialize', lane: 'legacy' },
   { id: 'mcp-server-discover', lane: 'modern' },
@@ -34,12 +34,15 @@ export interface SignInChallenge {
   lane: McpAuthRequired['lane'];
 }
 
-/** The wave-1 wire probes' evidence, in the order a 401's challenge is read. */
+/** The source checks whose answers settle sign-in, and with it every later MCP row. */
+export const WIRE_PROBE_IDS: readonly string[] = WIRE_PROBES.map(({ id }) => id);
+
+/** The wire probes' evidence, in the order a 401's challenge is read. */
 export function wireProbeEvidence(sources: ReadonlyMap<string, ProbeOutcome>): EvidenceItem[] {
   return WIRE_PROBES.flatMap(({ id }) => sources.get(id)?.evidence ?? []);
 }
 
-/** A wave-1 wire probe was served a JSON-RPC result: the endpoint answered a request that carried no token. */
+/** A wire probe was served a JSON-RPC result: the endpoint answered a request that carried no token. */
 export function servedWithoutSignIn(sources: ReadonlyMap<string, ProbeOutcome>): boolean {
   return WIRE_PROBES.some(({ id }) => handshakeServed(sources.get(id)));
 }
@@ -116,7 +119,7 @@ export async function signInEndpoint(
   return null;
 }
 
-/** The 401 a wave-1 wire probe drew from the endpoint; null when none did. */
+/** The 401 a wire probe drew from the endpoint; null when none did. */
 function wireChallenge(sources: ReadonlyMap<string, ProbeOutcome>): SignInChallenge | null {
   for (const { id, lane } of WIRE_PROBES) {
     const outcome = sources.get(id);
@@ -176,8 +179,8 @@ async function backedSignIn(input: SignInInput, answer: SignInChallenge): Promis
 }
 
 /**
- * Whether the endpoint of record requires sign-in, once wave 1 has probed
- * it. Wave 1's 401 is read first. When neither wire probe drew one, nor was
+ * Whether the endpoint of record requires sign-in, once both wire probes have
+ * answered. Their 401 is read first. When neither drew one, nor was
  * served a result, the 401 that discovery drew while finding the endpoint
  * still stands: a timeout, a rate limit, or a server error on the
  * handshake says nothing about whether the endpoint requires sign-in.

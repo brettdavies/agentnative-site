@@ -1,6 +1,6 @@
 // The API catalog's declarations in the follow slice. An anchor host is
 // admitted to the slice (a host slot and its domain's reservation), which
-// is what lets wave 2 send it the hygiene probes; it gets no request here.
+// is what lets the API rows send it the hygiene probes; it gets no request here.
 // What reaches it later is one GET, at a path a description declared for
 // it documents, else a nonsense path (handlers/api-probe-url.ts). Since
 // the audited site names the host and, through the description, the path,

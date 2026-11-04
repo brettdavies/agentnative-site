@@ -279,7 +279,7 @@ a scorecard of its own from that audit.
 
 ### Follow phase
 
-The bounded slice of a web audit, after MCP discovery and before wave 1, in which declared hosts are fetched: documents
+The bounded slice of a web audit, after MCP discovery and before the first check, in which declared hosts are fetched: documents
 by GET through the public-URL guard, one hop from the entry origin, under a wall-clock budget and per-audit caps on
 distinct hosts and requests. Exhaustion resolves dependent rows to not-applicable and never marks the audit incomplete.
 

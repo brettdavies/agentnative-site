@@ -10,7 +10,7 @@ describe('resolveAntecedent: content', () => {
     expect(resolveAntecedent('docs-site', ctx({ siteType: 'api' }))).toBe('n_a');
   });
 
-  test('root-llms-txt / root-llms-full-txt reuse the wave-1 probe results', () => {
+  test('root-llms-txt / root-llms-full-txt reuse the source probe results', () => {
     const sources = new Map([
       ['llms-txt', outcome('pass')],
       ['llms-full-txt', outcome('absent')],
@@ -34,12 +34,12 @@ describe('resolveAntecedent: markdown-twin', () => {
       },
     });
 
-  test('applies when the wave-1 accept-markdown probe passed', () => {
+  test('applies when the accept-markdown source probe passed', () => {
     const md = ctx({ sources: new Map([['accept-markdown', outcome('pass')]]) });
     expect(resolveAntecedent('markdown-twin', md)).toBe('apply');
   });
 
-  test('applies when the wave-1 llms.txt probe passed', () => {
+  test('applies when the llms.txt source probe passed', () => {
     const md = ctx({ sources: new Map([['llms-txt', outcome('pass')]]) });
     expect(resolveAntecedent('markdown-twin', md)).toBe('apply');
   });

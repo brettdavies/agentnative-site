@@ -7,7 +7,7 @@
 // evaluates serverInfo / capabilities / tools / resources / discovery /
 // error-code / content-type. Returns n_a when no endpoint was discovered,
 // n_a auth-required for a 401 from an endpoint that requires sign-in, and
-// an unprobed `absent` when wave 1 evidenced no modern lane.
+// an unprobed `absent` when the wire probes evidenced no modern lane.
 // CORS classification lives in the cors-preflight posture handler.
 
 import { parseJsonRpc } from '../assert';
@@ -519,7 +519,7 @@ export function handshakeServed(outcome: ProbeOutcome | undefined): boolean {
 }
 
 /**
- * Modern-lane presence from the wave-1 `server/discover` outcome. Only a
+ * Modern-lane presence from the `server/discover` wire probe's outcome. Only a
  * server serving the modern revision can answer `server/discover` with a
  * JSON-RPC result, and `supported_versions` is written on that result
  * path alone, so its presence is the era signal. A probe that never got
@@ -647,7 +647,7 @@ function signInRequired(ev: EvidenceItem): ProbeOutcome {
 }
 
 /**
- * A wave-1 outcome read again once the endpoint is known to require
+ * A wire probe's outcome read again once the endpoint is known to require
  * sign-in, through the arm `runMcp` applies to every later row; null when
  * that arm would not reach it (a failed request or a rate-limit refusal).
  */
@@ -765,7 +765,7 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
   // Settled ahead of every arm that reads the answer: a 401 that asks for
   // sign-in says nothing about the surface the row asks about, and the arms
   // below would read it as a broken one or as an era the server does not
-  // serve. An endpoint wave 1 did not settle as requiring sign-in, such as
+  // serve. An endpoint the wire probes did not settle as requiring sign-in, such as
   // one that serves a handshake without a token, can still ask for it on
   // this row, and its 401 reads the same once the endpoint's metadata backs it.
   if (

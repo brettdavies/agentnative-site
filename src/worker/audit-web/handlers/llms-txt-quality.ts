@@ -1,5 +1,5 @@
 // llms.txt quality trio (format / links / when-to-use). Reads the retained
-// wave-1 `/llms.txt` body so format and when-to-use issue no extra fetch.
+// source `/llms.txt` body so format and when-to-use issue no extra fetch.
 // Link probes are SSRF-guarded and budgeted like scoped-llms. An http link,
 // or one that redirects to http, is never requested: llmstxt.org asks for a
 // markdown link per item and never for plaintext, so such a link is present

@@ -144,20 +144,6 @@ export function stubFetchFor(scenario: Scenario, log: StubLog): typeof fetch {
   }) as typeof fetch;
 }
 
-/**
- * Normalizes a scorecard for comparison across engines: result rows take
- * registry order, because wave-2 rows arrive in whatever order the
- * concurrent probes resolve, which no second engine can reproduce and
- * which carries no meaning. The rows carry no wall-clock field (the
- * scorecard keeps the summarized evidence line, not the raw evidence), so
- * nothing else needs normalizing.
- */
-export function normalizeScorecard(scorecard: WebScorecard, registry: WebAuditRegistry): WebScorecard {
-  const order = new Map(registry.checks.map((check, index) => [check.id, index]));
-  const results = [...scorecard.results].sort((a, b) => (order.get(a.id) ?? -1) - (order.get(b.id) ?? -1));
-  return { ...scorecard, results };
-}
-
 export type ScenarioRun = {
   output: string;
   unmatched: string[];
@@ -165,15 +151,30 @@ export type ScenarioRun = {
   requests: HopRequest[];
 };
 
-/** Runs a scenario at `concurrency`, or at the engine's default when absent. */
+/**
+ * Runs a scenario at `concurrency`, or at the engine's default when absent.
+ * `answerDelayMs` holds back each answer by the time it names for the request's
+ * URL, which reorders what the schedule sees and leaves what it asks unchanged.
+ */
 export async function runScenario(
   name: string,
   scenario: Scenario,
   registry: WebAuditRegistry,
   concurrency?: number,
+  answerDelayMs?: (url: string) => number,
 ): Promise<ScenarioRun> {
   const sent: HopRequest[] = [];
   const log: StubLog = { unmatched: [], sent };
+  const stub = stubFetchFor(scenario, log);
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    // The stub records the request now; a transport failure it answers with stays
+    // unobserved through the wait, so it needs a handler before it is returned.
+    const answer = stub(input, init);
+    answer.catch(() => {});
+    const delay = answerDelayMs?.(String(input)) ?? 0;
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+    return answer;
+  }) as typeof fetch;
   const audit = runWebAudit({
     url: scenario.target,
     registry,
@@ -182,7 +183,7 @@ export async function runScenario(
     concurrency,
     followDeclarations: scenario.follow_declarations ?? true,
     domainBudget: ALWAYS_ADMIT_BUDGET,
-    fetchOptions: { fetchImpl: stubFetchFor(scenario, log) },
+    fetchOptions: { fetchImpl },
     now: () => FIXED_NOW_MS,
   });
   let scorecard: WebScorecard | null = null;
@@ -199,7 +200,7 @@ export async function runScenario(
   }
   if (scorecard === null) throw new Error(`scenario ${name} produced neither a scorecard nor an unreachable event`);
   return {
-    output: `${JSON.stringify(normalizeScorecard(scorecard, registry), null, 2)}\n`,
+    output: `${JSON.stringify(scorecard, null, 2)}\n`,
     unmatched: log.unmatched,
     requests: sent,
   };
@@ -548,10 +549,9 @@ concurrency 1 differs from the default run.
 
 ## scorecard.json
 
-The engine's terminal scorecard as \`JSON.stringify(scorecard, null, 2)\` plus a trailing newline, with one
-normalization applied before writing and expected of any engine under comparison: \`results\` is sorted into
-registry order, because wave-2 rows arrive in the order the concurrent probes resolve, which carries no
-meaning and which a second engine cannot reproduce. Rows carry the summarized \`evidence\` line, never the raw
+The engine's terminal scorecard as \`JSON.stringify(scorecard, null, 2)\` plus a trailing newline. \`results\` is
+in registry order whatever order the concurrent probes finished in, which carries no meaning and which a second
+engine cannot reproduce. Rows carry the summarized \`evidence\` line, never the raw
 evidence, so no wall-clock value reaches the file. Key order is otherwise the engine's emission order and
 every number is an integer. A scenario that ends in
 the engine's \`unreachable\` event writes \`{"unreachable": "<reason>"}\` instead of a scorecard. The engine runs

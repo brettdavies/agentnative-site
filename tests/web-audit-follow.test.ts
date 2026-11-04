@@ -1657,7 +1657,7 @@ describe('follow: sequencing and determinism', () => {
     const elapsed = Date.now() - started;
     expect(complete).toBe(true);
     // Each phase hangs for one 600 ms timeout and no endpoint survives, so
-    // the waves send nothing that hangs: about 600 ms side by side, at
+    // the checks send nothing that hangs: about 600 ms side by side, at
     // least 1200 ms one after the other.
     expect(elapsed).toBeGreaterThanOrEqual(600);
     expect(elapsed).toBeLessThan(1_000);
@@ -1855,7 +1855,7 @@ describe('follow: the hourly budget of each declared registrable domain', () => 
     ]);
   });
 
-  test('a domain at its hourly ceiling is refused on the next audit before wave 1, and nothing is sent to it', async () => {
+  test('a domain at its hourly ceiling is refused on the next audit before the checks, and nothing is sent to it', async () => {
     const log: string[] = [];
     const budget = declaredDomainBudget({ SCORE_KV: memoryKv(log) }, { hourlyCeiling: 1 });
     const first = await declaring(ENDPOINT, budget);
@@ -1874,7 +1874,7 @@ describe('follow: the hourly budget of each declared registrable domain', () => 
       log.push(`event:${event.type}`);
       if (event.type === 'complete') scorecard = event.scorecard;
     }
-    // The one read of a spent budget comes before the discovery event, so before wave 1, and nothing is written.
+    // The one read of a spent budget comes before the discovery event, so before the checks, and nothing is written.
     const reads = [expect.stringMatching(new RegExp(`^kv:get ${await budgetKeyPrefix('example.net')}\\d+$`))];
     expect(log.filter((line) => line.startsWith('kv:'))).toEqual(reads);
     expect(log.slice(0, log.indexOf('event:discovery')).filter((line) => line.startsWith('kv:'))).toEqual(reads);

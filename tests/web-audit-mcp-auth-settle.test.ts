@@ -1,7 +1,7 @@
 // Where the audit reads the RFC 9728 metadata that settles whether an MCP
 // endpoint requires sign-in: the location a 401's challenge names is
 // requested only when it is https, public, and on the endpoint's own host,
-// it takes precedence over metadata read earlier, either wave-1
+// it takes precedence over metadata read earlier, either wire-probe
 // handshake's 401 can settle it, and the 401 that found the endpoint
 // settles it only when no handshake drew a 401 or was served.
 
@@ -81,7 +81,7 @@ describe('a challenge naming metadata the auditor will not read', () => {
     }
   });
 
-  test("on a card-declared endpoint's wave-1 401, the named location gets no request and sign-in stays unsettled", async () => {
+  test("on a card-declared endpoint's wire-probe 401, the named location gets no request and sign-in stays unsettled", async () => {
     for (const named of FORBIDDEN) {
       const seen: Seen[] = [];
       const { scorecard } = await audit(router({ ...challengingWith(named), ...siteDeclaring(SAME) }, seen), {
@@ -200,10 +200,10 @@ describe('the 401 discovery drew while finding the endpoint', () => {
   };
   const LANES = ['legacy', 'modern'] as const;
 
-  const settle = (observed: SignInChallenge, wave1: Array<[string, ProbeOutcome]>) =>
+  const settle = (observed: SignInChallenge, wireProbes: Array<[string, ProbeOutcome]>) =>
     settleMcpAuth({
       observed,
-      sources: new Map(wave1),
+      sources: new Map(wireProbes),
       signIn: signInResolver({ endpoint: SAME, known: null, source }),
     });
 

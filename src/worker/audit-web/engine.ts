@@ -1,12 +1,13 @@
 // Web-audit orchestrator. Runs the single canonical root fetch and MCP
 // endpoint discovery, follows the hosts discovery's documents declare
 // while discovery's POSTs are in flight, settles the endpoint of record,
-// then evaluates in two waves: wave 1 probes the antecedent-source checks
-// (the WAVE1_CHECK_IDS set); wave 2 runs the dependent checks with
-// antecedents resolved from wave-1 results and the root fetch reused —
-// no duplicate `/` fetch. Between the waves it settles whether the MCP
-// endpoint requires sign-in (mcp-auth.ts), once wave 1's wire probes have
-// answered. Each check finalizes to
+// then runs every check under one concurrency cap. The antecedent-source
+// checks (SOURCE_CHECKS) probe first and unconditionally; every other check
+// starts as soon as what it reads has settled (row-prerequisites.ts), gating
+// on its antecedent then and probing if it applies, with the root fetch
+// reused so `/` is never fetched twice. Whether the MCP endpoint requires
+// sign-in settles once both wire probes have answered (mcp-auth.ts), ahead of
+// every later MCP row. Each check finalizes to
 // pass / noncompliant / broken / absent / n_a / skip / error; an
 // applicable MAY that comes back absent is re-tagged n_a with na_reason
 // 'optional-absent', an unmet antecedent yields the na_reason its
@@ -17,20 +18,23 @@
 //
 // The engine yields each result as it finalizes (KTD-6: streaming
 // transport is the route's concern) and a terminal `complete` event
-// carrying the scorecard built from the collected results.
+// carrying the scorecard built from the collected results in registry order.
 
 import { NO_PLAINTEXT_REQUEST } from '../../shared/web-audit-result-line';
 import {
   type AntecedentContext,
   type AntecedentResolution,
   antecedentUnmetEvidence,
+  MCP_SETTLED,
+  type Prerequisite,
   resolveAntecedent,
+  SOURCE_CHECKS,
   siteTypeApplies,
-  WAVE1_CHECK_IDS,
 } from './antecedents';
 import { isApiAnchor } from './api-catalog';
 import { apiTargets } from './api-targets';
 import type { ProbeResponse } from './assert';
+import { createAuditSlots } from './audit-slots';
 import { readDiscoveryDocuments } from './discovery';
 import { settleEndpointOfRecord } from './endpoint-of-record';
 import type { FollowStats } from './follow';
@@ -57,11 +61,12 @@ import {
 import { runProtectedResource } from './handlers/protected-resource';
 import { enumerateScopedDirs, runScopedLlms } from './handlers/scoped-llms';
 import { runServerCard, serverCardEvidence } from './handlers/server-card';
-import type { EvidenceItem, HandlerContext, McpAuthRequired, McpLaneEvidence, ProbeOutcome } from './handlers/types';
+import type { EvidenceItem, HandlerContext, McpLaneEvidence, ProbeOutcome } from './handlers/types';
 import { runWebMcp } from './handlers/webmcp';
-import { directArtifactSource, settleMcpAuth, signInResolver } from './mcp-auth';
+import { directArtifactSource, settleMcpAuth, signInResolver, WIRE_PROBE_IDS } from './mcp-auth';
 import type { WebAuditRegistry, WebCheck, WebSiteType } from './registry';
 import { closeRequestMemo, createRequestMemo, type MemoStats, type RequestMemo } from './request-hop';
+import { rowPrerequisites } from './row-prerequisites';
 import { buildWebScorecard, type EngineResult, type ScorecardStatus, type WebScorecard } from './scorecard';
 import { type AuditFetchOptions, type GuardedFetchOptions, guardedFetch, isEdgeErrorStatus } from './ssrf';
 
@@ -142,7 +147,7 @@ const EVAL_RULE_HANDLERS: Partial<Record<NonNullable<WebCheck['eval']>, Handler>
  * that a retained-document check with a handler other than `http` scores the
  * document with that handler; `http` asserts `expect` against it.
  */
-function handlerFor(check: WebCheck): Handler | undefined {
+export function handlerFor(check: WebCheck): Handler | undefined {
   if (check.eval === 'retained-document' && check.handler !== 'http') return HANDLERS[check.handler];
   return (check.eval !== undefined ? EVAL_RULE_HANDLERS[check.eval] : undefined) ?? HANDLERS[check.handler];
 }
@@ -350,34 +355,6 @@ function finalizeOptional(check: WebCheck, result: EngineResult): EngineResult {
   return result;
 }
 
-/** Run tasks with a concurrency cap, yielding each result as it resolves. */
-async function* mapConcurrentUnordered<T, R>(
-  items: T[],
-  concurrency: number,
-  fn: (item: T) => Promise<R>,
-): AsyncGenerator<R> {
-  let index = 0;
-  const pending = new Map<number, Promise<{ key: number; value: R }>>();
-  const schedule = (): boolean => {
-    if (index >= items.length) return false;
-    const key = index;
-    const item = items[index];
-    index += 1;
-    pending.set(
-      key,
-      fn(item).then((value) => ({ key, value })),
-    );
-    return true;
-  };
-  for (let i = 0; i < concurrency; i++) if (!schedule()) break;
-  while (pending.size > 0) {
-    const { key, value } = await Promise.race(pending.values());
-    pending.delete(key);
-    yield value;
-    schedule();
-  }
-}
-
 /**
  * Audit one site. The audit's request memo closes as `complete` is yielded,
  * so the consumer's work on the scorecard runs without it, and whenever the
@@ -467,17 +444,27 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
   }
 
   let incomplete = false;
-  const results: EngineResult[] = [];
-  const scopedDirs: string[] = [];
   const retainedBodies = new Map<string, string>();
+  let scopedDirs: string[] | undefined;
   let mcpSessionId: string | null = null;
   let mcpLanes: McpLaneEvidence = { modern: 'unknown', legacyAdvertised: [], modernAdvertised: [] };
-  let mcpAuth: McpAuthRequired | null = null;
   let mcpSignIn: HandlerContext['mcpSignIn'];
   const requestTimeoutMs = (): number => Math.min(perCheckTimeoutMs, Math.max(1, deadline - now()));
-  let descriptionBodies: ReadonlyMap<string, string> = new Map();
   const apiHostProbes = new Map<string, Promise<ProbeResponse>>();
+  const sources = new Map<string, ProbeOutcome>();
+  const actx: AntecedentContext = {
+    siteType: input.siteType,
+    mcpEndpoint: declared.endpoint,
+    discoveryEvidence: discovery.evidence,
+    root,
+    sources,
+    follow: { unmet: declared.unmet },
+    mcpAuth: null,
+    apiAnchors: discovery.apiAnchors.filter(isApiAnchor),
+  };
 
+  // Each field that reads a source holds what that source returned by the time
+  // a row whose prerequisites name it reads the field.
   const handlerCtx = (): HandlerContext => ({
     base,
     host,
@@ -486,16 +473,23 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
     protocolVersion: input.registry.mcp_discovery.protocol_version,
     defaultTimeoutMs: requestTimeoutMs(),
     root: root ?? undefined,
-    scopedDirs,
+    get scopedDirs(): string[] {
+      scopedDirs ??= enumerateScopedDirs(
+        retainedBodies.get('llms-txt') ?? '',
+        retainedBodies.get('sitemap') ?? '',
+        base,
+      );
+      return scopedDirs;
+    },
     retainedBodies,
     retainedDocuments: discovery.documents,
     apiTargets: api,
-    apiDescriptionBodies: descriptionBodies,
+    apiDescriptionBodies: apiDescriptionBodies(sources.get('openapi')?.evidence ?? []),
     apiHostProbes,
     fetchOptions,
     mcpSessionId,
     mcpLanes,
-    mcpAuth,
+    mcpAuth: actx.mcpAuth,
     mcpSignIn,
   });
 
@@ -518,70 +512,62 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
     }
   };
 
-  // Wave 1: probe the antecedent-source checks unconditionally.
-  const wave1Checks = input.registry.checks.filter((c) => WAVE1_CHECK_IDS.has(c.id));
-  const wave2Checks = input.registry.checks.filter((c) => !WAVE1_CHECK_IDS.has(c.id));
-  const sources = new Map<string, ProbeOutcome>();
-  const wave1Results = new Map<string, EngineResult>();
-  for await (const { check, outcome, result } of mapConcurrentUnordered(wave1Checks, concurrency, probeOne)) {
-    if (outcome) sources.set(check.id, outcome);
-    wave1Results.set(check.id, result);
-  }
+  const slots = createAuditSlots(concurrency);
+  const checks = input.registry.checks;
+  const sourceChecks = checks.filter((c) => SOURCE_CHECKS.has(c.id));
+  const sourceRows = new Map<string, EngineResult>();
 
-  // Whether the endpoint requires sign-in is settled once wave 1's wire
-  // probes have answered, from their 401 or, when they drew none and were
-  // served nothing, from the 401 that found the endpoint; their own rows are
-  // then read again the way every later MCP row is. When that settles
-  // nothing, a later row's 401 is read against the same metadata.
-  const signIn = signInResolver({
-    endpoint: declared.endpoint,
-    known: declared.metadata,
-    source: directArtifactSource(() => (deadline - now() > 0 ? requestTimeoutMs() : null), fetchOptions),
-  });
-  mcpAuth = await settleMcpAuth({ observed: declared.challenge, sources, signIn });
-  if (mcpAuth === null) mcpSignIn = async (answer) => (await signIn(answer)) !== null;
-  for (const check of mcpAuth === null ? [] : wave1Checks) {
-    const outcome = sources.get(check.id);
-    const reread = check.handler === 'mcp' && outcome !== undefined ? signInRequiredOutcome(outcome) : null;
-    if (reread !== null) {
-      sources.set(check.id, reread);
-      wave1Results.set(check.id, toResult(check, reread));
-    }
-  }
-
-  const actx: AntecedentContext = {
-    siteType: input.siteType,
-    mcpEndpoint: declared.endpoint,
-    discoveryEvidence: discovery.evidence,
-    root,
-    sources,
-    follow: { unmet: declared.unmet },
-    mcpAuth,
-    apiAnchors: discovery.apiAnchors.filter(isApiAnchor),
+  // Source checks probe whatever their own antecedents say: those antecedents
+  // read what the sources return, and apply to the row once it has.
+  const probeSource = async (check: WebCheck): Promise<void> => {
+    const { outcome, result } = await probeOne(check);
+    sourceRows.set(check.id, result);
+    if (outcome === null) return;
+    sources.set(check.id, outcome);
+    const body = retainedBody(sources, check.id);
+    if (body.length > 0) retainedBodies.set(check.id, body);
   };
+  const sourceProbes = new Map(sourceChecks.map((check) => [check.id, slots.run(() => probeSource(check))]));
 
-  // Section directories for the scoped-llms probes: the root llms.txt
-  // link index unioned with sitemap paths, both retained in wave 1.
-  scopedDirs.push(...enumerateScopedDirs(retainedBody(sources, 'llms-txt'), retainedBody(sources, 'sitemap'), base));
-  const llmsTxtBody = retainedBody(sources, 'llms-txt');
-  if (llmsTxtBody.length > 0) retainedBodies.set('llms-txt', llmsTxtBody);
-  const openapiBody = retainedBody(sources, 'openapi');
-  if (openapiBody.length > 0) retainedBodies.set('openapi', openapiBody);
-  descriptionBodies = apiDescriptionBodies(sources.get('openapi')?.evidence ?? []);
-  mcpSessionId = mcpSessionIdFrom(sources.get('mcp-initialize'));
-  mcpLanes = {
-    modern: mcpModernLaneFrom(sources.get('mcp-server-discover')),
-    legacyAdvertised: advertisedCapabilities(sources.get('mcp-initialize')?.evidence ?? []),
-    modernAdvertised: advertisedCapabilities(sources.get('mcp-server-discover')?.evidence ?? []),
-  };
-  if (mcpSessionId && declared.endpoint) {
-    await notifyMcpInitialized(declared.endpoint, mcpSessionId, {
-      timeoutMs: requestTimeoutMs(),
-      fetchOptions,
-      followed: declared.followed,
+  // Whether the endpoint requires sign-in is settled once the wire probes have
+  // answered, from their 401 or, when they drew none and were served nothing,
+  // from the 401 that found the endpoint; their own rows are then read again
+  // the way every later MCP row is. When that settles nothing, a later row's
+  // 401 is read against the same metadata.
+  const settleMcp = async (): Promise<void> => {
+    const signIn = signInResolver({
+      endpoint: declared.endpoint,
+      known: declared.metadata,
+      source: directArtifactSource(() => (deadline - now() > 0 ? requestTimeoutMs() : null), fetchOptions),
     });
-    if (deadline - now() <= 0) incomplete = true;
-  }
+    actx.mcpAuth = await settleMcpAuth({ observed: declared.challenge, sources, signIn });
+    if (actx.mcpAuth === null) mcpSignIn = async (answer) => (await signIn(answer)) !== null;
+    for (const check of actx.mcpAuth === null ? [] : sourceChecks) {
+      const outcome = sources.get(check.id);
+      const reread = check.handler === 'mcp' && outcome !== undefined ? signInRequiredOutcome(outcome) : null;
+      if (reread !== null) {
+        sources.set(check.id, reread);
+        sourceRows.set(check.id, toResult(check, reread));
+      }
+    }
+    mcpSessionId = mcpSessionIdFrom(sources.get('mcp-initialize'));
+    mcpLanes = {
+      modern: mcpModernLaneFrom(sources.get('mcp-server-discover')),
+      legacyAdvertised: advertisedCapabilities(sources.get('mcp-initialize')?.evidence ?? []),
+      modernAdvertised: advertisedCapabilities(sources.get('mcp-server-discover')?.evidence ?? []),
+    };
+    if (mcpSessionId && declared.endpoint) {
+      await notifyMcpInitialized(declared.endpoint, mcpSessionId, {
+        timeoutMs: requestTimeoutMs(),
+        fetchOptions,
+        followed: declared.followed,
+      });
+      if (deadline - now() <= 0) incomplete = true;
+    }
+  };
+  const mcpSettled = Promise.all(WIRE_PROBE_IDS.map((id) => sourceProbes.get(id))).then(() => slots.run(settleMcp));
+  const settled = (prerequisite: Prerequisite): Promise<void> | undefined =>
+    prerequisite === MCP_SETTLED ? mcpSettled : sourceProbes.get(prerequisite);
 
   // Gate: declared-type filter first, then the antecedent token. Returns
   // the n_a/error result when the check must not be scored.
@@ -592,35 +578,36 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
     return antecedentGate(check, resolveAntecedent(check.antecedent, { ...actx, mcpLane: mcpRequestEra(check) }));
   };
 
-  // Finalize + yield wave-1 results through the same gate.
-  for (const check of wave1Checks) {
+  // Every row gates once its prerequisites settle. A source row then reads the
+  // probe it already made; any other row takes a slot and probes if it applies.
+  const finishRow = async (check: WebCheck): Promise<EngineResult> => {
+    await Promise.all([sourceProbes.get(check.id), ...rowPrerequisites(check).map(settled)]);
     const gated = gate(check);
-    const result = finalizeOptional(
-      check,
-      gated ?? wave1Results.get(check.id) ?? errorResult(check, 'missing wave-1 result'),
+    if (gated !== null) return finalizeOptional(check, gated);
+    const row = SOURCE_CHECKS.has(check.id)
+      ? (sourceRows.get(check.id) ?? errorResult(check, 'missing source result'))
+      : (await slots.run(() => probeOne(check))).result;
+    return finalizeOptional(check, row);
+  };
+
+  const results = new Array<EngineResult>(checks.length);
+  // The settle step is raced too: with no MCP row waiting on it, nothing else
+  // would see it fail.
+  const pending = new Map<number, Promise<{ index: number; result: EngineResult | null }>>([
+    [-1, mcpSettled.then(() => ({ index: -1, result: null }))],
+  ]);
+  for (const [index, check] of checks.entries()) {
+    pending.set(
+      index,
+      finishRow(check).then((result) => ({ index, result })),
     );
-    results.push(result);
+  }
+  while (pending.size > 0) {
+    const { index, result } = await Promise.race(pending.values());
+    pending.delete(index);
+    if (result === null) continue;
+    results[index] = result;
     yield { type: 'result', result };
-  }
-
-  // Wave 2: gated checks resolve immediately; applicable ones probe with
-  // the root fetch and wave-1 signals reused.
-  const applicable: WebCheck[] = [];
-  for (const check of wave2Checks) {
-    const gated = gate(check);
-    if (gated) {
-      const result = finalizeOptional(check, gated);
-      results.push(result);
-      yield { type: 'result', result };
-    } else {
-      applicable.push(check);
-    }
-  }
-
-  for await (const { check, result } of mapConcurrentUnordered(applicable, concurrency, probeOne)) {
-    const finalized = finalizeOptional(check, result);
-    results.push(finalized);
-    yield { type: 'result', result: finalized };
   }
 
   const scorecard = buildWebScorecard(results, {

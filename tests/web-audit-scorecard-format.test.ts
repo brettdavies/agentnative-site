@@ -1060,7 +1060,7 @@ describe('MCP rows group into protocol lanes in registry order', () => {
     ['mcp-auth-enforced', 'n_a'],
   ];
   const MODERN_IDS = new Set(registry.checks.filter((check) => check.lane === 'modern').map((check) => check.id));
-  // A legacy-only server: wave 1 evidenced no modern lane, so every modern
+  // A legacy-only server: the wire probes evidenced no modern lane, so every modern
   // row lands as an unprobed absence.
   const LEGACY_ONLY_MCP: ReadonlyArray<[string, ScorecardStatus]> = ANC_DEV_MCP.map(([id, status]) => [
     id,

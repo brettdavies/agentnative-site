@@ -29,14 +29,14 @@ export type ProbeStatus = 'pass' | 'noncompliant' | 'broken' | 'absent' | 'na' |
 export type EvidenceItem = Record<string, unknown>;
 
 /**
- * Whether the target serves the modern MCP era, read from the wave-1
- * `server/discover` probe: `present` when it answered with a JSON-RPC
+ * Whether the target serves the modern MCP era, read from the
+ * `server/discover` wire probe: `present` when it answered with a JSON-RPC
  * result, `unevidenced` when it answered any other way, and `unknown`
  * when it never got an answer (transport failure, rate limit, deadline).
  */
 export type McpModernLane = 'present' | 'unevidenced' | 'unknown';
 
-/** Era-lane facts the wave-1 MCP probes establish for the wave-2 rows. */
+/** Era-lane facts the MCP wire probes establish for the later MCP rows. */
 export interface McpLaneEvidence {
   modern: McpModernLane;
   /** Capability groups the legacy `initialize` result advertised. */
@@ -120,7 +120,7 @@ export interface HandlerContext {
   /** Passed straight to guardedFetch (fetchImpl injection for tests, hop cap). */
   fetchOptions?: AuditFetchOptions;
   /**
-   * Wave-1 retained response bodies keyed by check id (e.g. `llms-txt`).
+   * Source checks' retained response bodies keyed by check id (e.g. `llms-txt`).
    * Handlers that soften on a discoverable twin read this instead of
    * issuing a second fetch of the antecedent source.
    */
@@ -132,17 +132,17 @@ export interface HandlerContext {
    * null or absent when it lists none and they evaluate the audited origin.
    */
   apiTargets?: ApiTargets | null;
-  /** The OpenAPI descriptions the wave-1 row retained, by declared URL, for the hygiene probes' URL. */
+  /** The OpenAPI descriptions the source row retained, by declared URL, for the hygiene probes' URL. */
   apiDescriptionBodies?: ReadonlyMap<string, string>;
   /** The GET each API anchor host receives, by URL, which both hygiene rows read. */
   apiHostProbes?: Map<string, Promise<ProbeResponse>>;
   /**
-   * Session id from wave-1 MCP initialize (`Mcp-Session-Id`), or null when
-   * the server is stateless. Wave-2 MCP probes send it when present.
+   * Session id from the initialize wire probe (`Mcp-Session-Id`), or null when
+   * the server is stateless. Later MCP probes send it when present.
    */
   mcpSessionId?: string | null;
   /**
-   * Era-lane evidence from the wave-1 MCP probes. Modern-era rows score
+   * Era-lane evidence from the MCP wire probes. Modern-era rows score
    * only against a lane `server/discover` evidenced, and a row that reads
    * a capability its own lane advertised is judged against that
    * advertisement.
@@ -151,7 +151,7 @@ export interface HandlerContext {
   /** Set once the endpoint is known to require sign-in, so a 401 from it reads as that rather than as a defect. */
   mcpAuth?: McpAuthRequired | null;
   /**
-   * Set when wave 1 did not settle that the endpoint requires sign-in:
+   * Set when the wire probes did not settle that the endpoint requires sign-in:
    * whether a 401 a later row drew is backed by the endpoint's RFC 9728
    * metadata, which then reads as sign-in the same way.
    */

@@ -1,5 +1,5 @@
 // Auth antecedents: whether the site exposes an auth surface (an OAuth
-// discovery doc, a 401 challenge anywhere in wave 1, or a card auth
+// discovery doc, a 401 challenge from a source probe, or a card auth
 // declaration).
 
 import type { AntecedentToken } from '../registry';
@@ -12,9 +12,10 @@ import {
   ownOriginEvidence,
   sourcePassed,
 } from './context';
+import { MCP_SETTLED, type Prerequisite } from './sources';
 
 /**
- * A 401 challenge observed anywhere in wave 1 on the audited origin or its
+ * A 401 challenge a source probe observed on the audited origin or its
  * MCP endpoint, or discovery card auth. A description an API anchor
  * declares on another host speaks for that host's auth, not the site's.
  */
@@ -31,6 +32,10 @@ const authPresent: AntecedentResolver = (ctx) =>
 export const authResolvers = {
   'auth-present': authPresent,
 } satisfies Partial<Record<AntecedentToken, AntecedentResolver>>;
+
+export const authPrerequisites = {
+  'auth-present': ['oauth-discovery', 'openapi', MCP_SETTLED],
+} satisfies Partial<Record<AntecedentToken, readonly Prerequisite[]>>;
 
 export const authEvidence = {
   'auth-present': 'no auth surface detected',

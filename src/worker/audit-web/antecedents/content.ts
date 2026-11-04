@@ -3,6 +3,7 @@
 
 import type { AntecedentToken } from '../registry';
 import { type AntecedentResolver, htmlRootGate, sourcePassed } from './context';
+import type { Prerequisite } from './sources';
 
 const docsSite: AntecedentResolver = (ctx) =>
   ctx.siteType === 'content' || sourcePassed(ctx, 'llms-txt') ? 'apply' : 'n_a';
@@ -29,6 +30,13 @@ export const contentResolvers = {
   'root-llms-full-txt': rootLlmsFullTxt,
   'markdown-twin': markdownTwin,
 } satisfies Partial<Record<AntecedentToken, AntecedentResolver>>;
+
+export const contentPrerequisites = {
+  'docs-site': ['llms-txt'],
+  'root-llms-txt': ['llms-txt'],
+  'root-llms-full-txt': ['llms-full-txt'],
+  'markdown-twin': ['accept-markdown', 'llms-txt'],
+} satisfies Partial<Record<AntecedentToken, readonly Prerequisite[]>>;
 
 export const contentEvidence = {
   'docs-site': 'not a docs/content site',

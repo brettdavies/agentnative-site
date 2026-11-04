@@ -105,7 +105,7 @@ export interface DiscoveryDocuments {
 
 // Hard wall-clock cap on the whole discovery phase. Discovery is a
 // prerequisite for the MCP checks, not the audit itself, so it must never
-// starve the check waves: a target that tarpits unsolicited POSTs (drops
+// starve the checks: a target that tarpits unsolicited POSTs (drops
 // them without responding until the socket times out) would otherwise eat
 // one full per-check timeout per candidate path and spend the entire
 // per-audit deadline before the first real check runs.
