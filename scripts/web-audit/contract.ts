@@ -68,7 +68,7 @@ export function contractDrift(generated: ReadonlyMap<string, string>, root: stri
 
   const listing: string[] = [];
   for (const [dir, pinned] of Object.entries(CONTRACT_LISTING)) {
-    const path = dir === '.' ? root : join(root, dir);
+    const path = join(root, dir);
     const actual = existsSync(path) ? readdirSync(path) : [];
     const entry = (name: string) => (dir === '.' ? name : `${dir}/${name}`);
     for (const name of actual) {

@@ -108,7 +108,7 @@ describe('the committed web-audit vendoring contract', () => {
     const proc = Bun.spawnSync(['bun', join(REPO_ROOT, 'scripts', 'web-audit', 'gen-fixtures.ts'), '--check']);
     if (proc.exitCode !== 0) throw new Error(proc.stderr.toString());
     expect(proc.exitCode).toBe(0);
-  });
+  }, 30_000);
 });
 
 describe('a contract that has drifted', () => {

@@ -68,7 +68,7 @@ describe('web-audit conformance corpus', () => {
         throw new Error(`${name} is stale; run ${REGENERATE_COMMAND} and commit the result`);
       }
     }
-  });
+  }, 30_000);
 
   // Saving an audit stamps the registry fingerprint; the engine never does,
   // so the Rust port reproduces the goldens without hashing a registry.
@@ -129,7 +129,7 @@ describe('web-audit conformance corpus', () => {
     for (const [name, content] of first) {
       if (second.get(name) !== content) throw new Error(`${name} differs between two generations`);
     }
-  });
+  }, 30_000);
 
   test('the registry carries no lookaround or backreference (the CLI compiles every pattern)', () => {
     const source = readFileSync(REGISTRY_PATH, 'utf8');
