@@ -80,13 +80,6 @@ Approach B, sequenced: video path green, then homepage CLI polish.
 1. Homepage Website **Audit** = GET `/web-audit?url=` (`open_web_audit` when P1 ships). Not transact.
 2. `/web-audit` **Audit** = Turnstile then `/web/scoring/<host>`. Only transact cut. Tools never fire it.
 
-**3-minute sequence:** open `https://anc.dev/web-audit` → `fill_audit_url` with Sounding
-(`https://sounding.brettdavies.workers.dev`) → `set_plan` → human clicks Audit → `/web/<sounding-host>` →
-`get_worksheet` + `get_fix_prompt` for all three MUST ids (never `mcp-cors-*`) → one pass in
-[sounding-webmcp-demo](https://github.com/brettdavies/sounding-webmcp-demo) covering `openapi`, `mcp-initialize`, and
-`mcp-tools-list` → redeploy → human Audit again. Two loops, one fix. Record last day. Between takes, restore that repo's
-`src/` from `main` and redeploy. Do not keep the patient Worker in this tree.
-
 **Script attach:**
 
 - Keep `/js/webmcp.js` on `/`, `/mcp`, `/p1`–`/p8`. Change `tests/agent-readiness-discovery.test.ts` in the same unit if
@@ -96,8 +89,7 @@ Approach B, sequenced: video path green, then homepage CLI polish.
   Do not touch `scoringBody` (`/web/scoring/<host>` / `web-audit-scoring.js`). Do not add it to
   `_internal/score-live-shell.html`.
 
-**If homepage web fill ships:** add a `data-s="web"` status node in `06-homepage.mjs`. Not required for the canonical
-demo.
+**If homepage web fill ships:** add a `data-s="web"` status node in `06-homepage.mjs`.
 
 **API:** Probe `document.modelContext || navigator.modelContext`. Prefer `registerTool`. `AbortSignal` on `pagehide` +
 bfcache `pageshow`. `execute` returns a `DOMString` ≤1.5k. Names ≤30, descriptions ≤500. Schemas:
@@ -119,15 +111,10 @@ bfcache `pageshow`. `execute` returns a `DOMString` ≤1.5k. Names ≤30, descri
 **P1 after video path:** `set_surface`, `fill_cli_target`, `fill_web_target`, `open_web_audit`, `set_public_listing`.
 Wrong-page calls return an error string.
 
-**Dogfood:** `fill_audit_url` with Sounding (`https://sounding.brettdavies.workers.dev`). No extra `prepare_self_audit`
-unless it wraps that.
-
 **Result DOM hook:** `renderCheck` in `src/worker/audit-web/summary-render.ts` must emit `data-id="${escHtml(row.id)}"`
 on `.web-check`. `get_worksheet` and `assemble_fix_prompt` read that attribute. Skill URLs are not the id contract.
 
-**Assemble clip:** never CORS (`mcp-cors-*`). Target is Sounding
-([brettdavies/sounding-webmcp-demo](https://github.com/brettdavies/sounding-webmcp-demo)), not this repo. MUST ids:
-`openapi`, `mcp-initialize`, `mcp-tools-list`. Two WebMCP loops, one fix pass for all three.
+**Assemble clip:** never CORS (`mcp-cors-*`). MUST ids: `openapi`, `mcp-initialize`, `mcp-tools-list`.
 
 **Not this week:** worker `webmcp` handler still greps markers.
 
@@ -135,21 +122,14 @@ on `.web-check`. `get_worksheet` and `assemble_fix_prompt` read that attribute. 
 
 1. **Public URL.** Locked: judges hit **anc.dev** (production). `release/*` → `main` before 3 Sep 1pm PT.
 2. **How much of B before the video.** One PR still includes homepage P1. Cut P1 from the release only if Friday slips.
-3. **Which check `id` the assemble clip uses.** Not anc.dev (live fails there are only `mcp-cors-*`). Clip target is
-   Sounding ([brettdavies/sounding-webmcp-demo](https://github.com/brettdavies/sounding-webmcp-demo), Worker `sounding`,
-   public `sounding.brettdavies.workers.dev`): MUST families we own (`openapi` absent; `mcp-initialize` /
-   `mcp-tools-list` broken). CORS on `/mcp` already passes. Two loops: worksheet + all three `get_fix_prompt`s, one code
-   pass in that repo, human Audit again. Between takes, restore that repo from `main` and redeploy. Do not add Sounding
-   to `src/data/web-audit/seed.yaml`. Do not keep the patient Worker in this tree.
-4. **Origin trial.** ChatGPT in-app browser is the recording and judge default (WebMCP on, no Chrome flag). Judges who
+3. **Origin trial.** ChatGPT in-app browser is the recording and judge default (WebMCP on, no Chrome flag). Judges who
    use Chrome follow Devpost (`#enable-webmcp-testing`). No origin-trial token on anc.dev this slice unless we later
    want stock Chrome 149+ to get tools without a flag.
-5. **Fill focus fallback.** Locked: value-only first; chip-style focus only if ChatGPT ignores `.value` (see when we get
+4. **Fill focus fallback.** Locked: value-only first; chip-style focus only if ChatGPT ignores `.value` (see when we get
    there).
 
 ## Success Criteria
 
-- Public URL completes the numbered 3-minute sequence. Audio on. Under 3 minutes.
 - Pathname → registered names in tests. Handlers never POST `/api/score` or navigate to `/web/scoring`. DevTools
   `getTools()` pass on `/web-audit` and `/web/anc.dev`.
 - `/about` has no worksheet script. `/mcp` and `/p*` keep orientation tools.
@@ -166,8 +146,7 @@ another unauthenticated public Worker. After act tools are live, submit `anc.dev
 1. ~~Confirm the public URL path (assignment below).~~ Locked: judges hit **anc.dev**.
 2. ~~Replace `src/client/webmcp.ts` (`registerTool` first). Concatenate script on `/web-audit`; inject on `/web/<host>`
    result HTML only.~~ [#280](https://github.com/brettdavies/agentnative-site/pull/280)
-3. ~~Video-path tools + orientation + homepage P1.~~ Same PR. Clip target is Sounding
-   ([sounding-webmcp-demo](https://github.com/brettdavies/sounding-webmcp-demo)); do not demo-fix CORS.
+3. ~~Video-path tools + orientation + homepage P1.~~ Same PR.
 4. ~~Tests: pathname → names; no scoring navigation/POST; discovery includes `/web-audit`.~~ `tests/webmcp.test.ts` plus
    attach tests. ChatGPT/Chrome `getTools()` is T5, not CI.
 5. Browser-verify light and dark; ChatGPT in-app or Chrome flag (T5).
@@ -348,7 +327,8 @@ Lane A: pre-unit 0. **Merged** (#279). Lane B: WebMCP T1–T4. **Merged** (#280)
   - Verify: stub execute; wrong-page errors when the homepage nodes are absent
 - [ ] **T5 (P1, human: ~30min)** — ChatGPT desktop or Chrome flag acceptance on public or local URL
   - Surfaced by: D10.1
-  - Verify: numbered 3-minute sequence; `executeTool` strings ≤1.5k. Staging is behind Access; production is T6
+  - Verify: `getTools()` on `/web-audit` and `/web/anc.dev`; `executeTool` strings ≤1.5k. Staging is behind Access;
+    production is T6
 - [ ] **T6 (P1, human: ops)** — Ship this slice to **anc.dev** via `release/*` → `main` before 3 Sep 1pm PT
   - Surfaced by: design Assignment; user locked production as the judge URL
   - Verify: ChatGPT in-app browser opens `https://anc.dev/web-audit` without Access
