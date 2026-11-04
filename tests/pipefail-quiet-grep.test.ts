@@ -14,7 +14,7 @@ import { describe, expect, test } from 'bun:test';
 import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import * as yaml from 'js-yaml';
-import { listWorkflows, REPO_ROOT, workflowText } from './helpers/workflows';
+import { listWorkflows, REPO_ROOT, trackedPaths, workflowText } from './helpers/workflows';
 
 const ACTIONS_DIR = join(REPO_ROOT, '.github/actions');
 const SHELL_SHEBANG = /^#!.*\b(?:ba)?sh\b/;
@@ -43,14 +43,11 @@ function offendingPipelines(script: string): string[] {
 
 /** Tracked shell files with their text. A hook carries no extension, so a shebang counts too. */
 function trackedShellFiles(): Map<string, string> {
-  const listing = Bun.spawnSync(['git', 'ls-files'], { cwd: REPO_ROOT });
-  if (listing.exitCode !== 0) throw new Error(`git ls-files failed: ${listing.stderr.toString()}`);
   const scripts = new Map<string, string>();
-  for (const path of listing.stdout.toString().split('\n').filter(Boolean)) {
+  for (const path of trackedPaths()) {
     const absolute = join(REPO_ROOT, path);
     const extension = extname(path);
     if (extension !== '' && extension !== '.sh' && extension !== '.bash') continue;
-    // `git ls-files` still lists a file removed from the tree until the removal is staged.
     if (!lstatSync(absolute, { throwIfNoEntry: false })?.isFile()) continue;
     const text = readFileSync(absolute, 'utf8');
     if (extension !== '' || SHELL_SHEBANG.test(text)) scripts.set(path, text);

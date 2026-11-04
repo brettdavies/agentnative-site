@@ -32,7 +32,7 @@ case "$url" in
   */skill.json) printf '{"version":"%s"}' "\${FAKE_SKILL_VERSION:-0.0.0}" >"$out"; printf '200 '; exit "\${FAKE_CURL_EXIT:-0}" ;;
 esac
 case "$format" in
-  '%{http_code}') printf '200'; exit 0 ;;
+  '%{http_code}') printf '%s' "\${FAKE_WALK_CODE:-200}"; exit "\${FAKE_WALK_EXIT:-0}" ;;
 esac
 if [ -z "$html" ]; then
   printf -- '---\\ntitle: the markdown twin\\n---\\n' >"$out"
@@ -83,6 +83,7 @@ const LOGIN = '<title>Sign in</title>';
 
 interface Run {
   gate?: string;
+  sitemap?: string;
   args?: string[];
   env?: Record<string, string>;
   token?: boolean;
@@ -91,7 +92,7 @@ interface Run {
 function postflight(
   home: string,
   scorecards: string,
-  { gate = 'pages', args = PROD, env = {}, token = false }: Run = {},
+  { gate = 'pages', sitemap = SITEMAP, args = PROD, env = {}, token = false }: Run = {},
 ): { status: number; output: string; urls: string[] } {
   const bin = mkdtempSync(join(tmpdir(), 'postflight-pages-'));
   try {
@@ -102,7 +103,7 @@ function postflight(
     writeFileSync(join(bin, 'home.html'), home);
     writeFileSync(join(bin, 'scorecards.html'), scorecards);
     writeFileSync(join(bin, 'score.json'), SCORE);
-    writeFileSync(join(bin, 'sitemap.xml'), SITEMAP);
+    writeFileSync(join(bin, 'sitemap.xml'), sitemap);
     writeFileSync(join(bin, 'urls.log'), '');
     const proc = Bun.spawnSync(['bash', join(REPO_ROOT, 'scripts/release/postflight.sh'), ...args, gate], {
       cwd: REPO_ROOT,
@@ -173,7 +174,7 @@ describe('postflight pages gate', () => {
 });
 
 describe('postflight gates that read staging through CF Access', () => {
-  test.each(['pages', 'retired', 'sitemap', 'purge'])('%s fails and names a missing token', (gate) => {
+  test.each(['pages', 'retired', 'sitemap', 'purge', 'mcp'])('%s fails and names a missing token', (gate) => {
     const { status, output } = postflight(LOGIN, LOGIN, { gate, args: STAGING });
     expect(output).toContain('no CF Access service token');
     expect(output).not.toContain('renders (has');
@@ -190,6 +191,37 @@ describe('postflight gates that read staging through CF Access', () => {
     ]);
     expect(output).toContain('all 3 sitemap entries return 200');
     expect(status).toBe(0);
+  });
+
+  test('sitemap fails an entry naming a host other than the canonical one, and does not fetch it', () => {
+    const elsewhere = 'https://other.invalid/privacy';
+    const { status, output, urls } = postflight(HOME, SCORECARDS, {
+      gate: 'sitemap',
+      sitemap: `<urlset><url><loc>https://anc.dev/</loc></url><url><loc>${elsewhere}</loc></url></urlset>`,
+    });
+    expect(output).toContain(`sitemap entry ${elsewhere}`);
+    expect(output).toContain('names a host other than');
+    expect(urls).not.toContain(elsewhere);
+    expect(status).toBe(1);
+  });
+
+  test('sitemap reports a failed entry with the status curl gave', () => {
+    const { status, output } = postflight(HOME, SCORECARDS, {
+      gate: 'sitemap',
+      env: { FAKE_WALK_CODE: '000', FAKE_WALK_EXIT: '7' },
+    });
+    expect(output).toContain('code=000');
+    expect(output).not.toContain('code=000000');
+    expect(status).toBe(1);
+  });
+
+  test('mcp accepts exported credentials, because mcp-smoke.sh reads them itself', () => {
+    const { output } = postflight(HOME, SCORECARDS, {
+      gate: 'mcp',
+      args: STAGING,
+      env: { CF_ACCESS_CLIENT_ID: 'fixture-id', CF_ACCESS_CLIENT_SECRET: 'fixture-secret' },
+    });
+    expect(output).not.toContain('no CF Access service token');
   });
 
   test('sitemap names where a rejected token was sent', () => {

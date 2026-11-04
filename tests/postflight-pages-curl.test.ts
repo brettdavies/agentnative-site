@@ -7,7 +7,7 @@ import { describe, expect, test } from 'bun:test';
 import { chmodSync, lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { REPO_ROOT } from './helpers/workflows';
+import { REPO_ROOT, trackedPaths } from './helpers/workflows';
 
 const POSTFLIGHT = join(REPO_ROOT, 'scripts/release/postflight.sh');
 const SECRET = 'fixture-access-secret';
@@ -24,6 +24,7 @@ type Answer =
   | 'no-marker'
   | 'dropped'
   | '403'
+  | 'moved-with-marker'
   | '503'
   | '503-retry-after'
   | 'redirect';
@@ -62,6 +63,8 @@ async function gate({ home = ['page'], score = ['score'], token = false }: Plan)
         return `HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: ${SCORE.length + 5000}\r\n\r\n${SCORE}`;
       case '403':
         return respond('403 Forbidden', '');
+      case 'moved-with-marker':
+        return respond('301 Moved Permanently', '<h1 class="hero__title">\n', 'location: /elsewhere\r\n');
       case 'no-marker':
         return respond('200 OK', '<p>none</p>\n');
       case 'dropped':
@@ -133,6 +136,12 @@ describe('postflight pages gate over real curl', () => {
     expect(output).not.toContain('home page renders');
   }, 30_000);
 
+  test('does not pass a redirect whose body carries the marker', async () => {
+    const { output } = await gate({ home: ['moved-with-marker'] });
+    expect(output).toContain('did not return HTML with hero__title (HTTP 301 to');
+    expect(output).not.toContain('home page renders');
+  }, 30_000);
+
   test('does not sleep through a long Retry-After', async () => {
     const { elapsedMs, output } = await gate({ home: ['503-retry-after'] });
     expect(elapsedMs).toBeLessThan(25_000);
@@ -170,15 +179,17 @@ describe('postflight pages gate over real curl', () => {
 
 describe('fetches carrying the CF Access credentials', () => {
   const CURL = /\be?curl\b/;
-  const CREDENTIALED = /\becurl\s|\s-K\s|CF-Access-Client/;
+  const CREDENTIALED = /\becurl\s|\s-K\s|\s--config\s|\s-H @|CF-Access-Client|ACCESS_HEADERS/;
   const FOLLOWS_REDIRECTS = /\s-[a-zA-Z]*L[a-zA-Z]*(?:\s|$)|\s--location\b/;
 
-  const sources = (() => {
-    const listing = Bun.spawnSync(['git', 'ls-files'], { cwd: REPO_ROOT }).stdout.toString().split('\n');
-    return listing.filter(
-      (path) => /\.(?:sh|bash)$/.test(path) || /^\.github\/.*\.ya?ml$/.test(path) || /^RELEASES[^/]*\.md$/.test(path),
-    );
-  })();
+  const sources = trackedPaths().filter(
+    (path) =>
+      /\.(?:sh|bash)$/.test(path) ||
+      /^scripts\/hooks\//.test(path) ||
+      /^\.github\/.*\.ya?ml$/.test(path) ||
+      /^RELEASES[^/]*\.md$/.test(path) ||
+      /^docs\/runbooks\/.*\.md$/.test(path),
+  );
 
   test('the scan reaches the release scripts, a workflow and the runbooks', () => {
     expect(sources).toEqual(
@@ -188,6 +199,7 @@ describe('fetches carrying the CF Access credentials', () => {
         'scripts/release/mcp-smoke.sh',
         '.github/workflows/mcp-sweep.yml',
         'RELEASES-PREFLIGHT.md',
+        'scripts/staging-cache-smoke.sh',
       ]),
     );
   });
@@ -207,9 +219,19 @@ describe('fetches carrying the CF Access credentials', () => {
 
   test('the manual recipes against ENV_URL never follow a redirect, because staging runs add the headers', () => {
     const recipes = readFileSync(join(REPO_ROOT, 'RELEASES-POSTFLIGHT.md'), 'utf8')
+      .replace(/\\\n\s*/g, ' ')
       .split('\n')
       .filter((line) => /\bcurl\b/.test(line) && line.includes('ENV_URL'));
     expect(recipes.length).toBeGreaterThan(0);
     expect(recipes.filter((line) => FOLLOWS_REDIRECTS.test(line))).toEqual([]);
+  });
+
+  test('every retry in postflight bounds how long curl may sleep through a Retry-After', () => {
+    const lines = readFileSync(POSTFLIGHT, 'utf8')
+      .replace(/\\\n\s*/g, ' ')
+      .split('\n');
+    const retried = lines.filter((line) => /\s--retry\s/.test(line));
+    expect(retried.length).toBeGreaterThan(0);
+    expect(retried.filter((line) => !line.includes('--retry-max-time'))).toEqual([]);
   });
 });
