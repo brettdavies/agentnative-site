@@ -78,10 +78,11 @@ VALUE="$(printf '%s' "$WRANGLER_STDOUT" | tr -d '\n')"
 if [ "$WRANGLER_EXIT" -eq 0 ]; then
   case "$VALUE" in
     true|1)     STATUS="warn";  DISABLED="true";    EXIT_CODE=1 ;;
-    # wrangler reports an absent key on stdout and exits 0.
-    ""|false|0|"Value not found") STATUS="ok"; DISABLED="false"; EXIT_CODE=0 ;;
+    ""|false|0) STATUS="ok";    DISABLED="false";   EXIT_CODE=0 ;;
     *)          STATUS="warn";  DISABLED="unknown"; EXIT_CODE=1 ;;
   esac
+elif grep -qiE "not found|does not exist|key.*does.*not" <<<"$WRANGLER_STDERR"; then
+  STATUS="ok"; DISABLED="false"; EXIT_CODE=0
 else
   STATUS="error"; DISABLED="unknown"; EXIT_CODE=4
 fi
