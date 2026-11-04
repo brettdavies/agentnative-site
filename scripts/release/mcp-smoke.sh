@@ -407,7 +407,7 @@ symmetry_probe() {
   local tool=$1 extra=$2 filter
   filter=".tier // \"\""
   [[ -n "$extra" ]] && filter="$filter, (.${extra} // \"\")"
-  curl -fsSL -K "$CF_CONFIG" -m 15 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  curl -fsS -K "$CF_CONFIG" -m 15 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
     -d "{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"tools/call\",\"params\":{\"name\":\"${tool}\",\"arguments\":{\"slug\":\"ripgrep\"}}}" \
     "${BASE_URL}/mcp" 2>/dev/null \
     | jq -r '.result.content[0].text' 2>/dev/null \
@@ -457,7 +457,7 @@ do_score_cli_call() {
   local bypass_json=false
   [[ "$bypass" -eq 1 ]] && bypass_json=true
   local body
-  body=$(curl -fsSL -K "$CF_CONFIG" -m 60 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  body=$(curl -fsS -K "$CF_CONFIG" -m 60 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
     -d "{\"jsonrpc\":\"2.0\",\"id\":${rpc_id},\"method\":\"tools/call\",\"params\":{\"name\":\"score_cli\",\"arguments\":{\"install\":\"npm install -g ${MCP_BINARY}\",\"bypass_cache\":${bypass_json}}}}" \
     "${BASE_URL}/mcp" 2>/dev/null || true)
   SCORE_CLI_RAW=$body

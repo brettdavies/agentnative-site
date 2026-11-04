@@ -554,7 +554,7 @@ gate_do_smoke() {
   # POST a non-registry github-url and assess.
   local repo body
   repo=$(do_fixture_repo "$BINARY")
-  body=$(curl -fsSL -K "$cfg" -H 'Content-Type: application/json' \
+  body=$(curl -fsS -K "$cfg" -H 'Content-Type: application/json' \
     -d "{\"target\":\"https://github.com/${repo}\",\"turnstile_token\":\"x\"}" \
     "${ENV_URL}/api/score" 2>/dev/null || true)
   rm -f "$cfg"
@@ -657,7 +657,7 @@ gate_dist() {
 
   # Skill manifest version matches source.
   local served_v src_v
-  served_v=$(curl -fsSL -K "$cfg" "${ENV_URL}/skill.json" 2>/dev/null \
+  served_v=$(curl -fsS -K "$cfg" "${ENV_URL}/skill.json" 2>/dev/null \
     | jq -r '.version // empty' 2>/dev/null || true)
   src_v=$(jq -r '.version' "$REPO_ROOT/src/data/skill/skill.json" 2>/dev/null || true)
   if [[ -n "$served_v" && "$served_v" == "$src_v" ]]; then

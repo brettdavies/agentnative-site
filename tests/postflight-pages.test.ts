@@ -1,29 +1,32 @@
-// scripts/release/postflight.sh's pages gate reads each page from the deployed
-// edge and looks for a marker in the body. Most cases use a stand-in `curl` on
-// PATH that answers from fixed bodies and negotiates like the Worker, so what runs
-// is the gate's own shell, under its own pipefail. Retry behavior belongs to curl
-// itself, so those cases drive real curl against a local socket.
+// scripts/release/postflight.sh's gates read the deployed site. A stand-in `curl` on
+// PATH answers from fixed bodies and negotiates like the Worker, so what runs is the
+// gate's own shell, under its own pipefail. What curl does between attempts belongs to
+// curl itself, so those cases live in postflight-pages-curl.test.ts.
 
 import { describe, expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { REPO_ROOT } from './helpers/workflows';
 
-const POSTFLIGHT = join(REPO_ROOT, 'scripts/release/postflight.sh');
-
 const FAKE_CURL = `#!/usr/bin/env bash
-url="" html="" out=/dev/stdout
+url="" html="" out=/dev/stdout format=""
 while [ $# -gt 0 ]; do
   case "$1" in
     https://*) url="$1" ;;
     'Accept: text/html') html=1 ;;
     -o) out="$2"; shift ;;
+    -w) format="$2"; shift ;;
   esac
   shift
 done
+printf '%s\n' "$url" >>"$FAKE_CURL_DIR/urls.log"
 case "$url" in
-  */api/score) cat "$FAKE_CURL_DIR/score.json"; exit 0 ;;
+  */api/score) cat "$FAKE_CURL_DIR/score.json" >"$out"; printf '200 '; exit 0 ;;
+  */sitemap.xml) cat "$FAKE_CURL_DIR/sitemap.xml"; exit 0 ;;
+esac
+case "$format" in
+  '%{http_code}') printf '200'; exit 0 ;;
 esac
 if [ -z "$html" ]; then
   printf -- '---\\ntitle: the markdown twin\\n---\\n' >"$out"
@@ -32,7 +35,7 @@ elif [ "\${url%/scorecards}" != "$url" ]; then
 else
   cat "$FAKE_CURL_DIR/home.html" >"$out"
 fi
-printf '%s %s' "\${FAKE_CURL_CODE:-200}" "\${FAKE_CURL_FINAL:-$url}"
+printf '%s %s' "\${FAKE_CURL_CODE:-200}" "\${FAKE_CURL_REDIRECT:-}"
 exit "\${FAKE_CURL_EXIT:-0}"
 `;
 
@@ -41,6 +44,9 @@ const SCORE = JSON.stringify({
   scorecard_url: 'https://fixture.invalid/score/ripgrep',
   spec_version: '0.0.0',
 });
+
+// The sitemap names the canonical host on every deployment.
+const SITEMAP = '<urlset><url><loc>https://anc.dev/</loc></url><url><loc>https://anc.dev/privacy</loc></url></urlset>';
 
 const PROD = ['--env', 'prod', '--prod-url', 'https://fixture.invalid'];
 const STAGING = ['--env', 'staging', '--staging-url', 'https://fixture.invalid'];
@@ -55,14 +61,22 @@ function largePage(marker: string): string {
   return `<!doctype html>\n${marker}\n${PADDING}`;
 }
 
-const PAGE = largePage('<div class="lrow">');
+const HOME = largePage('<h1 class="hero__title">');
+const SCORECARDS = largePage('<div class="lrow">');
 const LOGIN = '<title>Sign in</title>';
 
-function gatePages(
+interface Run {
+  gate?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  token?: boolean;
+}
+
+function postflight(
   home: string,
   scorecards: string,
-  { args = PROD, env = {}, token = false }: { args?: string[]; env?: Record<string, string>; token?: boolean } = {},
-): { status: number; output: string } {
+  { gate = 'pages', args = PROD, env = {}, token = false }: Run = {},
+): { status: number; output: string; urls: string[] } {
   const bin = mkdtempSync(join(tmpdir(), 'postflight-pages-'));
   try {
     writeFileSync(join(bin, 'curl'), FAKE_CURL);
@@ -72,7 +86,9 @@ function gatePages(
     writeFileSync(join(bin, 'home.html'), home);
     writeFileSync(join(bin, 'scorecards.html'), scorecards);
     writeFileSync(join(bin, 'score.json'), SCORE);
-    const proc = Bun.spawnSync(['bash', POSTFLIGHT, ...args, 'pages'], {
+    writeFileSync(join(bin, 'sitemap.xml'), SITEMAP);
+    writeFileSync(join(bin, 'urls.log'), '');
+    const proc = Bun.spawnSync(['bash', join(REPO_ROOT, 'scripts/release/postflight.sh'), ...args, gate], {
       cwd: REPO_ROOT,
       env: {
         ...process.env,
@@ -82,7 +98,11 @@ function gatePages(
         ...env,
       },
     });
-    return { status: proc.exitCode, output: proc.stdout.toString() + proc.stderr.toString() };
+    return {
+      status: proc.exitCode,
+      output: proc.stdout.toString() + proc.stderr.toString(),
+      urls: readFileSync(join(bin, 'urls.log'), 'utf8').split('\n').filter(Boolean),
+    };
   } finally {
     rmSync(bin, { recursive: true, force: true });
   }
@@ -90,136 +110,74 @@ function gatePages(
 
 describe('postflight pages gate', () => {
   test('passes a page past the pipe buffer whose marker is on an early line', () => {
-    const { status, output } = gatePages(PAGE, PAGE);
-    expect(output).toContain('home page renders (has lrow)');
+    const { status, output } = postflight(HOME, SCORECARDS);
+    expect(output).toContain('home page renders (has hero__title)');
     expect(output).toContain('/scorecards renders (has lrow)');
     expect(status).toBe(0);
   });
 
   test('fails a page past the pipe buffer that lacks its marker', () => {
-    const { status, output } = gatePages(largePage('<p>no rows</p>'), largePage('<p>no rows</p>'));
-    expect(output.match(/did not return HTML with lrow/g)).toHaveLength(2);
+    const { status, output } = postflight(largePage('<p>none</p>'), largePage('<p>none</p>'));
+    expect(output).toContain('did not return HTML with hero__title (HTTP 200)');
+    expect(output).toContain('did not return HTML with lrow (HTTP 200)');
     expect(status).toBe(1);
   });
 
   test('names the failed fetch and its HTTP status when the marker arrived before the failure', () => {
-    const { status, output } = gatePages(PAGE, PAGE, { env: { FAKE_CURL_EXIT: '28', FAKE_CURL_CODE: '000' } });
+    const { status, output } = postflight(HOME, SCORECARDS, { env: { FAKE_CURL_EXIT: '28', FAKE_CURL_CODE: '000' } });
     expect(output).toContain('curl exited 28 (HTTP 000)');
     expect(output).not.toContain('renders (has');
     expect(status).toBe(1);
   });
 
   test('runs against production with no Access token, because production is public', () => {
-    const { status, output } = gatePages(PAGE, PAGE);
+    const { status, output } = postflight(HOME, SCORECARDS);
     expect(output).not.toContain('no CF Access service token');
     expect(output).toContain('/scorecards renders (has lrow)');
     expect(status).toBe(0);
   });
 
-  test('names a missing Access token instead of reading the staging login page', () => {
-    const { status, output } = gatePages(LOGIN, LOGIN, { args: STAGING });
-    expect(output).toContain('no CF Access service token');
-    expect(output).not.toContain('renders (has');
-    expect(status).toBe(1);
-  });
-
   test('runs the rows on staging with a token loaded', () => {
-    const { status, output } = gatePages(PAGE, PAGE, { args: STAGING, token: true });
-    expect(output).toContain('home page renders (has lrow)');
+    const { status, output } = postflight(HOME, SCORECARDS, { args: STAGING, token: true });
+    expect(output).toContain('home page renders (has hero__title)');
     expect(output).toContain('/scorecards renders (has lrow)');
     expect(status).toBe(0);
   });
 
-  test('names where a rejected token landed instead of passing on the login page', () => {
-    const final = 'https://team.cloudflareaccess.com/cdn-cgi/access/login/fixture';
-    const { status, output } = gatePages(LOGIN, LOGIN, {
+  test('names where a rejected token was sent instead of passing on the login page', () => {
+    const login = 'https://team.cloudflareaccess.com/cdn-cgi/access/login/fixture';
+    const { status, output } = postflight(LOGIN, LOGIN, {
       args: STAGING,
       token: true,
-      env: { FAKE_CURL_FINAL: final },
+      env: { FAKE_CURL_CODE: '302', FAKE_CURL_REDIRECT: login },
     });
-    expect(output).toContain(`did not return HTML with lrow (ended at ${final})`);
+    expect(output).toContain(`did not return HTML with hero__title (HTTP 302 to ${login})`);
     expect(output).not.toContain('renders (has');
     expect(status).toBe(1);
   });
 });
 
-type Answer = 'page' | 'no-marker' | 'dropped' | '503' | '503-retry-after';
-
-function answer(kind: Answer): string {
-  const respond = (status: string, body: string, headers = '') =>
-    `HTTP/1.1 ${status}\r\ncontent-type: text/html\r\ncontent-length: ${body.length}\r\nconnection: close\r\n${headers}\r\n${body}`;
-  switch (kind) {
-    case 'page':
-      return respond('200 OK', '<div class="lrow">\n');
-    case 'no-marker':
-      return respond('200 OK', '<p>no rows</p>\n');
-    case 'dropped':
-      return 'HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: 500000\r\n\r\n<div class="lrow">\n';
-    case '503':
-      return respond('503 Service Unavailable', '');
-    case '503-retry-after':
-      return respond('503 Service Unavailable', '', 'retry-after: 45\r\n');
-  }
-}
-
-/** The real gate and real curl against a socket that answers `/` in turn from `attempts`. */
-async function gateOverRealCurl(attempts: Answer[]): Promise<{ elapsedMs: number; output: string }> {
-  let served = 0;
-  const server = Bun.listen({
-    hostname: '127.0.0.1',
-    port: 0,
-    socket: {
-      data(socket, request) {
-        const path = request.toString().split(' ')[1];
-        if (path === '/') socket.write(answer(attempts[Math.min(served++, attempts.length - 1)]));
-        else if (path === '/api/score') socket.write(`HTTP/1.1 200 OK\r\nconnection: close\r\n\r\n${SCORE}`);
-        else socket.write(answer('page'));
-        socket.end();
-      },
-    },
+describe('postflight gates that read staging through CF Access', () => {
+  test.each(['pages', 'retired', 'sitemap', 'purge'])('%s fails and names a missing token', (gate) => {
+    const { status, output } = postflight(LOGIN, LOGIN, { gate, args: STAGING });
+    expect(output).toContain('no CF Access service token');
+    expect(output).not.toContain('renders (has');
+    expect(status).toBe(1);
   });
-  const started = Date.now();
-  try {
-    const proc = Bun.spawn(
-      ['bash', POSTFLIGHT, '--env', 'prod', '--prod-url', `http://127.0.0.1:${server.port}`, 'pages'],
-      {
-        cwd: REPO_ROOT,
-        stdout: 'pipe',
-        stderr: 'pipe',
-      },
-    );
-    const [out, err] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
+
+  test('sitemap walks the target it was given, so staging credentials stay on staging', () => {
+    const { status, output, urls } = postflight(HOME, SCORECARDS, { gate: 'sitemap', args: STAGING, token: true });
+    expect(urls).toEqual([
+      'https://fixture.invalid/sitemap.xml',
+      'https://fixture.invalid/',
+      'https://fixture.invalid/privacy',
     ]);
-    return { elapsedMs: Date.now() - started, output: out + err };
-  } finally {
-    server.stop(true);
-  }
-}
+    expect(output).toContain('all 2 sitemap entries return 200');
+    expect(status).toBe(0);
+  });
 
-describe('postflight pages gate over real curl', () => {
-  test('recovers when a first attempt fails', async () => {
-    const { output } = await gateOverRealCurl(['503', 'page']);
-    expect(output).toContain('home page renders (has lrow)');
-  }, 30_000);
-
-  test('names the HTTP status when every attempt fails', async () => {
-    const { output } = await gateOverRealCurl(['503']);
-    expect(output).toContain('curl exited 22 (HTTP 503)');
-    expect(output).not.toContain('home page renders');
-  }, 30_000);
-
-  test('does not read the marker from a dropped attempt when the next attempt lacks it', async () => {
-    const { output } = await gateOverRealCurl(['dropped', 'no-marker']);
-    expect(output).toContain('did not return HTML with lrow');
-    expect(output).not.toContain('home page renders');
-  }, 30_000);
-
-  test('does not sleep through a long Retry-After', async () => {
-    const { elapsedMs, output } = await gateOverRealCurl(['503-retry-after']);
-    expect(elapsedMs).toBeLessThan(25_000);
-    expect(output).not.toContain('home page renders');
-  }, 30_000);
+  test.each(['retired', 'sitemap', 'purge'])('%s needs no token on production', (gate) => {
+    const { output } = postflight(HOME, SCORECARDS, { gate });
+    expect(output).not.toContain('no CF Access service token');
+  });
 });

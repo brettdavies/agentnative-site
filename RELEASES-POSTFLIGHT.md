@@ -131,8 +131,8 @@ manual recipe below skips the headers; for prod the recipe runs unauthenticated.
   # Accept: text/html is required — curl's default Accept negotiates markdown on
   # extensionless URLs (same as the scripted gate_pages() in postflight.sh). Each
   # body is captured first: with pipefail set, `curl | grep -q` fails on a healthy page.
-  home=$(curl -fSsL -H 'Accept: text/html' "${ENV_URL}/") && grep -q 'lrow' <<<"$home" && echo "home: ok"
-  board=$(curl -fSsL -H 'Accept: text/html' "${ENV_URL}/scorecards") && grep -q 'lrow' <<<"$board" && echo "leaderboard: ok"
+  home=$(curl -fSs -H 'Accept: text/html' "${ENV_URL}/") && grep -q 'hero__title' <<<"$home" && echo "home: ok"
+  board=$(curl -fSs -H 'Accept: text/html' "${ENV_URL}/scorecards") && grep -q 'lrow' <<<"$board" && echo "leaderboard: ok"
   curl -fSsL "${ENV_URL}/api/score" -X POST \
     -H 'Content-Type: application/json' \
     -d '{"target":"ripgrep","turnstile_token":"x"}' \
