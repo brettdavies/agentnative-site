@@ -313,19 +313,20 @@ gate_pages() {
   require_bin jq
 
   # Explicit Accept: text/html — curl's default Accept negotiates text/markdown
-  # on extensionless URLs (agent-native content negotiation). Capture the body
-  # before grepping: with `set -o pipefail`, `curl | grep -q` false-fails when
-  # the marker appears early (curl gets SIGPIPE / exit 23) even though HTML is fine.
+  # on extensionless URLs (agent-native content negotiation). Capture the body and
+  # grep it through a here-string, never a pipe: under `set -o pipefail`, grep -q
+  # exiting on an early marker kills whatever feeds the pipe (curl, or printf on a
+  # body past the 64 KB pipe buffer), and the gate fails on HTML that is fine.
   local home_html scorecards_html
   home_html=$(ecurl -fSsL -m 10 -H 'Accept: text/html' "${ENV_URL}/" 2>/dev/null || true)
-  if printf '%s' "$home_html" | grep -q '<title>'; then
+  if grep -q '<title>' <<<"$home_html"; then
     gate_pass "${ENV_URL}/ home page renders (has <title>)"
   else
     gate_fail "${ENV_URL}/ home page" "did not return HTML with <title>"
   fi
 
   scorecards_html=$(ecurl -fSsL -m 10 -H 'Accept: text/html' "${ENV_URL}/scorecards" 2>/dev/null || true)
-  if printf '%s' "$scorecards_html" | grep -q 'lrow'; then
+  if grep -q 'lrow' <<<"$scorecards_html"; then
     gate_pass "${ENV_URL}/scorecards renders (has lrow)"
   else
     gate_fail "${ENV_URL}/scorecards" "did not return HTML with lrow"
