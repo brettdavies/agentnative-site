@@ -322,8 +322,12 @@ within the last 7 days). Pre-hit rate craters across all inputs.
 Diagnostic:
 
 ```bash
-# Confirm R2 is reachable from your laptop, the bucket has objects, and the lifecycle rule is intact.
+# Confirm R2 is reachable from your laptop and the bucket has objects: read evidence.object_count.
+# Needs CLOUDFLARE_API_TOKEN, because wrangler has no command that lists R2 objects.
 scripts/monitoring/check-r2-cache.sh --env staging
+
+# Confirm the lifecycle rule is intact. Runs on a wrangler login alone.
+bun x wrangler r2 bucket lifecycle list anc-score-cache-staging
 ```
 
 Resolution: cache reads and writes are best-effort in `src/worker/score/cache.ts`; a missing cache makes `live` runs
@@ -400,8 +404,9 @@ health, recent Worker deploys, error-tier sample). Pick by audience.
 
 The read-only wrappers (`check-kill-switch.sh`, `check-r2-cache.sh`, `check-recent-deploys.sh`,
 `check-error-tier-sample.sh`) each emit one `{check, env, status, checked_at, evidence}` JSON object on stdout. Exit
-code mirrors status (`0` ok or dry-run, `1` warn, `2` alarm, `3` prerequisite missing, `4` error). Three of four use
-wrangler's existing auth flow; the AE SQL wrapper needs `CF_ACCOUNT_ID` + `CF_API_TOKEN` env vars. All four accept
+code mirrors status (`0` ok or dry-run, `1` warn, `2` alarm, `3` prerequisite missing, `4` error). Two of four use
+wrangler's existing auth flow; `check-r2-cache.sh` needs `CLOUDFLARE_API_TOKEN` for its object listing, and the AE SQL
+wrapper needs `CF_ACCOUNT_ID` + `CF_API_TOKEN` env vars. All four accept
 `--dry-run`, which emits the same envelope with `status: "dry-run"` and an `evidence.would_run` array listing the remote
 commands the script would fire.
 

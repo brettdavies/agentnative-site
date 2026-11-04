@@ -8,9 +8,10 @@
 import { describe, expect, test } from 'bun:test';
 import { lstatSync, readFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
-import { REPO_ROOT } from './helpers/workflows';
+import { REPO_ROOT, trackedPaths } from './helpers/workflows';
 
-const DATA_COMMAND = /(?:^\s*|\bbun x )wrangler (?:kv (?:key|bulk)|r2 object) \w+/;
+// Backticked inline code is prose naming a command, not a command to paste.
+const DATA_COMMAND = /(?<![`\w-])wrangler (?:kv[: ](?:key|bulk)|r2 object) \w+/;
 const NAMES_ITS_STORE = /\s--(?:remote|local)\b/;
 const SHEBANG = /^#!.*\b(?:ba)?sh\b/;
 
@@ -19,18 +20,20 @@ function unnamedStore(text: string): string[] {
   return text
     .replace(/\\\n\s*/g, ' ')
     .split('\n')
-    .filter((line) => !line.trim().startsWith('#') || line.includes('bun x wrangler'))
-    .filter((line) => DATA_COMMAND.test(line) && !NAMES_ITS_STORE.test(line))
-    .map((line) => line.trim());
+    .map((line) => line.trim())
+    .filter((line) => !line.startsWith('#'))
+    .filter((line) => DATA_COMMAND.test(line) && !NAMES_ITS_STORE.test(line));
 }
 
 function trackedOperatorFiles(): Map<string, string> {
-  const listing = Bun.spawnSync(['git', 'ls-files'], { cwd: REPO_ROOT });
-  if (listing.exitCode !== 0) throw new Error(`git ls-files failed: ${listing.stderr.toString()}`);
   const files = new Map<string, string>();
-  for (const path of listing.stdout.toString().split('\n').filter(Boolean)) {
+  for (const path of trackedPaths()) {
     const extension = extname(path);
-    const isDoc = /^RELEASES[^/]*\.md$|^AGENTS\.md$|^docs\/runbooks\/.*\.md$|^scripts\/.*\.md$/.test(path);
+    const isDoc =
+      /^(?:RELEASES[^/]*|AGENTS|README|CONTRIBUTING)\.md$/.test(path) ||
+      /^docs\/runbooks\/.*\.md$/.test(path) ||
+      /^scripts\/.*\.md$/.test(path) ||
+      /^\.github\/.*\.ya?ml$/.test(path);
     if (!isDoc && extension !== '' && extension !== '.sh' && extension !== '.bash') continue;
     const absolute = join(REPO_ROOT, path);
     if (!lstatSync(absolute, { throwIfNoEntry: false })?.isFile()) continue;
@@ -48,6 +51,14 @@ describe('unnamedStore', () => {
     'bun x wrangler r2 object list bucket --prefix=scores/ | head -20',
     'bun x wrangler kv bulk put file.json',
     'bun x wrangler kv key put \\\n  --binding=SCORE_KV key value',
+    'bunx wrangler kv key put k v',
+    'npx wrangler kv key get k',
+    'x=$(wrangler kv key get k)',
+    'cd a && wrangler kv key put k v',
+    'timeout 30 wrangler kv key get k',
+    'CLOUDFLARE_ENV=x wrangler kv key put k v',
+    '1. wrangler kv key put k v',
+    'wrangler kv:key put SCORE_KV scoring_disabled true',
   ])('reports %j', (line) => {
     expect(unnamedStore(line)).toHaveLength(1);
   });
@@ -75,6 +86,7 @@ describe('wrangler data commands name their store', () => {
         'scripts/monitoring/check-kill-switch.sh',
         'scripts/monitoring/check-r2-cache.sh',
         'docs/runbooks/live-scoring-monitoring.md',
+        '.github/workflows/ci.yml',
         'RELEASES.md',
       ]),
     );

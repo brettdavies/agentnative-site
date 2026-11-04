@@ -48,19 +48,22 @@ WRANGLER_ENV_FLAG=()
 
 NOW="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
-WOULD_RUN="bun x wrangler kv key list --remote --binding=SCORE_KV${WRANGLER_ENV_FLAG[*]:+ ${WRANGLER_ENV_FLAG[*]}} --prefix scoring_disabled"
+KV_TARGET=(--binding=SCORE_KV "${WRANGLER_ENV_FLAG[@]}")
+WOULD_GET="bun x wrangler kv key get --remote ${KV_TARGET[*]} scoring_disabled"
+WOULD_LIST="bun x wrangler kv key list --remote ${KV_TARGET[*]} --prefix scoring_disabled"
 
 if [ "$DRY_RUN" = true ]; then
   "$JQ_BIN" -n \
     --arg env "$ENV_ARG" \
     --arg checked_at "$NOW" \
-    --arg would_run "$WOULD_RUN" \
+    --arg would_get "$WOULD_GET" \
+    --arg would_list "$WOULD_LIST" \
     '{
        check: "kill-switch",
        env: $env,
        status: "dry-run",
        checked_at: $checked_at,
-       evidence: { would_run: [$would_run] }
+       evidence: { would_run: [$would_get, $would_list] }
      }'
   exit 0
 fi
@@ -69,17 +72,16 @@ STDERR_FILE="$(mktemp)"
 trap 'rm -f "$STDERR_FILE"' EXIT
 
 # Without --remote wrangler reads a local store and exits 0 on every key, which says
-# nothing about deployed KV. `kv key get --remote` answers an absent key and a missing
-# namespace with the same 404, so the key's presence comes from `kv key list`, which
-# exits non-zero only when the read itself fails. A listing that does not parse goes on
-# to the get, whose 404 reads as an error rather than as an absent key.
-WRANGLER_STDOUT=""
+# nothing about deployed KV. The value comes from `get` alone, because KV listings are
+# eventually consistent and can miss a key just flipped on or name one just flipped off.
+# `get` answers an absent key and a missing namespace with one 404, so on a 404 `list`
+# tells them apart: it can read the namespace or it cannot, whatever it lists.
 set +e
-LISTING="$(bun x wrangler kv key list --remote --binding=SCORE_KV "${WRANGLER_ENV_FLAG[@]}" --prefix scoring_disabled 2>"$STDERR_FILE")"
+WRANGLER_STDOUT="$(bun x wrangler kv key get --remote "${KV_TARGET[@]}" scoring_disabled 2>"$STDERR_FILE")"
 WRANGLER_EXIT=$?
-if [ "$WRANGLER_EXIT" -eq 0 ] \
-  && ! "$JQ_BIN" -e 'any(.[]; .name == "scoring_disabled") | not' <<<"$LISTING" >/dev/null 2>&1; then
-  WRANGLER_STDOUT="$(bun x wrangler kv key get --remote --binding=SCORE_KV "${WRANGLER_ENV_FLAG[@]}" scoring_disabled 2>"$STDERR_FILE")"
+if [ "$WRANGLER_EXIT" -ne 0 ] && grep -q '404: Not Found' "$STDERR_FILE"; then
+  WRANGLER_STDOUT=""
+  bun x wrangler kv key list --remote "${KV_TARGET[@]}" --prefix scoring_disabled >/dev/null 2>"$STDERR_FILE"
   WRANGLER_EXIT=$?
 fi
 set -e
