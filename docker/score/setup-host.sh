@@ -57,7 +57,7 @@ echo "==> Detected Ubuntu $VERSION_CODENAME ($CODENAME / $ARCH)"
 
 CONFLICTS=()
 for p in docker.io docker-compose docker-doc podman-docker containerd runc; do
-  if dpkg -l "$p" 2>/dev/null | grep -q "^ii"; then
+  if grep -q "^ii" <<<"$(dpkg -l "$p" 2>/dev/null)"; then
     CONFLICTS+=("$p")
   fi
 done
@@ -69,7 +69,7 @@ fi
 
 # ---- Step 2: Docker Engine (apt repo) -----------------------------------
 
-if ! dpkg -l docker-ce 2>/dev/null | grep -q "^ii"; then
+if ! grep -q "^ii" <<<"$(dpkg -l docker-ce 2>/dev/null)"; then
   echo "==> Setting up Docker apt repository"
 
   sudo apt-get update
@@ -102,7 +102,7 @@ fi
 
 # ---- Step 3: Add invoking user to docker group --------------------------
 
-if ! id -nG "$USER" | tr ' ' '\n' | grep -qx docker; then
+if ! grep -qx docker <<<"$(id -nG "$USER" | tr ' ' '\n')"; then
   echo "==> Adding $USER to docker group"
   sudo usermod -aG docker "$USER"
   GROUP_NEEDS_RELOGIN=1
@@ -117,7 +117,7 @@ if ! command -v nvidia-smi >/dev/null 2>&1; then
   echo "==> Skipping nvidia-container-toolkit — no NVIDIA driver detected on host."
   echo "    (nvidia-smi binary missing.) GPU passthrough will not be available;"
   echo "    nvidia-smi tool falls back to install-missing in the leaderboard."
-elif ! dpkg -l nvidia-container-toolkit 2>/dev/null | grep -q "^ii"; then
+elif ! grep -q "^ii" <<<"$(dpkg -l nvidia-container-toolkit 2>/dev/null)"; then
   echo "==> Setting up nvidia-container-toolkit apt repository"
 
   if [[ ! -f /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg ]]; then

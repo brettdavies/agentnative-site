@@ -427,8 +427,7 @@ gate_coord() {
     if [[ -n "$staging_pin" && -n "$worker_cmd" ]]; then
       if docker image inspect "$staging_pin" >/dev/null 2>&1 \
         || docker pull "$staging_pin" >/dev/null 2>&1; then
-        if docker run --rm --entrypoint /usr/local/bin/anc "$staging_pin" --help 2>/dev/null \
-          | grep -qE "^  $worker_cmd "; then
+        if grep -qE "^  $worker_cmd " <<<"$(docker run --rm --entrypoint /usr/local/bin/anc "$staging_pin" --help 2>/dev/null)"; then
           gate_pass "staging container pin baked anc supports '$worker_cmd' (Worker invocation)"
         else
           gate_fail "staging container baked anc vocabulary" \
@@ -750,7 +749,7 @@ gate_e2e() {
 gate_og_cards() {
   local cid="$1" csec="$2"
 
-  if ! (cd "$REPO_ROOT" && bun x wrangler whoami 2>/dev/null | grep -q 'You are logged in'); then
+  if ! grep -q 'You are logged in' <<<"$(cd "$REPO_ROOT" && bun x wrangler whoami 2>/dev/null)"; then
     gate_skip "og-cards smoke" "wrangler is not logged in; the smoke deploys a fixture Worker on anc.dev"
     return
   fi
