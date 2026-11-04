@@ -676,7 +676,7 @@ describe('rows the audit could not run', () => {
 
   test('the score note says global keeps those rows in its maximum, on the page and the twin', () => {
     const sentence =
-      'Global keeps the 18 checks this audit could not run in its maximum; the ones that need sign-in on another host name their own command.';
+      'Global keeps the 18 checks this audit could not run in its maximum; the ones that need sign-in name their own command.';
     expect(textOf(page(stripeShaped()))).toContain(sentence);
     expect(twin(stripeShaped())).toContain(`\n${sentence}\n`);
     const single = scorecardOf('example.com', [row('llms-txt', 'pass', at('example.com'))]);

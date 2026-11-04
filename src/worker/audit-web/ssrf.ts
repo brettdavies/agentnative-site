@@ -206,10 +206,14 @@ export function parseIpv6Literal(host: string): Uint8Array | null {
   return bytes;
 }
 
+function inIpv4Range(value: number, [base, bits]: [number, number]): boolean {
+  const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+  return (value & mask) >>> 0 === base;
+}
+
 function blockedIpv4Reason(value: number): string | null {
   for (const [base, bits] of BLOCKED_IPV4_RANGES) {
-    const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
-    if ((value & mask) >>> 0 === base) {
+    if (inIpv4Range(value, [base, bits])) {
       return `ipv4 ${formatIpv4(value)} is in blocked range ${formatIpv4(base)}/${bits}`;
     }
   }
@@ -265,20 +269,33 @@ export function blockedHostReason(rawHostname: string): string | null {
   return null;
 }
 
-/**
- * Cloud instance-metadata destinations: the one class of host this gate
- * blocks that `anc web` also refuses, from any network. `anc web` classifies
- * them the same way: 169.254.0.0/16, its IPv4-mapped and IPv4-compatible
- * IPv6 forms, fd00:ec2::254, and the GCP metadata name.
- */
+// What `anc web` refuses as cloud metadata from any network, matching the
+// metadata class in its `locality.rs`. Every other host this gate blocks is one
+// `anc web` can audit from a network that reaches it. 168.63.129.16 is a public
+// address this gate does not block; it is here because the command must not name it.
+const METADATA_HOSTS = {
+  names: ['metadata.google.internal'],
+  ipv4: [
+    [ipv4('169.254.0.0'), 16],
+    [ipv4('100.100.100.200'), 32],
+    [ipv4('168.63.129.16'), 32],
+  ] as Array<[number, number]>,
+  ipv6: ['fd00:ec2::254', 'fd20:ce::254'],
+};
+
+/** Whether a hostname, without its port, is a cloud metadata destination, in any literal form that names one. */
 export function isMetadataHost(rawHostname: string): boolean {
   const hostname = normalizedHostname(rawHostname);
-  if (hostname === 'metadata.google.internal') return true;
-  const inMetadataRange = (v4: number | null) => v4 !== null && v4 >>> 16 === 0xa9fe;
+  if (METADATA_HOSTS.names.includes(hostname)) return true;
+  const inMetadataIpv4 = (v4: number | null) =>
+    v4 !== null && METADATA_HOSTS.ipv4.some((range) => inIpv4Range(v4, range));
   const v6 = parseIpv6Literal(hostname.replace(/^\[|\]$/g, ''));
-  if (v6 === null) return inMetadataRange(parseIpv4Literal(hostname));
-  const imds = parseIpv6Literal('fd00:ec2::254');
-  return v6.every((b, i) => b === imds?.[i]) || inMetadataRange(embeddedIpv4(v6));
+  if (v6 === null) return inMetadataIpv4(parseIpv4Literal(hostname));
+  const isListed = METADATA_HOSTS.ipv6.some((listed) => {
+    const bytes = parseIpv6Literal(listed);
+    return v6.every((b, i) => b === bytes?.[i]);
+  });
+  return isListed || inMetadataIpv4(embeddedIpv4(v6));
 }
 
 /**

@@ -6,7 +6,6 @@ import { type AuditErrorObject, auditError } from '../../shared/audit-events';
 import { ANC_WEB_DOCS_PATH, localTargetCta } from '../../shared/scoring-copy';
 import type { WebTargetRefusal } from './core';
 import { ANC_WEB_RELEASED, ancWebCommand } from './provenance-copy';
-import { isMetadataHost } from './ssrf';
 
 /**
  * The error object naming `anc web <host>`, or null when the caller's generic
@@ -18,7 +17,7 @@ export function localTargetRefusal(
   origin: string,
   commandReleased: boolean = ANC_WEB_RELEASED,
 ): AuditErrorObject | null {
-  if (refusal.refused !== 'host' || isMetadataHost(refusal.url.hostname)) return null;
+  if (refusal.refused !== 'host') return null;
   const { host } = refusal.url;
   const command = ancWebCommand(host, commandReleased);
   if (command === null) return null;

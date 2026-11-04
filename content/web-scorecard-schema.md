@@ -405,10 +405,11 @@ replaced it, and no remediation, because a re-audit scores the successor instead
 
 A row with one of the six declared-host reasons also carries `access_remedy`: why the public audit could not evaluate
 it, and, when `anc web` can, the command that evaluates it from the reader's own network. `declared-host-blocked` and
-`reciprocity-refused` name no command, because `anc web` applies the same rules. A row that needs sign-in names the host
-the token belongs to, so a token never goes on a run aimed at the site that declared that host. A scorecard holding any
-such row carries `access_note` beside `results`: the sentence saying global keeps those rows in its maximum, and the
-command for the ones a run of the audited site can evaluate. Both are the sentences the result page shows.
+`reciprocity-refused` name no command, because `anc web` applies the same rules, and `declared-host-budget-exceeded`
+names none, because `anc web` stops at the same per-audit cap and the row does not say which limit it hit. A row that
+needs sign-in names the host its token belongs to with `--token-host`, because `anc web` sends a token only to the host
+that flag names. A scorecard holding any such row carries `access_note` beside `results`: the sentence saying global
+keeps those rows in its maximum, and the command for the ones a run of the audited site can evaluate. Both are the sentences the result page shows.
 
 ```json
 "remediation": {

@@ -9,6 +9,7 @@ import { MAX_FOLLOWED_HOSTS } from './follow-requests';
 import type { BudgetCause, NotFollowedReason } from './follow-trail';
 import type { AdmittedBy } from './reciprocity';
 import type { Rich } from './rich-text';
+import { isMetadataHost } from './ssrf';
 
 /** The fragment the Declared hosts slot carries on every page, whichever state it renders. */
 export const DECLARED_HOSTS_ID = 'declared-hosts';
@@ -160,12 +161,22 @@ const COMMAND_SAFE_HOST = /^(?:[a-z0-9_][a-z0-9_.-]*|\[[0-9a-f:.]+\])(?::\d+)?$/
 
 /**
  * The `anc web` invocation for a host, runnable as printed, or null when no
- * published release has the command or the host cannot be printed safely. A
- * bracketed IPv6 literal is quoted because zsh reads brackets as a glob.
+ * published release has the command or it cannot run for this host.
  */
 export function ancWebCommand(host: string, commandReleased: boolean = ANC_WEB_RELEASED): string | null {
-  if (!commandReleased || !COMMAND_SAFE_HOST.test(host)) return null;
-  return `anc web ${host.startsWith('[') ? `'${host}'` : host}`;
+  if (!commandReleased) return null;
+  const printed = printableHost(host);
+  return printed === null ? null : `anc web ${printed}`;
+}
+
+/**
+ * The host as a command argument, or null when it cannot be printed safely or
+ * `anc web` refuses it from any network. A bracketed IPv6 literal is quoted
+ * because zsh reads brackets as a glob.
+ */
+function printableHost(host: string): string | null {
+  if (!COMMAND_SAFE_HOST.test(host) || isMetadataHost(host.replace(/:\d+$/, ''))) return null;
+  return host.startsWith('[') ? `'${host}'` : host;
 }
 
 // `anc web` holds a declared host to the same rules the public audit does: it
@@ -182,14 +193,17 @@ const ANC_WEB_ALSO_REFUSES: readonly NaReason[] = [
 
 /**
  * The command that evaluates a not-run row from the reader's own network, or
- * null when none does. A sign-in row names the host the token belongs to, not
- * the audited site: `anc web` presents its token to the audited site's own
- * endpoint first, so a site that declares another host's server and answers
- * the reader's run itself would receive that host's token.
+ * null when none does. `anc web` sends a token only to the host `--token-host`
+ * names, so a sign-in row always names it; running the audited site with the
+ * flag reaches the endpoint through the site's own declaration, which finds an
+ * endpoint off the common paths that a run of the host alone would miss.
  */
 function notRunCommand(reason: NaReason, host: string, domain: string, commandReleased: boolean): string | null {
   if (ANC_WEB_ALSO_REFUSES.includes(reason)) return null;
-  return ancWebCommand(reason === 'auth-required' ? host : domain, commandReleased);
+  const onSite = ancWebCommand(domain, commandReleased);
+  if (onSite === null || reason !== 'auth-required') return onSite;
+  const tokenHost = printableHost(host);
+  return tokenHost === null ? null : `${onSite} --token-host ${tokenHost}`;
 }
 
 /**
@@ -225,24 +239,21 @@ export function notRunScoreNote(
   const total = rows.length === 1 ? '1 check' : `${rows.length} checks`;
   const siteCommand = ancWebCommand(domain, commandReleased);
   const commands = rows.map((row) => notRunCommand(row.reason, row.host, domain, commandReleased));
-  const here = rows.filter((_, i) => siteCommand !== null && commands[i] === siteCommand);
-  const elsewhere = commands.filter((command) => command !== null && command !== siteCommand).length;
+  const onSite = commands.filter((command) => command !== null && command === siteCommand).length;
+  const signIn = commands.filter((command) => command !== null && command !== siteCommand).length;
 
-  const them = here.length < rows.length ? `${here.length} of them` : rows.length === 1 ? 'it' : 'them';
-  const signIn: Rich = here.some((row) => row.reason === 'auth-required')
-    ? [', with ', { code: 'ANC_WEB_TOKEN' }, ' set for the ones that need sign-in']
-    : [];
-  const onSite: Rich =
-    siteCommand !== null && here.length > 0
-      ? ['; run ', { code: siteCommand }, ` to evaluate ${them} from your own network`, ...signIn]
+  const them = onSite < rows.length ? `${onSite} of them` : rows.length === 1 ? 'it' : 'them';
+  const runSite: Rich =
+    siteCommand !== null && onSite > 0
+      ? ['; run ', { code: siteCommand }, ` to evaluate ${them} from your own network`]
       : [];
-  const onOtherHosts: Rich =
-    elsewhere === 0
+  const signInRows: Rich =
+    signIn === 0
       ? []
       : [
-          elsewhere === 1
-            ? '; the one that needs sign-in on another host names its own command'
-            : '; the ones that need sign-in on another host name their own command',
+          signIn === 1
+            ? '; the one that needs sign-in names its own command'
+            : '; the ones that need sign-in name their own command',
         ];
-  return [`Global keeps the ${total} this audit could not run in its maximum`, ...onSite, ...onOtherHosts, '.'];
+  return [`Global keeps the ${total} this audit could not run in its maximum`, ...runSite, ...signInRows, '.'];
 }

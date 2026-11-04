@@ -41,6 +41,12 @@ describe('ancWebCommand', () => {
     }
   });
 
+  test('never prints a metadata destination, with or without a port, even one the SSRF gate does not block', () => {
+    for (const host of ['169.254.169.254', '100.100.100.200:8443', '168.63.129.16', '[fd20:ce::254]:443']) {
+      expect({ host, command: ancWebCommand(host, true) }).toEqual({ host, command: null });
+    }
+  });
+
   test('names nothing until a published release has the command', () => {
     expect(ancWebCommand('localhost:3000', false)).toBeNull();
   });
@@ -54,15 +60,31 @@ describe('isMetadataHost', () => {
       'metadata.google.internal',
       'metadata.google.internal.',
       '[fd00:ec2::254]',
+      '[fd20:ce::254]',
+      '100.100.100.200',
+      '168.63.129.16',
       '[::ffff:a9fe:a9fe]',
       '[::a9fe:a9fe]',
+      '[::ffff:6464:64c8]',
+      '[::ffff:a83f:8110]',
     ]) {
       expect({ host, metadata: isMetadataHost(host) }).toEqual({ host, metadata: true });
     }
   });
 
   test('leaves the hosts anc web audits', () => {
-    for (const host of ['localhost', '10.0.0.1', '127.0.0.1', 'build.internal', '[::1]', '[fd00::1]', '[fe80::1]']) {
+    for (const host of [
+      'localhost',
+      '10.0.0.1',
+      '127.0.0.1',
+      'build.internal',
+      '[::1]',
+      '[fd00::1]',
+      '[fe80::1]',
+      '100.100.100.199',
+      '168.63.129.17',
+      '[fd20:ce::255]',
+    ]) {
       expect({ host, metadata: isMetadataHost(host) }).toEqual({ host, metadata: false });
     }
   });
@@ -93,6 +115,8 @@ describe('localTargetRefusal', () => {
   test('stands aside for every case the generic refusal covers', () => {
     expect(localTargetRefusal(refused('localhost:3000'), ORIGIN, false)).toBeNull();
     expect(localTargetRefusal(refused('169.254.169.254'), ORIGIN)).toBeNull();
+    expect(localTargetRefusal(refused('100.100.100.200'), ORIGIN)).toBeNull();
+    expect(localTargetRefusal(refused('[fd20:ce::254]'), ORIGIN)).toBeNull();
     expect(localTargetRefusal(refused('metadata.google.internal'), ORIGIN)).toBeNull();
     expect(localTargetRefusal(refused('a$(id).internal'), ORIGIN)).toBeNull();
     expect(localTargetRefusal({ ok: false, refused: 'url', reason: 'invalid url' }, ORIGIN)).toBeNull();
