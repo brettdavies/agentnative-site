@@ -18,6 +18,7 @@ export interface ParityInput {
   unported: string | null;
   siteFingerprint: string | null;
   vendoredFingerprint: string | null;
+  siteHasPath: (path: string) => boolean;
 }
 
 export interface Row {
@@ -28,7 +29,7 @@ export interface Row {
 }
 
 export type Outcome =
-  | { kind: 'report'; rows: Row[]; failedTests: string[]; suiteCount: number }
+  | { kind: 'report'; rows: Row[]; failedTests: string[]; suiteCount: number; buildFailure: string | null }
   | { kind: 'unavailable' | 'broken'; reason: string; detail: string };
 
 interface LedgerEntry {
@@ -38,15 +39,19 @@ interface LedgerEntry {
 }
 
 // The sync's messages that blame the commit's contract. It exits 1 for its other
-// failures too, such as a commit missing from the checkout, and those are wiring.
-const CONTRACT_REFUSED = /^error: commit \S+ (?:has no |vendors a symlink)/m;
+// failures too, such as a commit missing from the checkout, and those are wiring. It
+// also says "has no" for any archive or tar failure, so a path the commit does hold
+// is wiring too.
+const CONTRACT_REFUSED = /^error: commit \S+ (?:has no (\S+)|vendors a symlink)/m;
 // The CLI's own crate only: a dependency's build failure says nothing about the contract.
 const CLI_BUILD_FAILED = /failed to run custom build command for `agentnative |could not compile `agentnative`/;
 const DUMP_TEST_PANIC = /^thread 'dump_corpus_divergences'.* panicked at /;
 // The dump test's own message for a failed write to the path this workflow passes.
 const DUMP_WRITE_PANIC = /^write \S+: /m;
-// A killed test binary explains nothing about the contract, whatever else failed.
-const TEST_BINARY_CRASH = /process didn't exit successfully: .*\(signal: /;
+// A killed rustc or test binary explains nothing about the contract, whatever else failed.
+const PROCESS_KILLED = /process didn't exit successfully: .*\(signal: /;
+// The bump suites' first output. Without it a named failure cannot excuse the second run.
+const BUMP_SUITES_RAN = /^\s*Running unittests /m;
 
 export const DETAIL_CHAR_CAP = 2000;
 
@@ -90,9 +95,15 @@ function parseLedger(text: string): Map<string, LedgerEntry> | null {
 /** Failing tests as `<suite>::<test>` and the suites that ran, from libtest's text output. The dump's suite runs twice. */
 function parseTestLog(log: string): { failedTests: string[]; suiteCount: number } {
   let suite = '';
+  let quotingOutput = false;
   const suites = new Set<string>();
   const failedTests = new Set<string>();
   for (const line of log.split('\n')) {
+    // From `failures:` to `test result:` libtest replays captured output, and a test of
+    // the CLI's bump script can quote a whole suite's lines there.
+    if (line === 'failures:') quotingOutput = true;
+    if (line.startsWith('test result: ')) quotingOutput = false;
+    if (quotingOutput) continue;
     const running = /^\s*Running (?:unittests )?(?:tests\/)?(\S+)\.rs /.exec(line);
     if (running) {
       suite = running[1] ?? '';
@@ -113,7 +124,7 @@ function excerptFrom(log: string, pattern: RegExp, count: number): string | null
 
 function classifyMissingDump(input: ParityInput): Outcome {
   const log = input.testLog;
-  if (CLI_BUILD_FAILED.test(log)) {
+  if (CLI_BUILD_FAILED.test(log) && !PROCESS_KILLED.test(log)) {
     return {
       kind: 'unavailable',
       reason: 'the CLI did not build against this contract',
@@ -133,7 +144,8 @@ function classifyMissingDump(input: ParityInput): Outcome {
 
 function classifySync(input: ParityInput): Outcome | null {
   if (input.syncExit === 0) return null;
-  if (input.syncExit === 1 && CONTRACT_REFUSED.test(input.syncLog)) {
+  const refused = CONTRACT_REFUSED.exec(input.syncLog);
+  if (input.syncExit === 1 && refused && !(refused[1] && input.siteHasPath(refused[1]))) {
     return { kind: 'unavailable', reason: 'the CLI could not read this contract', detail: lastLines(input.syncLog, 5) };
   }
   return {
@@ -180,8 +192,9 @@ export function classify(input: ParityInput): Outcome {
     .filter(([key]) => !observed.has(key))
     .map(([, { scenario, element, owner }]) => ({ scenario, element, status: 'closed', owner }));
   const tests = parseTestLog(input.testLog);
-  const failureNamed = tests.failedTests.length > 0 || CLI_BUILD_FAILED.test(input.testLog);
-  if (input.testExit !== 0 && (!failureNamed || TEST_BINARY_CRASH.test(input.testLog))) {
+  const buildFailed = CLI_BUILD_FAILED.test(input.testLog);
+  const failureNamed = buildFailed || (tests.failedTests.length > 0 && BUMP_SUITES_RAN.test(input.testLog));
+  if (input.testExit !== 0 && (!failureNamed || PROCESS_KILLED.test(input.testLog))) {
     return {
       kind: 'broken',
       reason: `the CLI tests ended with exit code ${input.testExit} and named no failure that accounts for it`,
@@ -193,5 +206,6 @@ export function classify(input: ParityInput): Outcome {
     kind: 'report',
     rows: order.flatMap((status) => [...seen, ...closed].filter((row) => row.status === status)),
     ...tests,
+    buildFailure: buildFailed ? (excerptFrom(input.testLog, /^error/, 12) ?? lastLines(input.testLog, 15)) : null,
   };
 }

@@ -25,7 +25,14 @@ test dump_corpus_divergences ... ok
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.69s
 `;
 
-const CHANGED_GOLDEN_LOG = `     Running tests/web_audit_conformance.rs (target/debug/deps/web_audit_conformance-221cd0fee985ecc8)
+const CHANGED_GOLDEN_LOG = `     Running unittests src/lib.rs (target/debug/deps/agentnative-3c302479454ea739)
+
+running 1 test
+test web_audit::scorecard::keeps_order ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.66s
+
+     Running tests/web_audit_conformance.rs (target/debug/deps/web_audit_conformance-221cd0fee985ecc8)
 
 running 3 tests
 test a_mutated_golden_fails_the_comparison ... ok
@@ -153,6 +160,7 @@ const input = (overrides: Partial<ParityInput> = {}): ParityInput => ({
   unported: UNPORTED_NONE,
   siteFingerprint: '686ddd155166\n',
   vendoredFingerprint: '686ddd155166\n',
+  siteHasPath: () => false,
   ...overrides,
 });
 
@@ -215,9 +223,11 @@ describe('a run that produced a dump', () => {
 
   test('a failing test beside an empty dump is not reported as full parity', () => {
     const failed = renderParityReport(input({ testExit: 101, testLog: CHANGED_GOLDEN_LOG }));
-    expect(failed.summary).toContain('**No scorecard divergence, but 1 CLI test fails at this contract.**');
+    expect(failed.summary).toContain('**No scorecard divergence. 1 CLI test fails at this contract.**');
     const unbuilt = renderParityReport(input({ testExit: 101, testLog: CLI_COMPILE_FAILURE_LOG }));
-    expect(unbuilt.summary).toContain('**No scorecard divergence, but the CLI tests ended with exit code 101.**');
+    expect(unbuilt.summary).toContain(
+      "**No scorecard divergence. The CLI's bump suites did not build, so they did not run.**",
+    );
   });
 
   test('the headline names failing tests beside a ledgered row, so it never reads as all clear', () => {
@@ -235,7 +245,7 @@ describe('a run that produced a dump', () => {
     );
   });
 
-  test('a bump suite the contract stops compiling stays a report and states the exit code', () => {
+  test('a bump suite the contract stops compiling stays a report, says so and quotes the error', () => {
     const report = renderParityReport(
       input({
         testExit: 101,
@@ -246,7 +256,46 @@ describe('a run that produced a dump', () => {
     );
     expect(report.exitCode).toBe(0);
     expect(report.summary).toContain(
-      '**No new divergence. 1 divergence already in the CLI ledger. The CLI tests ended with exit code 101.**',
+      "**No new divergence. 1 divergence already in the CLI ledger. The CLI's bump suites did not build, so they did not run.**",
+    );
+    expect(report.summary).toContain('mismatched types');
+  });
+
+  test('a named failure does not excuse a second run that never started', () => {
+    const report = renderParityReport(
+      input({ testExit: 101, testLog: `${MALFORMED_GOLDEN_LOG}${NO_TARGET_LOG}`, dump: '[["a","row:one"]]' }),
+    );
+    expect(report.exitCode).toBe(1);
+    expect(report.summary).toContain('named no failure that accounts for it');
+  });
+
+  test('test output a failing test quotes is not counted as a failing test', () => {
+    const testLog = `     Running unittests src/lib.rs (target/debug/deps/agentnative-3)
+
+running 1 test
+test a_real_test ... FAILED
+
+failures:
+
+---- a_real_test stdout ----
+test parses_the_registry ... FAILED
+     Running tests/quoted.rs (target/debug/deps/quoted-1)
+
+failures:
+    a_real_test
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+`;
+    const report = renderParityReport(input({ testExit: 101, testLog }));
+    expect(report.summary).toContain('**No scorecard divergence. 1 CLI test fails at this contract.**');
+    expect(report.summary).not.toContain('parses_the_registry');
+    expect(report.summary).toContain('Ran 1 CLI test suite.');
+  });
+
+  test('the headline names bindings the CLI has not ported', () => {
+    const unported = JSON.stringify({ handlers: { 'brand-new': ['a'] }, evals: { 'new-rule': ['b'] } });
+    expect(renderParityReport(input({ unported })).summary).toContain(
+      '**No scorecard divergence. 2 handler kinds or eval rules not yet ported.**',
     );
   });
 
@@ -276,16 +325,20 @@ describe('a run that produced a dump', () => {
 test scorecard::audience::tests::rejects_a_duplicate_signal - should panic ... FAILED
 `;
     const report = renderParityReport(input({ testExit: 101, testLog }));
-    expect(report.summary).toContain('**No scorecard divergence, but 1 CLI test fails at this contract.**');
+    expect(report.summary).toContain('**No scorecard divergence. 1 CLI test fails at this contract.**');
     expect(report.summary).toContain('- `src/lib::scorecard::audience::tests::rejects_a_duplicate_signal`');
   });
 
   test("the dump's suite running twice counts once, and its failure lists once", () => {
     const report = renderParityReport(
-      input({ testExit: 101, testLog: `${DUMP_FAILED_ONCE}${DUMP_FAILED_ONCE}`, dump: '[]' }),
+      input({
+        testExit: 101,
+        testLog: `${DUMP_FAILED_ONCE}     Running unittests src/lib.rs (target/debug/deps/agentnative-3)\n${DUMP_FAILED_ONCE}`,
+        dump: '[]',
+      }),
     );
-    expect(report.summary).toContain('Ran 1 CLI test suite.');
-    expect(report.summary.match(/dump_corpus_divergences/g)).toHaveLength(1);
+    expect(report.summary).toContain('Ran 2 CLI test suites.');
+    expect(report.summary.match(/web_audit_divergences::dump_corpus_divergences/g)).toHaveLength(1);
   });
 
   test('a failing-test list that would overrun a comment is capped and says where the rest are', () => {
@@ -307,7 +360,8 @@ test scorecard::audience::tests::rejects_a_duplicate_signal - should panic ... F
     );
     expect(report.comment.length).toBeLessThan(65536);
     expect(report.comment).toContain('The next CLI bump carries 5000 new divergences across 5000 scenarios.');
-    expect(report.comment).toContain('4800 more rows in the [job summary]');
+    expect(report.comment).toContain('4800 more rows not shown here; the [job summary]');
+    expect(report.comment).toContain('shows the first 2000.');
     expect(report.summary).toContain('3000 more rows not shown.');
     expect(new TextEncoder().encode(report.summary).length).toBeLessThan(1024 * 1024);
   });
@@ -369,6 +423,26 @@ describe('a run with no dump never reads as zero divergences', () => {
       expect(report.exitCode).toBe(1);
       expectUnavailable(report.summary, 'the CLI sync ended with exit code 1');
     }
+  });
+
+  test('"has no" for a path the commit does hold fails the run: the sync says that for any tar failure', () => {
+    const syncLog = 'error: commit abc has no src/data/web-audit/contract/build/\n';
+    const siteHasPath = (path: string): boolean => path === 'src/data/web-audit/contract/build/';
+    const report = renderParityReport(
+      input({ syncExit: 1, syncLog, siteHasPath, testExit: null, testLog: '', dump: null }),
+    );
+    expect(report.exitCode).toBe(1);
+    expectUnavailable(report.summary, 'the CLI sync ended with exit code 1');
+  });
+
+  test('a killed rustc fails the run: the runner is the cause, not the contract', () => {
+    const testLog = `error: could not compile \`agentnative\` (lib test)
+
+Caused by:
+  process didn't exit successfully: \`rustc --crate-name agentnative\` (signal: 9, SIGKILL: kill)
+`;
+    const report = renderParityReport(input({ testExit: 101, testLog, dump: null }));
+    expect(report.exitCode).toBe(1);
   });
 
   test('a contract the sync refuses for a symlink stays green', () => {
@@ -541,10 +615,19 @@ describe('the script as the workflow runs it', () => {
   test('a test step the workflow skipped arrives as an empty exit code and reads as unavailable', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cli-parity-sync-'));
     const syncLog = join(dir, 'sync.log');
-    writeFileSync(syncLog, 'error: commit abc has no src/data/web-audit/contract/build/\n');
+    writeFileSync(syncLog, 'error: commit abc has no tests/fixtures/web-audit-score-parity.json\n');
     const { code, comment } = run({ 'sync-exit': '1', 'test-exit': '', 'sync-log': syncLog });
     expect(code).toBe(0);
     expect(comment).toContain('**Report unavailable: the CLI could not read this contract.**');
+  });
+
+  test('a sync that says the commit has no path this checkout holds goes red', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-parity-sync-'));
+    const syncLog = join(dir, 'sync.log');
+    writeFileSync(syncLog, 'error: commit abc has no src/data/web-audit/contract/build/\n');
+    const { code, comment } = run({ 'sync-exit': '1', 'test-exit': '', 'sync-log': syncLog });
+    expect(code).toBe(1);
+    expect(comment).toContain('**Report unavailable: the CLI sync ended with exit code 1.**');
   });
 });
 
