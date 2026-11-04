@@ -38,6 +38,14 @@ const failure = (error: string): ExchangeResponse => ({ error });
 const TIMEOUT = failure('TimeoutError: deadline exceeded');
 const REFUSED = failure('TypeError: connection refused');
 
+// What discovery asks before the root has answered: the SEP-1649 cards, the AI catalog and the API catalog.
+const FIRST_DOCUMENT_READS = [
+  '/.well-known/mcp.json',
+  '/.well-known/mcp/server-card.json',
+  '/.well-known/ai-catalog.json',
+  '/.well-known/api-catalog',
+];
+
 const NOT_FOUND = html('<html><body><h1>Not found</h1><p>No such page.</p></body></html>', {}, 404);
 const SERVER_ERROR = html('<html><body><h1>Internal error</h1></body></html>', {}, 500);
 
@@ -669,9 +677,29 @@ export const SCENARIOS: Record<string, Scenario> = {
     ],
   ),
   'run-root-redirects-to-http': scenario(
-    'every https request, the root included, redirects to the http root, which would answer: the run ends unreachable after the root request alone, and nothing is requested over http',
+    'every https request, the root included, redirects to the http root, which would answer: the run ends unreachable on the root answer, the first document reads having gone out beside it, and nothing is requested over http',
     ['agent-ua-reachable', 'content-without-js'],
-    [get('/', redirect('http://example.com/')), get('http://example.com/', html(rootHtml()))],
+    [
+      get('/', redirect('http://example.com/')),
+      ...FIRST_DOCUMENT_READS.map((path) => get(path, redirect('http://example.com/'))),
+      get('http://example.com/', html(rootHtml())),
+    ],
+    { allow_unmatched: false },
+  ),
+  'run-root-redirects-to-http-catalog-card': scenario(
+    'the root redirects to http while the AI catalog names a same-origin card: the run ends unreachable on the root answer, and the card is never requested, whichever of the two answers first',
+    ['agent-ua-reachable', 'mcp-server-card'],
+    [
+      get('/', redirect('http://example.com/')),
+      get(
+        '/.well-known/ai-catalog.json',
+        json({ entries: [{ type: MCP_CARD_TYPE, url: '/cards/mcp.json' }] }),
+      ),
+      get('/cards/mcp.json', json({ remotes: [] })),
+      ...FIRST_DOCUMENT_READS.filter((path) => path !== '/.well-known/ai-catalog.json').map((path) =>
+        get(path, NOT_FOUND),
+      ),
+    ],
     { allow_unmatched: false },
   ),
   'run-body-over-cap': scenario(

@@ -58,7 +58,10 @@ keep the scheme, host, and port, and a redirect to another origin is its answer.
 ## requests.json
 
 Every request the engine sent for the scenario, recorded where the stub fetch receives it, before matching. An engine
-under comparison sends the same set, whatever order its requests complete in.
+under comparison sends the same set, whatever order its requests complete in. The root request and the first document
+reads (the `well_known` cards, the AI catalog, the API catalog) go out together, before any of them is answered, so
+they are in the set of every https target, a run that ends on the root's answer included. Every other request waits
+for the root's answer.
 
 - `method`: uppercase.
 - `url`: as the URL parser writes it.
@@ -252,7 +255,8 @@ the first two, `im` for the body patterns) and `results[i] = new RegExp(pattern,
 | `run-redirects` | redirect chains: a two-hop public chain is followed, a hop into the metadata range is refused, a cross-origin hop lands on a 404, and a five-hop chain exceeds the cap | `llms-txt`, `robots`, `sitemap`, `security-txt` |
 | `run-root-401` | a root that challenges for auth still audits, and the challenge satisfies the auth antecedent | `auth-md`, `oauth-discovery`, `agent-ua-reachable` |
 | `run-root-not-html` | the root is JSON, so every HTML-root check and the markdown twin family are `n_a` | `webmcp`, `accept-markdown`, `markdown-vary`, `markdown-frontmatter`, `root-meta-description`, `schema-org-jsonld`, `content-without-js`, `semantic-html`, `noscript-fallback`, `root-link-rel` |
-| `run-root-redirects-to-http` | every https request, the root included, redirects to the http root, which would answer: the run ends unreachable after the root request alone, and nothing is requested over http | `agent-ua-reachable`, `content-without-js` |
+| `run-root-redirects-to-http` | every https request, the root included, redirects to the http root, which would answer: the run ends unreachable on the root answer, the first document reads having gone out beside it, and nothing is requested over http | `agent-ua-reachable`, `content-without-js` |
+| `run-root-redirects-to-http-catalog-card` | the root redirects to http while the AI catalog names a same-origin card: the run ends unreachable on the root answer, and the card is never requested, whichever of the two answers first | `agent-ua-reachable`, `mcp-server-card` |
 | `run-site-type-api` | the full site declared as an API: content-only checks are `n_a` at the type filter | `llms-full-txt`, `llms-txt-scoped`, `llms-full-txt-scoped`, `openapi`, `json-errors` |
 | `run-site-type-content` | the full site declared as content: API-only checks are `n_a` at the type filter, MCP still applies on discovery | `openapi`, `json-schemas`, `api-catalog`, `json-errors`, `rate-limit-headers`, `llms-full-txt`, `mcp-initialize` |
 | `run-unreachable` | nothing answers at the network level | `robots`, `llms-txt` |

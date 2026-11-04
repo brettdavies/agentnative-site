@@ -1,5 +1,5 @@
-// Web-audit orchestrator. Runs the single canonical root fetch and MCP
-// endpoint discovery, follows the hosts discovery's documents declare
+// Web-audit orchestrator. Runs the single canonical root fetch beside MCP
+// endpoint discovery's document reads, follows the hosts those documents declare
 // while discovery's POSTs are in flight, settles the endpoint of record,
 // then runs every check under one concurrency cap. The antecedent-source
 // checks (SOURCE_CHECKS) probe first and unconditionally; every other check
@@ -383,11 +383,31 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
   const fetchOptions: AuditFetchOptions = { ...input.fetchOptions, memo };
 
   // The single canonical root fetch every root-HTML check and several
-  // antecedents read. null = failed at the network level. It runs before
-  // discovery because it doubles as the reachability probe: a network-dead
-  // root drops every later probe to the degraded timeout so a tarpitting
-  // target cannot spend the whole deadline on a handful of fetches.
-  const rootResp = await guardedFetch(base, {}, { ...fetchOptions, timeoutMs: configuredTimeoutMs });
+  // antecedents read. null = failed at the network level. It doubles as the
+  // reachability probe: a network-dead root drops every later probe to the
+  // degraded timeout, and cuts the document reads already running beside it to
+  // that same budget from their start, so a tarpitting target cannot spend the
+  // whole deadline on a handful of fetches. A root that redirects to http ends
+  // the run, stopping them. Both happen before anything waiting on the root
+  // resumes.
+  const rootFailed = new AbortController();
+  const discoveryConfig = input.registry.mcp_discovery;
+  const rootRead = guardedFetch(base, {}, { ...fetchOptions, timeoutMs: configuredTimeoutMs }).then((response) => {
+    if (response.refused === 'insecure-scheme') closeRequestMemo(memo);
+    else if (response.status === null) rootFailed.abort();
+    return response;
+  });
+  const documentsRead = readDiscoveryDocuments(input.url, discoveryConfig, {
+    timeoutMs: configuredTimeoutMs,
+    deadlineAt: deadline,
+    now,
+    fetchOptions: { ...fetchOptions, cut: { signal: rootFailed.signal, toMs: DEGRADED_PER_CHECK_TIMEOUT_MS } },
+    rootSettled: rootRead,
+  });
+  // Handled here because the wait on the root leaves it unobserved; the await
+  // below still throws what it threw.
+  documentsRead.catch(() => {});
+  const rootResp = await rootRead;
   if (rootResp.refused === 'insecure-scheme') {
     const how = rootResp.status === null ? 'is not https' : 'redirects to http';
     yield { type: 'unreachable', reason: `${base} ${how}, and ${NO_PLAINTEXT_REQUEST}.` };
@@ -397,9 +417,8 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
   const perCheckTimeoutMs =
     root === null ? Math.min(configuredTimeoutMs, DEGRADED_PER_CHECK_TIMEOUT_MS) : configuredTimeoutMs;
 
-  const discoveryConfig = input.registry.mcp_discovery;
   const phaseOptions = { timeoutMs: perCheckTimeoutMs, deadlineAt: deadline, now, fetchOptions };
-  const documents = await readDiscoveryDocuments(input.url, discoveryConfig, phaseOptions);
+  const documents = await documentsRead;
   const rootFromTarget = root !== null && !isEdgeErrorStatus(root.status);
   const following = input.followDeclarations !== false;
   const {

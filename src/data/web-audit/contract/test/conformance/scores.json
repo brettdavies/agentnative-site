@@ -9325,6 +9325,7 @@
     ]
   },
   "run-root-redirects-to-http": {"unreachable":true},
+  "run-root-redirects-to-http-catalog-card": {"unreachable":true},
   "run-site-type-api": {
     "score_pct": 100,
     "score": {"relative":100,"global":98},

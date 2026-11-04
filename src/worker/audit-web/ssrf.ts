@@ -46,9 +46,18 @@ export type GuardedFetchInit = {
   body?: string;
 };
 
+/**
+ * Cuts a request short once `signal` aborts, to `toMs` from when it started, so
+ * the time it has already spent counts. One started after that takes `toMs` from
+ * the outset.
+ */
+export type RequestCut = { signal: AbortSignal; toMs: number };
+
 export type GuardedFetchOptions = {
   /** Deadline for the whole request chain (redirects included). */
   timeoutMs?: number;
+  /** Shortens that deadline while the request is in flight; it never lengthens it. */
+  cut?: RequestCut;
   /**
    * Cap on response body bytes. `0` skips the body (status/headers only).
    * Unset keeps the historical full `response.text()` read.
@@ -82,7 +91,7 @@ export type GuardedFetchOptions = {
 };
 
 /** The fetch options an audit hands every probe: the caller's transport plus the audit's request memo. */
-export type AuditFetchOptions = Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects' | 'memo'>;
+export type AuditFetchOptions = Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects' | 'memo' | 'cut'>;
 
 export const DEFAULT_TIMEOUT_MS = 8_000;
 export const DEFAULT_MAX_REDIRECTS = 4;
@@ -303,13 +312,22 @@ export async function guardedFetch(
   init: GuardedFetchInit = {},
   opts: GuardedFetchOptions = {},
 ): Promise<ProbeResponse> {
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const cut = opts.cut;
+  const uncutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = cut?.signal.aborted ? Math.min(uncutMs, cut.toMs) : uncutMs;
   const maxRedirects = opts.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
   const fetchImpl = opts.fetchImpl ?? fetch;
   const started = Date.now();
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timer = setTimeout(() => controller.abort(), timeoutMs);
+  const applyCut = (): void => {
+    if (cut === undefined) return;
+    clearTimeout(timer);
+    const cutAt = started + Math.min(timeoutMs, cut.toMs);
+    timer = setTimeout(() => controller.abort(), Math.max(0, cutAt - Date.now()));
+  };
+  cut?.signal.addEventListener('abort', applyCut);
   const auditEnded = opts.memo?.ended.signal;
   const endWithAudit = (): void => controller.abort();
 
@@ -427,6 +445,7 @@ export async function guardedFetch(
     return fail(`redirect limit exceeded (${maxRedirects} hops)`);
   } finally {
     clearTimeout(timer);
+    cut?.signal.removeEventListener('abort', applyCut);
     auditEnded?.removeEventListener('abort', endWithAudit);
   }
 }

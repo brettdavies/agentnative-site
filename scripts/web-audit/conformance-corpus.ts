@@ -535,7 +535,10 @@ keep the scheme, host, and port, and a redirect to another origin is its answer.
 ## requests.json
 
 Every request the engine sent for the scenario, recorded where the stub fetch receives it, before matching. An engine
-under comparison sends the same set, whatever order its requests complete in.
+under comparison sends the same set, whatever order its requests complete in. The root request and the first document
+reads (the \`well_known\` cards, the AI catalog, the API catalog) go out together, before any of them is answered, so
+they are in the set of every https target, a run that ends on the root's answer included. Every other request waits
+for the root's answer.
 
 - \`method\`: uppercase.
 - \`url\`: as the URL parser writes it.

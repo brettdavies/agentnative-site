@@ -31,7 +31,10 @@
 // catalog, and the API catalog are kept for later checks, each read under
 // DOCUMENT_MAX_BODY_BYTES. Every pass is bounded by both the per-audit
 // deadline and the discovery budget, so the passes together cannot outrun
-// the audit budget even against a target that never answers.
+// the audit budget even against a target that never answers. The first pass
+// runs beside the root fetch, whose fate decides how long its reads keep (a
+// RequestCut) and when the budget starts; every later request waits for the
+// root, so what a run sends does not depend on which answers first.
 
 import type { RetainedDocumentKey } from '../../shared/web-audit-documents';
 import { API_CATALOG_PATH, type CatalogAnchor, catalogAnchors } from './api-catalog';
@@ -71,6 +74,8 @@ export interface DiscoveryOptions {
   deadlineAt?: number;
   /** Injectable clock, matching the engine's deterministic deadline tests. */
   now?: () => number;
+  /** Settles with a root fetch running beside the first pass; everything later waits for it, and the budget counts from then. */
+  rootSettled?: Promise<unknown>;
 }
 
 export interface DiscoveryResult {
@@ -103,9 +108,9 @@ export interface DiscoveryDocuments {
   probeEndpoint(): Promise<DiscoveryResult>;
 }
 
-// Hard wall-clock cap on the whole discovery phase. Discovery is a
-// prerequisite for the MCP checks, not the audit itself, so it must never
-// starve the checks: a target that tarpits unsolicited POSTs (drops
+// Hard wall-clock cap on the discovery phase from when the root settled.
+// Discovery is a prerequisite for the MCP checks, not the audit itself, so it
+// must never starve the checks: a target that tarpits unsolicited POSTs (drops
 // them without responding until the socket times out) would otherwise eat
 // one full per-check timeout per candidate path and spend the entire
 // per-audit deadline before the first real check runs.
@@ -137,11 +142,14 @@ export async function readDiscoveryDocuments(
   cfg: WebAuditDiscoveryConfig,
   opts: DiscoveryOptions,
 ): Promise<DiscoveryDocuments> {
-  const budget = phaseBudget(DISCOVERY_BUDGET_MS, opts.timeoutMs, {
-    deadlineAt: opts.deadlineAt,
-    now: opts.now ?? Date.now,
+  const clock = { deadlineAt: opts.deadlineAt, now: opts.now ?? Date.now };
+  let budget = phaseBudget(DISCOVERY_BUDGET_MS, opts.timeoutMs, clock);
+  // A slow root must not leave the POSTs less time than they would have had
+  // with the reads waiting for it, or a slow site could lose its MCP endpoint.
+  void opts.rootSettled?.then(() => {
+    budget = phaseBudget(DISCOVERY_BUDGET_MS, opts.timeoutMs, clock);
   });
-  const passBudget = budget.slice;
+  const passBudget = (): number | null => budget.slice();
   const readDocument = (url: string, timeoutMs: number, headers?: Record<string, string>) =>
     guardedFetch(url, headers === undefined ? {} : { headers }, {
       ...opts.fetchOptions,
@@ -287,6 +295,8 @@ export async function readDiscoveryDocuments(
       apiCatalogResp.status === 200 ? apiCatalogShape(parseJsonObject(apiCatalogResp)) : null,
     ),
   );
+
+  await opts.rootSettled;
 
   // The catalog's card entries: inline in place, same-origin URLs fetched.
   const entries = (catalog === null ? [] : catalogCardEntries(catalog)).map((entry) => {
