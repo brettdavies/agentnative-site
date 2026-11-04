@@ -82,6 +82,8 @@ const ANSWERS: Record<string, () => Response | Promise<Response>> = {
       ? Response.json({ ...VALID, contract_fingerprint: 'ffffffffffff' }, { headers: JSON_HEADERS })
       : ANSWERS['/valid']();
   },
+  '/unauthorized': () => new Response('denied', { status: 401 }),
+  '/forbidden': () => new Response('denied', { status: 403 }),
   '/counted-missing': () => {
     fingerprintHits += 1;
     return new Response('not found', { status: 404 });
@@ -133,6 +135,9 @@ async function smoke(base: string | null, env: Record<string, string> = {}) {
 }
 
 const fixture = (name: string) => `http://localhost:${server.port}/${name}`;
+
+// curl's own stderr names the status too, so these read the script's verdict alone.
+const failLine = (stderr: string) => stderr.split('\n').find((line) => line.startsWith('FAIL:')) ?? '';
 
 describe('scripts/smoke-web-audit-version.sh', () => {
   test('passes on the contract', async () => {
@@ -445,6 +450,31 @@ describe('scripts/smoke-web-audit-version.sh', () => {
       expect(exitCode).toBe(1);
       expect(stderr).toContain(reason);
       expect(stderr).toContain(`expected contract_fingerprint ${VALID.contract_fingerprint}`);
+    });
+
+    // The wait ends on the last answer, so a stale Access token has to read as itself rather than as a missing field.
+    test.each([
+      ['redirect', 'answered HTTP 302'],
+      ['unauthorized', 'did not answer 200: HTTP 401'],
+      ['forbidden', 'did not answer 200: HTTP 403'],
+    ])('a final %s names its status and the Access hint', async (name, answered) => {
+      const { exitCode, stderr } = await smoke(fixture(name), expecting());
+      expect(exitCode).toBe(1);
+      expect(failLine(stderr)).toContain(answered);
+      expect(failLine(stderr)).toContain('Access credentials');
+    });
+
+    test('a final 404 names its status, with no Access hint', async () => {
+      const { exitCode, stderr } = await smoke(fixture('missing'), expecting());
+      expect(exitCode).toBe(1);
+      expect(failLine(stderr)).toContain('did not answer 200: HTTP 404');
+      expect(failLine(stderr)).not.toContain('Access credentials');
+    });
+
+    test('no HTTP answer at all says so', async () => {
+      const { exitCode, stderr } = await smoke('http://localhost:1', expecting());
+      expect(exitCode).toBe(1);
+      expect(failLine(stderr)).toContain('did not answer 200: no HTTP answer');
     });
 
     // Without the longer wait a deploy that moves the value goes red while old isolates drain.

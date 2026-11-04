@@ -147,11 +147,20 @@ contract='(.registry_fingerprint | type == "string" and test("^[0-9a-f]{12}\\z")
 # part of the body. -q comes first so a caller's .curlrc cannot turn on verbose
 # output and print the headers, and --noproxy keeps a local proxy from seeing
 # credentials sent to localhost in the clear.
+access_hint='On staging, a redirect or refusal usually means missing or stale Access credentials.'
+
 check_once() {
   local response trailer status content_type served
   if ! response="$(curl -q -fsS -m 10 --noproxy localhost,127.0.0.1 -K "$curl_config" \
     -w '\n%{http_code} %{content_type}' "$URL")"; then
-    failure="$URL did not answer 200"
+    # curl -f still writes the trailer on an HTTP error, so the status is known.
+    status="${response##*$'\n'}"
+    status="${status%% *}"
+    case "$status" in
+      000 | '') failure="$URL did not answer 200: no HTTP answer" ;;
+      401 | 403) failure="$URL did not answer 200: HTTP $status. $access_hint" ;;
+      *) failure="$URL did not answer 200: HTTP $status" ;;
+    esac
     return 1
   fi
   trailer="${response##*$'\n'}"
@@ -161,7 +170,7 @@ check_once() {
 
   # curl -f lets 2xx and 3xx through, and Access answers a stale token with a 302.
   if [ "$status" != 200 ]; then
-    failure="$URL answered HTTP $status, expected 200. On staging, a redirect usually means missing or stale Access credentials."
+    failure="$URL answered HTTP $status, expected 200. $access_hint"
     return 1
   fi
   case "$content_type" in
