@@ -109,7 +109,7 @@ export interface DiscoveryDocuments {
 // them without responding until the socket times out) would otherwise eat
 // one full per-check timeout per candidate path and spend the entire
 // per-audit deadline before the first real check runs.
-const DISCOVERY_BUDGET_MS = 12_000;
+export const DISCOVERY_BUDGET_MS = 12_000;
 
 // The extension's discovery flow asks for a card by its media type.
 const CARD_REQUEST_HEADERS = { accept: MCP_SERVER_CARD_TYPE };

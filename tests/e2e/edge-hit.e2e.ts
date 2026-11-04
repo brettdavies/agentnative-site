@@ -138,6 +138,7 @@ test.describe('skip-Worker HIT — staging Workers Caching', () => {
     expect(isSkipWorkerHit(second.headers())).toBe(true);
     expect(second.headers()['cache-control']).toBe('public, max-age=300, stale-while-revalidate=60');
     expect(Object.keys((await second.json()) as object).sort()).toEqual([
+      'contract_fingerprint',
       'registry_fingerprint',
       'spec_version',
       'web_schema_version',
@@ -153,6 +154,7 @@ test.describe('skip-Worker HIT — staging Workers Caching', () => {
     const get = await request.get(`${STAGING_BASE}${path}`, { headers: ACCESS_HEADERS });
     expect(get.status()).toBe(200);
     expect(Object.keys((await get.json()) as object).sort()).toEqual([
+      'contract_fingerprint',
       'registry_fingerprint',
       'spec_version',
       'web_schema_version',

@@ -1,9 +1,10 @@
 // What a client with a vendored copy of the web-audit contract compares
-// against to learn it is behind this deploy. Every value is fixed for a given
+// against to learn it differs from this deploy. Every value is fixed for a given
 // Worker version, so the body is too, and HIT-1d fits: unlike the path-keyed
 // class it carries no `s-maxage`, and a new Worker version starts cold, so a
 // release that moves a value is visible at the edge as soon as it deploys.
 
+import { CONTRACT_FINGERPRINT_ASSET_PATH, isFingerprintPrefix } from '../../shared/web-audit-contract';
 import { isGetOrHead } from '../accept';
 import { applyHeaders } from '../headers';
 import { SPEC_VERSION } from '../spec-version.gen';
@@ -15,15 +16,43 @@ export interface WebAuditVersionSignal {
   spec_version: string;
   /** The prefix a scorecard scored under this registry records, not the full digest. */
   registry_fingerprint: string;
+  /**
+   * Moves when a file the CLI mirrors from the vendoring contract moves, so a
+   * handler or scoring change that moves a corpus scorecard shows here while
+   * `registry_fingerprint` stays still. A client compares it with the value it
+   * vendored and never computes it.
+   */
+  contract_fingerprint: string;
   web_schema_version: string;
 }
 
+async function loadContractFingerprint(env: WebAuditRegistryEnv): Promise<string> {
+  const res = await env.ASSETS.fetch(new Request(`https://assets.internal${CONTRACT_FINGERPRINT_ASSET_PATH}`));
+  if (!res.ok) throw new Error(`web-audit contract fingerprint fetch failed: ${res.status} ${res.statusText}`);
+  const body = await res.text();
+  const fingerprint = body.trim();
+  if (!isFingerprintPrefix(fingerprint)) {
+    throw new Error(`web-audit contract fingerprint is malformed: ${JSON.stringify(body.slice(0, 40))}`);
+  }
+  return fingerprint;
+}
+
+// The route has no rate limit and a query string misses the edge, so a request
+// a cache-buster sends through must not re-read the assets.
+const signals = new WeakMap<WebAuditRegistryEnv, WebAuditVersionSignal>();
+
 async function webAuditVersionSignal(env: WebAuditRegistryEnv): Promise<WebAuditVersionSignal> {
-  return {
+  const known = signals.get(env);
+  if (known !== undefined) return known;
+  const [registry, contractFingerprint] = await Promise.all([loadWebAuditRegistry(env), loadContractFingerprint(env)]);
+  const signal: WebAuditVersionSignal = {
     spec_version: SPEC_VERSION,
-    registry_fingerprint: await registryFingerprintPrefix(await loadWebAuditRegistry(env)),
+    registry_fingerprint: await registryFingerprintPrefix(registry),
+    contract_fingerprint: contractFingerprint,
     web_schema_version: WEB_SCHEMA_VERSION,
   };
+  signals.set(env, signal);
+  return signal;
 }
 
 // Plain text like the discovery and card routes: the JSON branch of

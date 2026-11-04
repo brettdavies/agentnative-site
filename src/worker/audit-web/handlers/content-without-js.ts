@@ -10,9 +10,9 @@ import { AUDIT_PROBE_MAX_BODY_BYTES, guardedFetch, validatePublicUrl } from '../
 import { markdownHrefs, remainingDeadlineMs, timeoutMsFor } from './shared';
 import type { HandlerContext, ProbeOutcome } from './types';
 
-const MIN_VISIBLE_CHARS = 200;
-const MAX_TWIN_PROBES = 3;
-const MIN_TWIN_CHARS = 40;
+export const MIN_VISIBLE_CHARS = 200;
+export const MAX_TWIN_PROBES = 3;
+export const MIN_TWIN_CHARS = 40;
 const INDEX_PATHS = new Set(['/llms.txt', '/llms-full.txt', '/robots.txt', '/sitemap.xml', '/favicon.ico']);
 
 function visibleText(html: string): string {

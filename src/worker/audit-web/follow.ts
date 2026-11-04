@@ -82,8 +82,8 @@ export const FOLLOW_SLICE_MS = 6_000;
 // A streamable-HTTP endpoint may hold a GET open as an event stream; the
 // GET only looks for a redirect and a challenge, so a hang must not spend
 // the slice reciprocity needs.
-const ENDPOINT_GET_TIMEOUT_MS = 3_000;
-const CARD_DOCUMENT_TIMEOUT_MS = 3_000;
+export const ENDPOINT_GET_TIMEOUT_MS = 3_000;
+export const CARD_DOCUMENT_TIMEOUT_MS = 3_000;
 
 export interface FollowInput {
   /** The audited origin, scheme + host + trailing slash. */

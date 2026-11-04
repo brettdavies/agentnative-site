@@ -1,6 +1,7 @@
 // The conformance scenarios: each names the exchanges a stub fetch answers
 // and the checks it is the subject of. The generator turns each into a
-// scenario.json / scorecard.json pair under tests/fixtures/web-audit-conformance.
+// scenario.json, scorecard.json and requests.json under the contract's
+// test/conformance.
 // Bodies and headers here are contract bytes: a change regenerates goldens
 // on both sides of the CLI port.
 

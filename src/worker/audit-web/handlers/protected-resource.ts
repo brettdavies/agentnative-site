@@ -13,9 +13,9 @@ import type { WebCheck } from '../registry';
 import { validatePublicUrl } from '../ssrf';
 import type { EvidenceItem, HandlerContext, McpAuthRequired, ProbeOutcome } from './types';
 
-const MAX_AUTHORIZATION_SERVERS = 8;
-const MAX_URL_LENGTH = 2048;
-const MAX_SHOWN_LENGTH = 200;
+export const MAX_AUTHORIZATION_SERVERS = 8;
+export const MAX_URL_LENGTH = 2048;
+export const MAX_SHOWN_LENGTH = 200;
 
 const BEARER_CHALLENGE = /(?:^|,)\s*bearer(?:\s|$)/i;
 

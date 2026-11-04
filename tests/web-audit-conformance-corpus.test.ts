@@ -7,14 +7,14 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { generateCorpus, loadRegistry } from '../scripts/web-audit/conformance-corpus';
+import { SCENARIOS } from '../scripts/web-audit/conformance-scenarios';
 import {
   CORPUS_DIR,
-  generateCorpus,
-  loadRegistry,
-  REGISTRY_PATH,
+  REGENERATE_COMMAND,
   SCENARIOS_DIR,
-} from '../scripts/web-audit/conformance-corpus';
-import { SCENARIOS } from '../scripts/web-audit/conformance-scenarios';
+  WEB_AUDIT_REGISTRY_PATH,
+} from '../src/build/web-audit-contract-paths.mjs';
 import { scoreWebAudit, universeMaxOf } from '../src/worker/audit-web/score';
 import type { WebScorecard } from '../src/worker/audit-web/scorecard';
 
@@ -70,10 +70,10 @@ describe('web-audit conformance corpus', () => {
     expect([...committed.keys()].sort()).toEqual(generatedNames);
     for (const name of generatedNames) {
       if (committed.get(name) !== generated.get(name)) {
-        throw new Error(`${name} is stale; run bun scripts/web-audit/gen-fixtures.ts and commit the result`);
+        throw new Error(`${name} is stale; run ${REGENERATE_COMMAND} and commit the result`);
       }
     }
-  });
+  }, 30_000);
 
   // Saving an audit stamps the registry fingerprint; the engine never does,
   // so the Rust port reproduces the goldens without hashing a registry.
@@ -134,10 +134,10 @@ describe('web-audit conformance corpus', () => {
     for (const [name, content] of first) {
       if (second.get(name) !== content) throw new Error(`${name} differs between two generations`);
     }
-  });
+  }, 30_000);
 
   test('the registry carries no lookaround or backreference (the CLI compiles every pattern)', () => {
-    const source = readFileSync(REGISTRY_PATH, 'utf8');
+    const source = readFileSync(WEB_AUDIT_REGISTRY_PATH, 'utf8');
     expect(source).not.toMatch(/\(\?[=!<]/);
     for (const check of registry.checks) {
       const expectBlock = (check.with as { expect?: Record<string, unknown> }).expect ?? {};

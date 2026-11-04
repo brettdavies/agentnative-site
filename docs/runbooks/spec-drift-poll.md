@@ -85,7 +85,8 @@ issue.
    JSON, which is valid YAML, so it pastes as written.
 4. For `mcp-server-card-schema`, vendor the new upstream commit first with
    `scripts/sync-server-card-schema.sh --ref <sha>` and update `PINNED_REF` in that script:
-   `tests/standards-drift.test.ts` fails while the vendored schema and the pin disagree.
+   `tests/standards-drift.test.ts` fails while the vendored schema and the pin disagree. The schema is a vendoring
+   contract input too, so regenerate with `bun scripts/web-audit/gen-fixtures.ts` in the same PR.
 5. Confirm locally that the entry is clean: `GITHUB_TOKEN="$(gh auth token)" bun scripts/standards/check-drift.ts` exits
    0 when nothing else has moved.
 6. Open the re-pin PR to `dev` and reference the issue.

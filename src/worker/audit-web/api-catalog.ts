@@ -24,7 +24,7 @@ export const API_CATALOG_PATH = '/.well-known/api-catalog';
 export const MCP_TARGET_RE = /\.well-known\/mcp|server-card|mcp-skill|\/mcp\b/i;
 
 // Bounds the declarations one catalog can add to the trail, whatever it lists.
-const MAX_CATALOG_ANCHORS = 8;
+export const MAX_CATALOG_ANCHORS = 8;
 
 /** A URL the catalog declares, with the JSON Pointer into the catalog where it does. */
 export interface CatalogLink {

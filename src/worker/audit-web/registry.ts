@@ -5,6 +5,8 @@
 // through env.ASSETS.fetch which bypasses the interceptor by not
 // re-entering dispatch.
 
+import { FINGERPRINT_PREFIX_LENGTH, isFingerprintPrefix } from '../../shared/web-audit-contract';
+
 export type WebCheckKeyword = 'must' | 'should' | 'may';
 export type WebCheckTier = 'required' | 'recommended' | 'optional';
 export type WebCheckHandler =
@@ -188,9 +190,6 @@ export async function registryFingerprint(
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-const FINGERPRINT_PREFIX_LENGTH = 12;
-const FINGERPRINT_PREFIX_RE = /^[0-9a-f]{12}$/;
-
 /** The part of a fingerprint a scorecard records: its first 12 characters. */
 export function fingerprintPrefix(fingerprint: string): string {
   return fingerprint.slice(0, FINGERPRINT_PREFIX_LENGTH);
@@ -202,9 +201,7 @@ export async function registryFingerprintPrefix(registry: WebAuditRegistry): Pro
 }
 
 /** Whether `value` is a recorded fingerprint prefix; anything else reads as an unknown registry version. */
-export function isRegistryFingerprintPrefix(value: unknown): value is string {
-  return typeof value === 'string' && FINGERPRINT_PREFIX_RE.test(value);
-}
+export const isRegistryFingerprintPrefix = isFingerprintPrefix;
 
 /**
  * `scorecard` with the prefix of the registry it was scored under. Every
