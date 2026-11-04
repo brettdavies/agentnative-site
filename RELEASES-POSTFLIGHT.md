@@ -129,9 +129,10 @@ manual recipe below skips the headers; for prod the recipe runs unauthenticated.
   # When staging, also: -H "CF-Access-Client-Id: $CFID" -H "CF-Access-Client-Secret: $CFSEC" (from 1Password)
 
   # Accept: text/html is required — curl's default Accept negotiates markdown on
-  # extensionless URLs (same as the scripted gate_pages() in postflight.sh).
-  curl -fSsL -H 'Accept: text/html' "${ENV_URL}/" | grep -q '<title>' && echo "home: ok"
-  curl -fSsL -H 'Accept: text/html' "${ENV_URL}/scorecards" | grep -q 'lrow' && echo "leaderboard: ok"
+  # extensionless URLs (same as the scripted gate_pages() in postflight.sh). Each
+  # body is captured first: with pipefail set, `curl | grep -q` fails on a healthy page.
+  home=$(curl -fSsL -H 'Accept: text/html' "${ENV_URL}/") && grep -q 'lrow' <<<"$home" && echo "home: ok"
+  board=$(curl -fSsL -H 'Accept: text/html' "${ENV_URL}/scorecards") && grep -q 'lrow' <<<"$board" && echo "leaderboard: ok"
   curl -fSsL "${ENV_URL}/api/score" -X POST \
     -H 'Content-Type: application/json' \
     -d '{"target":"ripgrep","turnstile_token":"x"}' \
