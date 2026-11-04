@@ -84,7 +84,7 @@ export interface WebCoverageLevel {
 }
 
 /**
- * Where an audit ran and whether it presented a credential: a score covers
+ * What an audit could reach and whether a request carried a credential: a score covers
  * what an agent at that vantage can verify.
  */
 export interface WebVantage {

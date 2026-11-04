@@ -66,6 +66,49 @@ describe('bouncePanel: the shared fallback', () => {
   });
 });
 
+describe('bouncePanel: a local, private, or internal target', () => {
+  const nextStep = { action: 'run', command: 'anc web localhost:3000', docs: 'https://anc.dev/install' };
+
+  test('names the command that audits it, links the install instructions, and offers no Run again', () => {
+    const panel = bouncePanel(
+      err('invalid_target', {
+        message: "anc's public audit never contacts localhost:3000.",
+        reason: 'local-target',
+        value: 'localhost:3000',
+        details: 'blocked: localhost is not a public host',
+        next_step: nextStep,
+      }),
+    );
+    expect(panel.headline).toBe("anc's public audit never contacts localhost:3000.");
+    expect(panel.bodyHtml).toContain('<code>anc web localhost:3000</code>');
+    expect(panel.bodyHtml).toContain('href="/install#audit-a-local-site"');
+    expect(panel.bodyHtml).toContain('HTTPS only');
+    expect(panel.bodyHtml).toContain('See how to install and run it');
+    expect(panel.bodyHtml).toContain('Run it only for a host you chose');
+    expect(panel.final).toBe(true);
+    // The headline already says why; the gate's own wording stays in the JSON.
+    expect(panel.details).toBeUndefined();
+  });
+
+  test('escapes the command it is handed', () => {
+    const panel = bouncePanel(
+      err('invalid_target', { reason: 'local-target', next_step: { ...nextStep, command: 'anc web <img src=x>' } }),
+    );
+    expect(panel.bodyHtml).toContain('anc web &lt;img src=x&gt;');
+    expect(panel.bodyHtml).not.toContain('<img');
+  });
+
+  test('the same code with no reason keeps the fallback panel and its Run again', () => {
+    const panel = bouncePanel(
+      err('invalid_target', { message: 'Not a target.', cta: 'Enter one.', details: 'blocked' }),
+    );
+    expect(panel.headline).toBe('Not a target.');
+    expect(panel.bodyHtml).toBe('Enter one.');
+    expect(panel.details).toBe('blocked');
+    expect(panel.final).toBeUndefined();
+  });
+});
+
 describe('the panels that carry no error object', () => {
   test('each names what happened and what to do', () => {
     for (const panel of [INCOMPLETE_PANEL, STREAM_LOST_PANEL, NETWORK_PANEL]) {

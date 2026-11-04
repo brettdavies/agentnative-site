@@ -66,6 +66,12 @@ export type AuditErrorCode =
   // A result page or read tool for a target with no stored result.
   | 'not_found';
 
+/** Stable names for the refusals an agent can branch on; a new one is added here. */
+type AuditErrorReason = 'local-target';
+
+/** The recovery an agent can act on without parsing `message`; `command` runs as printed. */
+export type AuditNextStep = { action: 'run'; command: string; docs: string };
+
 export type AuditError = {
   code: AuditErrorCode;
   message: string;
@@ -73,11 +79,21 @@ export type AuditError = {
   details?: string;
   retry_after?: number;
   pm?: string;
+  reason?: AuditErrorReason;
+  /** The input this error refuses. */
+  value?: string;
+  next_step?: AuditNextStep;
 };
 
 export type AuditErrorObject = { error: AuditError };
 
-export type AuditErrorExtras = { cta: string; details?: string; retry_after?: number; pm?: string };
+export type AuditErrorExtras = {
+  cta: string;
+  details?: string;
+  retry_after?: number;
+  pm?: string;
+  reason?: AuditErrorReason;
+};
 
 /** The call to action for a transient failure. */
 export const CTA_RETRY = 'Try again in a moment.';
@@ -127,6 +143,7 @@ export function auditError(code: AuditErrorCode, message: string, extras: AuditE
   if (extras.details !== undefined) error.details = extras.details;
   if (extras.retry_after !== undefined) error.retry_after = extras.retry_after;
   if (extras.pm !== undefined) error.pm = extras.pm;
+  if (extras.reason !== undefined) error.reason = extras.reason;
   return { error };
 }
 

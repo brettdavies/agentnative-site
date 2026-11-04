@@ -6,8 +6,11 @@
 //
 //   GET /scoring ................... no target: the prose pointer to the audit page
 //   GET /scoring?target=t .......... accepted target: the page for its lane
+//                                    a host refused for good: that page, failed (400)
 //                                    refused target: the pointer with the reason (400)
-//   GET /scoring.md, or markdown ... the prose pointer naming the read tools
+//   GET /scoring.md, or markdown ... the prose pointer naming the read tools; a
+//                                    host the public audit refuses for good: the
+//                                    command that audits it (400)
 //   any other method ............... 405
 //
 // The page carries a request-time sitekey and exists for one run, so no
@@ -23,8 +26,15 @@ import {
   scoreMarkdownPath,
 } from '../../shared/audit-routes';
 import { escHtml } from '../../shared/esc-html';
-import { LANE_EXPECTATION, scoringHeadingHtml, scoringTitle, TITLE_SUFFIX } from '../../shared/scoring-copy';
+import {
+  LANE_EXPECTATION,
+  localTargetNextHtml,
+  scoringHeadingHtml,
+  scoringTitle,
+  TITLE_SUFFIX,
+} from '../../shared/scoring-copy';
 import { detectPreference } from '../accept';
+import { type LocalTargetError, localTargetMarkdown, refusalForHost } from '../audit-web/local-target';
 import { loadWebAuditRegistry, type WebAuditRegistryEnv } from '../audit-web/registry';
 import { applyHeaders } from '../headers';
 import { loadShellTemplate, substituteShell } from '../shell-template';
@@ -59,7 +69,13 @@ export async function handleScoringPage(request: Request, env: ScoringPageEnv): 
         ? 'That target has no result page. Start the audit from the audit page.'
         : null;
 
+  // A host the public audit refuses for good still gets the page, because its
+  // client shows the refusal in a panel. The first paint already says so, for a
+  // browser without scripts, and the twin carries the refusal itself.
+  const refusal = accepted?.lane === 'web' ? refusalForHost(accepted.target, url.origin)?.error : undefined;
+
   if (url.pathname.endsWith('.md') || detectPreference(request) === 'markdown') {
+    if (refusal) return transient(request, new Response(localTargetMarkdown(refusal), { status: 400 }), true);
     const body = pointerMarkdown(url.origin, accepted, refused);
     // The twin answers a refusal with the status the page gives it: an agent
     // reading 200 here would take a rejection for a result.
@@ -76,7 +92,7 @@ export async function handleScoringPage(request: Request, env: ScoringPageEnv): 
     });
   }
   const refresh = url.searchParams.get('refresh') === '1';
-  const page = accepted ? await progressPage(env, accepted, refresh) : pointerPage(refused);
+  const page = accepted ? await progressPage(env, accepted, refresh, refusal) : pointerPage(refused);
   const html = substituteShell(template, {
     title: page.title,
     description: page.description,
@@ -84,7 +100,7 @@ export async function handleScoringPage(request: Request, env: ScoringPageEnv): 
     breadcrumb: 'Scoring',
     body: page.body,
   });
-  const status = refused ? 400 : 200;
+  const status = refused || refusal ? 400 : 200;
   return transient(
     request,
     new Response(html, { status, headers: { 'content-type': 'text/html; charset=utf-8' } }),
@@ -111,8 +127,14 @@ async function checkTotal(env: ScoringPageEnv): Promise<number | null> {
   }
 }
 
-async function progressPage(env: ScoringPageEnv, accepted: Accepted, refresh: boolean): Promise<Page> {
+async function progressPage(
+  env: ScoringPageEnv,
+  accepted: Accepted,
+  refresh: boolean,
+  refusal: LocalTargetError | undefined,
+): Promise<Page> {
   const { lane, target } = accepted;
+  const state = refusal ? 'failed' : 'running';
   const t = escHtml(target);
   const total = lane === 'web' ? await checkTotal(env) : null;
   const attrs = [
@@ -126,13 +148,16 @@ async function progressPage(env: ScoringPageEnv, accepted: Accepted, refresh: bo
     .join(' ');
   const saved = escHtml(scoreMarkdownPath(target));
   const readTool = lane === 'cli' ? 'get_scorecard' : 'get_website_audit';
+  const noscript = refusal
+    ? `${escHtml(refusal.message)} ${localTargetNextHtml(refusal.next_step.command)}`
+    : `This page runs a live audit with JavaScript. Without it, read the saved result at <a href="${saved}">${saved}</a>, or call the <code>${readTool}</code> MCP tool (<code>POST /mcp</code>, <a href="/mcp-docs">docs</a>).`;
   const body = `<article class="container scorecard-page scoring" ${attrs}>
   <meta name="turnstile-sitekey" content="${escHtml(env.TURNSTILE_SITEKEY ?? '')}" />
   <header class="scorecard-header">
-    <h1 tabindex="-1" data-scoring-heading>${scoringHeadingHtml('running', target, lane)}</h1>
-    <p class="live-score-summary__meta" data-scoring-subline>${escHtml(LANE_EXPECTATION[lane])}</p>
+    <h1 tabindex="-1" data-scoring-heading>${scoringHeadingHtml(state, target, lane)}</h1>
+    <p class="live-score-summary__meta" data-scoring-subline>${refusal ? '' : escHtml(LANE_EXPECTATION[lane])}</p>
   </header>
-  <p class="live-score__status" data-scoring-status role="status" aria-live="polite">Checking for a recent result&hellip;</p>
+  <p class="live-score__status" data-scoring-status role="status" aria-live="polite">${refusal ? escHtml(refusal.message) : 'Checking for a recent result&hellip;'}</p>
   <div class="scoring__body" data-scoring-body></div>
   <div class="scoring__actions" data-scoring-actions>
     <button type="button" class="btn btn--primary" data-scoring-start hidden>Start</button>
@@ -140,12 +165,16 @@ async function progressPage(env: ScoringPageEnv, accepted: Accepted, refresh: bo
     <a class="btn btn--ghost" href="${auditPath()}" data-scoring-other hidden>Audit something else</a>
   </div>
   <noscript>
-    <p>This page runs a live audit with JavaScript. Without it, read the saved result at <a href="${saved}">${saved}</a>, or call the <code>${readTool}</code> MCP tool (<code>POST /mcp</code>, <a href="/mcp-docs">docs</a>).</p>
+    <p>${noscript}</p>
   </noscript>
   <script defer src="${SCRIPT_SRC}"></script>
 </article>`;
   const kind = lane === 'cli' ? 'CLI' : 'website';
-  return { title: scoringTitle('running', target), description: `The live ${kind} audit of ${target}.`, body };
+  return {
+    title: scoringTitle(state, target),
+    description: refusal ? refusal.message : `The live ${kind} audit of ${target}.`,
+    body,
+  };
 }
 
 function pointerPage(refused: string | null): Page {

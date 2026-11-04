@@ -656,6 +656,15 @@ export const SCENARIOS: Record<string, Scenario> = {
       get('/s5', text('Contact: mailto:security@example.com\n')),
     ],
   ),
+  'run-redirects-to-internal-hosts': scenario(
+    'a public target redirects /robots.txt to an internal host and /sitemap.xml to the cloud metadata name: each hop is refused, and the row names the reason the gate gives for that name',
+    ['robots', 'sitemap'],
+    [
+      ...baseline(),
+      get('/robots.txt', redirect('https://build.internal/robots.txt', 302)),
+      get('/sitemap.xml', redirect('https://metadata.google.internal/sitemap.xml', 302)),
+    ],
+  ),
   'run-document-redirects-to-http': scenario(
     'the audited site answers /llms.txt and its API catalog with a redirect to the same path over http, where each would answer: neither hop is taken, and each document reads as missing (llms.txt absent, the optional API catalog n_a), its evidence naming the redirect to http',
     ['llms-txt', 'api-catalog'],

@@ -206,10 +206,14 @@ export function parseIpv6Literal(host: string): Uint8Array | null {
   return bytes;
 }
 
+function inIpv4Range(value: number, [base, bits]: [number, number]): boolean {
+  const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+  return (value & mask) >>> 0 === base;
+}
+
 function blockedIpv4Reason(value: number): string | null {
   for (const [base, bits] of BLOCKED_IPV4_RANGES) {
-    const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
-    if ((value & mask) >>> 0 === base) {
+    if (inIpv4Range(value, [base, bits])) {
       return `ipv4 ${formatIpv4(value)} is in blocked range ${formatIpv4(base)}/${bits}`;
     }
   }
@@ -227,26 +231,31 @@ function blockedIpv6Reason(bytes: Uint8Array): string | null {
   if (isLoopback) return 'ipv6 loopback (::1)';
   if ((bytes[0] & 0xfe) === 0xfc) return 'ipv6 unique-local (fc00::/7)';
   if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return 'ipv6 link-local (fe80::/10)';
-  // IPv4-mapped (::ffff:a.b.c.d) and IPv4-compatible (::a.b.c.d) forms
-  // range-check the embedded IPv4 address.
+  const v4 = embeddedIpv4(bytes);
+  const reason = v4 === null ? null : blockedIpv4Reason(v4);
+  return reason ? `ipv4-in-ipv6: ${reason}` : null;
+}
+
+/** The address inside an IPv4-mapped (::ffff:a.b.c.d) or IPv4-compatible (::a.b.c.d) literal, or null. */
+function embeddedIpv4(bytes: Uint8Array): number | null {
   const first10Zero = bytes.slice(0, 10).every((b) => b === 0);
-  if (first10Zero && ((bytes[10] === 0xff && bytes[11] === 0xff) || (bytes[10] === 0 && bytes[11] === 0))) {
-    const v4 = ((bytes[12] << 24) | (bytes[13] << 16) | (bytes[14] << 8) | bytes[15]) >>> 0;
-    const reason = blockedIpv4Reason(v4);
-    if (reason) return `ipv4-in-ipv6: ${reason}`;
-  }
-  return null;
+  if (!first10Zero || !((bytes[10] === 0xff && bytes[11] === 0xff) || (bytes[10] === 0 && bytes[11] === 0)))
+    return null;
+  return ((bytes[12] << 24) | (bytes[13] << 16) | (bytes[14] << 8) | bytes[15]) >>> 0;
+}
+
+/** A hostname as the block rules read it: WHATWG URL keeps trailing dots as written, and `localhost..` is localhost. */
+function normalizedHostname(raw: string): string {
+  return raw.toLowerCase().replace(/\.+$/, '');
 }
 
 /** Returns a block reason for the hostname, or null when it may be fetched. */
 export function blockedHostReason(rawHostname: string): string | null {
-  // WHATWG URL keeps trailing dots as written: `localhost..` is localhost.
-  const hostname = rawHostname.toLowerCase().replace(/\.+$/, '');
+  const hostname = normalizedHostname(rawHostname);
   if (hostname.length === 0) return 'empty hostname';
   if (hostname === 'localhost' || hostname.endsWith('.localhost')) return 'localhost is not a public host';
-  if (hostname === 'metadata.google.internal' || hostname.endsWith('.internal')) {
-    return 'internal metadata hostnames are blocked';
-  }
+  if (METADATA_HOSTS.names.includes(hostname)) return 'cloud metadata hostnames are blocked';
+  if (hostname.endsWith('.internal')) return 'internal hostnames are not public hosts';
   if (hostname.startsWith('[') && hostname.endsWith(']')) {
     const v6 = parseIpv6Literal(hostname.slice(1, -1));
     if (v6 === null) return 'unparseable ipv6 literal';
@@ -257,6 +266,39 @@ export function blockedHostReason(rawHostname: string): string | null {
   const v4 = parseIpv4Literal(hostname);
   if (v4 !== null) return blockedIpv4Reason(v4);
   return null;
+}
+
+/** A listed address that does not parse would silently leave the list, so it stops the module loading instead. */
+function metadataIpv6(literal: string): Uint8Array {
+  const bytes = parseIpv6Literal(literal);
+  if (bytes === null) throw new Error(`METADATA_HOSTS: not an IPv6 literal: ${literal}`);
+  return bytes;
+}
+
+// What `anc web` refuses as cloud metadata from any network, matching the
+// metadata class in its `locality.rs`. Every other host this gate blocks is one
+// `anc web` can audit from a network that reaches it. 168.63.129.16 is a public
+// address this gate does not block; it is here because the command must not name it.
+const METADATA_HOSTS = {
+  names: ['metadata.google.internal'],
+  ipv4: [
+    [ipv4('169.254.0.0'), 16],
+    [ipv4('100.100.100.200'), 32],
+    [ipv4('168.63.129.16'), 32],
+  ] as Array<[number, number]>,
+  ipv6: ['fd00:ec2::254', 'fd20:ce::254', 'fe80::a9fe:a9fe', 'fd00:a9fe:a9fe::1', 'fd00:42::42'].map(metadataIpv6),
+};
+
+/** Whether a hostname, without its port, is a cloud metadata destination, in any literal form that names one. */
+export function isMetadataHost(rawHostname: string): boolean {
+  const hostname = normalizedHostname(rawHostname);
+  if (METADATA_HOSTS.names.includes(hostname)) return true;
+  const inMetadataIpv4 = (v4: number | null) =>
+    v4 !== null && METADATA_HOSTS.ipv4.some((range) => inIpv4Range(v4, range));
+  const v6 = parseIpv6Literal(hostname.replace(/^\[|\]$/g, ''));
+  if (v6 === null) return inMetadataIpv4(parseIpv4Literal(hostname));
+  const isListed = METADATA_HOSTS.ipv6.some((listed) => v6.every((b, i) => b === listed[i]));
+  return isListed || inMetadataIpv4(embeddedIpv4(v6));
 }
 
 /**

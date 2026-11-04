@@ -154,7 +154,15 @@ test.describe('keyboard + a11y', () => {
   // wrangler-dev server (empty R2) it exercises the scoring-in-progress
   // empty state. The populated result-page archetype is covered by the
   // staging-targeting web-audit project.
-  for (const path of ['/score/ripgrep', '/score/anc.dev', '/scorecards', '/audit', '/scoring?target=anc.dev']) {
+  for (const path of [
+    '/score/ripgrep',
+    '/score/anc.dev',
+    '/score/never-audited.example',
+    '/score/localhost:3000',
+    '/scorecards',
+    '/audit',
+    '/scoring?target=anc.dev',
+  ]) {
     for (const scheme of ['light', 'dark'] as const) {
       test(`axe: 0 serious/critical violations on ${path} in ${scheme} mode`, async ({ page }) => {
         await page.emulateMedia({ colorScheme: scheme });
@@ -164,6 +172,60 @@ test.describe('keyboard + a11y', () => {
       });
     }
   }
+
+  test('a fragment link lands its target below the sticky header at 390/768/1440', async ({ page }) => {
+    const targets = [
+      '/install#audit-a-local-site',
+      '/install#homebrew',
+      '/#board',
+      '/p1#p1-non-interactive-by-default',
+    ];
+    for (const url of targets) {
+      for (const width of [390, 768, 1440]) {
+        // Short enough that every target has room to scroll to the top of the viewport.
+        await page.setViewportSize({ width, height: 500 });
+        await page.goto(url);
+        const landed = await page.evaluate(() => ({
+          top: document.querySelector(window.location.hash)?.getBoundingClientRect().top ?? Number.NaN,
+          headerBottom: document.querySelector('.site-header')?.getBoundingClientRect().bottom ?? Number.NaN,
+        }));
+        expect
+          .soft(landed.top, `${url} at ${width}px under a ${landed.headerBottom}px header`)
+          .toBeGreaterThanOrEqual(landed.headerBottom);
+      }
+    }
+  });
+
+  test('a focused link with no id, in the page or the footer, stops below the sticky header', async ({ page }) => {
+    await page.setViewportSize({ width: 640, height: 360 });
+    await page.goto('/install');
+    for (const selector of ['main a:not([id])', '.site-footer a']) {
+      const link = page.locator(selector).first();
+      await link.evaluate((a) => (a as HTMLElement).scrollIntoView({ block: 'start' }));
+      const landed = await link.evaluate((a) => ({
+        top: a.getBoundingClientRect().top,
+        headerBottom: document.querySelector('.site-header')?.getBoundingClientRect().bottom ?? Number.NaN,
+      }));
+      expect
+        .soft(landed.top, `${selector} under a ${landed.headerBottom}px header`)
+        .toBeGreaterThanOrEqual(landed.headerBottom);
+    }
+  });
+
+  test('focus reaching the sticky header leaves the page where it is', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 500 });
+    await page.goto('/install');
+    await page.evaluate(() => window.scrollTo(0, 400));
+    await page
+      .locator('main a')
+      .first()
+      .evaluate((a) => (a as HTMLElement).blur());
+    const before = await page.evaluate(() => window.scrollY);
+    expect(before).toBeGreaterThan(0);
+    await page.locator('.site-header a').first().focus();
+    await page.waitForTimeout(200);
+    expect(await page.evaluate(() => window.scrollY)).toBe(before);
+  });
 
   test('no horizontal overflow at 390/768/1440 on each archetype', async ({ page }) => {
     for (const path of ['/p1', '/score/ripgrep', '/scorecards', '/audit', '/install']) {

@@ -480,7 +480,7 @@ describe('provenance on stored scorecards', () => {
     expect(tools.host).toBe('example.com');
   });
 
-  test('a sign-in row names no local command while no published anc release includes one', () => {
+  test('a sign-in row names the local command and the token it needs', () => {
     const stored = {
       target_url: 'https://stripe.dev/',
       results: [
@@ -491,18 +491,144 @@ describe('provenance on stored scorecards', () => {
       access_note?: string;
       results: Array<{ access_remedy?: string }>;
     };
-    const text = `${out.results[0].access_remedy} ${out.access_note}`;
-    expect(text).not.toContain('anc web');
-    expect(text).not.toContain('ANC_WEB_TOKEN');
-    expect(out.results[0].access_remedy).toBe("anc's public audit holds no sign-in for mcp.stripe.com.");
+    expect(out.results[0].access_remedy).toBe(
+      "anc's public audit holds no sign-in for mcp.stripe.com. Run `anc web stripe.dev --token-host mcp.stripe.com --token-stdin < token-for-mcp.stripe.com.txt`, with token-for-mcp.stripe.com.txt holding a token for mcp.stripe.com, to evaluate this check from your own network.",
+    );
+    expect(out.access_note).toBe(
+      'Global keeps the 1 check this audit could not run in its maximum; the one that needs sign-in names its own command.',
+    );
   });
 
-  test('once a published anc release includes the local web audit, the remedy and the note name its command', () => {
-    expect(richMarkdown(notRunRemedy('auth-required', 'mcp.stripe.com', 'stripe.dev', 2, true))).toBe(
-      "anc's public audit holds no sign-in for mcp.stripe.com. Run `anc web stripe.dev` with `ANC_WEB_TOKEN` set to a token for mcp.stripe.com to evaluate these checks from your own network.",
+  test('with no published command, the remedy and the note state the reason and name nothing', () => {
+    expect(richMarkdown(notRunRemedy('auth-required', 'mcp.stripe.com', 'stripe.dev', 2, false))).toBe(
+      "anc's public audit holds no sign-in for mcp.stripe.com.",
     );
-    expect(richMarkdown(notRunScoreNote(1, 'example.com', false, true))).toBe(
+    expect(
+      richMarkdown(notRunScoreNote([{ reason: 'declared-host-unreachable', host: 'a.test' }], 'example.com', false)),
+    ).toBe('Global keeps the 1 check this audit could not run in its maximum.');
+  });
+
+  test('a stored domain that cannot be printed safely as a command reads as if no command exists', () => {
+    expect(richMarkdown(notRunRemedy('declared-host-unreachable', 'mcp.example.com', 'a$(id).example', 1))).toBe(
+      "mcp.example.com did not answer anc's public audit.",
+    );
+    expect(richMarkdown(notRunRemedy('auth-required', 'a$(id).example', 'example.com', 1))).toBe(
+      "anc's public audit holds no sign-in for a$(id).example.",
+    );
+    expect(
+      richMarkdown(notRunScoreNote([{ reason: 'declared-host-unreachable', host: 'a.test' }], 'a$(id).example')),
+    ).toBe('Global keeps the 1 check this audit could not run in its maximum.');
+  });
+
+  test('a sign-in row a hostile site chose takes nothing from the environment when run as printed', () => {
+    const remedy = richMarkdown(notRunRemedy('auth-required', 'mcp.evil.example', 'evil.example', 1));
+    expect(remedy).toContain(
+      '`anc web evil.example --token-host mcp.evil.example --token-stdin < token-for-mcp.evil.example.txt`',
+    );
+    expect(remedy).not.toContain('ANC_WEB_TOKEN');
+  });
+
+  test('two sign-in rows read two different token files, so one token cannot be replayed to the other host', () => {
+    const fileOf = (host: string) =>
+      richMarkdown(notRunRemedy('auth-required', host, 'example.com', 1)).match(/< (token-for-\S+)`/)?.[1];
+    expect(fileOf('mcp.stripe.com')).toBe('token-for-mcp.stripe.com.txt');
+    expect(fileOf('mcp.evil.example')).toBe('token-for-mcp.evil.example.txt');
+  });
+
+  test('a sign-in row binds its token to the host it belongs to, never the site that declared it', () => {
+    expect(richMarkdown(notRunRemedy('auth-required', 'mcp.stripe.com', 'evil.example', 1))).toBe(
+      "anc's public audit holds no sign-in for mcp.stripe.com. Run `anc web evil.example --token-host mcp.stripe.com --token-stdin < token-for-mcp.stripe.com.txt`, with token-for-mcp.stripe.com.txt holding a token for mcp.stripe.com, to evaluate this check from your own network.",
+    );
+    const note = richMarkdown(notRunScoreNote([{ reason: 'auth-required', host: 'mcp.stripe.com' }], 'evil.example'));
+    expect(note).toBe(
+      'Global keeps the 1 check this audit could not run in its maximum; the one that needs sign-in names its own command.',
+    );
+    expect(note).not.toContain('anc web evil.example');
+    expect(note).not.toContain('ANC_WEB_TOKEN');
+  });
+
+  test('a sign-in row on the audited site itself still names the host with the flag', () => {
+    expect(richMarkdown(notRunRemedy('auth-required', 'example.com', 'example.com', 1))).toBe(
+      "anc's public audit holds no sign-in for example.com. Run `anc web example.com --token-host example.com --token-stdin < token-for-example.com.txt`, with token-for-example.com.txt holding a token for example.com, to evaluate this check from your own network.",
+    );
+    expect(richMarkdown(notRunScoreNote([{ reason: 'auth-required', host: 'example.com' }], 'example.com'))).toBe(
+      'Global keeps the 1 check this audit could not run in its maximum; the one that needs sign-in names its own command.',
+    );
+  });
+
+  test('a host that differs from the site only by port is printed with its port, in both directions', () => {
+    expect(richMarkdown(notRunRemedy('auth-required', 'example.com:8443', 'example.com', 1))).toContain(
+      'Run `anc web example.com --token-host example.com:8443 --token-stdin < token-for-example.com_8443.txt`, with',
+    );
+    expect(richMarkdown(notRunRemedy('auth-required', 'example.com', 'example.com:8443', 1))).toContain(
+      'Run `anc web example.com:8443 --token-host example.com --token-stdin < token-for-example.com.txt`, with',
+    );
+  });
+
+  test('a sign-in command needs both the site and the host printable', () => {
+    for (const [host, domain] of [
+      ['mcp.example.com', 'a$(id).example'],
+      ['a$(id).example', 'example.com'],
+      ['--ca-cert=x.example', 'example.com'],
+      ['100.100.100.200', 'example.com'],
+    ]) {
+      expect(richMarkdown(notRunRemedy('auth-required', host, domain, 1))).toBe(
+        `anc's public audit holds no sign-in for ${host}.`,
+      );
+      expect(richMarkdown(notRunScoreNote([{ reason: 'auth-required', host }], domain))).toBe(
+        'Global keeps the 1 check this audit could not run in its maximum.',
+      );
+    }
+  });
+
+  test('the note separates rows the site command evaluates from sign-in rows and rows no run can evaluate', () => {
+    expect(
+      richMarkdown(
+        notRunScoreNote(
+          [
+            { reason: 'auth-required', host: 'example.com' },
+            { reason: 'declared-host-unreachable', host: 'a.test' },
+            { reason: 'declared-host-blocked', host: '10.0.0.1' },
+          ],
+          'example.com',
+        ),
+      ),
+    ).toBe(
+      'Global keeps the 3 checks this audit could not run in its maximum; run `anc web example.com` to evaluate 1 of them from your own network; the one that needs sign-in names its own command.',
+    );
+    expect(
+      richMarkdown(notRunScoreNote([{ reason: 'declared-host-unreachable', host: 'a.test' }], 'example.com')),
+    ).toBe(
       'Global keeps the 1 check this audit could not run in its maximum; run `anc web example.com` to evaluate it from your own network.',
+    );
+  });
+
+  test('a reason anc web also refuses names no command, and the note counts only the rows a run can evaluate', () => {
+    for (const reason of ['declared-host-blocked', 'reciprocity-refused', 'declared-host-budget-exceeded'] as const) {
+      expect(richMarkdown(notRunRemedy(reason, 'mcp.example.net', 'example.com', 1))).not.toContain('anc web');
+      expect(richMarkdown(notRunScoreNote([{ reason, host: 'mcp.example.net' }], 'example.com'))).toBe(
+        'Global keeps the 1 check this audit could not run in its maximum.',
+      );
+    }
+    for (const reason of ['follow-disabled', 'declared-host-unreachable'] as const) {
+      expect(richMarkdown(notRunRemedy(reason, 'mcp.example.net', 'example.com', 1))).toContain(
+        'Run `anc web example.com` to evaluate this check from your own network.',
+      );
+    }
+    expect(
+      richMarkdown(
+        notRunScoreNote(
+          [
+            { reason: 'declared-host-blocked', host: '10.0.0.1' },
+            { reason: 'declared-host-unreachable', host: 'a.test' },
+            { reason: 'auth-required', host: 'mcp.a.test' },
+            { reason: 'auth-required', host: 'mcp.b.test' },
+          ],
+          'example.com',
+        ),
+      ),
+    ).toBe(
+      'Global keeps the 4 checks this audit could not run in its maximum; run `anc web example.com` to evaluate 1 of them from your own network; the ones that need sign-in name their own command.',
     );
   });
 

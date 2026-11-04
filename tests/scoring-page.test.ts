@@ -94,6 +94,37 @@ describe('GET /scoring?target=', () => {
     expect(html).not.toContain('/js/scoring.js');
   });
 
+  test('the twin of a target the public audit refuses for good is a 400 naming the command, not a promised result', async () => {
+    for (const target of ['localhost%3A3000', '10.0.0.1']) {
+      const res = await handleScoringPage(get(`/scoring.md?target=${target}`), env());
+      expect(res.status).toBe(400);
+      expect(res.headers.get('cache-control')).toBe('no-store');
+      const text = await res.text();
+      expect(text).toContain('anc web ');
+      expect(text).toContain('Auditing it again returns the same answer.');
+      expect(text).not.toContain('once the audit finishes');
+    }
+  });
+
+  test('the page of a target refused for good says so in its first paint, at the status its twin gives', async () => {
+    const res = await handleScoringPage(get('/scoring?target=localhost%3A3000'), env());
+    expect(res.status).toBe(400);
+    const page = await res.text();
+    const noscript = page.split('<noscript>')[1]?.split('</noscript>')[0] ?? '';
+    expect(noscript).toContain('<code>anc web localhost:3000</code>');
+    expect(noscript).toContain('Run it only for a host you chose');
+    expect(noscript).not.toContain('saved result');
+    expect(page).toContain('anc&#39;s public audit never contacts localhost:3000');
+    expect(page).not.toContain('Usually under 30 seconds');
+    expect(page).not.toContain('Checking for a recent result');
+    expect(page).toContain('data-scoring ');
+  });
+
+  test('the twin of a metadata endpoint names no command', async () => {
+    const res = await handleScoringPage(get('/scoring.md?target=169.254.169.254'), env());
+    expect(await res.text()).not.toContain('anc web');
+  });
+
   test('a GitHub repo URL renders the page for its owner/repo, the way the audit form sends it', async () => {
     const { res, html } = await page('/scoring?target=https://github.com/sindresorhus/gh-home');
     expect(res.status).toBe(200);
