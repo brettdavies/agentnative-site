@@ -129,18 +129,14 @@ export type StubLog = {
 export function stubFetchFor(scenario: Scenario, log: StubLog): typeof fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const rawUrl = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const body = init?.body === undefined || init?.body === null ? undefined : String(init.body);
     const seen: SeenRequest = {
       method: (init?.method ?? 'GET').toUpperCase(),
       url: normalizeUrl(rawUrl),
       headers: lowercaseHeaders(init?.headers),
-      body: init?.body === undefined || init?.body === null ? '' : String(init.body),
+      body: body ?? '',
     };
-    log.sent?.push({
-      method: seen.method,
-      url: seen.url,
-      headers: seen.headers,
-      body: init?.body === undefined || init?.body === null ? undefined : seen.body,
-    });
+    log.sent?.push({ ...seen, body });
     const hit = scenario.exchanges.find((exchange) => matches(exchange.request, seen));
     if (hit) return toResponse(hit.response);
     log.unmatched.push(`${seen.method} ${seen.url}`);

@@ -287,6 +287,36 @@ describe('scripts/smoke-web-audit-version.sh', () => {
     }
   }, 30_000);
 
+  // An operator's debug run prints each line it traces, so tracing has to be off before the script reads the variables.
+  test.each([
+    ['bash -x', ['bash', '-x', SCRIPT], {}],
+    ['SHELLOPTS=xtrace', ['bash', SCRIPT], { SHELLOPTS: 'xtrace' }],
+  ] as const)(
+    'tracing with %s cannot print the secret',
+    async (_how, command, extra) => {
+      const proc = Bun.spawn([...command, fixture('valid')], {
+        env: {
+          ...callerEnv,
+          ...extra,
+          CF_ACCESS_CLIENT_ID: 'id-from-env',
+          CF_ACCESS_CLIENT_SECRET: 'secret-from-env',
+          SMOKE_RETRIES: '0',
+        },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      expect(exitCode).toBe(0);
+      expect(lastHeaders['cf-access-client-secret']).toBe('secret-from-env');
+      expect(`${stdout}${stderr}`).not.toContain('secret-from-env');
+    },
+    30_000,
+  );
+
   test("a verbose .curlrc cannot print the secret, because curl ignores the caller's config", async () => {
     const dir = await mkdtemp(join(tmpdir(), 'smoke-curlrc-'));
     try {
