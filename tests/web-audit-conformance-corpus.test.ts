@@ -9,7 +9,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateCorpus, loadRegistry } from '../scripts/web-audit/conformance-corpus';
 import { SCENARIOS } from '../scripts/web-audit/conformance-scenarios';
-import { CORPUS_DIR, REGISTRY_PATH, SCENARIOS_DIR } from '../scripts/web-audit/contract-paths';
+import { CORPUS_DIR, REGENERATE_COMMAND, REGISTRY_PATH, SCENARIOS_DIR } from '../scripts/web-audit/contract-paths';
 import { scoreWebAudit, universeMaxOf } from '../src/worker/audit-web/score';
 import type { WebScorecard } from '../src/worker/audit-web/scorecard';
 
@@ -65,7 +65,7 @@ describe('web-audit conformance corpus', () => {
     expect([...committed.keys()].sort()).toEqual(generatedNames);
     for (const name of generatedNames) {
       if (committed.get(name) !== generated.get(name)) {
-        throw new Error(`${name} is stale; run bun scripts/web-audit/gen-fixtures.ts and commit the result`);
+        throw new Error(`${name} is stale; run ${REGENERATE_COMMAND} and commit the result`);
       }
     }
   });

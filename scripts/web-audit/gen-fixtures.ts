@@ -1,32 +1,19 @@
 #!/usr/bin/env bun
-// Writes the web-audit conformance corpus (the contract's test/conformance)
-// from the scenarios in conformance-scenarios.ts, or checks that the committed
-// corpus is current.
+// Writes every generated file of the CLI vendoring contract: `build/` from the
+// registry, the fix catalog and the vendored schema, and `test/conformance/`
+// from the scenarios in conformance-scenarios.ts. Or checks that the committed
+// contract is current. contract-paths.ts owns the layout.
 //
 //   bun scripts/web-audit/gen-fixtures.ts                 regenerate every file in place
-//   bun scripts/web-audit/gen-fixtures.ts --check         exit 1 on any stale or missing file
+//   bun scripts/web-audit/gen-fixtures.ts --check         exit 1 naming any stale, missing or unpinned file
 //   bun scripts/web-audit/gen-fixtures.ts --scenario x    print scenario x's scorecard, write nothing
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { generateCorpus, loadRegistry, runScenario } from './conformance-corpus';
+import { loadRegistry, runScenario } from './conformance-corpus';
 import { SCENARIOS } from './conformance-scenarios';
-import { CORPUS_DIR } from './contract-paths';
-
-function committed(): Map<string, string> {
-  const out = new Map<string, string>();
-  if (!existsSync(CORPUS_DIR)) return out;
-  const walk = (dir: string, rel: string): void => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const path = join(dir, entry.name);
-      const relPath = rel ? `${rel}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) walk(path, relPath);
-      else out.set(relPath, readFileSync(path, 'utf8'));
-    }
-  };
-  walk(CORPUS_DIR, '');
-  return out;
-}
+import { contractDrift, contractDriftMessage, generateContract } from './contract';
+import { CONTRACT_DIR, GENERATED_TREES } from './contract-paths';
 
 async function main(argv: string[]): Promise<number> {
   const registry = loadRegistry();
@@ -45,34 +32,25 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
-  const files = await generateCorpus(registry);
+  const files = await generateContract(registry);
 
   if (argv.includes('--check')) {
-    const current = committed();
-    const stale: string[] = [];
-    for (const [name, content] of files) {
-      if (current.get(name) !== content) stale.push(name);
-    }
-    for (const name of current.keys()) {
-      if (!files.has(name)) stale.push(`${name} (no longer generated)`);
-    }
-    if (stale.length === 0) {
-      console.log(`ok: ${files.size} corpus files match the current registry and engine`);
+    const message = contractDriftMessage(contractDrift(files));
+    if (message === null) {
+      console.log(`ok: ${files.size} generated contract files match the registry, the fix catalog and the engine`);
       return 0;
     }
-    console.error(`stale corpus files (${stale.length}):\n  ${stale.join('\n  ')}`);
-    console.error('run `bun scripts/web-audit/gen-fixtures.ts` and commit the result.');
+    console.error(message);
     return 1;
   }
 
-  const scenariosDir = join(CORPUS_DIR, 'scenarios');
-  if (existsSync(scenariosDir)) rmSync(scenariosDir, { recursive: true });
+  for (const tree of GENERATED_TREES) rmSync(join(CONTRACT_DIR, tree), { recursive: true, force: true });
   for (const [name, content] of files) {
-    const path = join(CORPUS_DIR, name);
+    const path = join(CONTRACT_DIR, name);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, content);
   }
-  console.log(`wrote ${files.size} corpus files to ${CORPUS_DIR}`);
+  console.log(`wrote ${files.size} generated contract files to ${CONTRACT_DIR}`);
   return 0;
 }
 

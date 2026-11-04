@@ -18,11 +18,18 @@
 //   4. Scorecard pages — leaderboard exists with a <table>, at least one
 //      per-tool scorecard page exists, and sitemap includes scorecard paths.
 //
+//   5. Web-audit projections — the registry and fix catalog the build ships to
+//      the Worker are what the CLI vendors from the contract, compacted by the
+//      build's last step. The contract keeps the readable form so a registry
+//      change reads as a short diff in both repos.
+//
 // Run `bun run build` before these tests (bun test does not auto-build).
 
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { CONTRACT_BUILD_DIR } from '../scripts/web-audit/contract-paths';
+import { minifyJson } from '../src/build/12-minify-dist.mjs';
 
 const REPO_ROOT = join(import.meta.dir, '..');
 const DIST = join(REPO_ROOT, 'dist');
@@ -537,5 +544,16 @@ describe('regression #9 — Shiki code blocks keep their keyboard tab stop', () 
     // otherwise pass vacuously.
     expect(shikiPreCount).toBeGreaterThanOrEqual(10);
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('web-audit projections', () => {
+  test.each([
+    ['web-audit-registry.json', 'registry.json'],
+    ['web-remediation.json', 'remediation.json'],
+  ])('dist/_internal/%s is the contract build/%s after the JSON minify step', async (distName, contractName) => {
+    const shipped = await readFile(join(DIST, '_internal', distName), 'utf8');
+    const vendored = await readFile(join(CONTRACT_BUILD_DIR, contractName), 'utf8');
+    expect(shipped === minifyJson(vendored)).toBe(true);
   });
 });

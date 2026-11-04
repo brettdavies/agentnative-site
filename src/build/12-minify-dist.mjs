@@ -45,6 +45,11 @@ async function walk(dir) {
   return files;
 }
 
+/** The wire form of a JSON file: same keys in the same order, no whitespace. */
+export function minifyJson(text) {
+  return JSON.stringify(JSON.parse(text));
+}
+
 /** Minify one CSS file with the same Bun.build options the dist pipeline uses. */
 export async function minifyCssFile(filePath) {
   const result = await Bun.build({
@@ -87,7 +92,7 @@ export async function minifyDist(distDir) {
       bytesAfter += minified.length;
     } else if (ext === '.json') {
       const original = await readFile(file, 'utf8');
-      const minified = JSON.stringify(JSON.parse(original));
+      const minified = minifyJson(original);
       await writeFile(file, minified);
       counts.json++;
       bytesBefore += original.length;

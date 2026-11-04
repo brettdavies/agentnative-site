@@ -1,0 +1,11 @@
+# Tests and the CLI compare these byte for byte, so an editor leaves them as
+# generated, the way the canonical root file treats `fixtures/**`. Regenerate
+# with `bun scripts/web-audit/gen-fixtures.ts`; never hand-format.
+[{build,test}/**]
+charset = unset
+end_of_line = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+indent_style = unset
+indent_size = unset
+ignore = true

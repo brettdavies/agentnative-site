@@ -464,6 +464,18 @@ function normalizeAlternatives(groups, checks) {
 }
 
 /**
+ * The bytes of a projection: what this stage writes to dist/_internal, before
+ * minifyDist compacts it, and what the CLI vendoring contract commits under
+ * build/. A test holds the two equal.
+ *
+ * @param {unknown} projection
+ * @returns {string}
+ */
+export function projectionBytes(projection) {
+  return `${JSON.stringify(projection, null, 2)}\n`;
+}
+
+/**
  * Load, normalize, and emit the web-audit registry projection.
  *
  * @param {{ registryPath: string, distDir: string, cardSchemaPath?: string }} opts
@@ -472,7 +484,7 @@ function normalizeAlternatives(groups, checks) {
 export async function emitWebAuditRegistry({ registryPath, distDir, cardSchemaPath = VENDORED_CARD_SCHEMA_PATH }) {
   const raw = await readFile(registryPath, 'utf8');
   const normalized = normalizeWebAuditRegistry(yaml.load(raw), readCardSchema(cardSchemaPath));
-  await writeFile(join(distDir, '_internal', 'web-audit-registry.json'), `${JSON.stringify(normalized, null, 2)}\n`);
+  await writeFile(join(distDir, '_internal', 'web-audit-registry.json'), projectionBytes(normalized));
   return { checks: normalized.checks.length };
 }
 
@@ -536,6 +548,21 @@ export function normalizeWebRemediation(doc, checkIds, retiredIds = []) {
 }
 
 /**
+ * The remediation catalog's projection against a normalized registry.
+ *
+ * @param {string} remediationYaml
+ * @param {{ checks: Array<{ id: string }>, retired?: object }} registry
+ * @returns {ReturnType<typeof normalizeWebRemediation>}
+ */
+export function projectWebRemediation(remediationYaml, registry) {
+  return normalizeWebRemediation(
+    yaml.load(remediationYaml),
+    registry.checks.map((c) => c.id),
+    Object.keys(registry.retired ?? {}),
+  );
+}
+
+/**
  * Load + validate the remediation catalog and emit its JSON projection.
  *
  * @param {{ remediationPath: string, registryPath: string, distDir: string }} opts
@@ -543,12 +570,7 @@ export function normalizeWebRemediation(doc, checkIds, retiredIds = []) {
  */
 export async function emitWebRemediation({ remediationPath, registryPath, distDir }) {
   const registry = normalizeWebAuditRegistry(yaml.load(await readFile(registryPath, 'utf8')));
-  const doc = yaml.load(await readFile(remediationPath, 'utf8'));
-  const normalized = normalizeWebRemediation(
-    doc,
-    registry.checks.map((c) => c.id),
-    Object.keys(registry.retired ?? {}),
-  );
-  await writeFile(join(distDir, '_internal', 'web-remediation.json'), `${JSON.stringify(normalized, null, 2)}\n`);
+  const normalized = projectWebRemediation(await readFile(remediationPath, 'utf8'), registry);
+  await writeFile(join(distDir, '_internal', 'web-remediation.json'), projectionBytes(normalized));
   return { entries: Object.keys(normalized).length };
 }
