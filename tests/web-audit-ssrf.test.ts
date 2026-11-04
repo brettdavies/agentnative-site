@@ -11,6 +11,7 @@ import { describe, expect, test } from 'bun:test';
 import { AUDIT_USER_AGENT } from '../src/shared/user-agents';
 import {
   AUDIT_PROBE_MAX_BODY_BYTES,
+  blockedHostReason,
   guardedFetch,
   STATUS_ONLY_BODY_BYTES,
   validatePublicUrl,
@@ -80,6 +81,147 @@ describe('validatePublicUrl', () => {
   test('canonicalizes before range-checking: mixed-radix dotted forms', () => {
     expect(validatePublicUrl('http://0x0a.1.2.3/').ok).toBe(false);
     expect(validatePublicUrl('http://0300.0250.0.1/').ok).toBe(false);
+  });
+});
+
+describe('IPv4 ranges that hold no public audit target', () => {
+  test.each([
+    ['224.0.0.1', '224.0.0.0/4'],
+    ['239.255.255.250', '224.0.0.0/4'],
+    ['240.0.0.1', '240.0.0.0/4'],
+    ['255.255.255.255', '240.0.0.0/4'],
+    ['198.18.0.1', '198.18.0.0/15'],
+    ['198.19.255.255', '198.18.0.0/15'],
+    ['192.0.0.170', '192.0.0.0/24'],
+    ['192.0.0.192', '192.0.0.0/24'],
+    ['192.0.2.1', '192.0.2.0/24'],
+    ['192.88.99.1', '192.88.99.0/24'],
+    ['198.51.100.1', '198.51.100.0/24'],
+    ['203.0.113.1', '203.0.113.0/24'],
+    ['168.63.129.16', '168.63.129.16/32'],
+  ])('refuses %s', (dotted, range) => {
+    expect(blockedHostReason(dotted)).toBe(`ipv4 ${dotted} is in blocked range ${range}`);
+  });
+
+  test.each(['8.8.8.8', '1.1.1.1', '198.17.255.255', '198.20.0.1', '223.255.255.255', '168.63.129.17', '192.0.1.1'])(
+    'allows the public address %s',
+    (dotted) => {
+      expect(blockedHostReason(dotted)).toBeNull();
+    },
+  );
+});
+
+describe('IPv6 spellings that carry an IPv4 address', () => {
+  const FORMS: Array<[string, (hi: string, lo: string) => string]> = [
+    ['NAT64 well-known 64:ff9b::/96', (hi, lo) => `[64:ff9b::${hi}:${lo}]`],
+    ['IPv4-translated ::ffff:0:0:0/96', (hi, lo) => `[::ffff:0:${hi}:${lo}]`],
+    ['6to4 2002::/16', (hi, lo) => `[2002:${hi}:${lo}::]`],
+    ['ISATAP interface identifier', (hi, lo) => `[2607:f8b0::5efe:${hi}:${lo}]`],
+    ['ISATAP interface identifier, universal bit set', (hi, lo) => `[2607:f8b0::200:5efe:${hi}:${lo}]`],
+    ['IPv4-mapped ::ffff:0:0/96', (hi, lo) => `[::ffff:${hi}:${lo}]`],
+    ['IPv4-compatible ::/96', (hi, lo) => `[::${hi}:${lo}]`],
+  ];
+  const BLOCKED: Array<[string, string, string, string]> = [
+    ['169.254.169.254', 'a9fe', 'a9fe', '169.254.0.0/16'],
+    ['100.100.100.200', '6464', '64c8', '100.64.0.0/10'],
+    ['127.0.0.2', '7f00', '2', '127.0.0.0/8'],
+    ['10.1.2.3', 'a01', '203', '10.0.0.0/8'],
+    ['172.20.1.1', 'ac14', '101', '172.16.0.0/12'],
+    ['192.168.0.5', 'c0a8', '5', '192.168.0.0/16'],
+    ['0.1.2.3', '1', '203', '0.0.0.0/8'],
+    ['224.0.0.1', 'e000', '1', '224.0.0.0/4'],
+    ['198.18.0.1', 'c612', '1', '198.18.0.0/15'],
+    ['192.0.0.170', 'c000', 'aa', '192.0.0.0/24'],
+    ['168.63.129.16', 'a83f', '8110', '168.63.129.16/32'],
+  ];
+
+  describe.each(FORMS)('%s', (_form, spell) => {
+    test.each(BLOCKED)('blocks %s, naming the carried address and its range', (dotted, hi, lo, range) => {
+      expect(blockedHostReason(spell(hi, lo))).toBe(`ipv4-in-ipv6: ipv4 ${dotted} is in blocked range ${range}`);
+    });
+
+    test('a public address stays allowed', () => {
+      expect(blockedHostReason(spell('808', '808'))).toBeNull();
+    });
+  });
+
+  test.each([
+    ['a dotted tail', '[64:ff9b::169.254.169.254]'],
+    ['uppercase hex', '[64:FF9B::A9FE:A9FE]'],
+    ['every zero written out', '[0064:ff9b:0000:0000:0000:0000:a9fe:a9fe]'],
+    ['subnet and interface bits after a 6to4 address', '[2002:a9fe:a9fe:1::5]'],
+  ])('reads the same address through %s', (_how, host) => {
+    expect(blockedHostReason(host)).toBe('ipv4-in-ipv6: ipv4 169.254.169.254 is in blocked range 169.254.0.0/16');
+  });
+
+  test('a URL reaches the check in the form its parser writes', () => {
+    expect(validatePublicUrl('https://[64:ff9b::169.254.169.254]/').ok).toBe(false);
+    expect(validatePublicUrl('https://[2002:a9fe:a9fe::]/').ok).toBe(false);
+    expect(validatePublicUrl('https://[2002:808:808::]/').ok).toBe(true);
+  });
+});
+
+describe('IPv6 outside global unicast and its special-purpose blocks', () => {
+  test.each([
+    ['ipv6 NAT64 local-use (64:ff9b:1::/48)', '[64:ff9b:1::a9fe:a9fe]'],
+    ['ipv6 NAT64 local-use (64:ff9b:1::/48)', '[64:ff9b:1::808:808]'],
+    ['ipv6 NAT64 local-use (64:ff9b:1::/48)', '[64:ff9b:1:a9fe:a9:fe00:808:808]'],
+    ['ipv6 NAT64 local-use (64:ff9b:1::/48)', '[64:ff9b:1:0:a9:fea9:fe00:0]'],
+    ['ipv6 special-purpose (2001::/23)', '[2001:0:4136:e378:8000:63bf:5601:5601]'],
+    ['ipv6 special-purpose (2001::/23)', '[2001:0:a9fe:a9fe::1]'],
+    ['ipv6 special-purpose (2001::/23)', '[2001:1ff::1]'],
+    ['ipv6 documentation (2001:db8::/32)', '[2001:db8::1]'],
+    ['ipv6 documentation (3fff::/20)', '[3fff:fff::1]'],
+    ['ipv6 outside global unicast (2000::/3)', '[ff02::1]'],
+    ['ipv6 outside global unicast (2000::/3)', '[fec0::1]'],
+    ['ipv6 outside global unicast (2000::/3)', '[100::1]'],
+    ['ipv6 outside global unicast (2000::/3)', '[5f00::a9fe:a9fe]'],
+    ['ipv6 outside global unicast (2000::/3)', '[1fff:ffff::1]'],
+    ['ipv6 outside global unicast (2000::/3)', '[4000::1]'],
+    ['ipv6 outside global unicast (2000::/3)', '[64:ff9a::a9fe:a9fe]'],
+    ['ipv6 outside global unicast (2000::/3)', '[64:ff9b:0:1::a9fe:a9fe]'],
+    ['ipv6 outside global unicast (2000::/3)', '[64:ff9b:2::a9fe:a9fe]'],
+    ['ipv6 outside global unicast (2000::/3)', '[::fffe:0:a9fe:a9fe]'],
+    ['ipv6 outside global unicast (2000::/3)', '[::ffff:1:a9fe:a9fe]'],
+    ['ipv6 outside global unicast (2000::/3)', '[::200:5efe:808:808]'],
+    ['ipv6 unique-local (fc00::/7)', '[fd00:ec2::254]'],
+    ['ipv6 link-local (fe80::/10)', '[fe80::5efe:808:808]'],
+  ])('refuses as %s: %s', (reason, host) => {
+    expect(blockedHostReason(host)).toBe(reason);
+  });
+
+  test.each([
+    '[2606:4700:4700::1111]',
+    '[2001:4860:4860::8888]',
+    '[2a00:1450:4001::1]',
+    '[2000::1]',
+    '[2001:200::1]',
+    '[2003:a9fe:a9fe::]',
+    '[3fff:1000::1]',
+  ])('allows the public address %s', (host) => {
+    expect(blockedHostReason(host)).toBeNull();
+    expect(validatePublicUrl(`https://${host}/`).ok).toBe(true);
+  });
+
+  test.each([
+    '[64:ff9b::a9fe:a9fe]',
+    '[64:ff9b:1::a9fe:a9fe]',
+    '[64:ff9b:1:0:a9:fea9:fe00:0]',
+    '[::ffff:0:a9fe:a9fe]',
+    '[2002:a9fe:a9fe::]',
+    '[2001:0:a9fe:a9fe::1]',
+    '[2607:f8b0::5efe:a9fe:a9fe]',
+    '[ff02::1]',
+  ])('a redirect from a public target to %s is refused before it is sent', async (host) => {
+    const fetched: string[] = [];
+    const fetchImpl = stubFetch((url) => {
+      fetched.push(url);
+      return new Response(null, { status: 302, headers: { Location: `https://${host}/` } });
+    });
+    const resp = await guardedFetch('https://example.com/', {}, { fetchImpl });
+    expect(fetched).toEqual(['https://example.com/']);
+    expect(resp.status).toBeNull();
+    expect(resp.error).toContain('blocked');
   });
 });
 

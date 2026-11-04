@@ -5,10 +5,11 @@
 //   - allows only http/https schemes,
 //   - canonicalizes the host to a normalized IP BEFORE range-checking
 //     (decimal / octal / hex / short dotted IPv4 literal forms,
-//     IPv4-mapped IPv6, bracketed IPv6),
+//     IPv6 spellings that carry an IPv4 address, bracketed IPv6),
 //   - blocks private RFC1918, loopback, link-local, unique-local, CGNAT,
-//     unspecified, and cloud-metadata destinations plus the well-known
-//     metadata hostnames (localhost, *.internal),
+//     unspecified, other non-global, and cloud-metadata destinations, any
+//     IPv6 address outside global unicast, plus the well-known metadata
+//     hostnames (localhost, *.internal),
 //   - follows redirects manually with a hop cap, re-validating each
 //     Location target through the same canonicalization + range check,
 //   - can keep the hops on the request's own origin, so a probe's method
@@ -110,15 +111,25 @@ export function isEdgeErrorStatus(status: number | null): boolean {
 }
 
 // Blocked IPv4 ranges as [base, prefixBits]. The metadata IP
-// 169.254.169.254 sits inside 169.254.0.0/16.
+// 169.254.169.254 sits inside 169.254.0.0/16. Azure's 168.63.129.16 sits in
+// public space, so it is listed alone.
 const BLOCKED_IPV4_RANGES: Array<[number, number]> = [
   [ipv4('0.0.0.0'), 8],
   [ipv4('10.0.0.0'), 8],
   [ipv4('100.64.0.0'), 10],
   [ipv4('127.0.0.0'), 8],
+  [ipv4('168.63.129.16'), 32],
   [ipv4('169.254.0.0'), 16],
   [ipv4('172.16.0.0'), 12],
+  [ipv4('192.0.0.0'), 24],
+  [ipv4('192.0.2.0'), 24],
+  [ipv4('192.88.99.0'), 24],
   [ipv4('192.168.0.0'), 16],
+  [ipv4('198.18.0.0'), 15],
+  [ipv4('198.51.100.0'), 24],
+  [ipv4('203.0.113.0'), 24],
+  [ipv4('224.0.0.0'), 4],
+  [ipv4('240.0.0.0'), 4],
 ];
 
 function ipv4(dotted: string): number {
@@ -220,22 +231,78 @@ function formatIpv4(value: number): string {
   return [24, 16, 8, 0].map((shift) => (value >>> shift) & 0xff).join('.');
 }
 
-function blockedIpv6Reason(bytes: Uint8Array): string | null {
-  const allZero = bytes.every((b) => b === 0);
-  if (allZero) return 'ipv6 unspecified address (::)';
-  const isLoopback = bytes.slice(0, 15).every((b) => b === 0) && bytes[15] === 1;
-  if (isLoopback) return 'ipv6 loopback (::1)';
-  if ((bytes[0] & 0xfe) === 0xfc) return 'ipv6 unique-local (fc00::/7)';
-  if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return 'ipv6 link-local (fe80::/10)';
-  // IPv4-mapped (::ffff:a.b.c.d) and IPv4-compatible (::a.b.c.d) forms
-  // range-check the embedded IPv4 address.
-  const first10Zero = bytes.slice(0, 10).every((b) => b === 0);
-  if (first10Zero && ((bytes[10] === 0xff && bytes[11] === 0xff) || (bytes[10] === 0 && bytes[11] === 0))) {
-    const v4 = ((bytes[12] << 24) | (bytes[13] << 16) | (bytes[14] << 8) | bytes[15]) >>> 0;
-    const reason = blockedIpv4Reason(v4);
-    if (reason) return `ipv4-in-ipv6: ${reason}`;
+type Ipv6Prefix = { octets: Uint8Array; bits: number };
+
+function prefixOf(literal: string, bits: number): Ipv6Prefix {
+  const octets = parseIpv6Literal(literal);
+  if (octets === null) throw new Error(`not an IPv6 prefix: ${literal}`);
+  return { octets, bits };
+}
+
+function inPrefix(bytes: Uint8Array, { octets, bits }: Ipv6Prefix): boolean {
+  for (let i = 0, left = bits; left > 0; i += 1, left -= 8) {
+    const mask = left >= 8 ? 0xff : (0xff << (8 - left)) & 0xff;
+    if ((bytes[i] & mask) !== (octets[i] & mask)) return false;
   }
-  return null;
+  return true;
+}
+
+const GLOBAL_UNICAST = prefixOf('2000::', 3);
+
+function refused(label: string, literal: string, bits: number): Ipv6Prefix & { reason: string } {
+  return { ...prefixOf(literal, bits), reason: `ipv6 ${label} (${literal}/${bits})` };
+}
+
+// Prefixes that hold no public audit target. The local-use block is refused
+// whole: RFC 8215 keeps it off the global Internet, and RFC 6052 lets it lay an
+// IPv4 address out at several offsets. 2001::/23 is IANA's special-purpose block,
+// Teredo included.
+const REFUSED_IPV6_PREFIXES = [
+  refused('unique-local', 'fc00::', 7),
+  refused('link-local', 'fe80::', 10),
+  refused('NAT64 local-use', '64:ff9b:1::', 48),
+  refused('special-purpose', '2001::', 23),
+  refused('documentation', '2001:db8::', 32),
+  refused('documentation', '3fff::', 20),
+];
+
+// Prefixes whose addresses carry an IPv4 address, with the byte it starts at. A
+// host behind a translator or tunnel answers for that address, so it takes the
+// IPv4 range check, and a public one stays reachable.
+const IPV4_CARRYING_PREFIXES: ReadonlyArray<Ipv6Prefix & { ipv4At: number }> = [
+  { ...prefixOf('::ffff:0:0', 96), ipv4At: 12 }, // IPv4-mapped
+  { ...prefixOf('::', 96), ipv4At: 12 }, // IPv4-compatible
+  { ...prefixOf('::ffff:0:0:0', 96), ipv4At: 12 }, // IPv4-translated (RFC 2765)
+  { ...prefixOf('64:ff9b::', 96), ipv4At: 12 }, // NAT64 well-known (RFC 6052)
+  { ...prefixOf('2002::', 16), ipv4At: 2 }, // 6to4 (RFC 3056)
+];
+
+function readIpv4(bytes: Uint8Array, at: number): number {
+  return ((bytes[at] << 24) | (bytes[at + 1] << 16) | (bytes[at + 2] << 8) | bytes[at + 3]) >>> 0;
+}
+
+// RFC 5214 marks the interface identifier, not the prefix, so any global /64 can
+// carry one. The first byte's mask ignores the universal and group bits.
+function hasIsatapIdentifier(bytes: Uint8Array): boolean {
+  return (bytes[8] & 0xfc) === 0 && bytes[9] === 0 && bytes[10] === 0x5e && bytes[11] === 0xfe;
+}
+
+function carriedIpv4Reason(value: number): string | null {
+  const reason = blockedIpv4Reason(value);
+  return reason ? `ipv4-in-ipv6: ${reason}` : null;
+}
+
+function blockedIpv6Reason(bytes: Uint8Array): string | null {
+  if (bytes.every((b) => b === 0)) return 'ipv6 unspecified address (::)';
+  if (bytes.slice(0, 15).every((b) => b === 0) && bytes[15] === 1) return 'ipv6 loopback (::1)';
+  for (const prefix of REFUSED_IPV6_PREFIXES) {
+    if (inPrefix(bytes, prefix)) return prefix.reason;
+  }
+  for (const form of IPV4_CARRYING_PREFIXES) {
+    if (inPrefix(bytes, form)) return carriedIpv4Reason(readIpv4(bytes, form.ipv4At));
+  }
+  if (!inPrefix(bytes, GLOBAL_UNICAST)) return 'ipv6 outside global unicast (2000::/3)';
+  return hasIsatapIdentifier(bytes) ? carriedIpv4Reason(readIpv4(bytes, 12)) : null;
 }
 
 /** Returns a block reason for the hostname, or null when it may be fetched. */
