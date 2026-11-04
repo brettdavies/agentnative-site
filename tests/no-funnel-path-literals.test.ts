@@ -127,15 +127,18 @@ describe('funnel path literal guard: review fixtures', () => {
     expect(files).not.toContain('src/shared/audit-routes.ts');
   });
 
-  test('a generated bundle in a dot directory is not source', async () => {
+  test("wrangler's generated bundle is not source, and any other dot directory still is", async () => {
     const root = await mkdtemp(join(tmpdir(), 'funnel-guard-'));
     try {
       await mkdir(join(root, 'og-render/.wrangler/tmp'), { recursive: true });
+      await mkdir(join(root, 'og-render/.generated'), { recursive: true });
       await writeFile(join(root, 'og-render/.wrangler/tmp/index.js'), "a('/audit');");
+      await writeFile(join(root, 'og-render/.generated/routes.ts'), '');
       await writeFile(join(root, 'og-render/worker.ts'), '');
       const files = await listScannedFiles(root);
       expect(files.filter((f) => f.includes('.wrangler'))).toEqual([]);
       expect(files.filter((f) => f.endsWith('og-render/worker.ts'))).toHaveLength(1);
+      expect(files.filter((f) => f.endsWith('.generated/routes.ts'))).toHaveLength(1);
     } finally {
       await rm(root, { recursive: true });
     }

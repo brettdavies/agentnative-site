@@ -13,6 +13,7 @@
 
 import { expect, test } from '@playwright/test';
 import { MCP_DISCOVERY_DOCUMENTS } from '../../src/shared/mcp-discovery';
+import { SPEC_VERSION } from '../../src/worker/spec-version.gen';
 import { EXPECTED_TOOL_NAMES } from '../helpers/mcp-tools';
 
 const STAGING_BASE = process.env.ANC_STAGING_BASE_URL;
@@ -171,7 +172,8 @@ test.describe('staging /llms.txt', () => {
 });
 
 // The CLI skips its staleness note silently when this endpoint fails, so no
-// consumer would report a broken deploy; this is the live gate that does.
+// consumer would report a broken deploy. This checks staging's value; the
+// deploy jobs run scripts/smoke-web-audit-version.sh against each environment.
 test.describe('staging web-audit version signal', () => {
   const VERSION_SIGNAL = '/api/web-audit/version';
 
@@ -184,7 +186,7 @@ test.describe('staging web-audit version signal', () => {
     const body = (await res.json()) as Record<string, string>;
     expect(Object.keys(body).sort()).toEqual(['registry_fingerprint', 'spec_version', 'web_schema_version']);
     expect(body.registry_fingerprint).toMatch(/^[0-9a-f]{12}$/);
-    expect(body.spec_version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(body.spec_version).toBe(SPEC_VERSION);
     expect(body.web_schema_version).toMatch(/^\d+\.\d+$/);
   });
 

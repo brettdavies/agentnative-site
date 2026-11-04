@@ -95,21 +95,18 @@ export function scanSource(source: string, file: string): Hit[] {
   return hits;
 }
 
-/** Whether `file` sits in a dot directory under `root`, such as the bundle `wrangler dev` writes to `.wrangler/`. */
-function inDotDirectory(root: string, file: string): boolean {
-  return relative(root, file)
-    .split(sep)
-    .slice(0, -1)
-    .some((segment) => segment.startsWith('.'));
+/** Whether `file` sits in `.wrangler/` under `root`, where `wrangler dev` writes the bundle it generates. */
+function inWranglerState(root: string, file: string): boolean {
+  return relative(root, file).split(sep).slice(0, -1).includes('.wrangler');
 }
 
-/** Repo-relative source files under src/ except the route module, the vendored spec, generated types, and dot directories. */
+/** Repo-relative source files under src/ except the route module, the vendored spec, generated types, and wrangler's state. */
 export async function listScannedFiles(root: string = SRC_DIR): Promise<string[]> {
   const entries = await readdir(root, { recursive: true, withFileTypes: true });
   return entries
     .filter((entry) => entry.isFile() && SCANNED_EXTENSIONS.has(extname(entry.name)))
     .map((entry) => join(entry.parentPath, entry.name))
-    .filter((file) => !inDotDirectory(root, file))
+    .filter((file) => !inWranglerState(root, file))
     .map((file) => relative(REPO_ROOT, file))
     .filter((rel) => !EXCLUDED_PREFIXES.some((p) => rel.startsWith(p)))
     .sort();

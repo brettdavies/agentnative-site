@@ -8,7 +8,7 @@
 
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { API_WEB_AUDIT_VERSION_PATH, SCORECARDS_PATH, scoreMarkdownPath } from '../shared/audit-routes';
+import { SCORECARDS_PATH, scoreMarkdownPath } from '../shared/audit-routes';
 import { MCP_DISCOVERY_DOCUMENTS } from '../shared/mcp-discovery';
 import { buildLlmsFull, buildLlmsIndex } from './llms.mjs';
 import { buildLeaderboardMarkdown } from './scorecards-render.mjs';
@@ -75,7 +75,6 @@ export async function emitLlmsSurface({
       { label: 'MCP endpoint docs', path: '/mcp-docs.md' },
       ...MCP_DISCOVERY_DOCUMENTS.map(({ label, path }) => ({ label, path })),
       { label: 'MCP client skill', path: '/mcp-skill.md' },
-      { label: 'Web-audit version signal (JSON)', path: API_WEB_AUDIT_VERSION_PATH },
     ],
     scorecardLinks: [
       { name: 'Leaderboard', path: `${SCORECARDS_PATH}.md` },

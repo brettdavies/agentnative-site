@@ -129,6 +129,24 @@ test.describe('skip-Worker HIT — staging Workers Caching', () => {
     expect(second.headers()['cache-control'] ?? '').toContain('s-maxage=86400');
   });
 
+  // The one HIT-1d surface under /api/, where the gateway keeps the raw inbound
+  // Accept: only the absent Vary keeps its stored object unsharded. A HEAD goes
+  // first so a stored bodyless answer would show up as an empty GET.
+  test('repeat GET /api/web-audit/version is HIT with Age in the HIT-1d class with no Vary', async ({ request }) => {
+    const path = '/api/web-audit/version';
+    await request.fetch(`${STAGING_BASE}${path}`, { method: 'HEAD', headers: ACCESS_HEADERS });
+    const second = await warmThenGet(request, path, { accept: 'application/json' });
+    expect(second.status()).toBe(200);
+    expect(second.headers()['vary'] ?? '').toBe('');
+    expect(isSkipWorkerHit(second.headers())).toBe(true);
+    expect(second.headers()['cache-control']).toBe('public, max-age=300, stale-while-revalidate=60');
+    expect(Object.keys((await second.json()) as object).sort()).toEqual([
+      'registry_fingerprint',
+      'spec_version',
+      'web_schema_version',
+    ]);
+  });
+
   test('repeat GET /score/<seeded host>/json is HIT with Age in the HIT-min class with no Vary', async ({
     request,
   }) => {

@@ -260,11 +260,10 @@ describe('llms.txt Programmatic access section', () => {
     expect(princIdx).toBeGreaterThan(progIdx);
   });
 
-  test('links the MCP endpoint, both server cards, the AI catalog, the client skill, and the version signal', async () => {
+  test('links the MCP endpoint, both server cards, the AI catalog, and the client skill', async () => {
     const llms = await readFile(join(DIST_DIR, 'llms.txt'), 'utf8');
     const section = llms.slice(llms.indexOf('## Programmatic access'), llms.indexOf('## Principles'));
-    expect(section.match(/^- \[/gm)).toHaveLength(7);
-    expect(section).toContain('(https://anc.dev/api/web-audit/version)');
+    expect(section.match(/^- \[/gm)).toHaveLength(6);
     expect(section).toContain('https://anc.dev/mcp');
     expect(section).toContain('https://anc.dev/mcp-docs.md');
     expect(section).toContain('returns 405');
@@ -275,6 +274,14 @@ describe('llms.txt Programmatic access section', () => {
     expect(section).toContain('No authentication');
     expect(section).toContain('initialize');
     expect(section).toContain('Full recipes');
+  });
+
+  // The web audit reads any /api/ path in llms.txt as the site declaring a REST
+  // API (src/worker/audit-web/antecedents/api.ts), which turns on its OpenAPI,
+  // error-format, and rate-limit checks for this site's own public score.
+  test('names no /api/ path, so a listing cannot change what the audit asks of this site', async () => {
+    const llms = await readFile(join(DIST_DIR, 'llms.txt'), 'utf8');
+    expect(llms.split('\n').filter((line) => /\/api\//i.test(line))).toEqual([]);
   });
 
   test('only one Programmatic access section exists in llms.txt', async () => {

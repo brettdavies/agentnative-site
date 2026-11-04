@@ -25,8 +25,8 @@
 #   deploy     deploy.yml on the env's branch (dev for staging, main for prod):
 #              conclusion=success
 #   container  Env container app state is `ready`
-#   pages      `<env-url>/`, `/scorecards`, `/api/score` registry-hit all return
-#              expected
+#   pages      `<env-url>/`, `/scorecards`, `/api/score` registry-hit,
+#              `/api/web-audit/version` all return expected
 #   retired    every path the funnel retired answers 404 with no redirect,
 #              except the published inbound links, which 301 to a pinned
 #              destination. Run after the zone purge, or a cached pre-cut
@@ -342,6 +342,13 @@ gate_pages() {
     gate_pass "${ENV_URL}/api/score registry hit returns tier=registry, $scorecard_url, spec=$spec_v"
   else
     gate_fail "${ENV_URL}/api/score registry hit" "tier=$tier scorecard_url=$scorecard_url spec=$spec_v"
+  fi
+
+  local signal_error
+  if signal_error=$(SMOKE_RETRIES=0 SMOKE_CURL_CONFIG="$CF_CONFIG" "$REPO_ROOT/scripts/smoke-web-audit-version.sh" "$ENV_URL" 2>&1); then
+    gate_pass "${ENV_URL}/api/web-audit/version serves the version signal"
+  else
+    gate_fail "${ENV_URL}/api/web-audit/version" "$signal_error"
   fi
 }
 
