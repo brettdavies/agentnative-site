@@ -40,7 +40,7 @@ function verdict(outcome: Outcome & { kind: 'report' }, testExit: number | null)
     parts.push('No new divergence.');
   }
   if (count('ledgered') > 0) parts.push(`${plural(count('ledgered'), 'divergence', 'divergences')} already in the CLI ledger.`);
-  if (count('closed') > 0) parts.push(`${plural(count('closed'), 'ledger entry', 'ledger entries')} now matching.`);
+  if (count('closed') > 0) parts.push(`${plural(count('closed'), 'ledger entry', 'ledger entries')} no longer diverging.`);
   if (parts.length > 0) {
     if (testExit !== 0 && outcome.failedTests.length === 0) parts.push(`The CLI tests ended with exit code ${testExit}.`);
     return parts.join(' ');
@@ -59,7 +59,7 @@ const fence = (text: string): string =>
 const STATUS_LABEL: Record<Row['status'], string> = {
   new: 'new',
   ledgered: 'in the CLI ledger',
-  closed: 'now matches, in the CLI ledger',
+  closed: 'no longer diverges, in the CLI ledger',
 };
 
 function table(rows: Row[], cap: number, overflow: string): string {
@@ -75,7 +75,7 @@ type Bindings = Record<string, string[]>;
 
 function parseUnported(text: string): { handlers: Bindings; evals: Bindings } | null {
   const isBindings = (value: unknown): value is Bindings =>
-    typeof value === 'object' && value !== null && Object.values(value).every(Array.isArray);
+    typeof value === 'object' && value !== null && !Array.isArray(value) && Object.values(value).every(Array.isArray);
   try {
     const doc = JSON.parse(text) as { handlers?: unknown; evals?: unknown };
     return isBindings(doc.handlers) && isBindings(doc.evals) ? { handlers: doc.handlers, evals: doc.evals } : null;
@@ -121,7 +121,7 @@ function render(input: ParityInput, outcome: Outcome, cap: number, overflow: str
     sections.push(unportedLine(input.unported));
     sections.push('Informational: this check is not required. The result says nothing about parity at this contract.');
   } else {
-    sections.push('This run failed because the report workflow itself needs a fix. The contract is not the cause.');
+    sections.push('This run failed for a reason the contract does not explain. The cause is in the run log.');
   }
   return sections.join('\n\n');
 }

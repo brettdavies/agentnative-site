@@ -6,9 +6,9 @@
 # Never name this check in a ruleset. A divergence is expected whenever the engine
 # changes and reaches the CLI through its next bump PR, so divergences, a CLI that
 # no longer builds and a contract it cannot read all end green; the last two read
-# "report unavailable". Only a defect in this workflow goes red, by the exit codes
-# scripts/web-audit/cli-parity-summary.ts documents. A soft-failed step would hide
-# that defect, so failures are captured as exit codes and no step soft-fails.
+# "report unavailable". Only a run the contract cannot explain goes red, by the exit
+# codes scripts/web-audit/cli-parity-summary.ts documents. A soft-failed step would
+# hide that run, so failures are captured as exit codes and no step soft-fails.
 #
 # Triggers:
 #   pull_request       a change to the contract, or to this report.
@@ -128,11 +128,14 @@ jobs:
             cargo test --locked --features web --no-fail-fast --test web_audit_divergences \
             2>&1 | tee "$RUNNER_TEMP/tests.log"
           code=${PIPESTATUS[0]}
-          cargo test --locked --features web --no-fail-fast \
-            --lib --test 'web_audit_*' --test build_registry \
-            2>&1 | tee -a "$RUNNER_TEMP/tests.log"
-          suites=${PIPESTATUS[0]}
-          if [ "$code" = 0 ]; then code=$suites; fi
+          # Without a dump there is no report to add to, and a failed build fails again.
+          if [ -f "$RUNNER_TEMP/divergences.json" ]; then
+            cargo test --locked --features web --no-fail-fast \
+              --lib --test 'web_audit_*' --test build_registry \
+              2>&1 | tee -a "$RUNNER_TEMP/tests.log"
+            suites=${PIPESTATUS[0]}
+            if [ "$code" = 0 ]; then code=$suites; fi
+          fi
           echo "exit=$code" >> "$GITHUB_OUTPUT"
 
       - name: Write the report
@@ -201,7 +204,7 @@ jobs:
           if [ -n "$BODY" ]; then
             printf '%s\n' "$BODY" > "$file"
           else
-            # An older comment must not stand as this commit's report.
+            # A failed run must not leave an older comment standing as its report.
             printf '%s\n## CLI parity\n\n**Report unavailable: the report job ended with result %s before writing a report.** [Run](%s)\n' \
               "$COMMENT_MARKER" "$REPORT_RESULT" "$RUN_URL" > "$file"
           fi

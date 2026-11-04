@@ -84,10 +84,10 @@ thread 'dump_corpus_divergences' (3608) panicked at tests/web_audit_divergences.
 write /nonexistent/dir/d.json: No such file or directory (os error 2)
 `;
 
-const CLI_COMPILE_FAILURE_LOG = `error: this file contains an unclosed delimiter
-  --> tests/web_audit_token.rs:90:13
+const CLI_COMPILE_FAILURE_LOG = `error[E0308]: mismatched types
+  --> target/debug/build/agentnative-1/out/generated_web_registry.rs:90:13
 
-error: could not compile \`agentnative\` (test "web_audit_token") due to 1 previous error
+error: could not compile \`agentnative\` (lib) due to 1 previous error
 `;
 
 const DEPENDENCY_BUILD_FAILURE_LOGS = [
@@ -207,8 +207,8 @@ describe('a run that produced a dump', () => {
 
   test('a ledger entry the dump no longer holds reads as now matching', () => {
     const report = renderParityReport(input({ ledger: ledgerOf(['a', 'row:one', '#504']) }));
-    expect(report.summary).toContain('**No new divergence. 1 ledger entry now matching.**');
-    expect(report.summary).toContain('| `a` | `row:one` | now matches, in the CLI ledger (`#504`) |');
+    expect(report.summary).toContain('**No new divergence. 1 ledger entry no longer diverging.**');
+    expect(report.summary).toContain('| `a` | `row:one` | no longer diverges, in the CLI ledger (`#504`) |');
   });
 
   test('a failing test beside an empty dump is not reported as full parity', () => {
@@ -231,6 +231,16 @@ describe('a run that produced a dump', () => {
     const report = renderParityReport(input({ testExit: 101, testLog: LIB_SUITE_LOG }));
     expect(report.summary).toContain('- `src/lib::web_audit::scorecard::keeps_order`');
     expect(report.summary).toContain('Ran 2 CLI test suites.');
+  });
+
+  test('a should_panic test that fails is listed', () => {
+    const testLog = `     Running unittests src/lib.rs (target/debug/deps/agentnative-3)
+
+test scorecard::audience::tests::rejects_a_duplicate_signal - should panic ... FAILED
+`;
+    const report = renderParityReport(input({ testExit: 101, testLog }));
+    expect(report.summary).toContain('**No scorecard divergence, but 1 CLI test fails at this contract.**');
+    expect(report.summary).toContain('- `src/lib::scorecard::audience::tests::rejects_a_duplicate_signal`');
   });
 
   test("the dump's suite running twice counts once, and its failure lists once", () => {
@@ -284,7 +294,14 @@ describe('unported handler kinds and eval rules', () => {
 
   test('a missing or unreadable list reads as not checked, never as ported', () => {
     const notChecked = 'Unported handler kinds and eval rules: not checked';
-    for (const unported of [null, '{ broken', '{}', '[]', '{"handlers":{},"evals":[1]}']) {
+    for (const unported of [
+      null,
+      '{ broken',
+      '{}',
+      '[]',
+      '{"handlers":{},"evals":[1]}',
+      '{"handlers":[],"evals":[]}',
+    ]) {
       const report = renderParityReport(input({ unported }));
       expect(report.summary).toContain(notChecked);
       expect(report.summary).not.toContain('is ported');
@@ -359,7 +376,7 @@ describe('a run with no dump never reads as zero divergences', () => {
     const report = renderParityReport(input({ testExit: 101, testLog: CLI_COMPILE_FAILURE_LOG, dump: null }));
     expect(report.exitCode).toBe(0);
     expectUnavailable(report.summary, 'the CLI did not build against this contract');
-    expect(report.summary).toContain('unclosed delimiter');
+    expect(report.summary).toContain('mismatched types');
   });
 
   test('a contract the sync cannot map stays green and names the missing path', () => {
@@ -389,7 +406,7 @@ describe('a run with no dump never reads as zero divergences', () => {
     const report = renderParityReport(input({ testExit: 0, testLog: NO_FEATURE_LOG, dump: null }));
     expect(report.exitCode).toBe(1);
     expectUnavailable(report.summary, 'the CLI tests ended with exit code 0 and wrote no divergence dump');
-    expect(report.summary).toContain('needs a fix');
+    expect(report.summary).toContain('a reason the contract does not explain');
   });
 
   test('a missing test target fails the run', () => {
@@ -550,6 +567,13 @@ describe('the workflow', () => {
   test('a failure in either cargo run reaches the exit code the report reads', () => {
     const run = doc.jobs.report.steps.find((candidate) => candidate.id === 'tests')?.run ?? '';
     expect(run).toContain('if [ "$code" = 0 ]; then code=$suites; fi');
+  });
+
+  test('the bump suites run only beside a dump, so one log never mixes a failed build into a report', () => {
+    const run = doc.jobs.report.steps.find((candidate) => candidate.id === 'tests')?.run ?? '';
+    const gate = run.indexOf('if [ -f "$RUNNER_TEMP/divergences.json" ]; then');
+    expect(gate).toBeGreaterThan(-1);
+    expect(run.indexOf("--test 'web_audit_*'")).toBeGreaterThan(gate);
   });
 
   test('crate downloads stay on HTTP/1.1, as the CLI needs on hosted runners', () => {

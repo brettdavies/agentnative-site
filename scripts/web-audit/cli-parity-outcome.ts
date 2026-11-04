@@ -86,7 +86,7 @@ function parseTestLog(log: string): { failedTests: string[]; suiteCount: number 
       suite = running[1] ?? '';
       suites.add(suite);
     }
-    const test = /^test (\S+) \.\.\. FAILED$/.exec(line);
+    const test = /^test (\S+)(?: - should panic)? \.\.\. FAILED$/.exec(line);
     if (test) failedTests.add(`${suite}::${test[1]}`);
   }
   return { failedTests: [...failedTests], suiteCount: suites.size };

@@ -471,7 +471,7 @@ engine against a public URL) and for operating the web-board rescore (weekly cro
   for `release/*` heads.
 - `web-audit-cli-parity.yml`: on a PR that changes `src/data/web-audit/contract/**`, builds CLI `dev` against the PR's
   contract and reports the CLI scenarios it would diverge, in a job summary and one PR comment. Informational and in no
-  ruleset; only a defect in the workflow itself goes red.
+  ruleset; only a run the contract cannot explain goes red.
 
 ## Tool-site sequencing (do not violate)
 
