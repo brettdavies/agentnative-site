@@ -1,6 +1,6 @@
 // The declared-site-type gate, applied before the antecedent token. Separate
 // from token resolution: it filters on a check's declared `site_types`, not
-// on observed wave-1 evidence.
+// on observed probe evidence.
 
 import type { WebCheckSiteType } from '../registry';
 import type { AntecedentContext } from './context';

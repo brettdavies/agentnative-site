@@ -450,10 +450,13 @@ function failureOf(err: unknown, started: number, deadlineAt: number): HopFailur
   return { kind: 'failure', error: hopError(err, started, deadlineAt) };
 }
 
+/** How a request that ran out of budget reads, on the wire or never sent. */
+export const DEADLINE_EXCEEDED = 'TimeoutError: deadline exceeded';
+
 function hopError(err: unknown, started: number, deadlineAt: number): HopError {
   const timedOut = err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError');
   return {
-    message: timedOut ? 'TimeoutError: deadline exceeded' : errMsg(err),
+    message: timedOut ? DEADLINE_EXCEEDED : errMsg(err),
     timedOut,
     startedAt: started,
     endedAt: Date.now(),

@@ -36,7 +36,7 @@ function mcpRow(id: string, handler: WebCheck['handler'], with_: Record<string, 
   };
 }
 
-/** One wave-1 POST row and one wave-2 OPTIONS + POST pair, so any wire probe shows up in the request log. */
+/** One source POST row and one later OPTIONS + POST pair, so any wire probe shows up in the request log. */
 export function followRegistry(): WebAuditRegistry {
   return {
     version: 1,

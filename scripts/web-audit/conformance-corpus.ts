@@ -13,7 +13,8 @@ import { normalizeWebAuditRegistry } from '../../src/build/13-web-audit-registry
 import type { ExpectBlock } from '../../src/worker/audit-web/assert';
 import { runWebAudit } from '../../src/worker/audit-web/engine';
 import { ALWAYS_ADMIT_BUDGET } from '../../src/worker/audit-web/follow-requests';
-import type { WebAuditRegistry, WebSiteType } from '../../src/worker/audit-web/registry';
+import type { WebAuditRegistry, WebCheck, WebSiteType } from '../../src/worker/audit-web/registry';
+import { SOURCE_CHECKS } from '../../src/worker/audit-web/antecedents';
 import type { HopRequest } from '../../src/worker/audit-web/request-hop';
 import type { NaReason, ScorecardStatus, WebScorecard } from '../../src/worker/audit-web/scorecard';
 import { requestsJson, scheduleIndependentRequests } from './conformance-requests';
@@ -48,6 +49,8 @@ export type Scenario = {
   spec_version: string;
   /** Whether the run follows the hosts the target declares; absent means it does. */
   follow_declarations?: boolean;
+  /** Checks whose handler throws instead of probing; no target's answer can make one do that. */
+  failing_handlers?: string[];
   unmatched: ExchangeResponse;
   allow_unmatched: boolean;
   exchanges: Exchange[];
@@ -144,20 +147,6 @@ export function stubFetchFor(scenario: Scenario, log: StubLog): typeof fetch {
   }) as typeof fetch;
 }
 
-/**
- * Normalizes a scorecard for comparison across engines: result rows take
- * registry order, because wave-2 rows arrive in whatever order the
- * concurrent probes resolve, which no second engine can reproduce and
- * which carries no meaning. The rows carry no wall-clock field (the
- * scorecard keeps the summarized evidence line, not the raw evidence), so
- * nothing else needs normalizing.
- */
-export function normalizeScorecard(scorecard: WebScorecard, registry: WebAuditRegistry): WebScorecard {
-  const order = new Map(registry.checks.map((check, index) => [check.id, index]));
-  const results = [...scorecard.results].sort((a, b) => (order.get(a.id) ?? -1) - (order.get(b.id) ?? -1));
-  return { ...scorecard, results };
-}
-
 export type ScenarioRun = {
   output: string;
   unmatched: string[];
@@ -165,24 +154,74 @@ export type ScenarioRun = {
   requests: HopRequest[];
 };
 
-/** Runs a scenario at `concurrency`, or at the engine's default when absent. */
+// A name no engine registers, which is what makes a check's handler throw.
+const FAILING_HANDLER = 'corpus-failing-handler';
+const FAILING_HANDLER_EVIDENCE = `handler error: no handler registered for "${FAILING_HANDLER}"`;
+
+/** How long to hold an answer back, given the request's URL and its place in the order sent. */
+export type AnswerDelay = (url: string, sentIndex: number) => number;
+
+/** What a run varies from the engine's defaults, none of which may move its scorecard or request set. */
+export type ScenarioSchedule = {
+  concurrency?: number;
+  /** Reorders the answers every phase of the audit sees, which the stub's zero latency never does on its own. */
+  answerDelayMs?: AnswerDelay;
+  /** With an answer delay, a timeout an answer can actually run into, as the frozen clock's deadlines cannot. */
+  perCheckTimeoutMs?: number;
+};
+
+/** `ms`, or an abort as a real fetch reports one if the request's own timeout comes first. */
+function heldAnswer(ms: number, signal: AbortSignal | null | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const answered = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(answered);
+        reject(new DOMException('aborted', 'AbortError'));
+      },
+      { once: true },
+    );
+  });
+}
+
 export async function runScenario(
   name: string,
   scenario: Scenario,
   registry: WebAuditRegistry,
-  concurrency?: number,
+  schedule: ScenarioSchedule = {},
 ): Promise<ScenarioRun> {
   const sent: HopRequest[] = [];
   const log: StubLog = { unmatched: [], sent };
+  const stub = stubFetchFor(scenario, log);
+  const failing = new Set(scenario.failing_handlers ?? []);
+  const audited: WebAuditRegistry = {
+    ...registry,
+    checks: registry.checks.map((check) =>
+      failing.has(check.id) ? { ...check, handler: FAILING_HANDLER as WebCheck['handler'], eval: undefined } : check,
+    ),
+  };
+  let sentCount = 0;
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    // The stub records the request now; a transport failure it answers with stays
+    // unobserved through the wait, so it needs a handler before it is returned.
+    const answer = stub(input, init);
+    answer.catch(() => {});
+    const delay = schedule.answerDelayMs?.(String(input), sentCount) ?? 0;
+    sentCount += 1;
+    if (delay > 0) await heldAnswer(delay, init?.signal);
+    return answer;
+  }) as typeof fetch;
   const audit = runWebAudit({
     url: scenario.target,
-    registry,
+    registry: audited,
     siteType: scenario.site_type,
     specVersion: scenario.spec_version,
-    concurrency,
+    concurrency: schedule.concurrency,
+    perCheckTimeoutMs: schedule.perCheckTimeoutMs,
     followDeclarations: scenario.follow_declarations ?? true,
     domainBudget: ALWAYS_ADMIT_BUDGET,
-    fetchOptions: { fetchImpl: stubFetchFor(scenario, log) },
+    fetchOptions: { fetchImpl },
     now: () => FIXED_NOW_MS,
   });
   let scorecard: WebScorecard | null = null;
@@ -199,7 +238,7 @@ export async function runScenario(
   }
   if (scorecard === null) throw new Error(`scenario ${name} produced neither a scorecard nor an unreachable event`);
   return {
-    output: `${JSON.stringify(normalizeScorecard(scorecard, registry), null, 2)}\n`,
+    output: `${JSON.stringify(scorecard, null, 2)}\n`,
     unmatched: log.unmatched,
     requests: sent,
   };
@@ -433,6 +472,9 @@ function scoresJson(entries: ReadonlyArray<[string, ScoreIndexEntry]>): string {
 function validateScenario(name: string, scenario: Scenario, ids: ReadonlySet<string>): void {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error(`scenario name ${JSON.stringify(name)} is not kebab-case`);
   if (scenario.covers.length === 0) throw new Error(`scenario ${name} covers no check`);
+  for (const id of scenario.failing_handlers ?? []) {
+    if (!ids.has(id)) throw new Error(`scenario ${name} fails the handler of unknown check ${JSON.stringify(id)}`);
+  }
   for (const id of scenario.covers) {
     if (!ids.has(id)) throw new Error(`scenario ${name} covers unknown check ${JSON.stringify(id)}`);
   }
@@ -462,6 +504,7 @@ function scenarioJson(scenario: Scenario): string {
     site_type: scenario.site_type,
     spec_version: scenario.spec_version,
     ...(scenario.follow_declarations !== undefined ? { follow_declarations: scenario.follow_declarations } : {}),
+    ...(scenario.failing_handlers !== undefined ? { failing_handlers: scenario.failing_handlers } : {}),
     unmatched: scenario.unmatched,
     allow_unmatched: scenario.allow_unmatched,
     exchanges: scenario.exchanges,
@@ -507,6 +550,9 @@ ${relative(REPO_ROOT, CORPUS_DIR)}/
   budget that admits every domain, so no budget state reaches a golden.
 - \`unmatched\`: the response for a request no exchange matches, either a transport failure
   (\`{"error": "Name: message"}\`) or a full response.
+- \`failing_handlers\` (optional): check ids whose handler throws instead of probing, since no target's answer can
+  make one do that. Each sends no request, and its row reads \`error\` with the evidence
+  \`handler error: no handler registered for "corpus-failing-handler"\`.
 - \`allow_unmatched\`: when false, generation fails if any request reaches the unmatched policy.
 - \`exchanges\`: ordered rules; the first match wins and a rule may match repeatedly.
 
@@ -534,7 +580,12 @@ keep the scheme, host, and port, and a redirect to another origin is its answer.
 ## requests.json
 
 Every request the engine sent for the scenario, recorded where the stub fetch receives it, before matching. An engine
-under comparison sends the same set, whatever order its requests complete in.
+under comparison sends the same set, whatever order its requests complete in. The root request and the first document
+reads (the \`well_known\` cards, the AI catalog, the API catalog) go out together, before any of them is answered, so
+they are in the set of every https target, a run that ends on the root's answer included. Every other request, a redirect hop of one of
+those reads included, waits for the root's answer.
+
+Each entry:
 
 - \`method\`: uppercase.
 - \`url\`: as the URL parser writes it.
@@ -543,15 +594,34 @@ under comparison sends the same set, whatever order its requests complete in.
 
 Entries are sorted by the request memo's identity key, \`requestIdentityKey\` in
 \`src/worker/audit-web/request-hop.ts\`: the JSON array \`[method, url, [[name, value], ...], body]\`, compared by UTF-16
-code unit. Generation fails when a scenario sends one request twice, and when its scorecard or request set at
-concurrency 1 differs from the default run.
+code unit. Generation fails when a scenario sends one request twice, and when its scorecard or request set differs
+from the default run at concurrency 1 or with its answers arriving in another order: later requests answering first,
+or the source documents answering last.
+
+The set is unordered, so some rules it cannot show, and an engine under comparison keeps them anyway:
+
+- Every request carrying the session goes out after the \`notifications/initialized\` request has settled.
+- A root that fails at the network level cuts the first document reads still in flight to the degraded 2 s budget,
+  measured from their start. A redirect hop held for the root spends none of its read's budget while it waits, and a
+  hop whose budget a cut has already spent when the wait ends is not sent. The discovery budget counts from when the
+  root settled.
+- Six checks are in flight at most, and a cap that is not a whole number from 1 is refused before any request. A free
+  slot goes to the MCP steps, then the source checks, then the rows in registry order, then a fan-out's extra probes,
+  one item per slot, and one row's fan-out always leaves a slot free. Rank orders only what is waiting, so it favours the earlier ranks under deadline pressure
+  without promising which rows go unprobed.
+- A link in \`llms-txt-links\` not answered by the check's deadline reads as budget-exhausted and marks the run
+  incomplete, whether or not it was the last link. A link the deadline stopped before its request went out also carries
+  \`blocked\`, so the row names no host it never contacted.
+- An http check whose \`expect\` reads no body, with no \`retain_body\` and no \`with.timeout\`, reads status and headers
+  only, so a body that fails or stalls after a clean status does not change its row.
+- A source check that measured nothing, because its handler threw or the deadline came first, keeps its own row, unless
+  it is outside the declared site type. The checks gated on it read as they do on any failed antecedent.
 
 ## scorecard.json
 
-The engine's terminal scorecard as \`JSON.stringify(scorecard, null, 2)\` plus a trailing newline, with one
-normalization applied before writing and expected of any engine under comparison: \`results\` is sorted into
-registry order, because wave-2 rows arrive in the order the concurrent probes resolve, which carries no
-meaning and which a second engine cannot reproduce. Rows carry the summarized \`evidence\` line, never the raw
+The engine's terminal scorecard as \`JSON.stringify(scorecard, null, 2)\` plus a trailing newline. \`results\` is
+in registry order whatever order the concurrent probes finished in, which carries no meaning and which a second
+engine cannot reproduce. Rows carry the summarized \`evidence\` line, never the raw
 evidence, so no wall-clock value reaches the file. Key order is otherwise the engine's emission order and
 every number is an integer. A scenario that ends in
 the engine's \`unreachable\` event writes \`{"unreachable": "<reason>"}\` instead of a scorecard. The engine runs
@@ -606,23 +676,85 @@ ${rows.join('\n')}
 `;
 }
 
+// Longer than any burst an audit sends at once: discovery's first reads, its
+// POSTs, a follow fan-out, a full set of slots.
+const REVERSAL_SPAN = 8;
+const SOURCE_ANSWER_DELAY_MS = 20;
+
+/**
+ * Answer orders the zero-latency stub never shows, each of which a scenario must
+ * hold under. Reversing bursts reaches every concurrent phase: discovery, the
+ * follow slice and the checks. Holding the source documents to last reaches the
+ * checks that would pass by reading a source before it settled. Neither comes near
+ * a real timeout, so host load cannot move a scenario and a move always fails.
+ */
+export function answerOrders(registry: WebAuditRegistry): Array<ScenarioSchedule & { label: string }> {
+  const sourcePaths = new Set(
+    registry.checks
+      .filter((check) => SOURCE_CHECKS.has(check.id))
+      .flatMap((check) => {
+        const { path, path_any: pathAny } = check.with as { path?: string; path_any?: string[] };
+        return [...(path === undefined ? [] : [path]), ...(pathAny ?? [])];
+      }),
+  );
+  return [
+    {
+      label: 'with later requests answering first',
+      answerDelayMs: (_url, sentIndex) => REVERSAL_SPAN - (sentIndex % REVERSAL_SPAN),
+    },
+    {
+      label: 'with the source documents answering last',
+      answerDelayMs: (url) => (sourcePaths.has(new URL(url).pathname) ? SOURCE_ANSWER_DELAY_MS : 0),
+    },
+  ];
+}
+
+/**
+ * Throws naming the scenario when a check it says fails never reached its handler:
+ * a gate that rules the check out first would leave the scenario pinning nothing.
+ */
+export function assertHandlersFailed(name: string, scenario: Pick<Scenario, 'failing_handlers'>, output: string): void {
+  const rows = (JSON.parse(output) as { results?: Array<{ id: string; evidence: string | null }> }).results ?? [];
+  for (const id of scenario.failing_handlers ?? []) {
+    if (rows.find((row) => row.id === id)?.evidence !== FAILING_HANDLER_EVIDENCE) {
+      throw new Error(`scenario ${name}: the handler of ${id} did not fail, so the scenario pins nothing`);
+    }
+  }
+}
+
 /** Every corpus file by path relative to the corpus directory. */
-export async function generateCorpus(registry: WebAuditRegistry): Promise<Map<string, string>> {
+export async function generateCorpus(
+  registry: WebAuditRegistry,
+  orders: ReadonlyArray<ScenarioSchedule & { label: string }> = answerOrders(registry),
+): Promise<Map<string, string>> {
   const ids = new Set(registry.checks.map((check) => check.id));
   const names = Object.keys(SCENARIOS).sort();
   const files = new Map<string, string>();
   const scores: Array<[string, ScoreIndexEntry]> = [];
+  const runs = new Map<string, ScenarioRun>();
   for (const name of names) {
     const scenario = SCENARIOS[name];
     validateScenario(name, scenario, ids);
     const run = await runScenario(name, scenario, registry);
-    const serial = await runScenario(name, scenario, registry, 1);
-    const requests = scheduleIndependentRequests(name, run, serial);
+    const serial = await runScenario(name, scenario, registry, { concurrency: 1 });
+    const requests = scheduleIndependentRequests(name, 'at concurrency 1', run, serial);
+    assertHandlersFailed(name, scenario, run.output);
+    runs.set(name, run);
     files.set(`scenarios/${name}/scenario.json`, scenarioJson(scenario));
     files.set(`scenarios/${name}/scorecard.json`, run.output);
     files.set(`scenarios/${name}/requests.json`, requestsJson(requests));
     scores.push([name, scoreIndexEntry(run.output)]);
   }
+  // These runs wait on timers rather than the CPU, so side by side they cost about
+  // what one does.
+  await Promise.all(
+    names.flatMap((name) =>
+      orders.map(async ({ label, ...schedule }) => {
+        const other = await runScenario(name, SCENARIOS[name], registry, schedule);
+        scheduleIndependentRequests(name, label, runs.get(name) as ScenarioRun, other);
+      }),
+    ),
+  );
   files.set('regex-parity.json', `${JSON.stringify(regexParityFixture(registry), null, 2)}\n`);
   files.set('scores.json', scoresJson(scores));
   files.set('README.md', readme(names));

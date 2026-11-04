@@ -1,18 +1,22 @@
 // llms.txt quality trio (format / links / when-to-use). Reads the retained
-// wave-1 `/llms.txt` body so format and when-to-use issue no extra fetch.
-// Link probes are SSRF-guarded and budgeted like scoped-llms. An http link,
-// or one that redirects to http, is never requested: llmstxt.org asks for a
-// markdown link per item and never for plaintext, so such a link is present
-// but not usable over https.
+// source `/llms.txt` body so format and when-to-use issue no extra fetch.
+// Link probes are SSRF-guarded and run side by side under the audit's cap; a
+// link not answered by the check's deadline reads as the budget running out,
+// whichever order the others finished in. An http link, or one that redirects
+// to http, is never requested: llmstxt.org asks for a markdown link per item
+// and never for plaintext, so such a link is present but not usable over https.
 
+import { oneAtATime } from '../audit-slots';
 import type { WebCheck } from '../registry';
 import { guardedFetch, STATUS_ONLY_BODY_BYTES, validatePublicUrl } from '../ssrf';
 import {
   markdownHrefs,
+  NESTED_BUDGET_EXHAUSTED_WHY,
   plaintextItem,
   redirectsToHttp,
   redirectsToHttpItem,
   remainingDeadlineMs,
+  timedOut,
   timeoutMsFor,
 } from './shared';
 import type { EvidenceItem, HandlerContext, ProbeOutcome, ProbeStatus } from './types';
@@ -59,12 +63,20 @@ function hrefsFrom(body: string, base: string): string[] {
   return out;
 }
 
+type LinkProbe = { verdict: Exclude<ProbeStatus, 'na'>; item: EvidenceItem; exhausted?: true };
+
+/** `blocked` marks a link no request went out for, so the row names no host it never contacted. */
+function budgetExhausted(href: string, requested: boolean): LinkProbe {
+  const item = { url: href, ok: false, why: [NESTED_BUDGET_EXHAUSTED_WHY] };
+  return {
+    verdict: 'error',
+    item: requested ? item : { ...item, blocked: NESTED_BUDGET_EXHAUSTED_WHY },
+    exhausted: true,
+  };
+}
+
 /** One link's evidence and its own verdict, which the row's evidence line reads to name the link that decided it. */
-async function probeLink(
-  href: string,
-  timeoutMs: number,
-  ctx: HandlerContext,
-): Promise<{ verdict: Exclude<ProbeStatus, 'na'>; item: EvidenceItem }> {
+async function probeLink(href: string, deadlineAt: number, ctx: HandlerContext): Promise<LinkProbe> {
   const validation = validatePublicUrl(href);
   if (!validation.ok) return { verdict: 'absent', item: { url: href, blocked: validation.reason, ok: false } };
   if (validation.url.protocol !== 'https:') {
@@ -73,7 +85,10 @@ async function probeLink(
       item: { url: href, ...plaintextItem('not https') },
     };
   }
+  const timeoutMs = remainingDeadlineMs(deadlineAt);
+  if (timeoutMs <= 0) return budgetExhausted(href, false);
   const resp = await guardedFetch(href, {}, { ...ctx.fetchOptions, timeoutMs, maxBodyBytes: STATUS_ONLY_BODY_BYTES });
+  if (timedOut(resp)) return budgetExhausted(href, true);
   if (redirectsToHttp(resp)) return { verdict: 'noncompliant', item: redirectsToHttpItem(href, resp.status) };
   if (resp.error !== null || resp.status === null) {
     return { verdict: 'error', item: { url: href, status: resp.status, error: resp.error, ok: false } };
@@ -118,22 +133,9 @@ export async function runLlmsTxtQuality(check: WebCheck, ctx: HandlerContext): P
     return { status: 'absent', evidence: [{ why: ['llms.txt has no followable links'] }] };
   }
 
-  const evidence: ProbeOutcome['evidence'] = [];
-  const misses: Array<Exclude<ProbeStatus, 'pass' | 'na'>> = [];
-  for (const href of hrefs) {
-    const slice = remainingDeadlineMs(deadlineAt);
-    if (slice <= 0) {
-      evidence.push({ why: ['nested-probe budget exhausted'] });
-      misses.push('error');
-      break;
-    }
-    const { verdict, item } = await probeLink(href, slice, ctx);
-    evidence.push({ ...item, link_verdict: verdict });
-    if (verdict !== 'pass') misses.push(verdict);
-  }
-
-  if (misses.length === 0) return { status: 'pass', evidence };
-  const status = MISS_ORDER.find((miss) => misses.includes(miss)) ?? 'error';
-  const exhausted = evidence.some((row) => Array.isArray(row.why) && row.why.includes('nested-probe budget exhausted'));
-  return { status, evidence, ...(exhausted ? { incomplete: true } : {}) };
+  const probes = await (ctx.fanOut ?? oneAtATime)(hrefs, (href) => probeLink(href, deadlineAt, ctx));
+  const evidence = probes.map(({ verdict, item }) => ({ ...item, link_verdict: verdict }));
+  const verdicts = probes.map((probe) => probe.verdict);
+  const status = MISS_ORDER.find((miss) => verdicts.includes(miss)) ?? 'pass';
+  return { status, evidence, ...(probes.some((probe) => probe.exhausted) ? { incomplete: true } : {}) };
 }

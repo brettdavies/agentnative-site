@@ -30,7 +30,16 @@
 
 import { AUDIT_USER_AGENT } from '../../shared/user-agents';
 import type { ProbeResponse } from './assert';
-import { answerOf, bodyOf, failedHop, type HopContext, isRedirect, type RequestMemo, takeHop } from './request-hop';
+import {
+  answerOf,
+  bodyOf,
+  DEADLINE_EXCEEDED,
+  failedHop,
+  type HopContext,
+  isRedirect,
+  type RequestMemo,
+  takeHop,
+} from './request-hop';
 
 export { REDIRECT_STATUSES } from './request-hop';
 
@@ -46,9 +55,20 @@ export type GuardedFetchInit = {
   body?: string;
 };
 
+/**
+ * Cuts a request short once `signal` aborts, to `toMs` from when it started, so
+ * the time it has already spent counts. One started after that takes `toMs` from
+ * the outset.
+ */
+export type RequestCut = { signal: AbortSignal; toMs: number };
+
 export type GuardedFetchOptions = {
   /** Deadline for the whole request chain (redirects included). */
   timeoutMs?: number;
+  /** Shortens that deadline while the request is in flight; it never lengthens it. */
+  cut?: RequestCut;
+  /** Holds every redirect hop until this settles; the first request goes out regardless, and the wait spends none of the deadline. */
+  laterHopsAfter?: Promise<unknown>;
   /**
    * Cap on response body bytes. `0` skips the body (status/headers only).
    * Unset keeps the historical full `response.text()` read.
@@ -83,6 +103,9 @@ export type GuardedFetchOptions = {
 
 /** The fetch options an audit hands every probe: the caller's transport plus the audit's request memo. */
 export type AuditFetchOptions = Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects' | 'memo'>;
+
+/** What discovery's requests run with: an audit's fetch options, plus the cut a failed root applies. */
+export type DiscoveryFetchOptions = AuditFetchOptions & Pick<GuardedFetchOptions, 'cut'>;
 
 export const DEFAULT_TIMEOUT_MS = 8_000;
 export const DEFAULT_MAX_REDIRECTS = 4;
@@ -303,13 +326,24 @@ export async function guardedFetch(
   init: GuardedFetchInit = {},
   opts: GuardedFetchOptions = {},
 ): Promise<ProbeResponse> {
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const cut = opts.cut;
+  const uncutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const budgetMs = (): number => (cut?.signal.aborted ? Math.min(uncutMs, cut.toMs) : uncutMs);
   const maxRedirects = opts.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
   const fetchImpl = opts.fetchImpl ?? fetch;
   const started = Date.now();
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let budgetFrom = started;
+  let held = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const armDeadline = (): void => {
+    if (held) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => controller.abort(), Math.max(0, budgetFrom + budgetMs() - Date.now()));
+  };
+  armDeadline();
+  cut?.signal.addEventListener('abort', armDeadline);
   const auditEnded = opts.memo?.ended.signal;
   const endWithAudit = (): void => controller.abort();
 
@@ -335,6 +369,19 @@ export async function guardedFetch(
     const origin = current.url.origin;
 
     for (let hop = 0; hop <= maxRedirects; hop++) {
+      if (hop > 0 && opts.laterHopsAfter !== undefined) {
+        const heldFrom = Date.now();
+        held = true;
+        clearTimeout(timer);
+        await opts.laterHopsAfter;
+        held = false;
+        budgetFrom += Date.now() - heldFrom;
+        armDeadline();
+        if (auditEnded?.aborted) return fail('audit ended');
+        // A cut during the wait can leave no budget, and the timer just armed
+        // fires after this tick, once the request has gone out.
+        if (Date.now() >= budgetFrom + budgetMs()) return fail(DEADLINE_EXCEEDED);
+      }
       const request = {
         url: current.url.toString(),
         method: init.method ?? 'GET',
@@ -345,7 +392,7 @@ export async function guardedFetch(
         // A first hop's budget runs from the same instant as the deadline,
         // so callers with the same timeout compare equal.
         startedAt: hop === 0 ? started : Date.now(),
-        deadlineAt: started + timeoutMs,
+        deadlineAt: budgetFrom + budgetMs(),
         signal: controller.signal,
         bodyCap: opts.maxBodyBytes,
         keepsRedirect: opts.followRedirects === false || opts.crossOriginRedirects === 'return',
@@ -427,6 +474,7 @@ export async function guardedFetch(
     return fail(`redirect limit exceeded (${maxRedirects} hops)`);
   } finally {
     clearTimeout(timer);
+    cut?.signal.removeEventListener('abort', armDeadline);
     auditEnded?.removeEventListener('abort', endWithAudit);
   }
 }

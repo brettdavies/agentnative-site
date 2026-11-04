@@ -279,9 +279,23 @@ a scorecard of its own from that audit.
 
 ### Follow phase
 
-The bounded slice of a web audit, after MCP discovery and before wave 1, in which declared hosts are fetched: documents
-by GET through the public-URL guard, one hop from the entry origin, under a wall-clock budget and per-audit caps on
-distinct hosts and requests. Exhaustion resolves dependent rows to not-applicable and never marks the audit incomplete.
+The bounded slice of a web audit, after MCP discovery and before the first check, in which declared hosts are fetched:
+documents by GET through the public-URL guard, one hop from the entry origin, under a wall-clock budget and per-audit
+caps on distinct hosts and requests. Exhaustion resolves dependent rows to not-applicable and never marks the audit
+incomplete.
+
+### Source check
+
+A check probed as soon as the follow phase ends, whatever its own antecedent says, because other checks' antecedents or
+handlers read its result: `robots`, `llms-txt`, `llms-full-txt`, `openapi`, `oauth-discovery`, `sitemap`,
+`accept-markdown`, and the two MCP wire probes. Its antecedent applies once what that antecedent reads has settled.
+
+### Prerequisite
+
+What must settle before a check can gate or probe: a source check's probe, the MCP step after both wire probes answer,
+or the session notification that follows it, which every later request to the endpoint waits on. A check's prerequisites
+come from what its antecedent resolver and its handler read, so a new check names none. It starts as soon as they
+settle, under the audit's one concurrency cap.
 
 ### Reciprocity
 

@@ -1085,7 +1085,7 @@ describe('runWebAudit reachability', () => {
     expect(events.find((e) => e.type === 'complete')?.type).toBe('complete');
   });
 
-  test('a root that redirects to http ends the run unreachable after the root request alone', async () => {
+  test('a root that redirects to http ends the run unreachable, having asked only the first documents beside it', async () => {
     const sent: string[] = [];
     const fetchImpl = stubFetch((url) => {
       sent.push(url);
@@ -1102,7 +1102,13 @@ describe('runWebAudit reachability', () => {
         domainBudget: ALWAYS_ADMIT_BUDGET,
       }),
     );
-    expect(sent).toEqual(['https://example.com/']);
+    expect(sent.sort()).toEqual([
+      'https://example.com/',
+      'https://example.com/.well-known/ai-catalog.json',
+      'https://example.com/.well-known/api-catalog',
+      'https://example.com/.well-known/mcp.json',
+      'https://example.com/.well-known/mcp/server-card.json',
+    ]);
     expect(events).toEqual([
       { type: 'unreachable', reason: 'https://example.com/ redirects to http, and anc sends no plaintext request.' },
     ]);

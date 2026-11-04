@@ -3,6 +3,7 @@
 
 import type { AntecedentToken } from '../registry';
 import { type AntecedentResolver, htmlRootGate } from './context';
+import type { Prerequisite } from './sources';
 
 const none: AntecedentResolver = () => 'apply';
 
@@ -16,6 +17,12 @@ export const rootResolvers = {
   'http-root': httpRoot,
   'html-root': htmlRoot,
 } satisfies Partial<Record<AntecedentToken, AntecedentResolver>>;
+
+export const rootPrerequisites = {
+  none: [],
+  'http-root': [],
+  'html-root': [],
+} satisfies Partial<Record<AntecedentToken, readonly Prerequisite[]>>;
 
 export const rootEvidence = {
   none: 'not applicable',

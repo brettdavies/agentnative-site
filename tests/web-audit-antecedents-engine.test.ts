@@ -1,10 +1,10 @@
-// Dependency-ordered engine tests: runWebAudit's two-wave evaluation reuses
-// wave-1 probes and the single canonical root fetch to resolve antecedents,
+// Dependency-ordered engine tests: runWebAudit reuses source probes and the
+// single canonical root fetch to resolve antecedents,
 // instead of re-fetching. The per-token resolver logic is unit-tested in the
 // web-audit-antecedents-<group> files; this asserts the gating end to end.
 
 import { describe, expect, test } from 'bun:test';
-import { WAVE1_CHECK_IDS } from '../src/worker/audit-web/antecedents';
+import { SOURCE_CHECKS } from '../src/worker/audit-web/antecedents';
 import { type AuditEvent, antecedentGate, runWebAudit } from '../src/worker/audit-web/engine';
 import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
@@ -60,7 +60,7 @@ function resultsOf(events: AuditEvent[]) {
   return events.flatMap((e) => (e.type === 'result' ? [e.result] : []));
 }
 
-describe('runWebAudit two-wave evaluation', () => {
+describe('runWebAudit dependency-ordered evaluation', () => {
   const CHECKS: WebCheck[] = [
     makeCheck({
       id: 'robots',
@@ -144,7 +144,7 @@ describe('runWebAudit two-wave evaluation', () => {
     return { fetchImpl, seen };
   }
 
-  test('a dependent check sees its antecedent resolved from the wave-1 result, not a second fetch', async () => {
+  test('a dependent check sees its antecedent resolved from the source result, not a second fetch', async () => {
     const { fetchImpl, seen } = siteFetch();
     const events = await collect(
       runWebAudit({
@@ -424,7 +424,7 @@ describe('the antecedent gate stamps the reason a resolution carries', () => {
 });
 
 describe('runWebAudit retained documents', () => {
-  test('the api-catalog row scores the catalog discovery read, its only request, outside wave 1', async () => {
+  test('the api-catalog row scores the catalog discovery read, its only request, outside the source checks', async () => {
     let catalogReads = 0;
     const fetchImpl = stubFetch((url) => {
       if (url === 'https://example.com/.well-known/api-catalog') {
@@ -454,7 +454,7 @@ describe('runWebAudit retained documents', () => {
         domainBudget: ALWAYS_ADMIT_BUDGET,
       }),
     );
-    expect(WAVE1_CHECK_IDS.has('api-catalog')).toBe(false);
+    expect(SOURCE_CHECKS.has('api-catalog')).toBe(false);
     expect(catalogReads).toBe(1);
     expect(resultsOf(events).find((r) => r.id === 'api-catalog')).toMatchObject({
       status: 'pass',

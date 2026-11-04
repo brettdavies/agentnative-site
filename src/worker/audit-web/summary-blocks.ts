@@ -88,10 +88,10 @@ export function blockItems(rows: readonly SummaryRow[], domain: string): Summary
 
 /**
  * Split a category's rows into the registry's lanes, in lane-map order, with
- * rows in registry order inside each lane. Stored rows sit in the order their
- * probes completed, which says nothing a reader can use. A row whose id the
- * registry no longer carries lands in the first lane, after the known rows. A
- * category none of whose rows the registry files under a lane gets none.
+ * rows in registry order inside each lane, whatever order a stored scorecard
+ * lists them in. A row whose id the registry no longer carries lands in the
+ * first lane, after the known rows. A category none of whose rows the registry
+ * files under a lane gets none.
  */
 export function laneBlocks(
   rows: readonly SummaryRow[],
