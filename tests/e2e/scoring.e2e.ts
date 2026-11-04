@@ -282,7 +282,7 @@ test.describe('/scoring progress page', () => {
     ]);
     await page.goto('/scoring?target=localhost%3A3000');
     await expect(page.locator('.scoring__bounce code')).toHaveText('anc web localhost:3000');
-    await expect(page.locator('.scoring__bounce a')).toHaveAttribute('href', '/install');
+    await expect(page.locator('.scoring__bounce a')).toHaveAttribute('href', '/install#audit-a-local-site');
     await expect(page.locator('[data-scoring-start]')).toBeHidden();
     await expect(page.locator('[data-scoring-other]')).toBeVisible();
     await expect(page.locator('[data-scoring-subline]')).toBeEmpty();

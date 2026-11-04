@@ -675,10 +675,10 @@ describe('rows the audit could not run', () => {
   });
 
   test('the score note says global keeps those rows in its maximum, on the page and the twin', () => {
-    const note = (command: string, token: string) =>
-      `Global keeps the 18 checks this audit could not run in its maximum; run ${command} to evaluate them from your own network, with ${token} set for the ones that need sign-in.`;
-    expect(textOf(page(stripeShaped()))).toContain(note('anc web stripe.dev', 'ANC_WEB_TOKEN'));
-    expect(twin(stripeShaped())).toContain(`\n${note('`anc web stripe.dev`', '`ANC_WEB_TOKEN`')}\n`);
+    const sentence =
+      'Global keeps the 18 checks this audit could not run in its maximum; the ones that need sign-in on another host name their own command.';
+    expect(textOf(page(stripeShaped()))).toContain(sentence);
+    expect(twin(stripeShaped())).toContain(`\n${sentence}\n`);
     const single = scorecardOf('example.com', [row('llms-txt', 'pass', at('example.com'))]);
     expect(page(single)).not.toContain('Global keeps');
   });
@@ -727,8 +727,7 @@ describe('a host carrying a backtick, which the URL parser accepts', () => {
         ],
       },
     );
-  const REMEDY =
-    "anc's public audit holds no sign-in for a\\`b.example.com. Run `anc web example.com` with `ANC_WEB_TOKEN` set to a token for a\\`b.example.com to evaluate this check from your own network.";
+  const REMEDY = "anc's public audit holds no sign-in for a\\`b.example.com.";
 
   test('the twin widens the code span around it and escapes it in prose, so no span closes early', () => {
     expect(new URL(`https://${HOST}/`).host).toBe(HOST);

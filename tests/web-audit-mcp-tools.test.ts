@@ -318,7 +318,7 @@ describe('a local, private, or internal target', () => {
         error: {
           code: 'invalid_target',
           message: "anc's public audit never contacts localhost:3000, a local, private, or internal host.",
-          cta: 'Run anc web localhost:3000 to audit it from your own network.',
+          cta: 'Run anc web localhost:3000 to audit it from your own network; it sends HTTPS only, so the site must serve TLS.',
           details: 'blocked: localhost is not a public host',
           reason: 'local-target',
           value: 'localhost:3000',
@@ -2166,12 +2166,12 @@ describe('provenance reaches every reader of a stored website result', () => {
     const { scorecard } = await read('stripe.dev', stripeShaped());
     const { md } = rendered('stripe.dev', stripeShaped());
     expect(scorecard.access_note).toBe(
-      'Global keeps the 18 checks this audit could not run in its maximum; run `anc web stripe.dev` to evaluate them from your own network, with `ANC_WEB_TOKEN` set for the ones that need sign-in.',
+      'Global keeps the 18 checks this audit could not run in its maximum; the ones that need sign-in on another host name their own command.',
     );
     expect(md).toContain(scorecard.access_note ?? 'missing');
     const corsActual = scorecard.results.find((r) => r.id === 'mcp-cors-actual');
     expect(corsActual?.access_remedy).toBe(
-      "anc's public audit holds no sign-in for mcp.stripe.com. Run `anc web stripe.dev` with `ANC_WEB_TOKEN` set to a token for mcp.stripe.com to evaluate this check from your own network.",
+      "anc's public audit holds no sign-in for mcp.stripe.com. Run `anc web mcp.stripe.com` with `ANC_WEB_TOKEN` set to a token for mcp.stripe.com to evaluate this check from your own network.",
     );
     expect(md).toContain(`- Note: ${corsActual?.access_remedy}`);
     expect(scorecard.results.filter((r) => r.access_remedy !== undefined)).toHaveLength(18);

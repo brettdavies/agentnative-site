@@ -3,13 +3,10 @@
 // from a network that can reach it, so the refusal names that command.
 
 import { type AuditErrorObject, auditError } from '../../shared/audit-events';
-import { localTargetCta } from '../../shared/scoring-copy';
+import { ANC_WEB_DOCS_PATH, localTargetCta } from '../../shared/scoring-copy';
 import type { WebTargetRefusal } from './core';
 import { ANC_WEB_RELEASED, ancWebCommand } from './provenance-copy';
 import { isMetadataHost } from './ssrf';
-
-/** The section of the install page that covers `anc web`. */
-export const ANC_WEB_DOCS_PATH = '/install#audit-a-local-site';
 
 /**
  * The error object naming `anc web <host>`, or null when the caller's generic

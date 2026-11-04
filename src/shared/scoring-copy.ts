@@ -17,9 +17,12 @@ export const LANE_EXPECTATION: Readonly<Record<Lane, string>> = {
   web: 'Usually under 30 seconds; longer when the site declares other hosts.',
 };
 
+/** The section of the install page that covers `anc web`. */
+export const ANC_WEB_DOCS_PATH = '/install#audit-a-local-site';
+
 /** The refusal's call to action. `command` is plain text in JSON and escaped markup in the panel. */
 export function localTargetCta(command: string): string {
-  return `Run ${command} to audit it from your own network.`;
+  return `Run ${command} to audit it from your own network; it sends HTTPS only, so the site must serve TLS.`;
 }
 
 /** The website lane's status line once the run starts, until its first event arrives. */

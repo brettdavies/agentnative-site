@@ -121,9 +121,6 @@ const BLOCKED_IPV4_RANGES: Array<[number, number]> = [
   [ipv4('192.168.0.0'), 16],
 ];
 
-// fd00:ec2::254, the AWS instance-metadata address over IPv6.
-const IMDS_IPV6 = Uint8Array.from([0xfd, 0, 0x0e, 0xc2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02, 0x54]);
-
 function ipv4(dotted: string): number {
   const parts = dotted.split('.').map(Number);
   return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
@@ -230,21 +227,27 @@ function blockedIpv6Reason(bytes: Uint8Array): string | null {
   if (isLoopback) return 'ipv6 loopback (::1)';
   if ((bytes[0] & 0xfe) === 0xfc) return 'ipv6 unique-local (fc00::/7)';
   if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return 'ipv6 link-local (fe80::/10)';
-  // IPv4-mapped (::ffff:a.b.c.d) and IPv4-compatible (::a.b.c.d) forms
-  // range-check the embedded IPv4 address.
+  const v4 = embeddedIpv4(bytes);
+  const reason = v4 === null ? null : blockedIpv4Reason(v4);
+  return reason ? `ipv4-in-ipv6: ${reason}` : null;
+}
+
+/** The address inside an IPv4-mapped (::ffff:a.b.c.d) or IPv4-compatible (::a.b.c.d) literal, or null. */
+function embeddedIpv4(bytes: Uint8Array): number | null {
   const first10Zero = bytes.slice(0, 10).every((b) => b === 0);
-  if (first10Zero && ((bytes[10] === 0xff && bytes[11] === 0xff) || (bytes[10] === 0 && bytes[11] === 0))) {
-    const v4 = ((bytes[12] << 24) | (bytes[13] << 16) | (bytes[14] << 8) | bytes[15]) >>> 0;
-    const reason = blockedIpv4Reason(v4);
-    if (reason) return `ipv4-in-ipv6: ${reason}`;
-  }
-  return null;
+  if (!first10Zero || !((bytes[10] === 0xff && bytes[11] === 0xff) || (bytes[10] === 0 && bytes[11] === 0)))
+    return null;
+  return ((bytes[12] << 24) | (bytes[13] << 16) | (bytes[14] << 8) | bytes[15]) >>> 0;
+}
+
+/** A hostname as the block rules read it: WHATWG URL keeps trailing dots as written, and `localhost..` is localhost. */
+function normalizedHostname(raw: string): string {
+  return raw.toLowerCase().replace(/\.+$/, '');
 }
 
 /** Returns a block reason for the hostname, or null when it may be fetched. */
 export function blockedHostReason(rawHostname: string): string | null {
-  // WHATWG URL keeps trailing dots as written: `localhost..` is localhost.
-  const hostname = rawHostname.toLowerCase().replace(/\.+$/, '');
+  const hostname = normalizedHostname(rawHostname);
   if (hostname.length === 0) return 'empty hostname';
   if (hostname === 'localhost' || hostname.endsWith('.localhost')) return 'localhost is not a public host';
   if (hostname === 'metadata.google.internal' || hostname.endsWith('.internal')) {
@@ -269,18 +272,13 @@ export function blockedHostReason(rawHostname: string): string | null {
  * IPv6 forms, fd00:ec2::254, and the GCP metadata name.
  */
 export function isMetadataHost(rawHostname: string): boolean {
-  const hostname = rawHostname.toLowerCase().replace(/\.+$/, '');
+  const hostname = normalizedHostname(rawHostname);
   if (hostname === 'metadata.google.internal') return true;
-  const inLinkLocal = (v4: number) => v4 >>> 16 === 0xa9fe;
+  const inMetadataRange = (v4: number | null) => v4 !== null && v4 >>> 16 === 0xa9fe;
   const v6 = parseIpv6Literal(hostname.replace(/^\[|\]$/g, ''));
-  if (v6) {
-    if (v6.every((b, i) => b === IMDS_IPV6[i])) return true;
-    const embedded =
-      v6.slice(0, 10).every((b) => b === 0) && ((v6[10] === 0xff && v6[11] === 0xff) || (v6[10] === 0 && v6[11] === 0));
-    return embedded && inLinkLocal(((v6[12] << 24) | (v6[13] << 16) | (v6[14] << 8) | v6[15]) >>> 0);
-  }
-  const v4 = parseIpv4Literal(hostname);
-  return v4 !== null && inLinkLocal(v4);
+  if (v6 === null) return inMetadataRange(parseIpv4Literal(hostname));
+  const imds = parseIpv6Literal('fd00:ec2::254');
+  return v6.every((b, i) => b === imds?.[i]) || inMetadataRange(embeddedIpv4(v6));
 }
 
 /**

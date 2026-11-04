@@ -76,7 +76,7 @@ export interface WebAuditToolsEnv extends AuditLogEnv, NotifyEnv, InFlightEnv, F
 const LIST_ALL_MAX_USER_ROWS = 100;
 
 const LOCAL_TARGET_DISCLOSURE =
-  'A local, private, or internal target returns isError:true with a JSON { error } object whose reason is ' +
+  'A localhost, private-address, or *.internal target returns isError:true with a JSON { error } object whose reason is ' +
   '"local-target" and whose next_step.command is the anc web invocation that audits it from the caller\'s own network.';
 
 function textContent(value: unknown) {

@@ -131,8 +131,8 @@ Where the audit ran and what it could present. A score covers what an agent at t
 | `network`      | string  | `public` for an anc.dev audit, run from the public internet; `local` for a run on the runner's own network.                     |
 | `credentialed` | boolean | `true` when a local run presented a credential to the audited MCP endpoint; otherwise `false`.                                  |
 
-Every anc.dev audit writes `public` and `false`. A local run, which no published anc release offers yet, writes `local`,
-with `credentialed` `true` when it presented a credential. The public board lists public-vantage scorecards only, so a
+Every anc.dev audit writes `public` and `false`. A local run writes `local`, with `credentialed` `true` when it presented
+a credential. The public board lists public-vantage scorecards only, so a
 local or credentialed score is never ranked beside a public one. A scorecard stored before the field existed carries no
 `vantage`; every such scorecard anc.dev holds is its own public audit.
 
@@ -404,9 +404,11 @@ established was needed. A stored row whose check id is retired keeps its status 
 replaced it, and no remediation, because a re-audit scores the successor instead.
 
 A row with one of the six declared-host reasons also carries `access_remedy`: why the public audit could not evaluate
-it, and the `anc web` command that evaluates it from the reader's own network. A scorecard holding any such row carries
-`access_note` beside `results`: the sentence saying global keeps those rows in its maximum and naming that command. Both
-are the sentences the result page shows.
+it, and, when `anc web` can, the command that evaluates it from the reader's own network. `declared-host-blocked` and
+`reciprocity-refused` name no command, because `anc web` applies the same rules. A row that needs sign-in names the host
+the token belongs to, so a token never goes on a run aimed at the site that declared that host. A scorecard holding any
+such row carries `access_note` beside `results`: the sentence saying global keeps those rows in its maximum, and the
+command for the ones a run of the audited site can evaluate. Both are the sentences the result page shows.
 
 ```json
 "remediation": {

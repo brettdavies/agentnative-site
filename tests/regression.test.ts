@@ -23,7 +23,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { ANC_WEB_DOCS_PATH } from '../src/worker/audit-web/local-target';
+import { ANC_WEB_DOCS_PATH } from '../src/shared/scoring-copy';
 
 const REPO_ROOT = join(import.meta.dir, '..');
 const DIST = join(REPO_ROOT, 'dist');

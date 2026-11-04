@@ -155,16 +155,14 @@ export function attachInlineRemediation(
   if (!hasResults(scorecard)) return scorecard;
   const entryHost = entryHostOf(scorecard.target_url);
   const domain = entryHost ?? '';
-  let notRun = 0;
-  let signIn = false;
+  const notRun: { reason: NaReason; host: string }[] = [];
   const results = scorecard.results.map((row) => {
     const host = rowHostOf(row, entryHost);
     const result = resultLine(row.status, row.evidence ?? null, row.na_reason, host, rowHostOutcomes(row));
     const successor = successorOf(row.id, retired);
     const named = successor === undefined ? {} : { successor };
     if (row.status === 'n_a' && isNotRunReason(row.na_reason)) {
-      notRun += 1;
-      signIn ||= row.na_reason === 'auth-required';
+      notRun.push({ reason: row.na_reason, host });
       return { ...row, result, ...named, access_remedy: richMarkdown(notRunRemedy(row.na_reason, host, domain, 1)) };
     }
     if (successor !== undefined) return { ...row, result, ...named };
@@ -181,7 +179,7 @@ export function attachInlineRemediation(
   });
   return {
     ...scorecard,
-    ...(notRun > 0 ? { access_note: richMarkdown(notRunScoreNote(notRun, domain, signIn)) } : {}),
+    ...(notRun.length > 0 ? { access_note: richMarkdown(notRunScoreNote(notRun, domain)) } : {}),
     results,
   };
 }

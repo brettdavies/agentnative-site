@@ -183,7 +183,7 @@ describe('POST /api/score: unmetered tiers', () => {
       expect(await errorOf(res)).toEqual({
         code: 'invalid_target',
         message: `anc's public audit never contacts ${value}, a local, private, or internal host.`,
-        cta: `Run ${command} to audit it from your own network.`,
+        cta: `Run ${command} to audit it from your own network; it sends HTTPS only, so the site must serve TLS.`,
         details,
         reason: 'local-target',
         value,

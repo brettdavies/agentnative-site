@@ -167,10 +167,28 @@ export function ancWebCommand(host: string, commandReleased: boolean = ANC_WEB_R
   return `anc web ${host.startsWith('[') ? `'${host}'` : host}`;
 }
 
+// `anc web` holds a declared host to the same rules the public audit does: it
+// never probes an IP literal or a host of another class than the target's, and
+// it needs the same confirmation from a declared host. Naming the command for
+// these two would promise a result it will not produce.
+const ANC_WEB_ALSO_REFUSES: readonly NaReason[] = ['declared-host-blocked', 'reciprocity-refused'];
+
+/**
+ * The command that evaluates a not-run row from the reader's own network, or
+ * null when none does. A sign-in row names the host the token belongs to, not
+ * the audited site: `anc web` presents its token to the audited site's own
+ * endpoint first, so a site that declares another host's server and answers
+ * the reader's run itself would receive that host's token.
+ */
+function notRunCommand(reason: NaReason, host: string, domain: string, commandReleased: boolean): string | null {
+  if (ANC_WEB_ALSO_REFUSES.includes(reason)) return null;
+  return ancWebCommand(reason === 'auth-required' ? host : domain, commandReleased);
+}
+
 /**
  * Why the public audit could not evaluate a not-run row or group, and, when
- * a published anc release includes it, the command that evaluates it from
- * the reader's own network.
+ * a published anc release can evaluate it, the command that does so from the
+ * reader's own network.
  */
 export function notRunRemedy(
   reason: NaReason,
@@ -181,7 +199,7 @@ export function notRunRemedy(
 ): Rich {
   const cause = NOT_RUN_CAUSES[reason]?.(host, domain);
   const what = count === 1 ? 'this check' : 'these checks';
-  const invocation = ancWebCommand(domain, commandReleased);
+  const invocation = notRunCommand(reason, host, domain, commandReleased);
   if (invocation === null) return [cause ?? `anc's public audit could not run ${what}.`];
   const run = cause === undefined ? 'Run ' : `${cause} Run `;
   const command = { code: invocation };
@@ -193,21 +211,31 @@ export function notRunRemedy(
 
 /** The score note's sentence for a result holding rows the public audit could not run. */
 export function notRunScoreNote(
-  count: number,
+  rows: readonly { reason: NaReason; host: string }[],
   domain: string,
-  needsSignIn: boolean,
   commandReleased: boolean = ANC_WEB_RELEASED,
 ): Rich {
-  const rows = count === 1 ? '1 check' : `${count} checks`;
-  const invocation = ancWebCommand(domain, commandReleased);
-  if (invocation === null) return [`Global keeps the ${rows} this audit could not run in its maximum.`];
-  const them = count === 1 ? 'it' : 'them';
-  const signIn: Rich = needsSignIn ? [', with ', { code: 'ANC_WEB_TOKEN' }, ' set for the ones that need sign-in'] : [];
-  return [
-    `Global keeps the ${rows} this audit could not run in its maximum; run `,
-    { code: invocation },
-    ` to evaluate ${them} from your own network`,
-    ...signIn,
-    '.',
-  ];
+  const total = rows.length === 1 ? '1 check' : `${rows.length} checks`;
+  const siteCommand = ancWebCommand(domain, commandReleased);
+  const commands = rows.map((row) => notRunCommand(row.reason, row.host, domain, commandReleased));
+  const here = rows.filter((_, i) => siteCommand !== null && commands[i] === siteCommand);
+  const elsewhere = commands.filter((command) => command !== null && command !== siteCommand).length;
+
+  const them = here.length < rows.length ? `${here.length} of them` : rows.length === 1 ? 'it' : 'them';
+  const signIn: Rich = here.some((row) => row.reason === 'auth-required')
+    ? [', with ', { code: 'ANC_WEB_TOKEN' }, ' set for the ones that need sign-in']
+    : [];
+  const onSite: Rich =
+    siteCommand !== null && here.length > 0
+      ? ['; run ', { code: siteCommand }, ` to evaluate ${them} from your own network`, ...signIn]
+      : [];
+  const onOtherHosts: Rich =
+    elsewhere === 0
+      ? []
+      : [
+          elsewhere === 1
+            ? '; the one that needs sign-in on another host names its own command'
+            : '; the ones that need sign-in on another host name their own command',
+        ];
+  return [`Global keeps the ${total} this audit could not run in its maximum`, ...onSite, ...onOtherHosts, '.'];
 }

@@ -44,8 +44,9 @@ Two gates sit in front of the audit and shape how you reach it per environment:
   Cloudflare always-passes test secret, so any string works (`"turnstile_token": "x"`).
 - **SSRF.** `src/worker/audit-web/ssrf.ts` blocks loopback, RFC1918, link-local, and `localhost`/`*.internal`. You
   **cannot** audit a local `bun run dev` server (`http://localhost:8787`) through the endpoint; the root fetch is
-  rejected, and the refusal names `anc web <host>`, which audits it from your own network. The target must be a public
-  host.
+  rejected, and the refusal names `anc web <host>`, which audits a local host that serves HTTPS from your own network.
+  `bun run dev` serves plain HTTP, so `anc web` reads it as unreachable until TLS sits in front of it. The target must be
+  a public host.
 
 ### Quick check: the working-tree engine (`scripts/web-audit/run.sh`)
 
