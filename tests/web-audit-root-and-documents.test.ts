@@ -308,6 +308,29 @@ describe('a redirect hop held for the root', () => {
     expect(elapsed).toBeLessThan(1_500);
   });
 
+  test('a cut that leaves no budget when the wait ends sends no hop', async () => {
+    const rootFailed = new AbortController();
+    const asked: string[] = [];
+    const fetchImpl = stubFetch(async (url) => {
+      asked.push(pathOf(url));
+      if (pathOf(url) !== '/first') return new Response('ok', { status: 200 });
+      await Bun.sleep(60);
+      return new Response('', { status: 301, headers: { location: '/second' } });
+    });
+    const response = await guardedFetch(
+      'https://example.com/first',
+      {},
+      {
+        timeoutMs: 5_000,
+        cut: { signal: rootFailed.signal, toMs: 20 },
+        fetchImpl,
+        laterHopsAfter: Bun.sleep(100).then(() => rootFailed.abort()),
+      },
+    );
+    expect(response.error).toStartWith('TimeoutError');
+    expect(asked).toEqual(['/first']);
+  });
+
   test('the first request goes out without waiting', async () => {
     const asked: string[] = [];
     const held = new Promise<void>(() => {});

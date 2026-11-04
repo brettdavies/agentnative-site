@@ -12,7 +12,7 @@ function deferred(): { done: Promise<void>; finish: () => void } {
 }
 
 describe('the cap', () => {
-  test.each([0, -1])('of %d is refused, since nothing would ever run', (cap) => {
+  test.each([0, -1, Number.NaN, 1.5])('of %p is refused', (cap) => {
     expect(() => createAuditSlots(cap)).toThrow(RangeError);
   });
 });

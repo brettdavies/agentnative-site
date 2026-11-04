@@ -28,8 +28,8 @@ export const oneAtATime: FanOut = async (items, probe) => {
 };
 
 export function createAuditSlots(cap: number): AuditSlots {
-  // At a cap of 0 nothing would ever run, and the audit would wait on it forever.
-  if (cap < 1) throw new RangeError(`concurrency must be at least 1, got ${cap}`);
+  // At a cap of 0 or NaN nothing would ever run, and the audit would wait on it forever.
+  if (!Number.isInteger(cap) || cap < 1) throw new RangeError(`concurrency must be a whole number from 1, got ${cap}`);
   let free = cap;
   const waiting: Array<{ rank: number; resume: () => void }> = [];
   const acquire = (rank: number): Promise<void> =>

@@ -30,7 +30,16 @@
 
 import { AUDIT_USER_AGENT } from '../../shared/user-agents';
 import type { ProbeResponse } from './assert';
-import { answerOf, bodyOf, failedHop, type HopContext, isRedirect, type RequestMemo, takeHop } from './request-hop';
+import {
+  answerOf,
+  bodyOf,
+  DEADLINE_EXCEEDED,
+  failedHop,
+  type HopContext,
+  isRedirect,
+  type RequestMemo,
+  takeHop,
+} from './request-hop';
 
 export { REDIRECT_STATUSES } from './request-hop';
 
@@ -369,6 +378,9 @@ export async function guardedFetch(
         budgetFrom += Date.now() - heldFrom;
         armDeadline();
         if (auditEnded?.aborted) return fail('audit ended');
+        // A cut during the wait can leave no budget, and the timer just armed
+        // fires after this tick, once the request has gone out.
+        if (Date.now() >= budgetFrom + budgetMs()) return fail(DEADLINE_EXCEEDED);
       }
       const request = {
         url: current.url.toString(),
