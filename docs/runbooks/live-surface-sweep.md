@@ -69,6 +69,11 @@ Start from these signatures before treating a red run as a broken deploy:
 - **`Probe stdlib User-Agents` red with error 1010 on `sweep-production`**: Browser Integrity Check is on for the
   `anc.dev` zone. Turn it off in the dashboard (Security > Settings, **DDoS attacks** filter, **Browser integrity
   check**) or with `PATCH /zones/<zone-id>/settings/browser_check` and `{"value":"off"}`, then re-run the sweep.
+- **`serves contract_fingerprint X (expected contract_fingerprint Y)` from the version-signal smoke**: the endpoint still
+  answered another value when the retries ran out. Read it past the edge with a query string (`curl -s
+  'https://anc.dev/api/web-audit/version?fresh=1'`). If that shows `Y`, the deploy landed and an edge copy of the earlier
+  answer is stale, which clears within a day; re-run the job once. If it shows `X`, the deployment is not serving this
+  tree, so check the deploy job and any `wrangler rollback` before re-running.
 - Anything else: the smoke scripts print per-check failures and their response-capture directory; read the job log
   before touching infrastructure.
 
