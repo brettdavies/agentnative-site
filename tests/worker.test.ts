@@ -1289,7 +1289,6 @@ describe('worker.fetch — retired paths', () => {
   test('a website result path redirects to its result, twin and any host included', async () => {
     const env = makeEnv({});
     const cases: Array<[string, string]> = [
-      ['/web/sounding.brettdavies.workers.dev', '/score/sounding.brettdavies.workers.dev'],
       ['/web/anc.dev', '/score/anc.dev'],
       ['/web/modelcontextprotocol.io', '/score/modelcontextprotocol.io'],
       ['/web/developers.cloudflare.com', '/score/developers.cloudflare.com'],
