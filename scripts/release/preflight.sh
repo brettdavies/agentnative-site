@@ -173,6 +173,12 @@ esac
   exit 2
 }
 
+# Playwright prints a failed request's headers, and a failed gate's tail reaches
+# the operator's terminal and any agent transcript reading it.
+redact_access_cookie() {
+  sed -E 's/(CF_Authorization=)[^;[:space:]]+/\1<redacted>/g'
+}
+
 # 1Password helpers (read-only) ---------------------------------------------
 
 read_op_field() {
@@ -181,12 +187,6 @@ read_op_field() {
     return 2
   }
   "$OP_SKILL/read_field.sh" "$1" "$2" 2>/dev/null
-}
-
-# Playwright prints a failed request's headers, and a failed gate's tail reaches
-# the operator's terminal and any agent transcript reading it.
-redact_access_cookie() {
-  sed -E 's/(CF_Authorization=)[^;[:space:]]+/\1<redacted>/g'
 }
 
 # Stages CF Access service-token headers into a curl config file. Caller passes the
