@@ -114,8 +114,6 @@ Wrong-page calls return an error string.
 **Result DOM hook:** `renderCheck` in `src/worker/audit-web/summary-render.ts` must emit `data-id="${escHtml(row.id)}"`
 on `.web-check`. `get_worksheet` and `assemble_fix_prompt` read that attribute. Skill URLs are not the id contract.
 
-**Assemble clip:** never CORS (`mcp-cors-*`). MUST ids: `openapi`, `mcp-initialize`, `mcp-tools-list`.
-
 **Not this week:** worker `webmcp` handler still greps markers.
 
 ## Open Questions
