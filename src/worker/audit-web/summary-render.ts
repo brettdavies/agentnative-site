@@ -15,6 +15,7 @@
 import { escHtml } from '../../shared/esc-html';
 import { bandOf } from '../../shared/meter';
 import { renderBigScore, renderResultSpine, type SpineInput } from '../../shared/result-spine';
+import { WEBMCP_SCRIPT } from '../../shared/webmcp-script';
 import type { WebAuditFreshness } from './cache';
 import { WEB_CTA_NOTE_HOSTS_HTML, WEB_CTA_NOTE_HTML } from './copy';
 import { notRunCategoryNote, notRunCount } from './provenance-copy';
@@ -141,7 +142,7 @@ ${model.categories.map((category, i) => categoryHtml(category, i + 1)).join('')}
     html += `<section class="scorecard-cta">
   <p class="scorecard-cta__note">${model.hostsClause === null ? WEB_CTA_NOTE_HTML : WEB_CTA_NOTE_HOSTS_HTML}</p>
 </section>
-<script defer src="/js/webmcp.js"></script>
+<script defer src="${WEBMCP_SCRIPT}"></script>
 `;
   }
   html += '</article>';

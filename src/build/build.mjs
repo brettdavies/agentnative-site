@@ -34,6 +34,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { API_SCORE_PATH, SCORECARDS_PATH, scorePath } from '../shared/audit-routes';
 import { principleTier } from '../shared/scorecard-format.mjs';
+import { WEBMCP_SCRIPT } from '../shared/webmcp-script.ts';
 // Pipeline-stage modules sort in execution order via numeric filename
 // prefixes (00-… → 06-…). Numbering is decorative; build() below is the
 // actual order-enforcer. Shared helpers (content.mjs, render.mjs,
@@ -54,7 +55,7 @@ import { emitWebSeedProjection, loadWebSeed } from './14-web-scorecards-emit.mjs
 import { emitWebAuditSkillPages } from './15-web-audit-skills.mjs';
 import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
-import { emitShell, emitShellTemplate, WEBMCP_SCRIPT } from './shell.mjs';
+import { emitShell, emitShellTemplate } from './shell.mjs';
 import { composeTwin, escHtml, parseFilename, sortedGlob } from './util.mjs';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
