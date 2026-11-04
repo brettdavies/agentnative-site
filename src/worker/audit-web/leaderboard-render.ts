@@ -8,6 +8,7 @@
 // scoring-in-progress empty state rather than failing.
 
 import { AUDIT_PATH, auditPath, leaderboardPath, SCORECARDS_PATH, scorePath } from '../../shared/audit-routes';
+import { mdFlatten } from '../../shared/md-inline';
 import { bandOf, escHtml, renderMeter } from '../../shared/scorecard-format.mjs';
 import type { WebAggregateEntry } from './cache';
 
@@ -98,12 +99,13 @@ export function buildBoardViewNav(
 /**
  * Escape the characters that carry structure inside a markdown table cell. A
  * row's label is an audited site's own title, so an unescaped `]` closes the
- * link text early and forges a link, and a bare `|` shifts every column after
- * it. Parens are left alone: only `]` ends link text, and escaping them would
- * litter every legitimate `(Name)` in a table an agent reads.
+ * link text early and forges a link, a bare `|` shifts every column after it,
+ * and a newline ends the row. Parens are left alone: only `]` ends link text,
+ * and escaping them would litter every legitimate `(Name)` in a table an agent
+ * reads.
  */
 function escMdCell(value: string): string {
-  return value.replace(/[\\|[\]]/g, (ch) => `\\${ch}`);
+  return mdFlatten(value).replace(/[\\|[\]]/g, (ch) => `\\${ch}`);
 }
 
 /**
@@ -168,7 +170,9 @@ export function buildFrontpageBoardMarkdown(entries: WebAggregateEntry[]): strin
   const ranked = rankWebEntries(entries, 'relative');
   const lines = ['| # | Site | Score |', '|---|------|-------|'];
   for (const entry of ranked) {
-    const label = entry.name && entry.name !== entry.domain ? `${entry.domain} (${entry.name})` : entry.domain;
+    const label = escMdCell(
+      entry.name && entry.name !== entry.domain ? `${entry.domain} (${entry.name})` : entry.domain,
+    );
     lines.push(`| ${entry.rank} | [${label}](${scorePath(entry.domain)}) | ${entry.score.relative}% |`);
   }
   lines.push('');

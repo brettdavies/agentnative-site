@@ -102,6 +102,15 @@ describe('homepage web-board inject', () => {
     expect(webPane).toContain('class="lrow');
   });
 
+  test('a site title holding a replacement pattern is injected literally', async () => {
+    const entry = frontpageEntry('top.dev', 80);
+    entry.name = "Acme $& $' Co";
+    const html = await fetchHomepage(makeEnv([entry]));
+    expect(html).toContain('(Acme $&amp; $&#39; Co)');
+    expect(html).not.toContain('{{WEB_BOARD_ROWS}}');
+    expect(html.split('</html>').length - 1).toBe(1);
+  });
+
   test('renders the scoring-in-progress state when the aggregate is absent, still HTTP 200', async () => {
     const html = await fetchHomepage(makeEnv(null));
     expect(html).not.toContain('{{WEB_BOARD_ROWS}}');
@@ -193,6 +202,14 @@ describe('homepage markdown board inject', () => {
       expect(md.toLowerCase()).not.toContain('turnstile');
       expect(md).not.toContain('/api/score');
     }
+  });
+
+  test('a site title cannot forge a link, a column, or a line in the twin', async () => {
+    const entry = frontpageEntry('top.dev', 80);
+    entry.name = 'Acme] | Co\n# Forged heading';
+    const md = await fetchHomepage(makeEnv([entry]), { url: 'https://anc.dev/index.md' });
+    expect(md).toContain('[top.dev (Acme\\] \\| Co # Forged heading)](/score/top.dev)');
+    expect(md.split('\n')).not.toContain('# Forged heading');
   });
 
   test('HTML / still injects the web pane and keeps the baked CLI table', async () => {

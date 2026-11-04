@@ -10,6 +10,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   BONUS_GROUPS,
   buildScorecardBody,
+  buildScorecardMarkdown,
   escHtml,
   extractTopIssues,
   formatAuditRowMarkdown,
@@ -103,6 +104,19 @@ describe('statusLabel (7-status taxonomy, schema 0.6)', () => {
   });
 });
 
+describe('buildScorecardMarkdown', () => {
+  test('a tool name or version with a newline in it cannot start a line of its own', () => {
+    const md = buildScorecardMarkdown(
+      { name: 'tool\n# Forged heading', binary: 'tool' },
+      { badge: { score_pct: 10, eligible: false }, results: [] },
+      { version: '1.0\n# Forged version' },
+    );
+    expect(md.split('\n')).toContain('# tool # Forged heading');
+    expect(md).toContain('**Version scored:** 1.0 # Forged version');
+    expect(md.split('\n').filter((line) => line.startsWith('# Forged'))).toEqual([]);
+  });
+});
+
 describe('formatAuditRowMarkdown', () => {
   test('emits canonical row shape with site-relative link', () => {
     const row = formatAuditRowMarkdown({
@@ -141,6 +155,20 @@ describe('formatAuditRowMarkdown', () => {
     // The row still has exactly 5 unescaped pipes (the table delimiters).
     const unescapedPipes = row.match(/(?<!\\)\|/g)?.length ?? 0;
     expect(unescapedPipes).toBe(5);
+  });
+  test('a newline in evidence cannot break out of the table row', () => {
+    const row = formatAuditRowMarkdown({
+      status: 'fail',
+      label: 'label\nsplit',
+      group: 'P3',
+      evidence: 'usage: tool\n\n# Forged heading\r\n- forged item',
+    });
+    expect(row.split('\n')).toHaveLength(1);
+    expect(row).toBe('| FAIL | label split | [P3](/p3) | usage: tool # Forged heading - forged item |');
+  });
+  test('a backslash before a pipe cannot unescape it', () => {
+    const row = formatAuditRowMarkdown({ status: 'fail', label: 'ok', group: 'P3', evidence: 'a\\|b' });
+    expect(row).toContain('a\\\\\\|b');
   });
   test('handles null evidence', () => {
     const row = formatAuditRowMarkdown({

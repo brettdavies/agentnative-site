@@ -17,6 +17,7 @@
 // code both depend on `shared/`, never the other way around.
 
 import { escHtml } from './esc-html.ts';
+import { mdFlatten } from './md-inline.ts';
 import { renderBigScore, renderResultSpine, resultFrontMatter, shortDate } from './result-spine.ts';
 import { CANONICAL_SITE_URL } from './site-url';
 
@@ -108,6 +109,10 @@ export function extractTopIssues(scorecard, limit = 3) {
   return issues.slice(0, limit);
 }
 
+function mdTableCell(text) {
+  return mdFlatten(text).replace(/[\\|]/g, (ch) => `\\${ch}`);
+}
+
 /**
  * Format a single audit as a markdown table row. Both the static
  * `/score/<tool>.md` (full audit table) and the live `/live-score/<binary>.md`
@@ -116,8 +121,9 @@ export function extractTopIssues(scorecard, limit = 3) {
  *
  * Principle group codes (`P1..P7`) link to the principle page; bonus
  * groups (`CodeQuality`, `ProjectStructure`) stay as plain text. Evidence
- * and label strings have `|` escaped so user-controlled evidence with
- * pipes (shell pipelines, table syntax) doesn't fracture the table.
+ * and label strings land on one line with `|` and `\` escaped, because
+ * evidence is an audited tool's own output: a pipe would fracture the table
+ * and a newline would leave it, where the next line can pass for a heading.
  *
  * Links use a site-relative path by default. Callers serving markdown
  * twins that may be fetched cross-origin can pass an absolute baseUrl
@@ -133,8 +139,8 @@ export function formatAuditRowMarkdown(check, opts = {}) {
   const baseUrl = (opts.baseUrl ?? '').replace(/\/$/, '');
   const pNum = groupToPrincipleNum(check.group);
   const groupLabel = pNum ? `[${check.group}](${baseUrl}/p${pNum})` : check.group;
-  const evidence = (check.evidence ?? '').replaceAll('|', '\\|');
-  const label = check.label.replaceAll('|', '\\|');
+  const evidence = mdTableCell(check.evidence ?? '');
+  const label = mdTableCell(check.label);
   return `| ${statusLabel(check.status)} | ${label} | ${groupLabel} | ${evidence} |`;
 }
 
@@ -676,7 +682,7 @@ export function buildScorecardMarkdown(tool, scorecard, opts = {}) {
     );
   }
   if (opts.header) lines.push(opts.header);
-  else lines.push(`# ${tool.name}`);
+  else lines.push(`# ${mdFlatten(tool.name)}`);
   lines.push('');
   if (tool.description) {
     lines.push(tool.description);
@@ -723,7 +729,8 @@ export function buildScorecardMarkdown(tool, scorecard, opts = {}) {
     lines.push(`**Source:** [${tool.url}](${tool.url})`);
   }
   if (tool.language) lines.push(`**Language:** ${tool.language}`);
-  if (!opts.hideVersionRow) lines.push(`**Version scored:** ${version || '—'}`);
+  // A tool reports its own version, so this line is the tool's text.
+  if (!opts.hideVersionRow) lines.push(`**Version scored:** ${version ? mdFlatten(version) : '—'}`);
   const auditDateMd = formatStartedAt(meta.run?.started_at);
   if (auditDateMd) lines.push(`**Audit date:** ${auditDateMd}`);
   const durationMd = formatDuration(meta.run?.duration_ms);

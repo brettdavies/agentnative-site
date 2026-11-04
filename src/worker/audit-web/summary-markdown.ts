@@ -2,6 +2,7 @@
 // resolves them, and the fenced copy-paste prompt the HTML page withholds.
 
 import { auditPath } from '../../shared/audit-routes';
+import { mdFlatten } from '../../shared/md-inline';
 import { resultFrontMatter } from '../../shared/result-spine';
 import { CANONICAL_SITE_URL } from '../../shared/site-url';
 import { WEB_SURFACE_NOTE_HOSTS } from './copy';
@@ -19,7 +20,7 @@ import type { SummaryCategory, SummaryItem, SummaryRow } from './summary-types';
 // opens a code span, so inline text is flattened and fenced blocks lose any
 // embedded fence.
 function mdInline(text: string): string {
-  return text.replace(/[\r\n]+/g, ' ').replaceAll('`', '\\`');
+  return mdFlatten(text).replaceAll('`', '\\`');
 }
 
 function mdFenced(text: string): string {

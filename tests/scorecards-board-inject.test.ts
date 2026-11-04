@@ -195,6 +195,15 @@ describe('merged leaderboard: the website pane', () => {
     expect(html).not.toContain('{{WEB_BOARD_ROWS}}');
   });
 
+  test('a site title cannot start a line of its own in the twin', async () => {
+    const entry = boardEntry('top.dev', 80);
+    entry.name = 'Acme\n# Forged heading\u2028- forged item';
+    const md = await fetchBoard(makeEnv([entry]), 'https://anc.dev/scorecards.md');
+    const row = md.split('\n').find((line) => line.includes('top.dev'));
+    expect(row).toContain('top.dev (Acme # Forged heading - forged item)');
+    expect(md.split('\n')).not.toContain('# Forged heading');
+  });
+
   test('a site title holding the other placeholder cannot splice the view nav', async () => {
     // Substituting the rows first leaves a name that spells the second
     // placeholder for the pass behind it to fill, so the nav lands inside a row.

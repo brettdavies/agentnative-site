@@ -15,6 +15,7 @@ import {
   breadcrumbTrail,
   renderBreadcrumbNav,
 } from '../shared/breadcrumb.ts';
+import { jsonForScript } from '../shared/json-script';
 import { MCP_DISCOVERY_DOCUMENTS, SEP_1649_CARD_PATH } from '../shared/mcp-discovery';
 import { SITE_OG_IMAGE_ALT, SITE_OG_IMAGE_PATH } from '../shared/og-card.ts';
 import { markdownAlternateLink } from '../shared/result-head';
@@ -155,7 +156,7 @@ export const WEBMCP_SCRIPT = '/js/webmcp.js';
 /**
  * Emit a placeholder-only version of the shell. The Worker renders its
  * dynamic pages from it without duplicating the shell layout. The
- * template has five placeholders:
+ * template's placeholders:
  *
  *   {{TITLE}}            — document <title> + og:title (escaped at substitution)
  *   {{DESCRIPTION}}      — meta description + og:description
@@ -164,6 +165,9 @@ export const WEBMCP_SCRIPT = '/js/webmcp.js';
  *                          built by src/shared/result-head.ts from the route
  *                          module's representation builders
  *   {{BODY}}             — already-rendered body HTML (pre-escaped by caller)
+ *   {{JSONLD_TITLE}}, {{JSONLD_DESCRIPTION}}, {{JSONLD_CANONICAL_PATH}},
+ *   {{JSONLD_OG_IMAGE}}  — the same values inside the JSON-LD block, escaped for
+ *                          a JSON string in a script element
  *
  * Same shell layout as the static pages; the only difference is the
  * placeholders for the dynamic fields. The footer's markdown-twin anchor
@@ -297,10 +301,17 @@ export function emitShell({
       },
       {
         '@type': 'TechArticle',
-        headline: title,
-        description,
-        url: canonical,
-        image: resolvedOgImage,
+        // Inside a script element these take JSON escaping rather than the HTML
+        // escaping the head's tags take, so the template gives them tokens of
+        // their own.
+        ...(deferred
+          ? {
+              headline: '{{JSONLD_TITLE}}',
+              description: '{{JSONLD_DESCRIPTION}}',
+              url: `${base}{{JSONLD_CANONICAL_PATH}}`,
+              image: '{{JSONLD_OG_IMAGE}}',
+            }
+          : { headline: title, description, url: canonical, image: resolvedOgImage }),
         isPartOf: { '@id': siteId },
         author: {
           '@type': 'Person',
@@ -413,7 +424,7 @@ ${ogVideo ? `    ${ogVideo}\n` : ''}    <meta property="og:site_name" content="$
     <link rel="stylesheet" href="/css/foundation.css" />
     <link rel="stylesheet" href="/css/site.css" />
 
-    <script type="application/ld+json">${JSON.stringify(jsonLd)}</script>
+    <script type="application/ld+json">${jsonForScript(jsonLd)}</script>
     <script>${themeInitJs}</script>${extraHeadJs ? `\n    <script>${extraHeadJs}</script>` : ''}
   </head>
   <body>
