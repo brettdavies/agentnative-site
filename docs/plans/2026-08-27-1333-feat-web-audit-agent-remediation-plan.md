@@ -64,7 +64,7 @@ can run; kill switches, rate limits, and service failures still apply.
 - KD2. **Agents select remediation by normative priority and exact result status.** (session-settled: user-directed —
   chosen over a fixed MUST-only workflow because the requested remediation set varies by task.) Governs R2-R8.
 - KD3. **Implementation uses a feature branch from updated `origin/dev`.** (session-settled: user-directed — chosen over
-  modifying the existing dirty feature branch so the work includes schema 0.4 and preserves unrelated Sounding changes.)
+  modifying the existing dirty feature branch so the work includes schema 0.4 and preserves unrelated changes.)
   Governs R15.
 
 ### Requirements
@@ -214,7 +214,7 @@ can run; kill switches, rate limits, and service failures still apply.
 ### Key Technical Decisions
 
 - KTD1. **Use `origin/dev` as the implementation base in an isolated worktree.** (session-settled: user-directed —
-  chosen over modifying the Sounding worktree: preserves unrelated work and starts from schema 0.4.) Create
+  chosen over modifying the existing dirty worktree: preserves unrelated work and starts from schema 0.4.) Create
   `feat/web-audit-agent-remediation` and verify its HEAD against `origin/dev` before editing. Implements KD3 and R15.
 - KTD2. **Make the rendered row the canonical WebMCP record.** Every `.web-check[data-id]` carries stable row metadata.
   Prompt text remains a separate conditional child because eligibility depends on status and `unprobed`. Implements R1,
@@ -556,7 +556,7 @@ account for persistent cache state rather than assuming every call is fresh.
 - U5 is done when public docs match the shipped schemas, CI is green, staging serves the new tools and fields, and the
   R24 fresh-then-cached verification succeeds.
 - The implementation branch starts from verified `origin/dev`, uses the repository PR path to `dev`, and does not
-  contain the unrelated dirty Sounding changes.
+  contain the unrelated dirty changes.
 - No scorecard schema bump, CLI scoring change, leaderboard aggregate migration, Turnstile bypass, or WebMCP
   audit-submission path is present.
 - No dead-end helpers, duplicate status predicates, temporary diagnostics, stale generated output, or abandoned

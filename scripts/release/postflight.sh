@@ -376,7 +376,7 @@ RETIRED_REDIRECTS=(
   "/web-audit.md|/audit.md"
   "/mcp.md|/mcp-docs.md"
   "/mcp.html|/mcp-docs"
-  "/web/sounding.brettdavies.workers.dev|/score/sounding.brettdavies.workers.dev"
+  "/web/anc.dev|/score/anc.dev"
 )
 
 gate_retired() {
