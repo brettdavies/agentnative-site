@@ -18,12 +18,37 @@ import { listWorkflows, REPO_ROOT, workflowText } from './helpers/workflows';
 
 const ACTIONS_DIR = join(REPO_ROOT, '.github/actions');
 const SHELL_SHEBANG = /^#!.*\b(?:ba)?sh\b/;
-// A double-quoted string holding `$(` is kept, because a pipeline can live inside it.
-const QUOTED_TEXT = /'[^']*'|"(?:[^"$\\]|\\.|\$(?!\())*"/g;
-// A real pipe, never the `||` operator, into grep or rg with a quiet flag, past any
-// group, path, environment assignment or wrapper in front of the command.
+// A real pipe, never the `||` operator, into a stage holding grep or rg with a quiet
+// flag, whatever wrapper, path or assignment sits in front of the command.
 const PIPE_INTO_QUIET_GREP =
-  /(?<!\|)\|(?!\|)&?\s*[{(]?\s*(?:\w+=\S*\s+|(?:command|env)\s+|timeout\s+\S+\s+)*(?:\S*\/)?[ef]?(?:grep|rg)\b[^|;&]*?\s(?:-[a-zA-Z0-9]*q[a-zA-Z0-9]*|--quiet|--silent)(?=\s|$)/;
+  /(?<!\|)\|(?!\|)&?[^|;&]*\b(?:[ef]?grep|rg)\b[^|;&]*\s(?:-[a-zA-Z0-9]*q[a-zA-Z0-9]*|--quiet|--silent)(?=[\s;)&|]|$)/;
+
+/** `line` without its quoted text, keeping the code inside a `$(...)`, which can hold a pipeline. */
+function codeOnly(line: string): string {
+  let code = '';
+  const open: string[] = [];
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    const inside = open.at(-1);
+    if (inside === "'") {
+      if (char === "'") open.pop();
+    } else if (char === '\\') {
+      i++;
+    } else if (char === '$' && line[i + 1] === '(') {
+      open.push('$(');
+      code += '$(';
+      i++;
+    } else if (inside === '"') {
+      if (char === '"') open.pop();
+    } else if (char === "'" || char === '"') {
+      open.push(char);
+    } else {
+      if (char === ')' && inside === '$(') open.pop();
+      code += char;
+    }
+  }
+  return code;
+}
 
 /** The pipelines in `script` that end in a quiet grep, each joined onto one line. */
 function offendingPipelines(script: string): string[] {
@@ -33,7 +58,7 @@ function offendingPipelines(script: string): string[] {
     .replace(/\|[ \t]*\n\s*/g, '| ')
     .split('\n')
     .map((line) => line.trim())
-    .filter((line) => PIPE_INTO_QUIET_GREP.test(line.replace(QUOTED_TEXT, "''")));
+    .filter((line) => PIPE_INTO_QUIET_GREP.test(codeOnly(line)));
 }
 
 /** Tracked shell files with their text. A hook carries no extension, so a shebang counts too. */
@@ -69,7 +94,7 @@ function runBlocks(): Map<string, string> {
   const found = new Map<string, string>();
   const scan = (where: string, steps: Step[] = []) => {
     for (const [index, step] of steps.entries()) {
-      if (step.run) found.set(`${where}[${step.name ?? index}]`, step.run);
+      if (step.run) found.set(`${where}[${index} ${step.name ?? ''}]`, step.run);
     }
   };
   for (const file of listWorkflows()) {
@@ -106,6 +131,15 @@ describe('offendingPipelines', () => {
     'producer | timeout 5 grep -q marker',
     'producer | /usr/bin/grep -q marker',
     'producer | { grep -q marker; }',
+    `echo "$(foo)" | grep -q "bar"`,
+    `printf "%s" "$(foo)" | grep -qE "bar"`,
+    `x="$(echo "a" | grep -q "b")"`,
+    'if producer | grep marker -q; then',
+    'x=$(producer | grep -q)',
+    'producer | sudo grep -q marker',
+    'producer | nice grep -q marker',
+    'producer | stdbuf -oL grep -q marker',
+    'producer | ! grep -q marker',
   ])('reports %j', (script) => {
     expect(offendingPipelines(script)).toHaveLength(1);
   });
@@ -121,6 +155,8 @@ describe('offendingPipelines', () => {
     `producer | grep -c 'x -quiet y'`,
     `echo "producer | grep -q marker"`,
     'producer | grep -oE marker | sed s/a/b/',
+    'producer | tr a b && grep -q marker file',
+    `producer | sed 's/grep -q//'`,
   ])('allows %j', (script) => {
     expect(offendingPipelines(script)).toEqual([]);
   });
