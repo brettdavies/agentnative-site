@@ -39,7 +39,8 @@ function trackedShellFiles(): Map<string, string> {
     const absolute = join(REPO_ROOT, path);
     const extension = extname(path);
     if (extension !== '' && extension !== '.sh' && extension !== '.bash') continue;
-    if (!lstatSync(absolute).isFile()) continue;
+    // `git ls-files` still lists a file removed from the tree until the removal is staged.
+    if (!lstatSync(absolute, { throwIfNoEntry: false })?.isFile()) continue;
     const text = readFileSync(absolute, 'utf8');
     if (extension !== '' || SHELL_SHEBANG.test(text)) scripts.set(path, text);
   }

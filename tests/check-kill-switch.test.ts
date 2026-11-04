@@ -12,7 +12,7 @@ import { REPO_ROOT } from './helpers/workflows';
 // argument, because the script hands this text to jq as an --arg.
 const PADDING = `${'x'.repeat(79)}\n`.repeat(1375);
 
-function check(stderr: string): { status: number; verdict: { status: string; disabled?: unknown } } {
+function check(stderr: string): { status: number; verdict: { status: string } } {
   const bin = mkdtempSync(join(tmpdir(), 'check-kill-switch-'));
   try {
     writeFileSync(join(bin, 'stderr.txt'), stderr);
