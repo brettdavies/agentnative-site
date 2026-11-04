@@ -131,7 +131,7 @@ manual recipe below skips the headers; for prod the recipe runs unauthenticated.
   # Accept: text/html is required — curl's default Accept negotiates markdown on
   # extensionless URLs (same as the scripted gate_pages() in postflight.sh).
   curl -fSsL -H 'Accept: text/html' "${ENV_URL}/" | grep -q '<title>' && echo "home: ok"
-  curl -fSsL -H 'Accept: text/html' "${ENV_URL}/scorecards" | grep -q 'leaderboard-table' && echo "leaderboard: ok"
+  curl -fSsL -H 'Accept: text/html' "${ENV_URL}/scorecards" | grep -q 'lrow' && echo "leaderboard: ok"
   curl -fSsL "${ENV_URL}/api/score" -X POST \
     -H 'Content-Type: application/json' \
     -d '{"target":"ripgrep","turnstile_token":"x"}' \
