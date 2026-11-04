@@ -1,0 +1,197 @@
+# Informational report: which CLI conformance scenarios a site change to the
+# web-audit vendoring contract would diverge. Builds agentnative-cli against the
+# PR's contract, then writes a job summary and keeps one PR comment current.
+#
+# Never name this check in a ruleset. A divergence is expected whenever the engine
+# changes and reaches the CLI through its next bump PR, so divergences, a CLI that
+# no longer builds and a contract it cannot read all end green; the last two read
+# "report unavailable". Only a defect in this workflow goes red, by the exit codes
+# scripts/web-audit/cli-parity-summary.ts documents. A soft-failed step would hide
+# that defect, so failures are captured as exit codes and no step soft-fails.
+#
+# Triggers:
+#   pull_request       a change to the contract, or to this report.
+#   workflow_dispatch  `gh workflow run web-audit-cli-parity.yml --ref <site branch>
+#                      -f cli_ref=<cli ref>` reports that branch's contract against
+#                      another CLI ref, with a job summary and no comment.
+
+name: web-audit-cli-parity
+
+on:
+  pull_request:
+    paths:
+      - 'src/data/web-audit/contract/**'
+      - '.github/workflows/web-audit-cli-parity.yml'
+      - 'scripts/web-audit/cli-parity-*.ts'
+  workflow_dispatch:
+    inputs:
+      cli_ref:
+        description: agentnative-cli ref to build
+        required: false
+        default: dev
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-audit-cli-parity-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  COMMENT_MARKER: '<!-- web-audit-cli-parity -->'
+  RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+jobs:
+  report:
+    name: report · CLI conformance at this contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      comment: ${{ steps.report.outputs.comment }}
+    env:
+      CLI_REF: ${{ inputs.cli_ref || 'dev' }}
+      # The PR head, not the merge ref: the CLI's pin names a commit on a branch.
+      SITE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - name: Check out the site at the PR head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SITE_SHA }}
+          persist-credentials: false
+
+      - name: Check out the CLI
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: brettdavies/agentnative-cli
+          ref: ${{ env.CLI_REF }}
+          path: cli
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      # WEB_AUDIT_SITE_SHA, not --pin: moving the pin would fail the CLI's ledger
+      # check on the pin itself and hide what this contract changes.
+      - name: Point the CLI at this contract
+        id: sync
+        working-directory: cli
+        env:
+          WEB_AUDIT_SITE_REPO: ${{ github.workspace }}
+          WEB_AUDIT_SITE_SHA: ${{ env.SITE_SHA }}
+        run: |
+          code=0
+          bash scripts/sync-web-audit.sh > "$RUNNER_TEMP/sync.log" 2>&1 || code=$?
+          cat "$RUNNER_TEMP/sync.log"
+          echo "exit=$code" >> "$GITHUB_OUTPUT"
+
+      # rust-cache keys on `rustc -vV` run from the workspace root, outside the CLI's
+      # rust-toolchain.toml, so the pinned toolchain has to be the default there too.
+      - name: Install the CLI's Rust toolchain
+        if: steps.sync.outputs.exit == '0'
+        working-directory: cli
+        run: |
+          rustup toolchain install
+          rustup default "$(rustup show active-toolchain | cut -d' ' -f1)"
+
+      # Skipped with the build: a run that compiled nothing would save an empty
+      # cache under the key, and a later run's exact hit would never replace it.
+      - name: Cache the CLI's dependencies
+        if: steps.sync.outputs.exit == '0'
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: cli
+
+      # --features web is explicit because tests/web_audit_divergences.rs compiles
+      # to nothing without it, which passes and looks like a clean run.
+      # --no-fail-fast because the dump's suite must run after another suite fails.
+      - name: Replay the corpus through the CLI
+        id: tests
+        if: steps.sync.outputs.exit == '0'
+        working-directory: cli
+        env:
+          WEB_AUDIT_DIVERGENCE_OUT: ${{ runner.temp }}/divergences.json
+        run: |
+          cargo test --locked --features web --no-fail-fast \
+            --test web_audit_divergences --test web_audit_conformance --test web_audit_handlers \
+            2>&1 | tee "$RUNNER_TEMP/tests.log"
+          echo "exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Write the report
+        id: report
+        if: ${{ !cancelled() }}
+        env:
+          SYNC_EXIT: ${{ steps.sync.outputs.exit }}
+          TEST_EXIT: ${{ steps.tests.outputs.exit }}
+        run: |
+          code=0
+          bun scripts/web-audit/cli-parity-summary.ts \
+            --marker "$COMMENT_MARKER" \
+            --site-sha "$SITE_SHA" \
+            --cli-ref "$CLI_REF" \
+            --cli-sha "$(git -C cli rev-parse HEAD)" \
+            --run-url "$RUN_URL" \
+            --sync-exit "$SYNC_EXIT" \
+            --sync-log "$RUNNER_TEMP/sync.log" \
+            --test-exit "$TEST_EXIT" \
+            --test-log "$RUNNER_TEMP/tests.log" \
+            --dump "$RUNNER_TEMP/divergences.json" \
+            --ledger cli/tests/fixtures/web-audit-divergences.toml \
+            --vocab cli/build_support/web_registry/vocab.rs \
+            --summary-out "$GITHUB_STEP_SUMMARY" \
+            --comment-out "$RUNNER_TEMP/comment.md" || code=$?
+          if [ -f "$RUNNER_TEMP/comment.md" ]; then
+            delimiter="comment-$(openssl rand -hex 16)"
+            {
+              echo "comment<<$delimiter"
+              cat "$RUNNER_TEMP/comment.md"
+              echo "$delimiter"
+            } >> "$GITHUB_OUTPUT"
+          fi
+          exit "$code"
+
+  # Its own job so the token that can write a comment never shares a runner with
+  # the build, which executes the CLI's build script over PR-supplied data.
+  comment:
+    name: comment · keep one report on the PR
+    needs: report
+    # Fork PRs get a read-only token, so their report stays in the job summary.
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Create or update the comment
+        env:
+          BODY: ${{ needs.report.outputs.comment }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          REPORT_RESULT: ${{ needs.report.result }}
+        run: |
+          set -euo pipefail
+          file="$RUNNER_TEMP/comment.md"
+          if [ -n "$BODY" ]; then
+            printf '%s\n' "$BODY" > "$file"
+          else
+            # An older comment must not stand as this commit's report.
+            printf '%s\n## CLI parity\n\n**Report unavailable: the report job ended with result %s before writing a report.** [Run](%s)\n' \
+              "$COMMENT_MARKER" "$REPORT_RESULT" "$RUN_URL" > "$file"
+          fi
+          existing="$(
+            gh api --paginate "repos/$REPO/issues/$PR_NUMBER/comments" \
+              --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$COMMENT_MARKER\"))) | .id" \
+              | sed -n 1p
+          )"
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/$REPO/issues/comments/$existing" -F "body=@$file" --silent
+          else
+            gh api --method POST "repos/$REPO/issues/$PR_NUMBER/comments" -F "body=@$file" --silent
+          fi

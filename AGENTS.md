@@ -469,6 +469,9 @@ engine against a public URL) and for operating the web-board rescore (weekly cro
 - `guard-release-branch.yml`: rejects PRs to main whose head isn't `release/*`.
 - `guard-main-provenance.yml`: requires every non-exempt commit in a PR to main to carry a `(#N)` PR reference; skipped
   for `release/*` heads.
+- `web-audit-cli-parity.yml`: on a PR that changes `src/data/web-audit/contract/**`, builds CLI `dev` against the PR's
+  contract and reports the CLI scenarios it would diverge, in a job summary and one PR comment. Informational and in no
+  ruleset; only a defect in the workflow itself goes red.
 
 ## Tool-site sequencing (do not violate)
 
