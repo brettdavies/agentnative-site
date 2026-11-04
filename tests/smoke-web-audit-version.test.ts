@@ -3,8 +3,8 @@
 // can break has to fail it. Runs the real script against a local server.
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { existsSync, readFileSync } from 'node:fs';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CONTRACT_FINGERPRINT_ASSET_PATH } from '../src/shared/web-audit-contract';
@@ -249,6 +249,44 @@ describe('scripts/smoke-web-audit-version.sh', () => {
     }
   });
 
+  // No shell runs a trap after a SIGKILL, so the only way to leave nothing behind is never to write it.
+  test('no file holds the secret during a run or after a SIGKILL, and no child inherits it', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'smoke-kill-'));
+    try {
+      const tmp = join(dir, 'tmp');
+      await mkdir(tmp);
+      const started = join(dir, 'started');
+      const stub = join(dir, 'curl');
+      await writeFile(
+        stub,
+        `#!/usr/bin/env bash\nenv >"${dir}/env"\nls -A "${tmp}" >"${dir}/during"\n: >"${started}"\nexec sleep 5\n`,
+      );
+      await chmod(stub, 0o755);
+      const proc = Bun.spawn(['bash', SCRIPT, fixture('valid')], {
+        env: {
+          ...callerEnv,
+          CF_ACCESS_CLIENT_ID: 'id-from-env',
+          CF_ACCESS_CLIENT_SECRET: 'secret-from-env',
+          TMPDIR: tmp,
+          PATH: `${dir}:${process.env.PATH}`,
+        },
+        stdout: 'ignore',
+        stderr: 'ignore',
+      });
+      for (let attempt = 0; attempt < 400 && !existsSync(started); attempt += 1) await Bun.sleep(50);
+      expect(existsSync(started)).toBe(true);
+      proc.kill('SIGKILL');
+      await proc.exited;
+      expect(await readFile(join(dir, 'during'), 'utf8')).toBe('');
+      expect(await readdir(tmp)).toEqual([]);
+      const childEnv = await readFile(join(dir, 'env'), 'utf8');
+      expect(childEnv).not.toContain('CF_ACCESS');
+      expect(childEnv).not.toContain('secret-from-env');
+    } finally {
+      await rm(dir, { recursive: true });
+    }
+  }, 30_000);
+
   test("a verbose .curlrc cannot print the secret, because curl ignores the caller's config", async () => {
     const dir = await mkdtemp(join(tmpdir(), 'smoke-curlrc-'));
     try {
@@ -390,6 +428,22 @@ describe('scripts/smoke-web-audit-version.sh', () => {
     }
   });
 
+  // curl -f also fails on a broken transfer, and its trailer still carries the status it saw.
+  test('a 200 whose transfer failed says so, rather than that it did not answer 200', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'smoke-stub-'));
+    try {
+      const stub = join(dir, 'curl');
+      await writeFile(stub, `#!/usr/bin/env bash\nprintf '\\n200 application/json'\nexit 18\n`);
+      await chmod(stub, 0o755);
+      const { exitCode, stderr } = await smoke(fixture('valid'), { PATH: `${dir}:${process.env.PATH}` });
+      expect(exitCode).toBe(1);
+      expect(failLine(stderr)).toContain('answered HTTP 200 but the transfer failed');
+      expect(failLine(stderr)).not.toContain('did not answer 200');
+    } finally {
+      await rm(dir, { recursive: true });
+    }
+  });
+
   for (const [label, env] of [
     ['only the id', { CF_ACCESS_CLIENT_ID: 'id-from-env' }],
     ['only the secret', { CF_ACCESS_CLIENT_SECRET: 'secret-from-env' }],
@@ -413,6 +467,7 @@ describe('scripts/smoke-web-audit-version.sh', () => {
       const { exitCode, stdout } = await smoke(fixture('valid'), expecting());
       expect(exitCode).toBe(0);
       expect(stdout).toContain('PASS');
+      expect(stdout).toContain('contract_fingerprint compared');
     });
 
     test.each([
@@ -479,7 +534,7 @@ describe('scripts/smoke-web-audit-version.sh', () => {
 
     // Without the longer wait a deploy that moves the value goes red while old isolates drain.
     test.each([
-      ['with', { SMOKE_EXPECT_CONTRACT_FINGERPRINT: VALID.contract_fingerprint }, 25],
+      ['with', { SMOKE_EXPECT_CONTRACT_FINGERPRINT: VALID.contract_fingerprint }, 13],
       ['without', {}, 6],
     ])(
       '%s an expected value, the default retries give the attempts its wait needs',
@@ -499,11 +554,12 @@ describe('scripts/smoke-web-audit-version.sh', () => {
     // The production job records nothing for a ref without the file, and its smoke then checks the shape alone.
     test('an empty value compares nothing', async () => {
       propagatingAnswers = 1;
-      const { exitCode } = await smoke(
+      const { exitCode, stdout } = await smoke(
         fixture('propagating-other-value'),
         expecting({ SMOKE_EXPECT_CONTRACT_FINGERPRINT: '' }),
       );
       expect(exitCode).toBe(0);
+      expect(stdout).not.toContain('contract_fingerprint compared');
     });
 
     test.each(['not-a-print', '0A1B2C3D4E5F', '0a1b2c3d4e5'])('%s is a prerequisite failure', async (value) => {

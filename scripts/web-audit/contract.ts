@@ -115,10 +115,15 @@ function filesUnder(root: string, tree: string): string[] {
 }
 
 /** The bytes of every file the CLI mirrors, by its path under the contract root. */
-export function mirroredFiles(root: string = CONTRACT_DIR): Map<string, Buffer> {
+export function mirroredFiles(
+  root: string = CONTRACT_DIR,
+  include: (path: string) => boolean = () => true,
+): Map<string, Buffer> {
   const files = new Map<string, Buffer>();
   for (const tree of MIRRORED_TREES) {
-    for (const path of filesUnder(root, tree)) files.set(path, readFileSync(join(root, path)));
+    for (const path of filesUnder(root, tree)) {
+      if (include(path)) files.set(path, readFileSync(join(root, path)));
+    }
   }
   return files;
 }
@@ -138,7 +143,8 @@ function isHashed(path: string): boolean {
 export function contractFingerprint(files: ReadonlyMap<string, string | Buffer>): string {
   const hash = createHash('sha256');
   for (const path of [...files.keys()].filter(isHashed).sort()) {
-    const bytes = Buffer.from(files.get(path) as string);
+    const content = files.get(path) ?? '';
+    const bytes = typeof content === 'string' ? Buffer.from(content) : content;
     hash.update(`${path}\0${bytes.byteLength}\0`);
     hash.update(bytes);
   }
@@ -152,9 +158,7 @@ export async function generateContract(registry: WebAuditRegistry): Promise<Map<
   for (const [name, content] of await generateCorpus(registry)) files.set(`${CONTRACT_CORPUS_TREE}/${name}`, content);
   // What generation does not write, the fingerprint still covers: a hand-authored
   // fixture is an input the CLI mirrors too.
-  const handAuthored = MIRRORED_TREES.flatMap((tree) => filesUnder(CONTRACT_DIR, tree))
-    .filter((path) => !GENERATED_TREES.some((tree) => path.startsWith(`${tree}/`)))
-    .map((path): [string, Buffer] => [path, readFileSync(join(CONTRACT_DIR, path))]);
+  const handAuthored = mirroredFiles(CONTRACT_DIR, (path) => !GENERATED_TREES.some((tree) => path.startsWith(`${tree}/`)));
   files.set(CONTRACT_FINGERPRINT_FILE, contractFingerprint(new Map<string, string | Buffer>([...files, ...handAuthored])));
   return files;
 }

@@ -307,16 +307,20 @@ jobs:
       # Last, so a red signal marks the job failed without skipping the rescore,
       # the curated pass, or the link smoke above it. It still runs when one of
       # them fails, but not after a failed deploy, when it would be checking the
-      # previous Worker.
+      # previous Worker. A deploy of a ref without the file has nothing to compare.
       - name: Smoke /api/web-audit/version
         if: ${{ !cancelled() && steps.deploy_staging.outcome == 'success' }}
         env:
           CF_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
         run: |
-          expected="$(tr -d '[:space:]' < src/data/web-audit/contract/build/FINGERPRINT)"
-          test -n "$expected"
-          SMOKE_EXPECT_CONTRACT_FINGERPRINT="$expected" scripts/smoke-web-audit-version.sh "$PUBLIC_BASE_URL"
+          file=src/data/web-audit/contract/build/FINGERPRINT
+          if [ -e "$file" ]; then
+            SMOKE_EXPECT_CONTRACT_FINGERPRINT="$(tr -d '[:space:]' < "$file")"
+            test -n "$SMOKE_EXPECT_CONTRACT_FINGERPRINT"
+            export SMOKE_EXPECT_CONTRACT_FINGERPRINT
+          fi
+          scripts/smoke-web-audit-version.sh "$PUBLIC_BASE_URL"
 
   production:
     name: build + deploy production
@@ -342,7 +346,7 @@ jobs:
 
       # The smoke job checks out the branch again, and its tip can have moved past
       # what this job deployed. A rollback to a ref without this file deploys with
-      # nothing to compare, and the smoke then checks the signal's shape alone.
+      # nothing to compare.
       - name: Record the deployed contract fingerprint
         id: contract
         run: |

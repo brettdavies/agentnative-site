@@ -6,6 +6,7 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
+import * as yaml from 'js-yaml';
 import { loadRegistry } from '../scripts/web-audit/conformance-corpus';
 import {
   contractDrift,
@@ -30,6 +31,9 @@ import {
 import { CONTRACT_FINGERPRINT_ASSET_PATH } from '../src/shared/web-audit-contract';
 import { registryFingerprintPrefix } from '../src/worker/audit-web/registry';
 import { handleWebAuditVersion } from '../src/worker/audit-web/version-signal';
+import { workflowText } from './helpers/workflows';
+
+type DeployStep = { name?: string; id?: string; env?: Record<string, string>; run?: string };
 
 const registry = loadRegistry();
 const generated = await generateContract(registry);
@@ -113,14 +117,30 @@ describe('the committed web-audit vendoring contract', () => {
   // previous deploy could pass. The production value travels from the deploying job, because the smoke job's own
   // checkout of the branch can be newer than what was deployed.
   test('both deploy jobs smoke the version signal against the FINGERPRINT they deployed', () => {
-    const deploy = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'deploy.yml'), 'utf8');
+    const { jobs } = yaml.load(workflowText('deploy.yml')) as {
+      jobs: Record<string, { outputs?: Record<string, string>; steps: DeployStep[] }>;
+    };
+    const smokeStep = (job: string) => jobs[job]?.steps.find((step) => step.name === 'Smoke /api/web-audit/version');
     const path = relative(REPO_ROOT, CONTRACT_FINGERPRINT_PATH);
-    expect(deploy).toContain(`expected="$(tr -d '[:space:]' < ${path})"\n          test -n "$expected"\n`);
-    expect(deploy).toContain(
-      'SMOKE_EXPECT_CONTRACT_FINGERPRINT="$expected" scripts/smoke-web-audit-version.sh "$PUBLIC_BASE_URL"',
+
+    expect(smokeStep('staging')?.run).toBe(
+      [
+        `file=${path}`,
+        'if [ -e "$file" ]; then',
+        `  SMOKE_EXPECT_CONTRACT_FINGERPRINT="$(tr -d '[:space:]' < "$file")"`,
+        '  test -n "$SMOKE_EXPECT_CONTRACT_FINGERPRINT"',
+        '  export SMOKE_EXPECT_CONTRACT_FINGERPRINT',
+        'fi',
+        'scripts/smoke-web-audit-version.sh "$PUBLIC_BASE_URL"',
+        '',
+      ].join('\n'),
     );
+
+    const production = jobs.production?.steps ?? [];
+    const recorded = production.findIndex((step) => step.id === 'contract');
     // The production job reads it before anything else, so a redeploy of a ref without the file must get past this step.
-    expect(deploy).toContain(
+    expect(production[recorded - 1]?.name).toBe('Checkout');
+    expect(production[recorded]?.run).toBe(
       [
         `file=${path}`,
         'if [ -e "$file" ]; then',
@@ -128,13 +148,17 @@ describe('the committed web-audit vendoring contract', () => {
         '  test -n "$fingerprint"',
         '  echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"',
         'fi',
-      ].join('\n          '),
+        '',
+      ].join('\n'),
     );
     // biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, not a template
-    expect(deploy).toContain('contract_fingerprint: ${{ steps.contract.outputs.fingerprint }}');
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, not a template
-    expect(deploy).toContain('SMOKE_EXPECT_CONTRACT_FINGERPRINT: ${{ needs.production.outputs.contract_fingerprint }}');
-    expect(deploy).not.toContain('test -n "$SMOKE_EXPECT_CONTRACT_FINGERPRINT"');
+    expect(jobs.production?.outputs?.contract_fingerprint).toBe('${{ steps.contract.outputs.fingerprint }}');
+
+    expect(smokeStep('production-smoke')?.env?.SMOKE_EXPECT_CONTRACT_FINGERPRINT).toBe(
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, not a template
+      '${{ needs.production.outputs.contract_fingerprint }}',
+    );
+    expect(smokeStep('production-smoke')?.run).toBe('scripts/smoke-web-audit-version.sh https://anc.dev');
   });
 
   test('the contract root, build/ and test/ list exactly the pinned entries', () => {

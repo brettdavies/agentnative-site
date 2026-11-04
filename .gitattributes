@@ -33,3 +33,6 @@
 # The CLI vendoring contract: generated data and fixtures that tests and the CLI
 # compare byte for byte.
 src/data/web-audit/contract/** -text
+# Regenerated wholesale, so a pull request collapses them by default.
+src/data/web-audit/contract/build/** linguist-generated=true
+src/data/web-audit/contract/test/conformance/** linguist-generated=true
