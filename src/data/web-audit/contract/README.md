@@ -55,9 +55,9 @@ or the requests the engine sends regenerates the contract in the same PR.** `tes
 
 The CLI picks up a regenerated contract only when it moves its pin, and tests against the contract it holds until then.
 
-`.github/workflows/web-audit-cli-parity.yml` runs on each PR that changes this directory: it builds CLI `dev` against
-the PR's contract and reports, in a job summary and one PR comment, what the CLI's next bump will carry. The report is
-informational and in no ruleset.
+`.github/workflows/web-audit-cli-parity.yml` runs on each PR that changes this directory: it runs CLI `dev`'s web suites
+against the PR's contract without moving the pin and reports, in a job summary and one PR comment, what the CLI's next
+bump will carry. The report is informational and in no ruleset.
 
 ## Settings and request sets
 

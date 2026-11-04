@@ -1,17 +1,16 @@
 #!/usr/bin/env bun
 // Renders the informational CLI-parity report from what web-audit-cli-parity.yml
-// collected: the exit codes and logs of the CLI's sync and tests, its divergence
-// dump, ledger and handler vocabulary, and the contract's registry. Writes a job
-// summary and the body of the PR comment.
+// collected: the exit codes and logs of the CLI's sync and tests, and its divergence
+// dump, ledger and list of unported bindings. Writes a job summary and the body of
+// the PR comment.
 //
 // Exit 0 for any report or a stated "report unavailable", because a divergence is
 // expected whenever the engine changes and a contract can stop the CLI building.
 // Exit 1 only for a run the contract cannot explain, so a broken workflow stays red.
 
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { CONTRACT_BUILD_DIR } from '../../src/build/web-audit-contract-paths.mjs';
+import { CONTRACT_FINGERPRINT_PATH } from '../../src/build/web-audit-contract-paths.mjs';
 import { classify, type Outcome, type ParityInput, type Row } from './cli-parity-outcome';
 
 // A PR comment holds 65,536 characters and a step summary 1 MiB; a contract change
@@ -21,8 +20,6 @@ const SUMMARY_ROW_CAP = 2000;
 const DETAIL_CHAR_CAP = 2000;
 
 const plural = (count: number, one: string, many: string): string => `${count} ${count === 1 ? one : many}`;
-
-export type { ParityInput };
 
 export interface ParityReport {
   summary: string;
@@ -44,7 +41,10 @@ function verdict(outcome: Outcome & { kind: 'report' }, testExit: number | null)
   }
   if (count('ledgered') > 0) parts.push(`${plural(count('ledgered'), 'divergence', 'divergences')} already in the CLI ledger.`);
   if (count('closed') > 0) parts.push(`${plural(count('closed'), 'ledger entry', 'ledger entries')} now matching.`);
-  if (parts.length > 0) return parts.join(' ');
+  if (parts.length > 0) {
+    if (testExit !== 0 && outcome.failedTests.length === 0) parts.push(`The CLI tests ended with exit code ${testExit}.`);
+    return parts.join(' ');
+  }
   if (outcome.failedTests.length > 0) {
     return `No scorecard divergence, but ${plural(outcome.failedTests.length, 'CLI test fails', 'CLI tests fail')} at this contract.`;
   }
@@ -71,37 +71,33 @@ function table(rows: Row[], cap: number, overflow: string): string {
   return ['| Scenario | Element | Status |', '| --- | --- | --- |', ...shown].join('\n') + more;
 }
 
-function rustStrSlice(source: string, name: string): string[] | null {
-  const body = new RegExp(`const ${name}: &\\[&str\\] = &\\[([^\\]]*)\\]`).exec(source)?.[1];
-  return body === undefined ? null : [...body.matchAll(/"([^"]+)"/g)].map((match) => match[1] ?? '');
+type Bindings = Record<string, string[]>;
+
+function parseUnported(text: string): { handlers: Bindings; evals: Bindings } | null {
+  const isBindings = (value: unknown): value is Bindings =>
+    typeof value === 'object' && value !== null && Object.values(value).every(Array.isArray);
+  try {
+    const doc = JSON.parse(text) as { handlers?: unknown; evals?: unknown };
+    return isBindings(doc.handlers) && isBindings(doc.evals) ? { handlers: doc.handlers, evals: doc.evals } : null;
+  } catch {
+    return null;
+  }
 }
 
-function unportedLine(input: ParityInput): string {
-  const notChecked = 'Unported handler kinds and eval rules: not checked, the CLI vocabulary or the registry did not parse.';
-  if (input.vocab === null || input.registry === null) return notChecked;
-  const handlers = rustStrSlice(input.vocab, 'HANDLER_KINDS');
-  const evals = rustStrSlice(input.vocab, 'EVAL_RULES');
-  if (handlers === null || evals === null) return notChecked;
-  let checks: { handler?: string; eval?: string }[];
-  try {
-    checks = (JSON.parse(input.registry) as { checks: { handler?: string; eval?: string }[] }).checks;
-    if (!Array.isArray(checks)) return notChecked;
-  } catch {
-    return notChecked;
-  }
-  const missing = (names: (string | undefined)[], known: string[]): string[] =>
-    [...new Set(names.filter((name): name is string => name !== undefined && !known.includes(name)))].sort();
-  const parts = [
-    ...missing(checks.map((check) => check.handler), handlers).map((name) => `handler kind ${code(name)}`),
-    ...missing(checks.map((check) => check.eval), evals).map((name) => `eval rule ${code(name)}`),
-  ];
+function unportedLine(unported: string | null): string {
+  const list = unported === null ? null : parseUnported(unported);
+  if (list === null) return 'Unported handler kinds and eval rules: not checked, the CLI wrote no readable list.';
+  const named = (label: string, bindings: Bindings): string[] =>
+    Object.entries(bindings).map(([name, checks]) => `${label} ${code(name)} (${plural(checks.length, 'check', 'checks')})`);
+  const parts = [...named('handler kind', list.handlers), ...named('eval rule', list.evals)];
   return parts.length === 0
     ? 'Every handler kind and eval rule in this contract is ported.'
     : `Not yet ported by the CLI: ${parts.join(', ')}.`;
 }
 
 function render(input: ParityInput, outcome: Outcome, cap: number, overflow: string): string {
-  const context = `Contract at ${code(input.siteSha.slice(0, 12))}, CLI ${code(input.cliRef)} at ${code(input.cliSha.slice(0, 12))}. [Run](${input.runUrl})`;
+  const suites = outcome.kind === 'report' ? ` Ran ${plural(outcome.suiteCount, 'CLI test suite', 'CLI test suites')}.` : '';
+  const context = `Contract at ${code(input.siteSha.slice(0, 12))}, CLI ${code(input.cliRef)} at ${code(input.cliSha.slice(0, 12))}.${suites} [Run](${input.runUrl})`;
   const sections = ['## CLI parity'];
   if (outcome.kind === 'report') {
     sections.push(`**${verdict(outcome, input.testExit)}**`, context);
@@ -109,7 +105,7 @@ function render(input: ParityInput, outcome: Outcome, cap: number, overflow: str
     if (outcome.failedTests.length > 0) {
       sections.push(`Failing CLI tests:\n\n${outcome.failedTests.map((name) => `- ${code(name)}`).join('\n')}`);
     }
-    sections.push(unportedLine(input));
+    sections.push(unportedLine(input.unported));
     sections.push(
       'Informational: this check is not required and asks nothing of this PR. A divergence reaches the CLI through its next bump PR, where a port closes it.',
     );
@@ -118,7 +114,7 @@ function render(input: ParityInput, outcome: Outcome, cap: number, overflow: str
   sections.push(`**Report unavailable: ${outcome.reason}.**`, context);
   if (outcome.detail !== '') sections.push(fence(outcome.detail));
   if (outcome.kind === 'unavailable') {
-    sections.push(unportedLine(input));
+    sections.push(unportedLine(input.unported));
     sections.push('Informational: this check is not required. The result says nothing about parity at this contract.');
   } else {
     sections.push('This run failed because the report workflow itself needs a fix. The contract is not the cause.');
@@ -151,7 +147,8 @@ function main(argv: string[]): number {
         'test-log',
         'dump',
         'ledger',
-        'vocab',
+        'unported',
+        'vendored-fingerprint',
         'summary-out',
         'comment-out',
       ].map((name) => [name, { type: 'string' as const }]),
@@ -179,8 +176,9 @@ function main(argv: string[]): number {
     testLog: optionalFile(required('test-log')) ?? '',
     dump: optionalFile(required('dump')),
     ledger: optionalFile(required('ledger')),
-    vocab: optionalFile(required('vocab')),
-    registry: optionalFile(join(CONTRACT_BUILD_DIR, 'registry.json')),
+    unported: optionalFile(required('unported')),
+    siteFingerprint: optionalFile(CONTRACT_FINGERPRINT_PATH),
+    vendoredFingerprint: optionalFile(required('vendored-fingerprint')),
   });
   appendFileSync(required('summary-out'), `${report.summary}\n`);
   writeFileSync(required('comment-out'), `${report.comment}\n`);

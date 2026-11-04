@@ -8,7 +8,9 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
-import { type ParityInput, renderParityReport } from '../scripts/web-audit/cli-parity-summary';
+import type { ParityInput } from '../scripts/web-audit/cli-parity-outcome';
+import { renderParityReport } from '../scripts/web-audit/cli-parity-summary';
+import { CONTRACT_FINGERPRINT_PATH } from '../src/build/web-audit-contract-paths.mjs';
 import { REPO_ROOT, workflowText } from './helpers/workflows';
 
 const MARKER = '<!-- web-audit-cli-parity -->';
@@ -68,6 +70,44 @@ Caused by:
     web-audit registry: YAML parse error: error: line 1198 column 1: duplicate mapping key: checks
 `;
 
+const DUMP_WRITE_PANIC_LOG = `     Running tests/web_audit_divergences.rs (target/debug/deps/web_audit_divergences-06b78d95cce71c39)
+
+running 2 tests
+test dump_unported_bindings ... ok
+test dump_corpus_divergences ... FAILED
+
+failures:
+
+---- dump_corpus_divergences stdout ----
+
+thread 'dump_corpus_divergences' (3608) panicked at tests/web_audit_divergences.rs:33:29:
+write /nonexistent/dir/d.json: No such file or directory (os error 2)
+`;
+
+const CLI_COMPILE_FAILURE_LOG = `error: this file contains an unclosed delimiter
+  --> tests/web_audit_token.rs:90:13
+
+error: could not compile \`agentnative\` (test "web_audit_token") due to 1 previous error
+`;
+
+const DEPENDENCY_BUILD_FAILURE_LOGS = [
+  'error: failed to run custom build command for `aws-lc-sys v0.30.0`\n\nCaused by:\n  is `cmake` not installed?\n',
+  'error: could not compile `ring` (lib) due to 1 previous error\n',
+];
+
+const LIB_SUITE_LOG = `     Running unittests src/lib.rs (target/debug/deps/agentnative-3c302479454ea739)
+
+running 2 tests
+test web_audit::scorecard::keeps_order ... FAILED
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.66s
+
+     Running tests/build_registry.rs (target/debug/deps/build_registry-393847b08390b122)
+
+running 1 test
+test reads_the_contract ... ok
+`;
+
 const NO_TARGET_LOG = `error: no test target named \`web_audit_divergences\` in default-run packages
 
 help: a target with a similar name exists: \`web_audit_api\`
@@ -80,22 +120,7 @@ running 0 tests
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 `;
 
-const VOCAB = `pub const HANDLER_KINDS: &[&str] = &[
-    "http",
-    "mcp",
-];
-/// Eval rules the Rust engine ports.
-pub const EVAL_RULES: &[&str] = &[
-    "retained-document",
-];
-pub(super) const SITE_TYPES: &[&str] = &["content"];
-`;
-const REGISTRY = JSON.stringify({
-  checks: [
-    { id: 'a', handler: 'http', eval: 'retained-document' },
-    { id: 'b', handler: 'mcp' },
-  ],
-});
+const UNPORTED_NONE = JSON.stringify({ handlers: {}, evals: {} });
 
 const ledgerOf = (...entries: [string, string, string][]): string =>
   [
@@ -118,8 +143,9 @@ const input = (overrides: Partial<ParityInput> = {}): ParityInput => ({
   testLog: PASSING_LOG,
   dump: '[]',
   ledger: ledgerOf(),
-  vocab: VOCAB,
-  registry: REGISTRY,
+  unported: UNPORTED_NONE,
+  siteFingerprint: '686ddd155166\n',
+  vendoredFingerprint: '686ddd155166\n',
   ...overrides,
 });
 
@@ -184,9 +210,26 @@ describe('a run that produced a dump', () => {
     expect(unnamed.summary).toContain('**No scorecard divergence, but the CLI tests ended with exit code 101.**');
   });
 
+  test('a crash that names no failing test is stated beside the rows', () => {
+    const report = renderParityReport(
+      input({ testExit: 101, dump: '[["a","row:one"]]', ledger: ledgerOf(['a', 'row:one', '#504']) }),
+    );
+    expect(report.summary).toContain(
+      '**No new divergence. 1 divergence already in the CLI ledger. The CLI tests ended with exit code 101.**',
+    );
+  });
+
+  test('a failure in the unit tests names its suite, and the report counts the suites that ran', () => {
+    const report = renderParityReport(input({ testExit: 101, testLog: LIB_SUITE_LOG }));
+    expect(report.summary).toContain('- `src/lib::web_audit::scorecard::keeps_order`');
+    expect(report.summary).toContain('Ran 2 CLI test suites.');
+  });
+
   test('a large report stays within what a PR comment holds, and says what it left out', () => {
     const pairs = Array.from({ length: 5000 }, (_, i) => [`scenario-name-of-ordinary-length-${i}`, `row:check-${i}`]);
-    const report = renderParityReport(input({ testExit: 101, dump: JSON.stringify(pairs) }));
+    const report = renderParityReport(
+      input({ testExit: 101, testLog: CHANGED_GOLDEN_LOG, dump: JSON.stringify(pairs) }),
+    );
     expect(report.comment.length).toBeLessThan(65536);
     expect(report.comment).toContain('**The next CLI bump carries 5000 new divergences across 5000 scenarios.**');
     expect(report.comment).toContain('4800 more rows in the [job summary]');
@@ -201,28 +244,23 @@ describe('a run that produced a dump', () => {
 });
 
 describe('unported handler kinds and eval rules', () => {
-  test('a name the CLI vocabulary lacks is listed once, and a fully ported contract says so', () => {
+  test('each name the CLI cannot run is listed with its check count, and a fully ported contract says so', () => {
     expect(renderParityReport(input()).summary).toContain(
       'Every handler kind and eval rule in this contract is ported.',
     );
-    const registry = JSON.stringify({
-      checks: [
-        { id: 'a', handler: 'brand-new' },
-        { id: 'b', handler: 'brand-new', eval: 'new-rule' },
-      ],
-    });
-    expect(renderParityReport(input({ registry })).summary).toContain(
-      'Not yet ported by the CLI: handler kind `brand-new`, eval rule `new-rule`.',
+    const unported = JSON.stringify({ handlers: { 'brand-new': ['a', 'b'] }, evals: { 'new-rule': ['b'] } });
+    expect(renderParityReport(input({ unported })).summary).toContain(
+      'Not yet ported by the CLI: handler kind `brand-new` (2 checks), eval rule `new-rule` (1 check).',
     );
   });
 
-  test('an unreadable vocabulary or registry reads as not checked, never as ported', () => {
+  test('a missing or unreadable list reads as not checked, never as ported', () => {
     const notChecked = 'Unported handler kinds and eval rules: not checked';
-    expect(renderParityReport(input({ vocab: null })).summary).toContain(notChecked);
-    expect(renderParityReport(input({ vocab: 'const OTHER: u8 = 1;' })).summary).toContain(notChecked);
-    expect(renderParityReport(input({ registry: null })).summary).toContain(notChecked);
-    expect(renderParityReport(input({ registry: '{ broken' })).summary).toContain(notChecked);
-    expect(renderParityReport(input({ registry: '{}' })).summary).toContain(notChecked);
+    for (const unported of [null, '{ broken', '{}', '[]', '{"handlers":{},"evals":[1]}']) {
+      const report = renderParityReport(input({ unported }));
+      expect(report.summary).toContain(notChecked);
+      expect(report.summary).not.toContain('is ported');
+    }
   });
 });
 
@@ -232,6 +270,62 @@ describe('a run with no dump never reads as zero divergences', () => {
     expect(text).toContain(`**Report unavailable: ${reason}.**`);
     for (const claim of ZERO_CLAIMS) expect(text).not.toContain(claim);
   };
+
+  test('a sync failure the contract did not cause fails the run', () => {
+    for (const syncLog of [
+      'error: commit abc is not in /home/runner/work/agentnative-site/agentnative-site\n',
+      'error: pin must be a full 40-hex commit SHA (got abc)\n',
+      'scripts/sync-web-audit.sh: line 40: scripts/hardened-git.sh: No such file or directory\n',
+    ]) {
+      const report = renderParityReport(input({ syncExit: 1, syncLog, testExit: null, testLog: '', dump: null }));
+      expect(report.exitCode).toBe(1);
+      expectUnavailable(report.summary, 'the CLI sync ended with exit code 1');
+    }
+  });
+
+  test('a contract the sync refuses for a symlink stays green', () => {
+    const syncLog = 'error: commit abc vendors a symlink, which a sync refuses: build/link.json\n';
+    const report = renderParityReport(input({ syncExit: 1, syncLog, testExit: null, testLog: '', dump: null }));
+    expect(report.exitCode).toBe(0);
+    expectUnavailable(report.summary, 'the CLI could not read this contract');
+  });
+
+  test('a sync that ended cleanly but vendored another contract fails the run', () => {
+    for (const vendoredFingerprint of ['aaaaaaaaaaaa\n', null]) {
+      const report = renderParityReport(input({ vendoredFingerprint }));
+      expect(report.exitCode).toBe(1);
+      expectUnavailable(report.summary, 'the CLI did not vendor this contract');
+      expect(report.summary).toContain('contract fingerprint 686ddd155166');
+    }
+    const noSiteFile = renderParityReport(input({ siteFingerprint: null }));
+    expect(noSiteFile.exitCode).toBe(1);
+  });
+
+  test('a suite failing beside a missing dump fails the run: the suites loaded the contract', () => {
+    const report = renderParityReport(input({ testExit: 101, testLog: CHANGED_GOLDEN_LOG, dump: null }));
+    expect(report.exitCode).toBe(1);
+    expectUnavailable(report.summary, 'the CLI tests ended with exit code 101 and wrote no divergence dump');
+  });
+
+  test('a dump test that cannot write its file fails the run', () => {
+    const report = renderParityReport(input({ testExit: 101, testLog: DUMP_WRITE_PANIC_LOG, dump: null }));
+    expect(report.exitCode).toBe(1);
+    expect(report.summary).toContain('write /nonexistent/dir/d.json');
+  });
+
+  test('a dependency that does not build fails the run: it says nothing about the contract', () => {
+    for (const testLog of DEPENDENCY_BUILD_FAILURE_LOGS) {
+      const report = renderParityReport(input({ testExit: 101, testLog, dump: null }));
+      expect(report.exitCode).toBe(1);
+    }
+  });
+
+  test('a CLI that does not compile against the contract stays green', () => {
+    const report = renderParityReport(input({ testExit: 101, testLog: CLI_COMPILE_FAILURE_LOG, dump: null }));
+    expect(report.exitCode).toBe(0);
+    expectUnavailable(report.summary, 'the CLI did not build against this contract');
+    expect(report.summary).toContain('unclosed delimiter');
+  });
 
   test('a contract the sync cannot map stays green and names the missing path', () => {
     const syncLog =
@@ -319,7 +413,8 @@ describe('the script as the workflow runs it', () => {
       'test-log': write('tests.log', PASSING_LOG),
       dump: join(dir, 'absent-divergences.json'),
       ledger: write('ledger.toml', ledgerOf()),
-      vocab: write('vocab.rs', VOCAB),
+      unported: write('unported.json', UNPORTED_NONE),
+      'vendored-fingerprint': write('FINGERPRINT', readFileSync(CONTRACT_FINGERPRINT_PATH, 'utf8')),
       'summary-out': summaryOut,
       'comment-out': commentOut,
       ...args,
@@ -346,7 +441,10 @@ describe('the script as the workflow runs it', () => {
   });
 
   test('a test step the workflow skipped arrives as an empty exit code and reads as unavailable', () => {
-    const { code, comment } = run({ 'sync-exit': '1', 'test-exit': '' });
+    const dir = mkdtempSync(join(tmpdir(), 'cli-parity-sync-'));
+    const syncLog = join(dir, 'sync.log');
+    writeFileSync(syncLog, 'error: commit abc has no src/data/web-audit/contract/build/\n');
+    const { code, comment } = run({ 'sync-exit': '1', 'test-exit': '', 'sync-log': syncLog });
     expect(code).toBe(0);
     expect(comment).toContain('**Report unavailable: the CLI could not read this contract.**');
   });
@@ -363,6 +461,7 @@ describe('the workflow', () => {
   }
   interface Job {
     permissions?: Record<string, string>;
+    env?: Record<string, string>;
     steps: Step[];
     if?: string;
     needs?: string;
@@ -389,10 +488,18 @@ describe('the workflow', () => {
 
   test('the test step passes the flags without which a clean run is a false reading', () => {
     const run = doc.jobs.report.steps.find((step) => step.id === 'tests')?.run ?? '';
-    for (const flag of ['--features web', '--no-fail-fast', '--locked', '--test web_audit_divergences']) {
+    for (const flag of ['--features web', '--no-fail-fast', '--locked', '--lib', "--test 'web_audit_*'"]) {
       expect(run).toContain(flag);
     }
-    expect(doc.jobs.report.steps.find((step) => step.id === 'tests')?.env?.WEB_AUDIT_DIVERGENCE_OUT).toBeDefined();
+    expect(run).toContain('--test build_registry');
+    expect(run).not.toContain('sync_web_audit');
+    const env = doc.jobs.report.steps.find((step) => step.id === 'tests')?.env;
+    expect(env?.WEB_AUDIT_DIVERGENCE_OUT).toBeDefined();
+    expect(env?.WEB_AUDIT_UNPORTED_OUT).toBeDefined();
+  });
+
+  test('crate downloads stay on HTTP/1.1, as the CLI needs on hosted runners', () => {
+    expect(doc.jobs.report.env?.CARGO_HTTP_MULTIPLEXING).toBe('false');
   });
 
   test('the sync uses a per-run commit and never moves the CLI pin', () => {
@@ -403,8 +510,11 @@ describe('the workflow', () => {
   });
 
   test('a fork PR never reaches the comment step, and a cancelled run does not overwrite the comment', () => {
-    expect(doc.jobs.comment.if).toContain('github.event.pull_request.head.repo.full_name == github.repository');
-    expect(doc.jobs.comment.if).toContain('!cancelled()');
+    expect(doc.jobs.comment.if?.split(/\s+&&\s+/).map((part) => part.trim())).toEqual([
+      '!cancelled()',
+      "github.event_name == 'pull_request'",
+      'github.event.pull_request.head.repo.full_name == github.repository',
+    ]);
   });
 
   test('no step soft-fails', () => {

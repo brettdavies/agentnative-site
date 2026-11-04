@@ -53,6 +53,9 @@ jobs:
       CLI_REF: ${{ inputs.cli_ref || 'dev' }}
       # The PR head, not the merge ref: the CLI's pin names a commit on a branch.
       SITE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      # Crate downloads on hosted runners fail with curl error 16 over HTTP/2, which
+      # cargo does not retry, and a failed download would read as a broken workflow.
+      CARGO_HTTP_MULTIPLEXING: 'false'
 
     steps:
       - name: Check out the site at the PR head
@@ -104,8 +107,10 @@ jobs:
         with:
           workspaces: cli
 
-      # --features web is explicit because tests/web_audit_divergences.rs compiles
-      # to nothing without it, which passes and looks like a clean run.
+      # The suites the CLI's next bump runs, so a clean report means a clean bump.
+      # sync_web_audit is left out: it holds the vendored copies to the pin this run
+      # leaves alone. --features web is explicit because tests/web_audit_divergences.rs
+      # compiles to nothing without it, which passes and looks like a clean run.
       # --no-fail-fast because the dump's suite must run after another suite fails.
       - name: Replay the corpus through the CLI
         id: tests
@@ -113,9 +118,10 @@ jobs:
         working-directory: cli
         env:
           WEB_AUDIT_DIVERGENCE_OUT: ${{ runner.temp }}/divergences.json
+          WEB_AUDIT_UNPORTED_OUT: ${{ runner.temp }}/unported.json
         run: |
           cargo test --locked --features web --no-fail-fast \
-            --test web_audit_divergences --test web_audit_conformance --test web_audit_handlers \
+            --lib --test 'web_audit_*' --test build_registry \
             2>&1 | tee "$RUNNER_TEMP/tests.log"
           echo "exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
@@ -139,10 +145,13 @@ jobs:
             --test-log "$RUNNER_TEMP/tests.log" \
             --dump "$RUNNER_TEMP/divergences.json" \
             --ledger cli/tests/fixtures/web-audit-divergences.toml \
-            --vocab cli/build_support/web_registry/vocab.rs \
+            --unported "$RUNNER_TEMP/unported.json" \
+            --vendored-fingerprint cli/src/web_audit/vendored/contract/FINGERPRINT \
             --summary-out "$GITHUB_STEP_SUMMARY" \
             --comment-out "$RUNNER_TEMP/comment.md" || code=$?
           if [ -f "$RUNNER_TEMP/comment.md" ]; then
+            # The API cannot read a job summary, so the log carries the report too.
+            cat "$RUNNER_TEMP/comment.md"
             delimiter="comment-$(openssl rand -hex 16)"
             {
               echo "comment<<$delimiter"
