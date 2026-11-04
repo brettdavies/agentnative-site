@@ -308,21 +308,27 @@ gate_container() {
 # Gate: pages ----------------------------------------------------------------
 
 # One page, fetched and checked for its marker. Accept: text/html is explicit
-# because curl's default Accept negotiates text/markdown on extensionless URLs. A
-# failed fetch fails the row even when the marker arrived first, because a
-# truncated page has not rendered. The body reaches grep through a here-string
-# because under `set -o pipefail` a pipe reports the writer's SIGPIPE when grep -q
-# exits on an early marker, which fails the row on HTML that is fine.
+# because curl's default Accept negotiates text/markdown on extensionless URLs. The
+# body goes to a file because curl truncates a file between retries; on stdout a
+# failed attempt's bytes stay ahead of the next attempt's, so the marker from a
+# dropped transfer would pass the row. --retry-max-time bounds a long Retry-After,
+# which curl otherwise sleeps through. grep reads the file because under
+# `set -o pipefail` a pipe reports the writer's SIGPIPE when grep -q exits on an
+# early marker, which fails the row on HTML that is fine.
 page_row() {
-  local path=$1 marker=$2 label=$3 body status=0
-  body=$(ecurl -fSsL -m 10 --retry 2 --retry-all-errors -H 'Accept: text/html' "${ENV_URL}${path}" 2>/dev/null) || status=$?
+  local path=$1 marker=$2 label=$3 page out status=0
+  page=$(mktemp)
+  out=$(ecurl -fSsL -m 10 --retry 2 --retry-all-errors --retry-max-time 30 \
+    -o "$page" -w '%{http_code} %{url_effective}' \
+    -H 'Accept: text/html' "${ENV_URL}${path}" 2>/dev/null) || status=$?
   if [[ "$status" -ne 0 ]]; then
-    gate_fail "$label" "curl exited $status fetching ${ENV_URL}${path}"
-  elif grep -q "$marker" <<<"$body"; then
+    gate_fail "$label" "curl exited $status (HTTP ${out%% *}) fetching ${ENV_URL}${path}"
+  elif grep -q "$marker" "$page"; then
     gate_pass "$label renders (has $marker)"
   else
-    gate_fail "$label" "did not return HTML with $marker"
+    gate_fail "$label" "did not return HTML with $marker (ended at ${out#* })"
   fi
+  rm -f "$page"
 }
 
 gate_pages() {
@@ -330,14 +336,14 @@ gate_pages() {
   require_bin curl
   require_bin jq
 
-  # Without the token, staging answers 200 with the Access login page, whose
-  # <title> would pass the home row.
+  # Without the token, staging answers 200 with the Access login page, so every
+  # row would report a missing marker and not the missing token.
   if [[ "$ENV_AUTH_NEEDED" -eq 1 && -z "$CF_CONFIG" ]]; then
     gate_fail "$ENV_URL pages" "no CF Access service token loaded; these fetches would read the login page"
     return
   fi
 
-  page_row / '<title>' "${ENV_URL}/ home page"
+  page_row / lrow "${ENV_URL}/ home page"
   page_row /scorecards lrow "${ENV_URL}/scorecards"
 
   local body tier scorecard_url spec_v
