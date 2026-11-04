@@ -206,9 +206,9 @@ describe('homepage markdown board inject', () => {
 
   test('a site title cannot forge a link, a column, or a line in the twin', async () => {
     const entry = frontpageEntry('top.dev', 80);
-    entry.name = 'Acme] | Co\n# Forged heading';
+    entry.name = 'Acme] | Co\n# Forged heading <b>';
     const md = await fetchHomepage(makeEnv([entry]), { url: 'https://anc.dev/index.md' });
-    expect(md).toContain('[top.dev (Acme\\] \\| Co # Forged heading)](/score/top.dev)');
+    expect(md).toContain('[top.dev (Acme\\] \\| Co # Forged heading \\<b>)](/score/top.dev)');
     expect(md.split('\n')).not.toContain('# Forged heading');
   });
 

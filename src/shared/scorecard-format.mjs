@@ -17,7 +17,7 @@
 // code both depend on `shared/`, never the other way around.
 
 import { escHtml } from './esc-html.ts';
-import { mdFlatten } from './md-inline.ts';
+import { mdCodeSpan, mdFlatten, mdInlineText, mdTableCell } from './md-inline.ts';
 import { renderBigScore, renderResultSpine, resultFrontMatter, shortDate } from './result-spine.ts';
 import { CANONICAL_SITE_URL } from './site-url';
 
@@ -76,7 +76,7 @@ const STATUS_LABELS = {
  * @returns {string}
  */
 export function statusLabel(status) {
-  return STATUS_LABELS[status] ?? String(status).toUpperCase();
+  return Object.hasOwn(STATUS_LABELS, status) ? STATUS_LABELS[status] : String(status).toUpperCase();
 }
 
 /**
@@ -109,10 +109,6 @@ export function extractTopIssues(scorecard, limit = 3) {
   return issues.slice(0, limit);
 }
 
-function mdTableCell(text) {
-  return mdFlatten(text).replace(/[\\|]/g, (ch) => `\\${ch}`);
-}
-
 /**
  * Format a single audit as a markdown table row. Both the static
  * `/score/<tool>.md` (full audit table) and the live `/live-score/<binary>.md`
@@ -120,10 +116,10 @@ function mdTableCell(text) {
  * source of truth.
  *
  * Principle group codes (`P1..P7`) link to the principle page; bonus
- * groups (`CodeQuality`, `ProjectStructure`) stay as plain text. Evidence
- * and label strings land on one line with `|` and `\` escaped, because
- * evidence is an audited tool's own output: a pipe would fracture the table
- * and a newline would leave it, where the next line can pass for a heading.
+ * groups (`CodeQuality`, `ProjectStructure`) stay as plain text. Every field
+ * goes through `mdTableCell`, because a record is an audited tool's own output:
+ * a pipe would fracture the table, a newline would leave it, where the next
+ * line can pass for a heading, and `](` would form a link the site never wrote.
  *
  * Links use a site-relative path by default. Callers serving markdown
  * twins that may be fetched cross-origin can pass an absolute baseUrl
@@ -138,10 +134,10 @@ function mdTableCell(text) {
 export function formatAuditRowMarkdown(check, opts = {}) {
   const baseUrl = (opts.baseUrl ?? '').replace(/\/$/, '');
   const pNum = groupToPrincipleNum(check.group);
-  const groupLabel = pNum ? `[${check.group}](${baseUrl}/p${pNum})` : check.group;
+  const groupLabel = pNum ? `[${check.group}](${baseUrl}/p${pNum})` : mdTableCell(check.group);
   const evidence = mdTableCell(check.evidence ?? '');
   const label = mdTableCell(check.label);
-  return `| ${statusLabel(check.status)} | ${label} | ${groupLabel} | ${evidence} |`;
+  return `| ${mdTableCell(statusLabel(check.status))} | ${label} | ${groupLabel} | ${evidence} |`;
 }
 
 /**
@@ -227,7 +223,7 @@ export function renderAuditRows(checks) {
   return checks
     .map((check) => {
       const category = suppressionCategory(check);
-      const rowClass = category ? 'audit audit--skip audit--suppressed' : `audit audit--${check.status}`;
+      const rowClass = category ? 'audit audit--skip audit--suppressed' : `audit audit--${escHtml(check.status)}`;
       const label = category ? `N/A by ${escHtml(category)}` : escHtml(statusLabel(check.status));
       const evidence = check.evidence ? escHtml(check.evidence) : '';
       return `        <tr class="${rowClass}">
@@ -420,7 +416,7 @@ function renderEligibleEmbed(tool, scorecard, opts) {
     : '';
   return `<section class="scorecard-embed scorecard-embed--eligible">
   <h2>Embed the badge</h2>
-  <p>This score (${pct}%) clears the <a href="/badge">badge floor</a> (${BADGE_ELIGIBILITY_FLOOR_PCT}%). Copy this into your README:</p>
+  <p>This score (${escHtml(pct)}%) clears the <a href="/badge">badge floor</a> (${BADGE_ELIGIBILITY_FLOOR_PCT}%). Copy this into your README:</p>
   <pre tabindex="0"><code>${escHtml(embedMd)}</code></pre>${preview}
 </section>
 `;
@@ -433,7 +429,7 @@ function renderBelowFloorHint(pct, hasIssues) {
     : ' See the full audit results below for the gaps.';
   return `<section class="scorecard-embed scorecard-embed--below">
   <h2>Embed the badge</h2>
-  <p>The <a href="/badge">badge floor</a> is ${BADGE_ELIGIBILITY_FLOOR_PCT}%; this scorecard is at ${pct}% (${gap} point${gap === 1 ? '' : 's'} below). Once the score clears the floor, the embed snippet will appear here.${issuesPointer}</p>
+  <p>The <a href="/badge">badge floor</a> is ${BADGE_ELIGIBILITY_FLOOR_PCT}%; this scorecard is at ${escHtml(pct)}% (${gap} point${gap === 1 ? '' : 's'} below). Once the score clears the floor, the embed snippet will appear here.${issuesPointer}</p>
 </section>
 `;
 }
@@ -505,11 +501,11 @@ export function buildScorecardBody(tool, scorecard, opts = {}) {
   const cov = scorecard.coverage_summary;
   if (cov?.must)
     chips.push(
-      `<span class="chip ${cov.must.verified === cov.must.total ? 'chip--ok' : 'chip--warn'}">MUST ${cov.must.verified} / ${cov.must.total}</span>`,
+      `<span class="chip ${cov.must.verified === cov.must.total ? 'chip--ok' : 'chip--warn'}">MUST ${escHtml(cov.must.verified)} / ${escHtml(cov.must.total)}</span>`,
     );
   if (cov?.should)
     chips.push(
-      `<span class="chip ${cov.should.verified === cov.should.total ? 'chip--ok' : 'chip--warn'}">SHOULD ${cov.should.verified} / ${cov.should.total}</span>`,
+      `<span class="chip ${cov.should.verified === cov.should.total ? 'chip--ok' : 'chip--warn'}">SHOULD ${escHtml(cov.should.verified)} / ${escHtml(cov.should.total)}</span>`,
     );
   const failCount = results.filter((r) => r.status === 'fail').length;
   const warnCount = results.filter((r) => r.status === 'warn').length;
@@ -682,14 +678,15 @@ export function buildScorecardMarkdown(tool, scorecard, opts = {}) {
     );
   }
   if (opts.header) lines.push(opts.header);
-  else lines.push(`# ${mdFlatten(tool.name)}`);
+  else lines.push(`# ${mdInlineText(tool.name)}`);
   lines.push('');
   if (tool.description) {
     lines.push(tool.description);
     lines.push('');
   }
 
-  const pct = scorecard.badge.score_pct;
+  const scorePct = scorecard.badge.score_pct;
+  const pct = mdInlineText(scorePct);
   lines.push(`**Score:** ${pct}% pass rate`);
   lines.push(`**Principles:** ${principleScore.met}/${principleScore.total} met`);
   lines.push('');
@@ -704,11 +701,11 @@ export function buildScorecardMarkdown(tool, scorecard, opts = {}) {
       );
       lines.push('');
       lines.push('```markdown');
-      lines.push(scorecard.badge.embed_markdown);
+      lines.push(mdFlatten(scorecard.badge.embed_markdown ?? ''));
       lines.push('```');
       lines.push('');
     } else {
-      const gap = BADGE_ELIGIBILITY_FLOOR_PCT - pct;
+      const gap = BADGE_ELIGIBILITY_FLOOR_PCT - scorePct;
       lines.push('## Embed the badge');
       lines.push('');
       lines.push(
@@ -730,17 +727,17 @@ export function buildScorecardMarkdown(tool, scorecard, opts = {}) {
   }
   if (tool.language) lines.push(`**Language:** ${tool.language}`);
   // A tool reports its own version, so this line is the tool's text.
-  if (!opts.hideVersionRow) lines.push(`**Version scored:** ${version ? mdFlatten(version) : '—'}`);
+  if (!opts.hideVersionRow) lines.push(`**Version scored:** ${version ? mdInlineText(version) : '—'}`);
   const auditDateMd = formatStartedAt(meta.run?.started_at);
   if (auditDateMd) lines.push(`**Audit date:** ${auditDateMd}`);
   const durationMd = formatDuration(meta.run?.duration_ms);
   if (durationMd) lines.push(`**Duration:** ${durationMd}`);
   if (meta.run?.platform?.os && meta.run?.platform?.arch) {
-    lines.push(`**Platform:** \`${meta.run.platform.os}/${meta.run.platform.arch}\``);
+    lines.push(`**Platform:** ${mdCodeSpan(`${meta.run.platform.os}/${meta.run.platform.arch}`)}`);
   }
-  if (meta.target?.kind) lines.push(`**Mode:** ${meta.target.kind}`);
+  if (meta.target?.kind) lines.push(`**Mode:** ${mdInlineText(meta.target.kind)}`);
   const ancBuildMd = getAncBuildVersion(meta.anc);
-  if (ancBuildMd) lines.push(`**Anc build:** ${ancBuildMd}`);
+  if (ancBuildMd) lines.push(`**Anc build:** ${mdInlineText(ancBuildMd)}`);
   if (tool.install) lines.push(`**Install:** \`${tool.install}\``);
 
   // Reproduce-locally block. Suppressed for web targets (no `anc audit`
@@ -757,7 +754,7 @@ export function buildScorecardMarkdown(tool, scorecard, opts = {}) {
     lines.push('## Reproduce locally');
     lines.push('');
     lines.push('```bash');
-    lines.push(reproMd);
+    lines.push(mdFlatten(reproMd));
     lines.push('```');
     lines.push('');
   }

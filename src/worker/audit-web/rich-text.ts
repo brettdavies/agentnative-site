@@ -4,7 +4,7 @@
 // handles the target's strings in one place.
 
 import { escHtml } from '../../shared/esc-html';
-import { mdFlatten } from '../../shared/md-inline';
+import { mdCodeSpan, mdFlatten } from '../../shared/md-inline';
 
 type RichPart = string | { code: string } | { text: string; href: string };
 export type Rich = readonly RichPart[];
@@ -27,20 +27,11 @@ export function richHtml(rich: Rich, opts: { wbr?: boolean } = {}): string {
     .join('');
 }
 
-/** A code span no backtick inside it can close early. */
-function mdCode(text: string): string {
-  const flat = mdFlatten(text);
-  if (!flat.includes('`')) return `\`${flat}\``;
-  const longest = Math.max(...[...flat.matchAll(/`+/g)].map((m) => m[0].length));
-  const fence = '`'.repeat(longest + 1);
-  return `${fence} ${flat} ${fence}`;
-}
-
 export function richMarkdown(rich: Rich): string {
   return rich
     .map((part) => {
       if (typeof part === 'string') return mdFlatten(part).replace(/[`<]/g, '\\$&');
-      if ('code' in part) return mdCode(part.code);
+      if ('code' in part) return mdCodeSpan(part.code);
       return mdFlatten(part.text);
     })
     .join('');

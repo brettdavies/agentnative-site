@@ -241,6 +241,12 @@ describe('the audit handlers', () => {
     expect(substituteEndpoint('{mcp_endpoint}', endpoint)).toBe(endpoint);
     expect(substituteHost('_dns.{host}', 'a$&b')).toBe('_dns.a$&b');
   });
+
+  test('an endpoint spelling the other token is not scanned again', () => {
+    const endpoint = 'https://mcp.example/{mcp_origin}';
+    expect(substituteEndpoint('{mcp_endpoint}', endpoint)).toBe(endpoint);
+    expect(substituteEndpoint('{mcp_origin}/x', "https://a$'b.example/y")).toBe("https://a$'b.example/x");
+  });
 });
 
 describe('source guards', () => {

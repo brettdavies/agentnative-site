@@ -100,12 +100,12 @@ export function buildBoardViewNav(
  * Escape the characters that carry structure inside a markdown table cell. A
  * row's label is an audited site's own title, so an unescaped `]` closes the
  * link text early and forges a link, a bare `|` shifts every column after it,
- * and a newline ends the row. Parens are left alone: only `]` ends link text,
- * and escaping them would litter every legitimate `(Name)` in a table an agent
- * reads.
+ * a `<` opens a tag, and a newline ends the row. Parens are left alone: only
+ * `]` ends link text, and escaping them would litter every legitimate `(Name)`
+ * in a table an agent reads.
  */
 function escMdCell(value: string): string {
-  return mdFlatten(value).replace(/[\\|[\]]/g, (ch) => `\\${ch}`);
+  return mdFlatten(value).replace(/[\\|[\]<]/g, (ch) => `\\${ch}`);
 }
 
 /**

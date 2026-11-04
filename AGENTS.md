@@ -428,13 +428,15 @@ engine against a public URL) and for operating the web-board rescore (weekly cro
   never ship to `main`, so a PR buys nothing. Code goes through a branch and a PR. See [`RELEASES.md`](./RELEASES.md)
   for the full workflow.
 - **Commits:** Conventional Commits. Short, specific messages.
-- **Request text is escaped for the context it lands in.** A target comes from the URL, so treat it as hostile in every
-  representation. JSON in a `<script>` element goes through `jsonForScript` (`src/shared/json-script.ts`), because
-  `JSON.stringify` leaves `<` raw and the HTML tokenizer ends the element at `</script`, whatever the JSON says. A
-  placeholder is filled with a function replacement in one pass, because a string replacement expands `$&` and its
-  siblings and a later pass fills any token a value spells out. In a markdown twin a target rides in a code span
-  (`richMarkdown([{ code }])`) and a URL through `mdLinkDestination`, flattened by `mdFlatten` so it cannot start a
-  line. `tests/shell-request-text.test.ts` holds the source guards.
+- **Request and record text is escaped for the context it lands in.** A target comes from the URL and a stored scorecard
+  comes from the audited software, so treat both as hostile in every representation, including a field the renderer
+  expects to be a number or a known status. JSON in a `<script>` element goes through `jsonForScript`
+  (`src/shared/json-script.ts`), because `JSON.stringify` leaves `<` raw and the HTML tokenizer ends the element at
+  `</script`, whatever the JSON says. A placeholder is filled with a function replacement in one pass, because a string
+  replacement expands `$&` and its siblings and a later pass fills any token a value spells out. In a markdown twin,
+  text goes through `src/shared/md-inline.ts`: a target rides in a code span (`mdCodeSpan`), other text through
+  `mdInlineText` or `mdTableCell`, a URL through `mdLinkDestination`, and a fence's contents through `mdFlatten`, so it
+  cannot start a line or form a link. `tests/shell-request-text.test.ts` holds the source guards.
 - **Worker logs go through the emitter.** Every structured record the Worker writes passes through
   `src/worker/telemetry/log.ts`: a call site names its `scope` (a closed union; adding a scope means adding it there)
   and its fields, and nothing else. The emitter merges the request-scoped ambient fields, caps client-supplied names,
