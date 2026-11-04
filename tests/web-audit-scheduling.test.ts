@@ -444,6 +444,31 @@ describe('which work a free slot goes to', () => {
     expect(rows.get('scoped')?.status).toBe('n_a');
   });
 
+  test('a source outside the declared site type reads not applicable even when its handler throws', async () => {
+    const fetchImpl = stubFetch(
+      async (url) => new Response('ok', { status: pathOf(url) === '/' ? 200 : 404, headers: HTML }),
+    );
+    const events = await collect(
+      runWebAudit({
+        url: BASE,
+        registry: registryOf([
+          makeCheck({
+            id: 'openapi',
+            antecedent: 'api-surface',
+            site_types: ['api'],
+            handler: 'not-a-handler' as WebCheck['handler'],
+            with: { path: '/openapi.json', expect: { status: [200] } },
+          }),
+        ]),
+        siteType: 'content',
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
+    );
+    const row = events.flatMap((e) => (e.type === 'result' ? [e.result] : []))[0];
+    expect(row).toMatchObject({ status: 'n_a', evidence: 'not applicable to the declared site type' });
+  });
+
   test('a source the deadline got to first keeps its skip row', async () => {
     let clock = 1_000_000;
     const fetchImpl = stubFetch(async (url) => {

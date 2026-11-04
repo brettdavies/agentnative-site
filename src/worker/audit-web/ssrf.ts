@@ -58,7 +58,7 @@ export type GuardedFetchOptions = {
   timeoutMs?: number;
   /** Shortens that deadline while the request is in flight; it never lengthens it. */
   cut?: RequestCut;
-  /** Holds every redirect hop until this settles; the first request goes out regardless. */
+  /** Holds every redirect hop until this settles; the first request goes out regardless, and the wait spends none of the deadline. */
   laterHopsAfter?: Promise<unknown>;
   /**
    * Cap on response body bytes. `0` skips the body (status/headers only).
@@ -319,20 +319,22 @@ export async function guardedFetch(
 ): Promise<ProbeResponse> {
   const cut = opts.cut;
   const uncutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const timeoutMs = cut?.signal.aborted ? Math.min(uncutMs, cut.toMs) : uncutMs;
+  const budgetMs = (): number => (cut?.signal.aborted ? Math.min(uncutMs, cut.toMs) : uncutMs);
   const maxRedirects = opts.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
   const fetchImpl = opts.fetchImpl ?? fetch;
   const started = Date.now();
 
   const controller = new AbortController();
-  let timer = setTimeout(() => controller.abort(), timeoutMs);
-  const applyCut = (): void => {
-    if (cut === undefined) return;
+  let budgetFrom = started;
+  let held = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const armDeadline = (): void => {
+    if (held) return;
     clearTimeout(timer);
-    const cutAt = started + Math.min(timeoutMs, cut.toMs);
-    timer = setTimeout(() => controller.abort(), Math.max(0, cutAt - Date.now()));
+    timer = setTimeout(() => controller.abort(), Math.max(0, budgetFrom + budgetMs() - Date.now()));
   };
-  cut?.signal.addEventListener('abort', applyCut);
+  armDeadline();
+  cut?.signal.addEventListener('abort', armDeadline);
   const auditEnded = opts.memo?.ended.signal;
   const endWithAudit = (): void => controller.abort();
 
@@ -359,7 +361,13 @@ export async function guardedFetch(
 
     for (let hop = 0; hop <= maxRedirects; hop++) {
       if (hop > 0 && opts.laterHopsAfter !== undefined) {
+        const heldFrom = Date.now();
+        held = true;
+        clearTimeout(timer);
         await opts.laterHopsAfter;
+        held = false;
+        budgetFrom += Date.now() - heldFrom;
+        armDeadline();
         if (auditEnded?.aborted) return fail('audit ended');
       }
       const request = {
@@ -372,7 +380,7 @@ export async function guardedFetch(
         // A first hop's budget runs from the same instant as the deadline,
         // so callers with the same timeout compare equal.
         startedAt: hop === 0 ? started : Date.now(),
-        deadlineAt: started + timeoutMs,
+        deadlineAt: budgetFrom + budgetMs(),
         signal: controller.signal,
         bodyCap: opts.maxBodyBytes,
         keepsRedirect: opts.followRedirects === false || opts.crossOriginRedirects === 'return',
@@ -454,7 +462,7 @@ export async function guardedFetch(
     return fail(`redirect limit exceeded (${maxRedirects} hops)`);
   } finally {
     clearTimeout(timer);
-    cut?.signal.removeEventListener('abort', applyCut);
+    cut?.signal.removeEventListener('abort', armDeadline);
     auditEnded?.removeEventListener('abort', endWithAudit);
   }
 }

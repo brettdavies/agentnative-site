@@ -156,21 +156,40 @@ export type ScenarioRun = {
 
 // A name no engine registers, which is what makes a check's handler throw.
 const FAILING_HANDLER = 'corpus-failing-handler';
+const FAILING_HANDLER_EVIDENCE = `handler error: no handler registered for "${FAILING_HANDLER}"`;
 
 /** How long to hold an answer back, given the request's URL and its place in the order sent. */
 export type AnswerDelay = (url: string, sentIndex: number) => number;
 
-/**
- * Runs a scenario at `concurrency`, or at the engine's default when absent.
- * `answerDelayMs` reorders the answers every phase of the audit sees, which the
- * stub's zero latency never does on its own.
- */
+/** What a run varies from the engine's defaults, none of which may move its scorecard or request set. */
+export type ScenarioSchedule = {
+  concurrency?: number;
+  /** Reorders the answers every phase of the audit sees, which the stub's zero latency never does on its own. */
+  answerDelayMs?: AnswerDelay;
+  /** With an answer delay, a timeout an answer can actually run into, as the frozen clock's deadlines cannot. */
+  perCheckTimeoutMs?: number;
+};
+
+/** `ms`, or an abort as a real fetch reports one if the request's own timeout comes first. */
+function heldAnswer(ms: number, signal: AbortSignal | null | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const answered = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(answered);
+        reject(new DOMException('aborted', 'AbortError'));
+      },
+      { once: true },
+    );
+  });
+}
+
 export async function runScenario(
   name: string,
   scenario: Scenario,
   registry: WebAuditRegistry,
-  concurrency?: number,
-  answerDelayMs?: AnswerDelay,
+  schedule: ScenarioSchedule = {},
 ): Promise<ScenarioRun> {
   const sent: HopRequest[] = [];
   const log: StubLog = { unmatched: [], sent };
@@ -188,9 +207,9 @@ export async function runScenario(
     // unobserved through the wait, so it needs a handler before it is returned.
     const answer = stub(input, init);
     answer.catch(() => {});
-    const delay = answerDelayMs?.(String(input), sentCount) ?? 0;
+    const delay = schedule.answerDelayMs?.(String(input), sentCount) ?? 0;
     sentCount += 1;
-    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+    if (delay > 0) await heldAnswer(delay, init?.signal);
     return answer;
   }) as typeof fetch;
   const audit = runWebAudit({
@@ -198,7 +217,8 @@ export async function runScenario(
     registry: audited,
     siteType: scenario.site_type,
     specVersion: scenario.spec_version,
-    concurrency,
+    concurrency: schedule.concurrency,
+    perCheckTimeoutMs: schedule.perCheckTimeoutMs,
     followDeclarations: scenario.follow_declarations ?? true,
     domainBudget: ALWAYS_ADMIT_BUDGET,
     fetchOptions: { fetchImpl },
@@ -565,18 +585,7 @@ reads (the \`well_known\` cards, the AI catalog, the API catalog) go out togethe
 they are in the set of every https target, a run that ends on the root's answer included. Every other request, a redirect hop of one of
 those reads included, waits for the root's answer.
 
-The set is unordered, so some rules it cannot show, and an engine under comparison keeps them anyway:
-
-- Every request carrying the session goes out after the \`notifications/initialized\` request has settled.
-- A root that fails at the network level cuts the first document reads still in flight to the degraded 2 s budget,
-  measured from their start. The discovery budget counts from when the root settled.
-- Six requests are in flight at most, not counting a check's own second request. A free slot goes to the MCP steps,
-  then the source checks, then the rows in registry order, then a fan-out's extra probes, and one row's fan-out always
-  leaves a slot free. This decides which rows go unprobed when the per-audit deadline passes.
-- A link in \`llms-txt-links\` not answered by the check's deadline reads as budget-exhausted and marks the run
-  incomplete, whether or not it was the last link.
-- A source check that measured nothing, because its handler threw or the deadline came first, keeps its own row. The
-  checks gated on it read as they do on any failed antecedent.
+Each entry:
 
 - \`method\`: uppercase.
 - \`url\`: as the URL parser writes it.
@@ -586,8 +595,24 @@ The set is unordered, so some rules it cannot show, and an engine under comparis
 Entries are sorted by the request memo's identity key, \`requestIdentityKey\` in
 \`src/worker/audit-web/request-hop.ts\`: the JSON array \`[method, url, [[name, value], ...], body]\`, compared by UTF-16
 code unit. Generation fails when a scenario sends one request twice, and when its scorecard or request set differs
-from the default run at concurrency 1 or with its answers arriving in another order (later requests answering first,
-or the source documents answering last).
+from the default run at concurrency 1 or with its answers arriving in another order: later requests answering first,
+the source documents answering last, or the root answering just inside a 1200 ms per-check timeout with every other
+answer at 60 ms.
+
+The set is unordered, so some rules it cannot show, and an engine under comparison keeps them anyway:
+
+- Every request carrying the session goes out after the \`notifications/initialized\` request has settled.
+- A root that fails at the network level cuts the first document reads still in flight to the degraded 2 s budget,
+  measured from their start. A redirect hop held for the root spends none of its read's budget while it waits. The
+  discovery budget counts from when the root settled.
+- Six checks are in flight at most. A free slot goes to the MCP steps,
+  then the source checks, then the rows in registry order, then a fan-out's extra probes, and one row's fan-out always
+  leaves a slot free. Rank orders only what is waiting, so it favours the earlier ranks under deadline pressure
+  without promising which rows go unprobed.
+- A link in \`llms-txt-links\` not answered by the check's deadline reads as budget-exhausted and marks the run
+  incomplete, whether or not it was the last link.
+- A source check that measured nothing, because its handler threw or the deadline came first, keeps its own row, unless
+  it is outside the declared site type. The checks gated on it read as they do on any failed antecedent.
 
 ## scorecard.json
 
@@ -652,14 +677,22 @@ ${rows.join('\n')}
 // POSTs, a follow fan-out, a full set of slots.
 const REVERSAL_SPAN = 8;
 const SOURCE_ANSWER_DELAY_MS = 20;
+// The root's answer lands just inside its timeout, so anything still charging
+// that wait to another request runs out. Every other answer is short enough that
+// the longest chain of requests in the corpus fits the timeout on its own.
+const SLOW_ROOT_TIMEOUT_MS = 1200;
+const SLOW_ROOT_ANSWER_MS = 1150;
+const AFTER_SLOW_ROOT_ANSWER_MS = 60;
 
 /**
  * Answer orders the zero-latency stub never shows, each of which a scenario must
  * hold under. Reversing bursts reaches every concurrent phase: discovery, the
  * follow slice and the checks. Holding the source documents to last reaches the
- * checks that would pass by reading a source before it settled.
+ * checks that would pass by reading a source before it settled. A slow root under
+ * a real timeout reaches what reordering alone cannot: a budget that time spent
+ * waiting on the root runs out.
  */
-export function answerOrders(registry: WebAuditRegistry): Array<{ schedule: string; delayMs: AnswerDelay }> {
+export function answerOrders(registry: WebAuditRegistry): Array<ScenarioSchedule & { label: string }> {
   const sourcePaths = new Set(
     registry.checks
       .filter((check) => SOURCE_CHECKS.has(check.id))
@@ -670,14 +703,33 @@ export function answerOrders(registry: WebAuditRegistry): Array<{ schedule: stri
   );
   return [
     {
-      schedule: 'with later requests answering first',
-      delayMs: (_url, sentIndex) => REVERSAL_SPAN - (sentIndex % REVERSAL_SPAN),
+      label: 'with later requests answering first',
+      answerDelayMs: (_url, sentIndex) => REVERSAL_SPAN - (sentIndex % REVERSAL_SPAN),
     },
     {
-      schedule: 'with the source documents answering last',
-      delayMs: (url) => (sourcePaths.has(new URL(url).pathname) ? SOURCE_ANSWER_DELAY_MS : 0),
+      label: 'with the source documents answering last',
+      answerDelayMs: (url) => (sourcePaths.has(new URL(url).pathname) ? SOURCE_ANSWER_DELAY_MS : 0),
+    },
+    {
+      label: 'with the root answering just inside its timeout',
+      perCheckTimeoutMs: SLOW_ROOT_TIMEOUT_MS,
+      // The root is the first request an audit sends.
+      answerDelayMs: (_url, sentIndex) => (sentIndex === 0 ? SLOW_ROOT_ANSWER_MS : AFTER_SLOW_ROOT_ANSWER_MS),
     },
   ];
+}
+
+/**
+ * Throws naming the scenario when a check it says fails never reached its handler:
+ * a gate that rules the check out first would leave the scenario pinning nothing.
+ */
+export function assertHandlersFailed(name: string, scenario: Pick<Scenario, 'failing_handlers'>, output: string): void {
+  const rows = (JSON.parse(output) as { results?: Array<{ id: string; evidence: string | null }> }).results ?? [];
+  for (const id of scenario.failing_handlers ?? []) {
+    if (rows.find((row) => row.id === id)?.evidence !== FAILING_HANDLER_EVIDENCE) {
+      throw new Error(`scenario ${name}: the handler of ${id} did not fail, so the scenario pins nothing`);
+    }
+  }
 }
 
 /** Every corpus file by path relative to the corpus directory. */
@@ -691,8 +743,9 @@ export async function generateCorpus(registry: WebAuditRegistry): Promise<Map<st
     const scenario = SCENARIOS[name];
     validateScenario(name, scenario, ids);
     const run = await runScenario(name, scenario, registry);
-    const serial = await runScenario(name, scenario, registry, 1);
+    const serial = await runScenario(name, scenario, registry, { concurrency: 1 });
     const requests = scheduleIndependentRequests(name, 'at concurrency 1', run, serial);
+    assertHandlersFailed(name, scenario, run.output);
     runs.set(name, run);
     files.set(`scenarios/${name}/scenario.json`, scenarioJson(scenario));
     files.set(`scenarios/${name}/scorecard.json`, run.output);
@@ -703,9 +756,9 @@ export async function generateCorpus(registry: WebAuditRegistry): Promise<Map<st
   // what one does.
   await Promise.all(
     names.flatMap((name) =>
-      answerOrders(registry).map(async ({ schedule, delayMs }) => {
-        const other = await runScenario(name, SCENARIOS[name], registry, undefined, delayMs);
-        scheduleIndependentRequests(name, schedule, runs.get(name) as ScenarioRun, other);
+      answerOrders(registry).map(async ({ label, ...schedule }) => {
+        const other = await runScenario(name, SCENARIOS[name], registry, schedule);
+        scheduleIndependentRequests(name, label, runs.get(name) as ScenarioRun, other);
       }),
     ),
   );

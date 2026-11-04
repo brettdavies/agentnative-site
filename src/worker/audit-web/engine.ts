@@ -621,12 +621,14 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
   // A source that measured nothing, because its handler threw or the deadline
   // came first, keeps its own row: the gate would read that silence as the
   // surface not being there, which can lift the score of a run that never looked.
+  // One outside the declared site type still reads not applicable, which reads no
+  // source.
   const finishRow = async (check: WebCheck, rank: number): Promise<EngineResult> => {
     await Promise.all([sourceProbes.get(check.id), ...rowPrerequisites(check).map(settled)]);
     const sourceRow = SOURCE_CHECKS.has(check.id)
       ? (sourceRows.get(check.id) ?? errorResult(check, 'missing source result'))
       : null;
-    if (sourceRow !== null && !sources.has(check.id)) return sourceRow;
+    if (sourceRow !== null && !sources.has(check.id) && siteTypeApplies(check.site_types, actx)) return sourceRow;
     const gated = gate(check);
     if (gated !== null) return finalizeOptional(check, gated);
     return finalizeOptional(check, sourceRow ?? (await slots.run(() => probeOne(check), rank)).result);

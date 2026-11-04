@@ -5,7 +5,12 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { answerOrders, loadRegistry, stubFetchFor } from '../scripts/web-audit/conformance-corpus';
+import {
+  answerOrders,
+  assertHandlersFailed,
+  loadRegistry,
+  stubFetchFor,
+} from '../scripts/web-audit/conformance-corpus';
 import { requestsJson, scheduleIndependentRequests, sortedRequests } from '../scripts/web-audit/conformance-requests';
 import { SCENARIOS } from '../scripts/web-audit/conformance-scenarios';
 import { SCENARIOS_DIR } from '../src/build/web-audit-contract-paths.mjs';
@@ -74,9 +79,9 @@ describe("each scenario's requests.json", () => {
 
   test('a scenario whose scorecard differs at concurrency 1 fails generation, naming the scenario', () => {
     const concurrent = { output: 'a', requests: [request('https://a.test/')] };
-    expect(() => scheduleIndependentRequests('moves', 'at concurrency 1', concurrent, { ...concurrent, output: 'b' })).toThrow(
-      'scenario moves: the scorecard at concurrency 1 differs',
-    );
+    expect(() =>
+      scheduleIndependentRequests('moves', 'at concurrency 1', concurrent, { ...concurrent, output: 'b' }),
+    ).toThrow('scenario moves: the scorecard at concurrency 1 differs');
   });
 
   test('a scenario whose request set differs at concurrency 1 fails generation, naming the request', () => {
@@ -90,24 +95,48 @@ describe("each scenario's requests.json", () => {
   test('a scenario that moves with its answers in another order fails generation, naming the order', () => {
     const concurrent = { output: 'a', requests: [request('https://a.test/')] };
     const other = { output: 'a', requests: [request('https://a.test/'), request('https://b.test/')] };
-    expect(() => scheduleIndependentRequests('moves', 'with later requests answering first', concurrent, other)).toThrow(
+    expect(() =>
+      scheduleIndependentRequests('moves', 'with later requests answering first', concurrent, other),
+    ).toThrow(
       /scenario moves: the request set with later requests answering first differs.*only with later requests answering first: .*b\.test/,
     );
   });
 
   test('the first answer order reverses any eight requests sent in a row from a multiple of eight', () => {
     const [reversed] = answerOrders(registry);
-    const burst = Array.from({ length: 8 }, (_, sentIndex) => reversed.delayMs('https://example.com/', sentIndex));
+    const burst = Array.from({ length: 8 }, (_, sentIndex) =>
+      reversed.answerDelayMs?.('https://example.com/', sentIndex),
+    ) as number[];
     expect(burst).toEqual([...burst].sort((a, b) => b - a));
     expect(new Set(burst).size).toBe(burst.length);
     expect(Math.min(...burst)).toBeGreaterThan(0);
   });
 
-  test('the second answer order holds back every source document and nothing else', () => {
+  test('the second answer order holds back the paths source checks read, the root path among them', () => {
     const [, sourcesLast] = answerOrders(registry);
-    expect(sourcesLast.delayMs('https://example.com/llms.txt', 0)).toBeGreaterThan(0);
-    expect(sourcesLast.delayMs('https://example.com/sitemap.xml', 0)).toBeGreaterThan(0);
-    expect(sourcesLast.delayMs('https://example.com/.well-known/security.txt', 0)).toBe(0);
+    expect(sourcesLast.answerDelayMs?.('https://example.com/llms.txt', 0)).toBeGreaterThan(0);
+    expect(sourcesLast.answerDelayMs?.('https://example.com/sitemap.xml', 0)).toBeGreaterThan(0);
+    expect(sourcesLast.answerDelayMs?.('https://example.com/', 0)).toBeGreaterThan(0);
+    expect(sourcesLast.answerDelayMs?.('https://example.com/.well-known/security.txt', 0)).toBe(0);
+  });
+
+  test('the third answer order lands the root just inside a timeout it can run into', () => {
+    const [, , slowRoot] = answerOrders(registry);
+    const root = slowRoot.answerDelayMs?.('https://example.com/', 0) as number;
+    expect(root).toBeLessThan(slowRoot.perCheckTimeoutMs as number);
+    expect(root + (slowRoot.answerDelayMs?.('https://example.com/a', 1) as number)).toBeGreaterThan(
+      slowRoot.perCheckTimeoutMs as number,
+    );
+  });
+
+  test('a scenario whose failing handler never ran fails generation, naming it', () => {
+    const evidence = 'handler error: no handler registered for "corpus-failing-handler"';
+    const rows = (row: object) => JSON.stringify({ results: [{ id: 'x', ...row }] });
+    expect(() => assertHandlersFailed('moves', { failing_handlers: ['x'] }, rows({ evidence: 'gated' }))).toThrow(
+      'scenario moves: the handler of x did not fail',
+    );
+    expect(() => assertHandlersFailed('moves', { failing_handlers: ['x'] }, rows({ evidence }))).not.toThrow();
+    expect(() => assertHandlersFailed('moves', {}, rows({ evidence: 'gated' }))).not.toThrow();
   });
 
   test('the file form names an absent body null and holds lowercase header names sorted by name', () => {

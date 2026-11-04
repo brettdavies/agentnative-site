@@ -11,6 +11,12 @@ function deferred(): { done: Promise<void>; finish: () => void } {
   return { done, finish };
 }
 
+describe('the cap', () => {
+  test.each([0, -1])('of %d is refused, since nothing would ever run', (cap) => {
+    expect(() => createAuditSlots(cap)).toThrow(RangeError);
+  });
+});
+
 describe('a free slot', () => {
   test('goes to the lowest rank, and to the earliest within a rank', async () => {
     const slots = createAuditSlots(1);
@@ -98,6 +104,24 @@ describe('a fan-out', () => {
     hold.finish();
     await Promise.all([...held, fan, ranked]);
     expect(order.indexOf('ranked row')).toBeLessThan(order.indexOf('b'));
+  });
+
+  test('a probe that throws on a helper rejects it and every slot comes back', async () => {
+    const slots = createAuditSlots(4);
+    const rejected = slots.run(
+      () =>
+        slots.fanOut([1, 2, 3, 4], async (item) => {
+          await Bun.sleep(item === 2 ? 1 : 3);
+          if (item === 2) throw new Error('helper probe failed');
+          return item;
+        }),
+      0,
+    );
+    await expect(rejected).rejects.toThrow('helper probe failed');
+    await Bun.sleep(20);
+    const log = { inFlight: 0, peak: 0 };
+    await Promise.all([1, 2, 3, 4].map((item) => slots.run(() => probing(log, 5)(item), 0)));
+    expect(log.peak).toBe(4);
   });
 
   test('a probe that throws rejects it and every slot comes back', async () => {

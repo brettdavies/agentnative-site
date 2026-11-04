@@ -1,8 +1,8 @@
 // One audit's concurrency cap. A check holds a slot while it probes; a check
 // gated without a request never takes one. A free slot goes to the waiter that
 // ranks first, earliest first within a rank, so what other work waits on goes
-// ahead of what waits on it, and when the audit's deadline runs out the rows
-// left unprobed are the ones late in the registry, whatever finished when.
+// ahead of what waits on it. Rank orders only what is waiting: a low-ranked row
+// that became ready first keeps the slot it took.
 
 /** `probe` over `items`, results in item order however the probes finish. */
 export type FanOut = <T, R>(items: readonly T[], probe: (item: T) => Promise<R>) => Promise<R[]>;
@@ -27,6 +27,8 @@ export const oneAtATime: FanOut = async (items, probe) => {
 };
 
 export function createAuditSlots(cap: number): AuditSlots {
+  // At a cap of 0 nothing would ever run, and the audit would wait on it forever.
+  if (cap < 1) throw new RangeError(`concurrency must be at least 1, got ${cap}`);
   let free = cap;
   const waiting: Array<{ rank: number; resume: () => void }> = [];
   const acquire = (rank: number): Promise<void> =>

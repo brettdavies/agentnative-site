@@ -226,6 +226,101 @@ describe('a discovery failure while the root is still out', () => {
   });
 });
 
+describe('a slow root and a redirected document', () => {
+  test('the document keeps its budget, so the endpoint it names is found and the root is asked once', async () => {
+    let rootAsked = 0;
+    const fetchImpl = stubFetch(async (url, init) => {
+      const path = pathOf(url);
+      if (path === '/') {
+        rootAsked += 1;
+        await Bun.sleep(100);
+        return new Response('<html></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+      }
+      if (path === DOCUMENT) return new Response('', { status: 301, headers: { location: '/cards/mcp.json' } });
+      if (path === '/cards/mcp.json') {
+        await new Promise((resolve, reject) => {
+          const answered = setTimeout(resolve, 50);
+          init?.signal?.addEventListener('abort', () => {
+            clearTimeout(answered);
+            reject(new DOMException('aborted', 'AbortError'));
+          });
+        });
+        return Response.json({ mcp_endpoint: 'https://example.com/rpc' });
+      }
+      return new Response('', { status: 404 });
+    });
+    const events = await collect(
+      runWebAudit({
+        url: BASE,
+        registry: registry(),
+        perCheckTimeoutMs: 120,
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
+    );
+    expect(events.find((event) => event.type === 'discovery')).toMatchObject({ endpoint: 'https://example.com/rpc' });
+    expect(rootAsked).toBe(1);
+  });
+});
+
+describe('a redirect hop held for the root', () => {
+  const answers = (secondHop: (init: RequestInit | undefined) => Promise<Response>) =>
+    stubFetch((url, init) =>
+      pathOf(url) === '/first' ? new Response('', { status: 301, headers: { location: '/second' } }) : secondHop(init),
+    );
+  const answersAfter =
+    (ms: number) =>
+    (init: RequestInit | undefined): Promise<Response> =>
+      new Promise((resolve, reject) => {
+        const answer = setTimeout(() => resolve(new Response('ok', { status: 200 })), ms);
+        init?.signal?.addEventListener('abort', () => {
+          clearTimeout(answer);
+          reject(new DOMException('aborted', 'AbortError'));
+        });
+      });
+
+  test('waits without spending its budget, so a slow root leaves the hop the time it would have had', async () => {
+    const response = await guardedFetch(
+      'https://example.com/first',
+      {},
+      { timeoutMs: 120, fetchImpl: answers(answersAfter(60)), laterHopsAfter: Bun.sleep(100) },
+    );
+    expect({ status: response.status, error: response.error }).toEqual({ status: 200, error: null });
+  });
+
+  test('a cut that arrives during the wait counts from where the wait ended', async () => {
+    const rootFailed = new AbortController();
+    const rootSettled = Bun.sleep(150).then(() => rootFailed.abort());
+    const started = Date.now();
+    const response = await guardedFetch(
+      'https://example.com/first',
+      {},
+      {
+        timeoutMs: 5_000,
+        cut: { signal: rootFailed.signal, toMs: 80 },
+        fetchImpl: answers(hangUntilAborted),
+        laterHopsAfter: rootSettled,
+      },
+    );
+    const elapsed = Date.now() - started;
+    expect(response.error).toStartWith('TimeoutError');
+    expect(elapsed).toBeGreaterThanOrEqual(200);
+    expect(elapsed).toBeLessThan(1_500);
+  });
+
+  test('the first request goes out without waiting', async () => {
+    const asked: string[] = [];
+    const held = new Promise<void>(() => {});
+    const fetchImpl = stubFetch((url) => {
+      asked.push(pathOf(url));
+      return new Response('ok', { status: 200 });
+    });
+    const response = await guardedFetch('https://example.com/first', {}, { fetchImpl, laterHopsAfter: held });
+    expect(response.status).toBe(200);
+    expect(asked).toEqual(['/first']);
+  });
+});
+
 describe('a request cut', () => {
   const hanging = stubFetch((_url, init) => hangUntilAborted(init));
 

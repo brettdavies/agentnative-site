@@ -52,11 +52,11 @@ class RecordingSources extends Map<string, ProbeOutcome> {
     super(entries);
   }
   override get(id: string): ProbeOutcome | undefined {
-    this.reads?.add(asPrerequisite(id));
+    this.reads.add(asPrerequisite(id));
     return super.get(id);
   }
   override has(id: string): boolean {
-    this.reads?.add(asPrerequisite(id));
+    this.reads.add(asPrerequisite(id));
     return super.has(id);
   }
 }
@@ -139,42 +139,65 @@ const FIELD_READS: Partial<Record<keyof HandlerContext, readonly Prerequisite[]>
   mcpSignIn: [MCP_SETTLED],
 };
 
-/** What `check`'s handler reads from the context, with both API shapes it can see. */
+type Answers = { status: number; headers: Record<string, string>; apiTargets: HandlerContext['apiTargets'] };
+
+// A read can sit behind one answer or context shape, so both are run: every answer
+// a 200 with no API anchor, and every answer a 401 challenge with one.
+const CONTEXT_SHAPES: readonly Answers[] = [
+  { status: 200, headers: { 'content-type': 'text/plain', 'mcp-session-id': 's' }, apiTargets: null },
+  {
+    status: 401,
+    headers: { 'content-type': 'text/plain', 'www-authenticate': 'Bearer realm="x"' },
+    apiTargets: {
+      descriptions: [],
+      hosts: [
+        {
+          origin: 'https://api.example.com',
+          anchors: [{ url: 'https://api.example.com/', description: 'https://api.example.com/openapi.json' }],
+          declared: true,
+        },
+      ],
+    },
+  },
+];
+
+/** What `check`'s handler reads from the context, across every shape it can see. */
 async function handlerReads(check: WebCheck): Promise<Set<Prerequisite>> {
   const reads = new Set<Prerequisite>();
-  const fetchImpl = stubFetch(
-    () => new Response('# Doc\n', { status: 200, headers: { 'content-type': 'text/plain', 'mcp-session-id': 's' } }),
-  );
-  const bodies = new RecordingBodies([
-    ['llms-txt', '# Site\n\n> Summary\n\n- [Docs](https://example.com/docs/a.md)\n'],
-    ['openapi', '{"openapi":"3.1.0","servers":[{"url":"https://example.com/"}]}'],
-  ]);
-  const ctx: HandlerContext = {
-    base: 'https://example.com/',
-    host: 'example.com',
-    mcpEndpoint: ENDPOINT,
-    protocolVersion: '2025-06-18',
-    defaultTimeoutMs: 200,
-    root: htmlRoot('text/html'),
-    scopedDirs: ['/docs'],
-    retainedBodies: bodies,
-    retainedDocuments: new Map(),
-    apiTargets: null,
-    apiDescriptionBodies: new Map(),
-    apiHostProbes: new Map(),
-    fetchOptions: { fetchImpl },
-    mcpSessionId: 's',
-    mcpLanes: { modern: 'present', legacyAdvertised: [], modernAdvertised: [] },
-    mcpAuth: null,
-  };
-  const recording = new Proxy(ctx, {
-    get(target, field, receiver) {
-      for (const prerequisite of FIELD_READS[field as keyof HandlerContext] ?? []) reads.add(prerequisite);
-      return Reflect.get(target, field, receiver);
-    },
-  });
-  await handlerFor(check)?.(check, recording);
-  for (const read of bodies.reads) reads.add(read);
+  for (const { status, headers, apiTargets } of CONTEXT_SHAPES) {
+    const fetchImpl = stubFetch(() => new Response('# Doc\n', { status, headers }));
+    const bodies = new RecordingBodies([
+      ['llms-txt', '# Site\n\n> Summary\n\n- [Docs](https://example.com/docs/a.md)\n'],
+      ['openapi', '{"openapi":"3.1.0","servers":[{"url":"https://example.com/"}]}'],
+    ]);
+    const ctx: HandlerContext = {
+      base: 'https://example.com/',
+      host: 'example.com',
+      mcpEndpoint: ENDPOINT,
+      protocolVersion: '2025-06-18',
+      defaultTimeoutMs: 200,
+      root: htmlRoot('text/html'),
+      scopedDirs: ['/docs'],
+      retainedBodies: bodies,
+      retainedDocuments: new Map(),
+      apiTargets,
+      apiDescriptionBodies: new Map(),
+      apiHostProbes: new Map(),
+      fetchOptions: { fetchImpl },
+      mcpSessionId: 's',
+      mcpLanes: { modern: 'present', legacyAdvertised: [], modernAdvertised: [] },
+      mcpAuth: null,
+      mcpSignIn: async () => false,
+    };
+    const recording = new Proxy(ctx, {
+      get(target, field, receiver) {
+        for (const prerequisite of FIELD_READS[field as keyof HandlerContext] ?? []) reads.add(prerequisite);
+        return Reflect.get(target, field, receiver);
+      },
+    });
+    await handlerFor(check)?.(check, recording);
+    for (const read of bodies.reads) reads.add(read);
+  }
   return reads;
 }
 
