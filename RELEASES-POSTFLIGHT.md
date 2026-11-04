@@ -133,7 +133,7 @@ manual recipe below skips the headers; for prod the recipe runs unauthenticated.
   # body is captured first: with pipefail set, `curl | grep -q` fails on a healthy page.
   home=$(curl -fSs -H 'Accept: text/html' "${ENV_URL}/") && grep -q 'hero__title' <<<"$home" && echo "home: ok"
   board=$(curl -fSs -H 'Accept: text/html' "${ENV_URL}/scorecards") && grep -q 'lrow' <<<"$board" && echo "leaderboard: ok"
-  curl -fSsL "${ENV_URL}/api/score" -X POST \
+  curl -fSs "${ENV_URL}/api/score" -X POST \
     -H 'Content-Type: application/json' \
     -d '{"target":"ripgrep","turnstile_token":"x"}' \
     | jq '.kind, .tier, .anc_version, .spec_version'
@@ -149,7 +149,7 @@ manual recipe below skips the headers; for prod the recipe runs unauthenticated.
   source:
 
   ```bash
-  curl -fsSL "${ENV_URL}/skill.json" | jq -r '.version'
+  curl -fsS "${ENV_URL}/skill.json" | jq -r '.version'
   jq -r '.version' src/data/skill/skill.json
   # both must match
   ```

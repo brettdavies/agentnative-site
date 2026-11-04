@@ -664,7 +664,7 @@ different durable object namespace`.
 bun x wrangler deployments list --env staging | head -20
 
 # 2. Verify /api/score works against a curated slug.
-curl -fSsL -H "Content-Type: application/json" \
+curl -fSs -H "Content-Type: application/json" \
   -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
   -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
   -d '{"target":"ripgrep","turnstile_token":"x"}' \

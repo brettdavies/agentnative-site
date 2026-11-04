@@ -321,11 +321,12 @@ gate_container() {
 # marker from a dropped transfer would pass the row. --retry-max-time bounds a long
 # Retry-After, which curl otherwise sleeps through. No -L: curl keeps custom headers
 # across hosts, so following a redirect hands the Access secret to wherever it points.
+# A GET adds --retry-all-errors; a POST goes without, so a permanent error is not re-sent.
 fetch_to() {
   local file=$1 out
   shift
   FETCH_STATUS=0
-  out=$(ecurl -fSs -m 10 --retry 2 --retry-all-errors --retry-max-time 30 \
+  out=$(ecurl -fSs -m 10 --retry 2 --retry-max-time 30 \
     -o "$file" -w '%{http_code} %{redirect_url}' "$@") || FETCH_STATUS=$?
   FETCH_CODE=${out%% *}
   FETCH_REDIRECT=${out#* }
@@ -343,7 +344,7 @@ fetch_detail() {
 page_row() {
   local path=$1 marker=$2 label=$3 page
   page=$(mktemp)
-  fetch_to "$page" -H 'Accept: text/html' "${ENV_URL}${path}"
+  fetch_to "$page" --retry-all-errors -H 'Accept: text/html' "${ENV_URL}${path}"
   if [[ "$FETCH_STATUS" -ne 0 ]]; then
     gate_fail "$label" "curl exited $FETCH_STATUS ($(fetch_detail)) fetching ${ENV_URL}${path}"
   elif grep -q "$marker" "$page"; then
@@ -372,7 +373,7 @@ gate_pages() {
   scorecard_url=$(jq -r '.scorecard_url // empty' "$page" 2>/dev/null || true)
   spec_v=$(jq -r '.spec_version // empty' "$page" 2>/dev/null || true)
   rm -f "$page"
-  if [[ "$tier" == "registry" && "$scorecard_url" == */score/ripgrep && -n "$spec_v" ]]; then
+  if [[ "$FETCH_STATUS" -eq 0 && "$tier" == "registry" && "$scorecard_url" == */score/ripgrep && -n "$spec_v" ]]; then
     gate_pass "${ENV_URL}/api/score registry hit returns tier=registry, $scorecard_url, spec=$spec_v"
   else
     gate_fail "${ENV_URL}/api/score registry hit" \
@@ -457,18 +458,20 @@ gate_sitemap() {
   require_bin curl
   require_access sitemap || return 0
 
-  local xml locs loc path code failures=0 total=0
-  xml=$(ecurl -fSs -m 20 "${ENV_URL}/sitemap.xml" 2>/dev/null || true)
-  locs=$(printf '%s' "$xml" | grep -oE '<loc>[^<]+</loc>' | sed -E 's#</?loc>##g' || true)
-  if [[ -z "$locs" ]]; then
-    gate_fail "${ENV_URL}/sitemap.xml" "no <loc> entries parsed"
+  local page locs loc path code failures=0 total=0
+  page=$(mktemp)
+  fetch_to "$page" --retry-all-errors -m 20 "${ENV_URL}/sitemap.xml"
+  locs=$(grep -oE '<loc>[^<]+</loc>' "$page" | sed -E 's#</?loc>##g' || true)
+  rm -f "$page"
+  if [[ "$FETCH_STATUS" -ne 0 || -z "$locs" ]]; then
+    gate_fail "${ENV_URL}/sitemap.xml" "no complete list of <loc> entries (curl exited $FETCH_STATUS, $(fetch_detail))"
     return
   fi
   while IFS= read -r loc; do
     [[ -z "$loc" ]] && continue
     total=$((total + 1))
     path=${loc#*://}
-    path=/${path#*/}
+    if [[ "$path" == */* ]]; then path=/${path#*/}; else path=/; fi
     code=$(ecurl -sS -m 15 --retry 2 --retry-all-errors -o /dev/null -w '%{http_code}' \
       -H 'Accept: text/html' "${ENV_URL}${path}" 2>/dev/null || echo "000")
     if [[ "$code" != "200" ]]; then
@@ -512,12 +515,15 @@ gate_purge() {
   require_bin jq
   require_access purge || return 0
 
-  local served_v src_v
-  served_v=$(ecurl -fsS -m 10 "${ENV_URL}/skill.json" 2>/dev/null \
-    | jq -r '.version // empty' 2>/dev/null || true)
+  local page served_v src_v
+  page=$(mktemp)
+  fetch_to "$page" --retry-all-errors "${ENV_URL}/skill.json"
+  served_v=$(jq -r '.version // empty' "$page" 2>/dev/null || true)
+  rm -f "$page"
   src_v=$(jq -r '.version' "$REPO_ROOT/src/data/skill/skill.json" 2>/dev/null || true)
-  if [[ -z "$served_v" || -z "$src_v" ]]; then
-    gate_skip "skill.json served vs source" "could not read one (served=$served_v source=$src_v)"
+  if [[ "$FETCH_STATUS" -ne 0 || -z "$served_v" || -z "$src_v" ]]; then
+    gate_fail "skill.json served vs source" \
+      "could not read one (served=$served_v source=$src_v; curl exited $FETCH_STATUS, $(fetch_detail))"
     return
   fi
   if [[ "$served_v" == "$src_v" ]]; then

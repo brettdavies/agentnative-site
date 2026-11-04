@@ -20,10 +20,16 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-printf '%s\n' "$url" >>"$FAKE_CURL_DIR/urls.log"
+printf '%s\\n' "$url" >>"$FAKE_CURL_DIR/urls.log"
+if [ -n "\${FAKE_CURL_REDIRECT:-}" ]; then
+  : >"$out"
+  printf '302 %s' "$FAKE_CURL_REDIRECT"
+  exit 0
+fi
 case "$url" in
   */api/score) cat "$FAKE_CURL_DIR/score.json" >"$out"; printf '200 '; exit 0 ;;
-  */sitemap.xml) cat "$FAKE_CURL_DIR/sitemap.xml"; exit 0 ;;
+  */sitemap.xml) cat "$FAKE_CURL_DIR/sitemap.xml" >"$out"; printf '200 '; exit "\${FAKE_CURL_EXIT:-0}" ;;
+  */skill.json) printf '{"version":"%s"}' "\${FAKE_SKILL_VERSION:-0.0.0}" >"$out"; printf '200 '; exit "\${FAKE_CURL_EXIT:-0}" ;;
 esac
 case "$format" in
   '%{http_code}') printf '200'; exit 0 ;;
@@ -35,7 +41,7 @@ elif [ "\${url%/scorecards}" != "$url" ]; then
 else
   cat "$FAKE_CURL_DIR/home.html" >"$out"
 fi
-printf '%s %s' "\${FAKE_CURL_CODE:-200}" "\${FAKE_CURL_REDIRECT:-}"
+printf '%s ' "\${FAKE_CURL_CODE:-200}"
 exit "\${FAKE_CURL_EXIT:-0}"
 `;
 
@@ -46,7 +52,17 @@ const SCORE = JSON.stringify({
 });
 
 // The sitemap names the canonical host on every deployment.
-const SITEMAP = '<urlset><url><loc>https://anc.dev/</loc></url><url><loc>https://anc.dev/privacy</loc></url></urlset>';
+const SITEMAP = [
+  '<urlset>',
+  '<url><loc>https://anc.dev</loc></url>',
+  '<url><loc>https://anc.dev/</loc></url>',
+  '<url><loc>https://anc.dev/privacy</loc></url>',
+  '</urlset>',
+].join('\n');
+const SOURCE_SKILL_VERSION: string = JSON.parse(
+  readFileSync(join(REPO_ROOT, 'src/data/skill/skill.json'), 'utf8'),
+).version;
+const LOGIN_REDIRECT = 'https://team.cloudflareaccess.com/cdn-cgi/access/login/fixture';
 
 const PROD = ['--env', 'prod', '--prod-url', 'https://fixture.invalid'];
 const STAGING = ['--env', 'staging', '--staging-url', 'https://fixture.invalid'];
@@ -145,13 +161,12 @@ describe('postflight pages gate', () => {
   });
 
   test('names where a rejected token was sent instead of passing on the login page', () => {
-    const login = 'https://team.cloudflareaccess.com/cdn-cgi/access/login/fixture';
     const { status, output } = postflight(LOGIN, LOGIN, {
       args: STAGING,
       token: true,
-      env: { FAKE_CURL_CODE: '302', FAKE_CURL_REDIRECT: login },
+      env: { FAKE_CURL_REDIRECT: LOGIN_REDIRECT },
     });
-    expect(output).toContain(`did not return HTML with hero__title (HTTP 302 to ${login})`);
+    expect(output).toContain(`did not return HTML with hero__title (HTTP 302 to ${LOGIN_REDIRECT})`);
     expect(output).not.toContain('renders (has');
     expect(status).toBe(1);
   });
@@ -170,10 +185,64 @@ describe('postflight gates that read staging through CF Access', () => {
     expect(urls).toEqual([
       'https://fixture.invalid/sitemap.xml',
       'https://fixture.invalid/',
+      'https://fixture.invalid/',
       'https://fixture.invalid/privacy',
     ]);
-    expect(output).toContain('all 2 sitemap entries return 200');
+    expect(output).toContain('all 3 sitemap entries return 200');
     expect(status).toBe(0);
+  });
+
+  test('sitemap names where a rejected token was sent', () => {
+    const { status, output } = postflight(LOGIN, LOGIN, {
+      gate: 'sitemap',
+      args: STAGING,
+      token: true,
+      env: { FAKE_CURL_REDIRECT: LOGIN_REDIRECT },
+    });
+    expect(output).toContain(`(curl exited 0, HTTP 302 to ${LOGIN_REDIRECT})`);
+    expect(status).toBe(1);
+  });
+
+  test.each(['sitemap', 'purge'])('%s fails when its fetch failed after the bytes arrived', (gate) => {
+    const { status, output } = postflight(HOME, SCORECARDS, {
+      gate,
+      args: STAGING,
+      token: true,
+      env: { FAKE_CURL_EXIT: '18', FAKE_SKILL_VERSION: SOURCE_SKILL_VERSION },
+    });
+    expect(output).toContain('curl exited 18');
+    expect(status).toBe(1);
+  });
+
+  test('purge fails on a rejected token rather than exiting 0 having verified nothing', () => {
+    const { status, output } = postflight(LOGIN, LOGIN, {
+      gate: 'purge',
+      args: STAGING,
+      token: true,
+      env: { FAKE_CURL_REDIRECT: LOGIN_REDIRECT },
+    });
+    expect(output).toContain(`HTTP 302 to ${LOGIN_REDIRECT}`);
+    expect(output).not.toContain('⊝');
+    expect(status).toBe(1);
+  });
+
+  test('purge runs to a verdict with a token loaded', () => {
+    const matches = postflight(HOME, SCORECARDS, {
+      gate: 'purge',
+      args: STAGING,
+      token: true,
+      env: { FAKE_SKILL_VERSION: SOURCE_SKILL_VERSION },
+    });
+    expect(matches.output).toContain('matches src/data/skill/skill.json');
+    expect(matches.status).toBe(0);
+    const drifted = postflight(HOME, SCORECARDS, {
+      gate: 'purge',
+      args: STAGING,
+      token: true,
+      env: { FAKE_SKILL_VERSION: '0.0.0-drifted' },
+    });
+    expect(drifted.output).toContain('version drift');
+    expect(drifted.status).toBe(1);
   });
 
   test.each(['retired', 'sitemap', 'purge'])('%s needs no token on production', (gate) => {

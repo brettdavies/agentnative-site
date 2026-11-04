@@ -4,7 +4,7 @@
 // custom headers across hosts, so following one hands the secret to wherever it points.
 
 import { describe, expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { REPO_ROOT } from './helpers/workflows';
@@ -17,7 +17,16 @@ const SCORE = JSON.stringify({
   spec_version: '0.0.0',
 });
 
-type Answer = 'page' | 'score' | 'no-marker' | 'dropped' | '503' | '503-retry-after' | 'redirect';
+type Answer =
+  | 'page'
+  | 'score'
+  | 'score-truncated'
+  | 'no-marker'
+  | 'dropped'
+  | '403'
+  | '503'
+  | '503-retry-after'
+  | 'redirect';
 
 interface Plan {
   home?: Answer[];
@@ -49,6 +58,10 @@ async function gate({ home = ['page'], score = ['score'], token = false }: Plan)
         return respond('200 OK', '<h1 class="hero__title">\n<div class="lrow">\n');
       case 'score':
         return respond('200 OK', SCORE);
+      case 'score-truncated':
+        return `HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: ${SCORE.length + 5000}\r\n\r\n${SCORE}`;
+      case '403':
+        return respond('403 Forbidden', '');
       case 'no-marker':
         return respond('200 OK', '<p>none</p>\n');
       case 'dropped':
@@ -94,7 +107,7 @@ async function gate({ home = ['page'], score = ['score'], token = false }: Plan)
       new Response(proc.stderr).text(),
       proc.exited,
     ]);
-    return { elapsedMs: Date.now() - started, output: out + err, elsewhere, otherPort: otherHost.port };
+    return { elapsedMs: Date.now() - started, output: out + err, elsewhere, otherPort: otherHost.port, served };
   } finally {
     server.stop(true);
     otherHost.stop(true);
@@ -134,6 +147,19 @@ describe('postflight pages gate over real curl', () => {
     expect(failed.output).toContain('HTTP 503');
   }, 30_000);
 
+  test('the score row fails a truncated transfer whose bytes still parse', async () => {
+    const { output } = await gate({ score: ['score-truncated'] });
+    expect(output).toContain('curl exited 18');
+    expect(output).not.toContain('registry hit returns tier=registry');
+  }, 30_000);
+
+  test('the score row does not re-send its POST on a permanent error', async () => {
+    const { output, served } = await gate({ score: ['403'] });
+    expect(served.score).toBe(1);
+    expect(output).toContain('curl exited 22');
+    expect(output).toContain('HTTP 403');
+  }, 30_000);
+
   test('does not send the Access secret to a redirect target, and names the target', async () => {
     const { elsewhere, otherPort, output } = await gate({ home: ['redirect'], token: true });
     expect(elsewhere).toEqual([]);
@@ -143,17 +169,47 @@ describe('postflight pages gate over real curl', () => {
 });
 
 describe('fetches carrying the CF Access credentials', () => {
-  test.each(['scripts/release/postflight.sh', 'scripts/release/preflight.sh', 'scripts/release/mcp-smoke.sh'])(
-    '%s never follows a redirect',
-    (script) => {
-      const lines = readFileSync(join(REPO_ROOT, script), 'utf8')
+  const CURL = /\be?curl\b/;
+  const CREDENTIALED = /\becurl\s|\s-K\s|CF-Access-Client/;
+  const FOLLOWS_REDIRECTS = /\s-[a-zA-Z]*L[a-zA-Z]*(?:\s|$)|\s--location\b/;
+
+  const sources = (() => {
+    const listing = Bun.spawnSync(['git', 'ls-files'], { cwd: REPO_ROOT }).stdout.toString().split('\n');
+    return listing.filter(
+      (path) => /\.(?:sh|bash)$/.test(path) || /^\.github\/.*\.ya?ml$/.test(path) || /^RELEASES[^/]*\.md$/.test(path),
+    );
+  })();
+
+  test('the scan reaches the release scripts, a workflow and the runbooks', () => {
+    expect(sources).toEqual(
+      expect.arrayContaining([
+        'scripts/release/postflight.sh',
+        'scripts/release/preflight.sh',
+        'scripts/release/mcp-smoke.sh',
+        '.github/workflows/mcp-sweep.yml',
+        'RELEASES-PREFLIGHT.md',
+      ]),
+    );
+  });
+
+  test('none follows a redirect, in a script, a workflow or a recipe', () => {
+    const offenders = sources.flatMap((path) => {
+      const absolute = join(REPO_ROOT, path);
+      if (!lstatSync(absolute, { throwIfNoEntry: false })?.isFile()) return [];
+      return readFileSync(absolute, 'utf8')
         .replace(/\\\n\s*/g, ' ')
-        .split('\n');
-      const credentialed = lines.filter(
-        (line) => /\becurl\s|\bcurl\b.*\s-K\s/.test(line) && !line.trim().startsWith('#'),
-      );
-      expect(credentialed.length).toBeGreaterThan(0);
-      expect(credentialed.filter((line) => /\s-[a-zA-Z]*L[a-zA-Z]*\s|\s--location\b/.test(line))).toEqual([]);
-    },
-  );
+        .split('\n')
+        .filter((line) => CURL.test(line) && CREDENTIALED.test(line) && FOLLOWS_REDIRECTS.test(line))
+        .map((line) => `${path}: ${line.trim().slice(0, 90)}`);
+    });
+    expect(offenders).toEqual([]);
+  });
+
+  test('the manual recipes against ENV_URL never follow a redirect, because staging runs add the headers', () => {
+    const recipes = readFileSync(join(REPO_ROOT, 'RELEASES-POSTFLIGHT.md'), 'utf8')
+      .split('\n')
+      .filter((line) => /\bcurl\b/.test(line) && line.includes('ENV_URL'));
+    expect(recipes.length).toBeGreaterThan(0);
+    expect(recipes.filter((line) => FOLLOWS_REDIRECTS.test(line))).toEqual([]);
+  });
 });
