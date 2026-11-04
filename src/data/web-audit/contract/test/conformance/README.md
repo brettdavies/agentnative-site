@@ -223,6 +223,7 @@ the first two, `im` for the body patterns) and `results[i] = new RegExp(pattern,
 | `llms-quality-dead-link` | a link that answers 404 makes the links row absent | `llms-txt-links` |
 | `llms-quality-h1-only` | an llms.txt with only an H1 misses format, has no links to follow, and has no when-to-use heading | `llms-txt-format`, `llms-txt-links`, `llms-txt-when-to-use` |
 | `llms-quality-http-link` | an llms.txt that lists an http link beside resolving https links: the http link is never requested, though it would answer, and the links row reads noncompliant naming it | `llms-txt-links` |
+| `llms-quality-link-budget-exhausted` | a link still unanswered at the check's deadline reads as the budget running out on that link's own row, which decides the links row as an operational error, and every other link is still asked | `llms-txt-links` |
 | `llms-quality-pass` | an llms.txt with an H1, a summary, resolving links and a when-to-use heading passes the trio | `llms-txt-format`, `llms-txt-links`, `llms-txt-when-to-use` |
 | `mcp-capabilities-empty` | an initialize result with empty capabilities passes initialize but is broken on the capabilities row | `mcp-initialize`, `mcp-capabilities` |
 | `mcp-card-no-endpoint-field` | a card without an endpoint field that names its server in serverInfo is SEP-1649-shaped and passes the card check with the superseded advisory, while discovery falls through to initialize | `mcp-server-card`, `mcp-initialize` |

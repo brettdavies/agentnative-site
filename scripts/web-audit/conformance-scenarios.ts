@@ -1652,6 +1652,16 @@ export const SCENARIOS: Record<string, Scenario> = {
     get('/llms.txt', text(LLMS_TXT_FULL)),
     get('/docs/guide.md', md(GUIDE_MD)),
   ]),
+  'llms-quality-link-budget-exhausted': scenario(
+    "a link still unanswered at the check's deadline reads as the budget running out on that link's own row, which decides the links row as an operational error, and every other link is still asked",
+    ['llms-txt-links'],
+    [
+      ...baseline(),
+      get('/llms.txt', text(LLMS_TXT_FULL)),
+      get('/docs/guide.md', TIMEOUT),
+      get('/docs/api.md', md(GUIDE_MD)),
+    ],
+  ),
   'llms-quality-dead-and-http-link': scenario(
     'an llms.txt that lists a dead link and an http link: the http link is never requested, though it would answer with a server error that would read broken, and the dead link decides the links row, which reads absent',
     ['llms-txt-links'],
