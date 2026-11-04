@@ -70,8 +70,9 @@ for the root's answer.
 
 Entries are sorted by the request memo's identity key, `requestIdentityKey` in
 `src/worker/audit-web/request-hop.ts`: the JSON array `[method, url, [[name, value], ...], body]`, compared by UTF-16
-code unit. Generation fails when a scenario sends one request twice, and when its scorecard or request set at
-concurrency 1 differs from the default run.
+code unit. Generation fails when a scenario sends one request twice, and when its scorecard or request set differs
+from the default run at concurrency 1 or with its answers arriving in another order (later requests answering first,
+or the source documents answering last).
 
 ## scorecard.json
 

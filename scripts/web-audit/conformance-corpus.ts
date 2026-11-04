@@ -14,6 +14,7 @@ import type { ExpectBlock } from '../../src/worker/audit-web/assert';
 import { runWebAudit } from '../../src/worker/audit-web/engine';
 import { ALWAYS_ADMIT_BUDGET } from '../../src/worker/audit-web/follow-requests';
 import type { WebAuditRegistry, WebSiteType } from '../../src/worker/audit-web/registry';
+import { SOURCE_CHECKS } from '../../src/worker/audit-web/antecedents';
 import type { HopRequest } from '../../src/worker/audit-web/request-hop';
 import type { NaReason, ScorecardStatus, WebScorecard } from '../../src/worker/audit-web/scorecard';
 import { requestsJson, scheduleIndependentRequests } from './conformance-requests';
@@ -151,27 +152,32 @@ export type ScenarioRun = {
   requests: HopRequest[];
 };
 
+/** How long to hold an answer back, given the request's URL and its place in the order sent. */
+export type AnswerDelay = (url: string, sentIndex: number) => number;
+
 /**
  * Runs a scenario at `concurrency`, or at the engine's default when absent.
- * `answerDelayMs` holds back each answer by the time it names for the request's
- * URL, which reorders what the schedule sees and leaves what it asks unchanged.
+ * `answerDelayMs` reorders the answers every phase of the audit sees, which the
+ * stub's zero latency never does on its own.
  */
 export async function runScenario(
   name: string,
   scenario: Scenario,
   registry: WebAuditRegistry,
   concurrency?: number,
-  answerDelayMs?: (url: string) => number,
+  answerDelayMs?: AnswerDelay,
 ): Promise<ScenarioRun> {
   const sent: HopRequest[] = [];
   const log: StubLog = { unmatched: [], sent };
   const stub = stubFetchFor(scenario, log);
+  let sentCount = 0;
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     // The stub records the request now; a transport failure it answers with stays
     // unobserved through the wait, so it needs a handler before it is returned.
     const answer = stub(input, init);
     answer.catch(() => {});
-    const delay = answerDelayMs?.(String(input)) ?? 0;
+    const delay = answerDelayMs?.(String(input), sentCount) ?? 0;
+    sentCount += 1;
     if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
     return answer;
   }) as typeof fetch;
@@ -547,8 +553,9 @@ for the root's answer.
 
 Entries are sorted by the request memo's identity key, \`requestIdentityKey\` in
 \`src/worker/audit-web/request-hop.ts\`: the JSON array \`[method, url, [[name, value], ...], body]\`, compared by UTF-16
-code unit. Generation fails when a scenario sends one request twice, and when its scorecard or request set at
-concurrency 1 differs from the default run.
+code unit. Generation fails when a scenario sends one request twice, and when its scorecard or request set differs
+from the default run at concurrency 1 or with its answers arriving in another order (later requests answering first,
+or the source documents answering last).
 
 ## scorecard.json
 
@@ -609,23 +616,67 @@ ${rows.join('\n')}
 `;
 }
 
+// Longer than any burst an audit sends at once: discovery's first reads, its
+// POSTs, a follow fan-out, a full set of slots.
+const REVERSAL_SPAN = 8;
+const SOURCE_ANSWER_DELAY_MS = 20;
+
+/**
+ * Answer orders the zero-latency stub never shows, each of which a scenario must
+ * hold under. Reversing bursts reaches every concurrent phase: discovery, the
+ * follow slice and the checks. Holding the source documents to last reaches the
+ * checks that would pass by reading a source before it settled.
+ */
+export function answerOrders(registry: WebAuditRegistry): Array<{ schedule: string; delayMs: AnswerDelay }> {
+  const sourcePaths = new Set(
+    registry.checks
+      .filter((check) => SOURCE_CHECKS.has(check.id))
+      .flatMap((check) => {
+        const { path, path_any: pathAny } = check.with as { path?: string; path_any?: string[] };
+        return [...(path === undefined ? [] : [path]), ...(pathAny ?? [])];
+      }),
+  );
+  return [
+    {
+      schedule: 'with later requests answering first',
+      delayMs: (_url, sentIndex) => REVERSAL_SPAN - (sentIndex % REVERSAL_SPAN),
+    },
+    {
+      schedule: 'with the source documents answering last',
+      delayMs: (url) => (sourcePaths.has(new URL(url).pathname) ? SOURCE_ANSWER_DELAY_MS : 0),
+    },
+  ];
+}
+
 /** Every corpus file by path relative to the corpus directory. */
 export async function generateCorpus(registry: WebAuditRegistry): Promise<Map<string, string>> {
   const ids = new Set(registry.checks.map((check) => check.id));
   const names = Object.keys(SCENARIOS).sort();
   const files = new Map<string, string>();
   const scores: Array<[string, ScoreIndexEntry]> = [];
+  const runs = new Map<string, ScenarioRun>();
   for (const name of names) {
     const scenario = SCENARIOS[name];
     validateScenario(name, scenario, ids);
     const run = await runScenario(name, scenario, registry);
     const serial = await runScenario(name, scenario, registry, 1);
-    const requests = scheduleIndependentRequests(name, run, serial);
+    const requests = scheduleIndependentRequests(name, 'at concurrency 1', run, serial);
+    runs.set(name, run);
     files.set(`scenarios/${name}/scenario.json`, scenarioJson(scenario));
     files.set(`scenarios/${name}/scorecard.json`, run.output);
     files.set(`scenarios/${name}/requests.json`, requestsJson(requests));
     scores.push([name, scoreIndexEntry(run.output)]);
   }
+  // These runs wait on timers rather than the CPU, so side by side they cost about
+  // what one does.
+  await Promise.all(
+    names.flatMap((name) =>
+      answerOrders(registry).map(async ({ schedule, delayMs }) => {
+        const other = await runScenario(name, SCENARIOS[name], registry, undefined, delayMs);
+        scheduleIndependentRequests(name, schedule, runs.get(name) as ScenarioRun, other);
+      }),
+    ),
+  );
   files.set('regex-parity.json', `${JSON.stringify(regexParityFixture(registry), null, 2)}\n`);
   files.set('scores.json', scoresJson(scores));
   files.set('README.md', readme(names));
