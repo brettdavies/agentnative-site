@@ -20,10 +20,11 @@
 
 import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { WEBMCP_SCRIPT } from '../shared/webmcp-script.ts';
 import { renderAuditForm } from './audit-form.mjs';
 import { extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
-import { emitShell, WEBMCP_SCRIPT } from './shell.mjs';
+import { emitShell } from './shell.mjs';
 import { composeTwin } from './util.mjs';
 
 // The audit page's hero: the shared entry form under the page's heading and

@@ -85,3 +85,21 @@ export async function parseHtml(html: string): Promise<Document> {
   const doc = element(root);
   return doc as unknown as Document;
 }
+
+/**
+ * The `src` of every script element a whole page loads, in document order.
+ * `parseHtml` cannot read a whole page: it tracks end tags, and the shell's
+ * self-closing SVG elements have none.
+ */
+export async function scriptSources(html: string): Promise<string[]> {
+  const sources: string[] = [];
+  await new HTMLRewriter()
+    .on('script[src]', {
+      element(el) {
+        sources.push(el.getAttribute('src') ?? '');
+      },
+    })
+    .transform(new Response(html))
+    .text();
+  return sources;
+}

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { readFile } from 'node:fs/promises';
+import { emitShellTemplate } from '../src/build/shell.mjs';
 import {
   discoveryLine,
   inlineSubline,
@@ -7,10 +7,12 @@ import {
   rowHostPhrase,
   webReadingLine,
 } from '../src/shared/scoring-copy';
+import { WEBMCP_SCRIPT } from '../src/shared/webmcp-script';
 import { handleScoringPage, type ScoringPageEnv } from '../src/worker/audit/scoring-page';
 import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
 import { _resetShellTemplateCache } from '../src/worker/shell-template';
 import { webRegistryJson } from './helpers/audit-api-env';
+import { scriptSources } from './helpers/html-elements';
 
 // GET /scoring renders the progress page's first paint from the target
 // alone. These tests drive the handler against a stub shell and the real
@@ -54,7 +56,7 @@ beforeEach(() => {
   resetWebAuditRegistryCacheForTests();
 });
 
-describe('GET /scoring through the built shell', () => {
+describe('GET /scoring through the real shell template', () => {
   // A script the shell adds to every page is invisible to the stub above, which
   // names no scripts at all.
   test.each([
@@ -63,15 +65,15 @@ describe('GET /scoring through the built shell', () => {
     ['no target', '/scoring'],
     ['a refused target', `/scoring?target=${'a'.repeat(129)}`],
   ])('%s loads no WebMCP script', async (_name, path) => {
-    const shell = await readFile(new URL('../dist/_internal/score-live-shell.html', import.meta.url), 'utf8');
-    const { html } = await page(path, env(SITEKEY, shell));
-    expect(html).toContain('<script src="/js/theme.js"');
-    expect(html).not.toContain('webmcp');
+    const { html } = await page(path, env(SITEKEY, emitShellTemplate()));
+    const scripts = await scriptSources(html);
+    expect(scripts).toContain('/js/theme.js');
+    expect(scripts).not.toContain(WEBMCP_SCRIPT);
   });
 });
 
 describe('GET /scoring?target=', () => {
-  test('a CLI target renders its page: lane, target, sitekey meta, the page script, and the probe line, and never WebMCP', async () => {
+  test('a CLI target renders its page: lane, target, sitekey meta, the page script, and the probe line', async () => {
     const { res, html } = await page('/scoring?target=ripgrep');
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/html');
@@ -79,7 +81,6 @@ describe('GET /scoring?target=', () => {
     expect(html).toContain('data-target="ripgrep"');
     expect(html).toContain(`name="turnstile-sitekey" content="${SITEKEY}"`);
     expect(html).toContain('src="/js/scoring.js"');
-    expect(html).not.toContain('webmcp');
     expect(html).toContain('Auditing <code>ripgrep</code>');
     expect(html).toContain('Installs the tool in a sandbox; usually under a minute.');
     expect(html).toContain('Checking for a recent result');
