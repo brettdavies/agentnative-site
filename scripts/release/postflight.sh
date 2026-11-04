@@ -180,7 +180,7 @@ CF_CONFIG=""
 maybe_stage_cf_access() {
   [[ "$ENV_AUTH_NEEDED" -eq 1 ]] || return 0
   [[ -x "$OP_SKILL/read_field.sh" ]] || {
-    echo "warn: 1Password skill not found at $OP_SKILL; staging gates that need CF Access will SKIP" >&2
+    echo "warn: 1Password skill not found at $OP_SKILL; staging gates that need CF Access read the login page instead" >&2
     return 0
   }
   local cid csec
@@ -307,30 +307,38 @@ gate_container() {
 
 # Gate: pages ----------------------------------------------------------------
 
+# One page, fetched and checked for its marker. Accept: text/html is explicit
+# because curl's default Accept negotiates text/markdown on extensionless URLs. A
+# failed fetch fails the row even when the marker arrived first, because a
+# truncated page has not rendered. The body reaches grep through a here-string
+# because under `set -o pipefail` a pipe reports the writer's SIGPIPE when grep -q
+# exits on an early marker, which fails the row on HTML that is fine.
+page_row() {
+  local path=$1 marker=$2 label=$3 body status=0
+  body=$(ecurl -fSsL -m 10 --retry 2 --retry-all-errors -H 'Accept: text/html' "${ENV_URL}${path}" 2>/dev/null) || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    gate_fail "$label" "curl exited $status fetching ${ENV_URL}${path}"
+  elif grep -q "$marker" <<<"$body"; then
+    gate_pass "$label renders (has $marker)"
+  else
+    gate_fail "$label" "did not return HTML with $marker"
+  fi
+}
+
 gate_pages() {
   header "Distribution surface against $ENV_URL"
   require_bin curl
   require_bin jq
 
-  # Explicit Accept: text/html — curl's default Accept negotiates text/markdown
-  # on extensionless URLs (agent-native content negotiation). Capture the body and
-  # grep it through a here-string, never a pipe: under `set -o pipefail`, grep -q
-  # exiting on an early marker kills whatever feeds the pipe (curl, or printf on a
-  # body past the 64 KB pipe buffer), and the gate fails on HTML that is fine.
-  local home_html scorecards_html
-  home_html=$(ecurl -fSsL -m 10 -H 'Accept: text/html' "${ENV_URL}/" 2>/dev/null || true)
-  if grep -q '<title>' <<<"$home_html"; then
-    gate_pass "${ENV_URL}/ home page renders (has <title>)"
-  else
-    gate_fail "${ENV_URL}/ home page" "did not return HTML with <title>"
+  # Without the token, staging answers 200 with the Access login page, whose
+  # <title> would pass the home row.
+  if [[ "$ENV_AUTH_NEEDED" -eq 1 && -z "$CF_CONFIG" ]]; then
+    gate_fail "$ENV_URL pages" "no CF Access service token loaded; these fetches would read the login page"
+    return
   fi
 
-  scorecards_html=$(ecurl -fSsL -m 10 -H 'Accept: text/html' "${ENV_URL}/scorecards" 2>/dev/null || true)
-  if grep -q 'lrow' <<<"$scorecards_html"; then
-    gate_pass "${ENV_URL}/scorecards renders (has lrow)"
-  else
-    gate_fail "${ENV_URL}/scorecards" "did not return HTML with lrow"
-  fi
+  page_row / '<title>' "${ENV_URL}/ home page"
+  page_row /scorecards lrow "${ENV_URL}/scorecards"
 
   local body tier scorecard_url spec_v
   body=$(ecurl -fSsL -m 10 "${ENV_URL}/api/score" -X POST \
