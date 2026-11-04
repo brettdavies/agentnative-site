@@ -245,12 +245,13 @@ more than the path does passes the class it served (the result route: a curated 
 shape); a 4xx/5xx or an always-MISS path is MISS regardless.
 
 - **HIT-1d** — bake-at-build HTML/markdown (`/about`, `/p1`–`/p8`, bare `/audit`, curated `/score/<slug>` and its `/md`
-  twin, `/mcp-skill`, `/mcp-docs`, other spec/docs pages without a live board). Browser:
+  twin, `/mcp-skill`, `/mcp-docs`, other spec/docs pages without a live board), plus `/api/web-audit/version`, a JSON
+  signal whose values only a deploy moves. Browser:
   `Cache-Control: public, max-age=300, stale-while-revalidate=60` (no `s-maxage`; that re-arms the custom-domain zone
   HIT that stored the Worker response and dropped `Vary`). Edge: `Cloudflare-CDN-Cache-Control: public, max-age=86400`.
-  Extensionless URLs keep `Vary: Accept, User-Agent`. Explicit `.md` is one representation (no `Vary`). A new Worker
-  version starts with an empty cache (`cache.cross_version_cache` stays off). Path-keyed `/llms.txt`, `.json`, `.svg`,
-  and the curated `/score/<slug>/json` keep
+  Extensionless pages keep `Vary: Accept, User-Agent`. Explicit `.md` and the JSON signal are one representation (no
+  `Vary`). A new Worker version starts with an empty cache (`cache.cross_version_cache` stays off). Path-keyed
+  `/llms.txt`, `.json`, `.svg`, and the curated `/score/<slug>/json` keep
   `Cache-Control: public, max-age=300, s-maxage=86400, stale-while-revalidate=60` with no `Vary`.
 - **HIT-min** — the live board and live results, every representation alike: `/`, `/index.md`, `/scorecards`,
   `/scorecards.md`, and their `?lane=`/`?view=` queries; a live or branch-scoped `/score/<target>` with its `/md` and

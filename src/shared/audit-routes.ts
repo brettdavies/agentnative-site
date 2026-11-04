@@ -47,6 +47,7 @@ export const SCORECARDS_PATH = '/scorecards';
 export const AUDIT_PATH = '/audit';
 export const FIX_PREFIX = '/fix/';
 export const API_SCORE_PATH = '/api/score';
+export const API_WEB_AUDIT_VERSION_PATH = '/api/web-audit/version';
 
 /**
  * Retired paths that answer a redirect instead of a 404, and where each one

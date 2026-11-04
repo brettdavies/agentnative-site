@@ -48,7 +48,7 @@ Sub-commands let you re-run one verification in isolation. Each is parameterized
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
 | `deploy`    | `deploy.yml` on the env's branch (`dev` for staging, `main` for prod): conclusion=success                                        | `gh run view`                          |
 | `container` | Env container app (`agentnative-site[-staging]-sandbox`) state is `ready`                                                        | `bunx wrangler containers list`        |
-| `pages`     | `<env-url>/`, `/scorecards`, and `/api/score` registry-hit all return expected                                                   | `curl`                                 |
+| `pages`     | `<env-url>/`, `/scorecards`, `/api/score` registry-hit, and `/api/web-audit/version` all return expected                         | `curl`                                 |
 | `retired`   | Retired paths answer 404 with no redirect, and the published inbound links 301 to a pinned destination; run after the zone purge | `curl`                                 |
 | `sitemap`   | Every `<loc>` in `<env-url>/sitemap.xml` returns 200                                                                             | `curl`                                 |
 | `mcp`       | `<env-url>/mcp` initialize + `tools/list` + registry-tier symmetry + live audit against `$MCP_BINARY`                            | `scripts/release/mcp-smoke.sh`         |
@@ -127,6 +127,7 @@ manual recipe below skips the headers; for prod the recipe runs unauthenticated.
   ```bash
   ENV_URL=https://anc.dev   # or https://agentnative-site-staging.brettdavies.workers.dev for staging
   # When staging, also: -H "CF-Access-Client-Id: $CFID" -H "CF-Access-Client-Secret: $CFSEC" (from 1Password)
+  # and, for the version smoke, which reads no flags: export CF_ACCESS_CLIENT_ID="$CFID" CF_ACCESS_CLIENT_SECRET="$CFSEC"
 
   # Accept: text/html is required — curl's default Accept negotiates markdown on
   # extensionless URLs (same as the scripted gate_pages() in postflight.sh).
@@ -137,9 +138,11 @@ manual recipe below skips the headers; for prod the recipe runs unauthenticated.
     -d '{"target":"ripgrep","turnstile_token":"x"}' \
     | jq '.kind, .tier, .anc_version, .spec_version'
   # expect: "cli", "registry", <anc_version>, <spec_version>
+  scripts/smoke-web-audit-version.sh "$ENV_URL"
+  # expect: PASS and the signal's three fields
   ```
 
-  All three must succeed. The registry-hit `/api/score` POST confirms the read tier composes `lookupOnly`'s curated
+  All four must succeed. The registry-hit `/api/score` POST confirms the read tier composes `lookupOnly`'s curated
   branch correctly through the env's bindings.
 
 - [ ] **Cache-purge after deploys that change `/skill`, `/skill.json`, `/skill.md`.** Cloudflare's edge cache holds

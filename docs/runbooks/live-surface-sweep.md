@@ -20,7 +20,9 @@ and `POST /mcp` and requires HTTP 200. Cloudflare Browser Integrity Check refuse
 neither Workers Logs nor the self-identifying probes can see it. The staging leg skips it: BIC on `*.workers.dev` cannot
 be turned off. The staging leg first preflights the CF Access service token so credential rot is diagnosed as
 credentials, not as a broken surface. The production smoke adds `scripts/smoke-api-score.sh https://anc.dev` (registry
-fast-path) after a propagation-settle retry loop.
+fast-path) after a propagation-settle retry loop. The production leg and the production smoke both run
+`scripts/smoke-web-audit-version.sh https://anc.dev`, because a client treats any failure of the version signal as no
+signal, so nothing else reports a broken one.
 
 The sweep legs carry no `continue-on-error`: they gate nothing downstream, so a red leg simply shows red in the Actions
 tab and emails the run owner. The production smoke is the one governed soft-fail, and the contract below is what makes
