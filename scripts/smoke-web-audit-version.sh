@@ -3,24 +3,24 @@
 # GET /api/web-audit/version answers 200 with JSON holding exactly its three
 # fields, each in its expected shape; exits non-zero otherwise.
 #
-# Its one consumer, the anc CLI's staleness note, skips silently on any
-# failure, so this is where a broken signal turns red. Invoked from
-# .github/workflows/deploy.yml after each deploy and from the release
-# postflight, and runnable locally for parity.
+# A client treats any failure of the signal as no signal, so no consumer reports
+# a broken one and this is where it turns red. Invoked from
+# .github/workflows/deploy.yml after each deploy, the daily production sweep, and
+# the release postflight, and runnable locally for parity.
 #
 # Usage:
 #   scripts/smoke-web-audit-version.sh <base-url>
 #
 # Environment variables (all optional):
-#   CF_ACCESS_CLIENT_ID      Sent as CF-Access-Client-Id when non-empty.
-#   CF_ACCESS_CLIENT_SECRET  Sent as CF-Access-Client-Secret when non-empty.
+#   CF_ACCESS_CLIENT_ID      Sent as CF-Access-Client-Id, with the secret.
+#   CF_ACCESS_CLIENT_SECRET  Sent as CF-Access-Client-Secret, with the id.
 #                            Both are required for staging (Worker is behind
 #                            Cloudflare Access) and unused for production.
-#   SMOKE_CURL_CONFIG        A curl config file carrying the same headers.
-#   SMOKE_RETRIES            Attempts after the first, ten seconds apart.
-#                            Default 5, so an isolate still running the
-#                            previous deploy inside the propagation window
-#                            cannot fail the deploy on its own.
+#   SMOKE_RETRIES            Attempts after the first. Default 5, so an isolate
+#                            still running the previous deploy inside the
+#                            propagation window cannot fail the deploy on its
+#                            own.
+#   SMOKE_RETRY_DELAY        Seconds between attempts. Default 10.
 #
 # Exit codes:
 #   0  smoke passed
@@ -43,19 +43,20 @@ fi
 
 URL="${BASE_URL%/}/api/web-audit/version"
 
-curl_args=(-fsS -m 10 --retry "${SMOKE_RETRIES:-5}" --retry-delay 10 --retry-all-errors -w '\n%{content_type}')
-if [ -n "${SMOKE_CURL_CONFIG:-}" ]; then
-  curl_args+=(-K "$SMOKE_CURL_CONFIG")
-fi
-if [ -n "${CF_ACCESS_CLIENT_ID:-}" ]; then
-  curl_args+=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID")
-fi
-if [ -n "${CF_ACCESS_CLIENT_SECRET:-}" ]; then
-  curl_args+=(-H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET")
+# A mode-600 config keeps the secret off curl's command line.
+curl_config="$(mktemp)"
+chmod 600 "$curl_config"
+trap 'rm -f "$curl_config"' EXIT
+if [ -n "${CF_ACCESS_CLIENT_ID:-}" ] && [ -n "${CF_ACCESS_CLIENT_SECRET:-}" ]; then
+  printf 'header = "CF-Access-Client-Id: %s"\n' "$CF_ACCESS_CLIENT_ID" >>"$curl_config"
+  printf 'header = "CF-Access-Client-Secret: %s"\n' "$CF_ACCESS_CLIENT_SECRET" >>"$curl_config"
 fi
 
-if ! response="$(curl "${curl_args[@]}" "$URL" 2>&1)"; then
-  echo "FAIL: $URL did not answer 200: $response" >&2
+# Stdout alone: curl reports each failed attempt on stderr, and a retry that
+# later succeeds must not read as part of the body.
+if ! response="$(curl -fsS -m 10 --retry "${SMOKE_RETRIES:-5}" --retry-delay "${SMOKE_RETRY_DELAY:-10}" \
+  --retry-all-errors -K "$curl_config" -w '\n%{content_type}' "$URL")"; then
+  echo "FAIL: $URL did not answer 200" >&2
   exit 1
 fi
 content_type="${response##*$'\n'}"
@@ -71,9 +72,9 @@ esac
 
 # shellcheck disable=SC2016 # the filter is jq, not shell
 contract='(keys == ["registry_fingerprint", "spec_version", "web_schema_version"])
-  and (.registry_fingerprint | type == "string" and test("^[0-9a-f]{12}$"))
-  and (.spec_version | type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+"))
-  and (.web_schema_version | type == "string" and test("^[0-9]+\\.[0-9]+$"))'
+  and (.registry_fingerprint | type == "string" and test("^[0-9a-f]{12}\\z"))
+  and (.spec_version | type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?\\z"))
+  and (.web_schema_version | type == "string" and test("^[0-9]+\\.[0-9]+\\z"))'
 
 if ! printf '%s' "$body" | "$JQ_BIN" -e "$contract" >/dev/null 2>&1; then
   echo "FAIL: $URL broke the contract: $body" >&2

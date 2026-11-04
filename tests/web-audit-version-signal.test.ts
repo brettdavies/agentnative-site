@@ -1,7 +1,7 @@
 // The route and body here are a contract the anc CLI reads; the path stays a
 // literal so a rename fails this suite instead of following the constant.
 
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import {
   isRegistryFingerprintPrefix,
   registryFingerprintPrefix,
@@ -79,6 +79,30 @@ describe('GET /api/web-audit/version', () => {
       const res = await send({ headers }, e);
       expect(res.headers.get('content-type')).toBe('application/json; charset=utf-8');
       expect(await res.text()).toBe(baseline);
+    }
+  });
+
+  test('a query string changes nothing but the cache class, so it cannot mint a day-long edge object', async () => {
+    const { env: e } = env();
+    const plain = await send({}, e);
+    const queried = await worker.fetch(new Request(`${URL_}?x=1`), e, {} as ExecutionContext);
+    expect(await queried.text()).toBe(await plain.text());
+    expect(queried.headers.get('cache-control')).toBe('public, max-age=0, must-revalidate');
+    expect(queried.headers.get('cloudflare-cdn-cache-control')).toBe('public, max-age=300');
+  });
+
+  test('hashes the registry once however many requests miss the edge', async () => {
+    const { env: e } = env();
+    const digest = spyOn(crypto.subtle, 'digest');
+    try {
+      await send({}, e);
+      const afterFirst = digest.mock.calls.length;
+      await send({}, e);
+      await worker.fetch(new Request(`${URL_}?x=2`), e, {} as ExecutionContext);
+      expect(afterFirst).toBeGreaterThan(0);
+      expect(digest.mock.calls.length).toBe(afterFirst);
+    } finally {
+      digest.mockRestore();
     }
   });
 

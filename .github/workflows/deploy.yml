@@ -125,12 +125,6 @@ jobs:
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
         run: scripts/smoke-api-score.sh "$PUBLIC_BASE_URL"
 
-      - name: Smoke /api/web-audit/version
-        env:
-          CF_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
-          CF_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
-        run: scripts/smoke-web-audit-version.sh "$PUBLIC_BASE_URL"
-
       # Settle the MCP route before smoking it. Edge propagation lags
       # `wrangler deploy`, and a stale isolate 404s the new route; curl
       # does not retry 4xx without --retry-all-errors. `|| true` keeps a
@@ -309,6 +303,14 @@ jobs:
           ai_catalog=$(discovery_get /.well-known/ai-catalog.json)
           assert_self_hosted "AI catalog" "$ai_catalog"
 
+      # Last, so a red signal marks the job failed without skipping the rescore,
+      # the curated pass, or the link smoke above it.
+      - name: Smoke /api/web-audit/version
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
+        run: scripts/smoke-web-audit-version.sh "$PUBLIC_BASE_URL"
+
   production:
     name: build + deploy production
     if: >-
@@ -424,7 +426,9 @@ jobs:
       - name: Smoke /api/score (registry-fast-path)
         run: scripts/smoke-api-score.sh https://anc.dev
 
-      # The CLI skips its staleness note silently when this endpoint fails, so
-      # this step is where a broken signal turns red.
+      # A client treats any failure of this signal as no signal, so nothing
+      # else reports a broken one. Always runs: an earlier red smoke must not
+      # leave the signal unchecked for this deploy.
       - name: Smoke /api/web-audit/version
+        if: always()
         run: scripts/smoke-web-audit-version.sh https://anc.dev

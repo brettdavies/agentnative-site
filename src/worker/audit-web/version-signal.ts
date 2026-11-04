@@ -8,7 +8,12 @@ import { isGetOrHead } from '../accept';
 import { applyHeaders } from '../headers';
 import { SPEC_VERSION } from '../spec-version.gen';
 import { emitLog } from '../telemetry/log';
-import { loadWebAuditRegistry, registryFingerprintPrefix, type WebAuditRegistryEnv } from './registry';
+import {
+  loadWebAuditRegistry,
+  registryFingerprintPrefix,
+  type WebAuditRegistry,
+  type WebAuditRegistryEnv,
+} from './registry';
 import { WEB_SCHEMA_VERSION } from './scorecard';
 
 export interface WebAuditVersionSignal {
@@ -18,10 +23,22 @@ export interface WebAuditVersionSignal {
   web_schema_version: string;
 }
 
+// The route has no rate limit and a query string misses the edge, so a request
+// a cache-buster sends through must not re-hash the registry.
+const fingerprints = new WeakMap<WebAuditRegistry, string>();
+
+async function fingerprintOf(registry: WebAuditRegistry): Promise<string> {
+  const known = fingerprints.get(registry);
+  if (known !== undefined) return known;
+  const prefix = await registryFingerprintPrefix(registry);
+  fingerprints.set(registry, prefix);
+  return prefix;
+}
+
 async function webAuditVersionSignal(env: WebAuditRegistryEnv): Promise<WebAuditVersionSignal> {
   return {
     spec_version: SPEC_VERSION,
-    registry_fingerprint: await registryFingerprintPrefix(await loadWebAuditRegistry(env)),
+    registry_fingerprint: await fingerprintOf(await loadWebAuditRegistry(env)),
     web_schema_version: WEB_SCHEMA_VERSION,
   };
 }
@@ -57,11 +74,14 @@ export async function handleWebAuditVersion(request: Request, env: WebAuditRegis
     );
     return plainTextError(503, 'web-audit version signal unavailable\n', { 'retry-after': '30' });
   }
+  const url = new URL(request.url);
   return applyHeaders(new Response(request.method === 'HEAD' ? null : JSON.stringify(signal)), {
     request,
     servedMarkdown: false,
     servedJson: true,
-    pathname: new URL(request.url).pathname,
-    cache: { klass: 'hit-1d' },
+    pathname: url.pathname,
+    // A query string changes nothing here, so it must not mint a day-long edge
+    // object per value; a prefilled /audit is demoted the same way.
+    cache: { klass: url.search === '' ? 'hit-1d' : 'hit-min' },
   });
 }

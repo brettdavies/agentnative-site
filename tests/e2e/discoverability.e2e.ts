@@ -171,9 +171,9 @@ test.describe('staging /llms.txt', () => {
   });
 });
 
-// The CLI skips its staleness note silently when this endpoint fails, so no
-// consumer would report a broken deploy. This checks staging's value; the
-// deploy jobs run scripts/smoke-web-audit-version.sh against each environment.
+// A client treats any failure of this signal as no signal, so no consumer
+// reports a broken deploy. This checks staging's value; the deploy jobs and the
+// sweep run scripts/smoke-web-audit-version.sh against each environment.
 test.describe('staging web-audit version signal', () => {
   const VERSION_SIGNAL = '/api/web-audit/version';
 
