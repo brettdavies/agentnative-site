@@ -596,8 +596,7 @@ Entries are sorted by the request memo's identity key, \`requestIdentityKey\` in
 \`src/worker/audit-web/request-hop.ts\`: the JSON array \`[method, url, [[name, value], ...], body]\`, compared by UTF-16
 code unit. Generation fails when a scenario sends one request twice, and when its scorecard or request set differs
 from the default run at concurrency 1 or with its answers arriving in another order: later requests answering first,
-the source documents answering last, or the root answering just inside a 1200 ms per-check timeout with every other
-answer at 60 ms.
+or the source documents answering last.
 
 The set is unordered, so some rules it cannot show, and an engine under comparison keeps them anyway:
 
@@ -681,20 +680,13 @@ ${rows.join('\n')}
 // POSTs, a follow fan-out, a full set of slots.
 const REVERSAL_SPAN = 8;
 const SOURCE_ANSWER_DELAY_MS = 20;
-// The root's answer lands just inside its timeout, so anything still charging
-// that wait to another request runs out. Every other answer is short enough that
-// the longest chain of requests in the corpus fits the timeout on its own.
-const SLOW_ROOT_TIMEOUT_MS = 1200;
-const SLOW_ROOT_ANSWER_MS = 1150;
-const AFTER_SLOW_ROOT_ANSWER_MS = 60;
 
 /**
  * Answer orders the zero-latency stub never shows, each of which a scenario must
  * hold under. Reversing bursts reaches every concurrent phase: discovery, the
  * follow slice and the checks. Holding the source documents to last reaches the
- * checks that would pass by reading a source before it settled. A slow root under
- * a real timeout reaches what reordering alone cannot: a budget that time spent
- * waiting on the root runs out.
+ * checks that would pass by reading a source before it settled. Neither comes near
+ * a real timeout, so host load cannot move a scenario and a move always fails.
  */
 export function answerOrders(registry: WebAuditRegistry): Array<ScenarioSchedule & { label: string }> {
   const sourcePaths = new Set(
@@ -714,12 +706,6 @@ export function answerOrders(registry: WebAuditRegistry): Array<ScenarioSchedule
       label: 'with the source documents answering last',
       answerDelayMs: (url) => (sourcePaths.has(new URL(url).pathname) ? SOURCE_ANSWER_DELAY_MS : 0),
     },
-    {
-      label: 'with the root answering just inside its timeout',
-      perCheckTimeoutMs: SLOW_ROOT_TIMEOUT_MS,
-      // The root is the first request an audit sends.
-      answerDelayMs: (_url, sentIndex) => (sentIndex === 0 ? SLOW_ROOT_ANSWER_MS : AFTER_SLOW_ROOT_ANSWER_MS),
-    },
   ];
 }
 
@@ -733,25 +719,6 @@ export function assertHandlersFailed(name: string, scenario: Pick<Scenario, 'fai
     if (rows.find((row) => row.id === id)?.evidence !== FAILING_HANDLER_EVIDENCE) {
       throw new Error(`scenario ${name}: the handler of ${id} did not fail, so the scenario pins nothing`);
     }
-  }
-}
-
-/**
- * Side by side, event-loop lag on a busy host can outrun a real timeout. A real
- * dependence on the order also moves the scenario alone, and lag does not, so
- * only a job that fails again alone fails. One that holds alone is reported,
- * because a race that needs the crowd would look the same.
- */
-export async function holdsAloneIfMoved<T>(
-  jobs: readonly T[],
-  holds: (job: T) => Promise<void>,
-  report: (message: string) => void = console.warn,
-): Promise<void> {
-  const crowded = await Promise.allSettled(jobs.map(holds));
-  for (const [index, outcome] of crowded.entries()) {
-    if (outcome.status !== 'rejected') continue;
-    await holds(jobs[index]);
-    report(`moved side by side, held alone: ${outcome.reason}`);
   }
 }
 
@@ -780,12 +747,13 @@ export async function generateCorpus(
   }
   // These runs wait on timers rather than the CPU, so side by side they cost about
   // what one does.
-  await holdsAloneIfMoved(
-    names.flatMap((name) => orders.map((order) => ({ name, order }))),
-    async ({ name, order: { label, ...schedule } }) => {
-      const other = await runScenario(name, SCENARIOS[name], registry, schedule);
-      scheduleIndependentRequests(name, label, runs.get(name) as ScenarioRun, other);
-    },
+  await Promise.all(
+    names.flatMap((name) =>
+      orders.map(async ({ label, ...schedule }) => {
+        const other = await runScenario(name, SCENARIOS[name], registry, schedule);
+        scheduleIndependentRequests(name, label, runs.get(name) as ScenarioRun, other);
+      }),
+    ),
   );
   files.set('regex-parity.json', `${JSON.stringify(regexParityFixture(registry), null, 2)}\n`);
   files.set('scores.json', scoresJson(scores));

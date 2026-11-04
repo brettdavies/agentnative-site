@@ -9,8 +9,8 @@ import {
   answerOrders,
   assertHandlersFailed,
   generateCorpus,
-  holdsAloneIfMoved,
   loadRegistry,
+  runScenario,
   stubFetchFor,
 } from '../scripts/web-audit/conformance-corpus';
 import { requestsJson, scheduleIndependentRequests, sortedRequests } from '../scripts/web-audit/conformance-requests';
@@ -122,40 +122,38 @@ describe("each scenario's requests.json", () => {
     expect(sourcesLast.answerDelayMs?.('https://example.com/.well-known/security.txt', 0)).toBe(0);
   });
 
-  test('the third answer order lands the root just inside a timeout it can run into', () => {
-    const [, , slowRoot] = answerOrders(registry);
-    const root = slowRoot.answerDelayMs?.('https://example.com/', 0) as number;
-    expect(root).toBeLessThan(slowRoot.perCheckTimeoutMs as number);
-    expect(root + (slowRoot.answerDelayMs?.('https://example.com/a', 1) as number)).toBeGreaterThan(
-      slowRoot.perCheckTimeoutMs as number,
-    );
-  });
-
-  test('a job that moved in the crowd passes once it holds alone, is reported, and the others run once', async () => {
-    const attempts = new Map<string, number>();
-    const reported: string[] = [];
-    await holdsAloneIfMoved(
-      ['moved', 'held'],
-      async (job) => {
-        const attempt = (attempts.get(job) ?? 0) + 1;
-        attempts.set(job, attempt);
-        if (job === 'moved' && attempt === 1) throw new Error('moved under load');
-      },
-      (message) => reported.push(message),
-    );
-    expect([...attempts]).toEqual([
-      ['moved', 2],
-      ['held', 1],
-    ]);
-    expect(reported).toEqual(['moved side by side, held alone: Error: moved under load']);
-  });
-
-  test('a job that moves again alone fails', async () => {
-    const moved = holdsAloneIfMoved(['moved'], async () => {
-      throw new Error('moved in this order too');
-    });
-    await expect(moved).rejects.toThrow('moved in this order too');
-  });
+  // Generation stays away from real timeouts, because a stall on a busy host moves
+  // every scenario in the crowd. This one needs one: the root answers inside its
+  // timeout, and the root's answer plus any other outruns it, so a wait for the root
+  // charged to a redirect hop's budget runs out. Each scenario here reads through
+  // such a hop. The margin is wide and the retry covers a stall longer than it; a
+  // wait that spends the budget fails both tries.
+  test(
+    'a redirect hop held for a slow root keeps its budget in the scenarios that read through one',
+    async () => {
+      const slowRoot = {
+        perCheckTimeoutMs: 1000,
+        answerDelayMs: (_url: string, sentIndex: number) => (sentIndex === 0 ? 800 : 220),
+      };
+      await Promise.all(
+        [
+          'alias-redirect-pass',
+          'cors-full-pass',
+          'mcp-dual-stack',
+          'mcp-www-authenticate',
+          'run-all-pass',
+          'run-healthy',
+          'run-root-redirects-to-http-catalog-card',
+          'run-root-redirects-to-http-document-redirect',
+        ].map(async (name) => {
+          const expected = await runScenario(name, SCENARIOS[name], registry);
+          const held = await runScenario(name, SCENARIOS[name], registry, slowRoot);
+          scheduleIndependentRequests(name, 'with a slow root', expected, held);
+        }),
+      );
+    },
+    { timeout: 60_000, retry: 1 },
+  );
 
   // Rejects only if the delay is applied, the stub honors the abort, the timeout
   // reaches the engine and the comparison runs, so losing any of them fails here.

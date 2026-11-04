@@ -77,8 +77,7 @@ Entries are sorted by the request memo's identity key, `requestIdentityKey` in
 `src/worker/audit-web/request-hop.ts`: the JSON array `[method, url, [[name, value], ...], body]`, compared by UTF-16
 code unit. Generation fails when a scenario sends one request twice, and when its scorecard or request set differs
 from the default run at concurrency 1 or with its answers arriving in another order: later requests answering first,
-the source documents answering last, or the root answering just inside a 1200 ms per-check timeout with every other
-answer at 60 ms.
+or the source documents answering last.
 
 The set is unordered, so some rules it cannot show, and an engine under comparison keeps them anyway:
 
