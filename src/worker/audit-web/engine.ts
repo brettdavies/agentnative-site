@@ -6,8 +6,9 @@
 // starts as soon as what it reads has settled (row-prerequisites.ts), gating
 // on its antecedent then and probing if it applies, with the root fetch
 // reused so `/` is never fetched twice. Whether the MCP endpoint requires
-// sign-in settles once both wire probes have answered (mcp-auth.ts), ahead of
-// every later MCP row. Each check finalizes to
+// sign-in settles once both wire probes have answered (mcp-auth.ts), and the
+// session is notified after that, ahead of every later MCP row. Each check
+// finalizes to
 // pass / noncompliant / broken / absent / n_a / skip / error; an
 // applicable MAY that comes back absent is re-tagged n_a with na_reason
 // 'optional-absent', an unmet antecedent yields the na_reason its
@@ -25,6 +26,7 @@ import {
   type AntecedentContext,
   type AntecedentResolution,
   antecedentUnmetEvidence,
+  MCP_NOTIFIED,
   MCP_SETTLED,
   type Prerequisite,
   resolveAntecedent,
@@ -576,18 +578,25 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
       legacyAdvertised: advertisedCapabilities(sources.get('mcp-initialize')?.evidence ?? []),
       modernAdvertised: advertisedCapabilities(sources.get('mcp-server-discover')?.evidence ?? []),
     };
-    if (mcpSessionId && declared.endpoint) {
-      await notifyMcpInitialized(declared.endpoint, mcpSessionId, {
-        timeoutMs: requestTimeoutMs(),
-        fetchOptions,
-        followed: declared.followed,
-      });
-      if (deadline - now() <= 0) incomplete = true;
-    }
+  };
+  const notifyMcp = async (endpoint: string, sessionId: string): Promise<void> => {
+    await notifyMcpInitialized(endpoint, sessionId, {
+      timeoutMs: requestTimeoutMs(),
+      fetchOptions,
+      followed: declared.followed,
+    });
+    if (deadline - now() <= 0) incomplete = true;
   };
   const mcpSettled = Promise.all(WIRE_PROBE_IDS.map((id) => sourceProbes.get(id))).then(() => slots.run(settleMcp));
-  const settled = (prerequisite: Prerequisite): Promise<void> | undefined =>
-    prerequisite === MCP_SETTLED ? mcpSettled : sourceProbes.get(prerequisite);
+  const mcpNotified = mcpSettled.then(async () => {
+    const { endpoint } = declared;
+    const sessionId = mcpSessionId;
+    if (sessionId && endpoint) await slots.run(() => notifyMcp(endpoint, sessionId));
+  });
+  const settled = (prerequisite: Prerequisite): Promise<void> | undefined => {
+    if (prerequisite === MCP_SETTLED) return mcpSettled;
+    return prerequisite === MCP_NOTIFIED ? mcpNotified : sourceProbes.get(prerequisite);
+  };
 
   // Gate: declared-type filter first, then the antecedent token. Returns
   // the n_a/error result when the check must not be scored.
@@ -611,10 +620,10 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
   };
 
   const results = new Array<EngineResult>(checks.length);
-  // The settle step is raced too: with no MCP row waiting on it, nothing else
-  // would see it fail.
+  // The MCP steps are raced too: with no MCP row waiting on them, nothing else
+  // would see them fail.
   const pending = new Map<number, Promise<{ index: number; result: EngineResult | null }>>([
-    [-1, mcpSettled.then(() => ({ index: -1, result: null }))],
+    [-1, mcpNotified.then(() => ({ index: -1, result: null }))],
   ]);
   for (const [index, check] of checks.entries()) {
     pending.set(

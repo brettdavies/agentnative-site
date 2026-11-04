@@ -2,7 +2,7 @@
 // reads, plus what its handler reads from the context. A new check takes its
 // edges from its token and handler, so it never names them itself.
 
-import { antecedentPrerequisites, MCP_SETTLED, type Prerequisite } from './antecedents';
+import { antecedentPrerequisites, MCP_NOTIFIED, MCP_SETTLED, type Prerequisite } from './antecedents';
 import type { WebCheck } from './registry';
 
 const HANDLER_PREREQUISITES: Record<WebCheck['handler'], readonly Prerequisite[]> = {
@@ -12,8 +12,8 @@ const HANDLER_PREREQUISITES: Record<WebCheck['handler'], readonly Prerequisite[]
   webmcp: [],
   'markdown-frontmatter': [],
   'server-card': [],
-  mcp: [MCP_SETTLED],
-  'cors-preflight': [MCP_SETTLED],
+  mcp: [MCP_NOTIFIED],
+  'cors-preflight': [MCP_NOTIFIED],
   'protected-resource': [MCP_SETTLED],
   'content-without-js': ['llms-txt'],
   'llms-txt-quality': ['llms-txt'],

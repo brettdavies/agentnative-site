@@ -4,6 +4,8 @@
 // in the scorecard all hold as they would in any order.
 
 import { describe, expect, test } from 'bun:test';
+import { loadRegistry, stubFetchFor } from '../scripts/web-audit/conformance-corpus';
+import { SCENARIOS } from '../scripts/web-audit/conformance-scenarios';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
 import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
@@ -300,6 +302,72 @@ describe('the MCP step', () => {
       otherStartedWhileNotifying: true,
       toolsListAfterNotify: true,
     });
+  });
+});
+
+describe('the session notification', () => {
+  const scenario = SCENARIOS['mcp-stateful-session'];
+
+  test('no request carrying the session goes out until the notification has settled, across every registry check', async () => {
+    const stub = stubFetchFor(scenario, { unmatched: [] });
+    let notified = false;
+    const carrying: Array<{ url: string; beforeNotified: boolean }> = [];
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const body = String(init?.body ?? '');
+      if (body.includes('notifications/initialized')) {
+        // Long enough for a row that did not wait to have sent its request.
+        await Bun.sleep(30);
+        const answer = await stub(input, init);
+        notified = true;
+        return answer;
+      }
+      if (new Headers(init?.headers).has('mcp-session-id')) {
+        carrying.push({ url: String(input), beforeNotified: !notified });
+      }
+      return stub(input, init);
+    }) as typeof fetch;
+    for await (const _event of runWebAudit({
+      url: scenario.target,
+      registry: loadRegistry(),
+      siteType: scenario.site_type,
+      specVersion: scenario.spec_version,
+      domainBudget: ALWAYS_ADMIT_BUDGET,
+      fetchOptions: { fetchImpl },
+    })) {
+      // drain the audit
+    }
+    expect(notified).toBe(true);
+    expect(carrying.length).toBeGreaterThan(0);
+    expect(carrying.filter((request) => request.beforeNotified)).toEqual([]);
+  });
+
+  test('a server with no session is sent no notification, and its rows still run', async () => {
+    const sent: string[] = [];
+    const card = JSON.stringify({ mcp_endpoint: 'https://example.com/mcp' });
+    const fetchImpl = stubFetch(async (url, init) => {
+      const path = pathOf(url);
+      if (path === '/.well-known/mcp.json') {
+        return new Response(card, { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (path !== '/mcp') return new Response('ok', { status: path === '/' ? 200 : 404, headers: HTML });
+      sent.push(String(init?.body ?? ''));
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [] } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const events = await collect(
+      audit(
+        [
+          makeCheck({ id: 'mcp-initialize', handler: 'mcp', antecedent: 'mcp-present', with: { op: 'initialize' } }),
+          makeCheck({ id: 'mcp-tools-list', handler: 'mcp', antecedent: 'mcp-session', with: { op: 'tools-list' } }),
+        ],
+        fetchImpl,
+      ),
+    );
+    expect(sent.some((body) => body.includes('notifications/initialized'))).toBe(false);
+    expect(sent.some((body) => body.includes('"tools/list"'))).toBe(true);
+    expect(events.at(-1)?.type).toBe('complete');
   });
 });
 

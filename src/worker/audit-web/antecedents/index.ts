@@ -19,7 +19,7 @@ import { rootEvidence, rootPrerequisites, rootResolvers } from './root';
 import type { Prerequisite } from './sources';
 
 export { siteTypeApplies } from './site-type';
-export { MCP_SETTLED, type Prerequisite, SOURCE_CHECKS } from './sources';
+export { MCP_NOTIFIED, MCP_SETTLED, type Prerequisite, SOURCE_CHECKS } from './sources';
 export type { AntecedentContext, AntecedentResolution };
 
 const RESOLVERS: Record<AntecedentToken, AntecedentResolver> = {

@@ -10,6 +10,7 @@ import { loadRegistry } from '../scripts/web-audit/conformance-corpus';
 import {
   type AntecedentContext,
   antecedentPrerequisites,
+  MCP_NOTIFIED,
   MCP_SETTLED,
   type Prerequisite,
   resolveAntecedent,
@@ -113,18 +114,26 @@ function tokenReads(token: AntecedentToken): Set<Prerequisite> {
   return reads;
 }
 
+// The notification follows the settled step, so a check waiting on it has the
+// other too and names only the later one.
+function withoutImplied(edges: Set<Prerequisite>): Set<Prerequisite> {
+  if (edges.has(MCP_NOTIFIED)) edges.delete(MCP_SETTLED);
+  return edges;
+}
+
 // The one edge no read shows: every later request to the MCP endpoint comes
 // after the session is notified, so an `mcp-*` token waits whatever it reads.
 function tokenEdges(token: AntecedentToken): Set<Prerequisite> {
   const reads = tokenReads(token);
-  if (token.startsWith('mcp-')) reads.add(MCP_SETTLED);
-  return reads;
+  if (token.startsWith('mcp-')) reads.add(MCP_NOTIFIED);
+  return withoutImplied(reads);
 }
 
 const FIELD_READS: Partial<Record<keyof HandlerContext, readonly Prerequisite[]>> = {
   scopedDirs: ['llms-txt', 'sitemap'],
   apiDescriptionBodies: ['openapi'],
-  mcpSessionId: [MCP_SETTLED],
+  // A request carrying the session is what the notification must precede.
+  mcpSessionId: [MCP_NOTIFIED],
   mcpLanes: [MCP_SETTLED],
   mcpAuth: [MCP_SETTLED],
   mcpSignIn: [MCP_SETTLED],
@@ -180,7 +189,7 @@ describe('a check waits on exactly what its code reads', () => {
     'the check %s waits on its resolver and handler reads',
     async (_id, check) => {
       const derived = new Set([...tokenEdges(check.antecedent), ...(await handlerReads(check))]);
-      expect(new Set(rowPrerequisites(check))).toEqual(derived);
+      expect(withoutImplied(new Set(rowPrerequisites(check)))).toEqual(withoutImplied(derived));
     },
   );
 
