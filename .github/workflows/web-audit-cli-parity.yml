@@ -147,7 +147,7 @@ jobs:
             --marker "$COMMENT_MARKER" \
             --site-sha "$SITE_SHA" \
             --cli-ref "$CLI_REF" \
-            --cli-sha "$(git -C cli rev-parse HEAD)" \
+            --cli-sha "$(git -C cli rev-parse --verify --quiet HEAD || echo unknown)" \
             --cli-pin cli/src/web_audit/vendored/SITE_SHA \
             --run-url "$RUN_URL" \
             --sync-exit "$SYNC_EXIT" \
