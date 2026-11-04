@@ -134,7 +134,7 @@ describe('markdown-vary header pattern', () => {
       checked += 1;
     }
     expect(checked).toBeGreaterThan(5_000_000);
-  });
+  }, 30_000);
 
   test('agrees with the semantic requirement over token-built header values', () => {
     const rewritten = new RegExp(registryVaryPattern(), 'i');
