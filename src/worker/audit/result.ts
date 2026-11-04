@@ -57,6 +57,7 @@ import {
   suggestTargets,
 } from '../../shared/audit-routes';
 import { escHtml } from '../../shared/esc-html';
+import { mdLinkDestination } from '../../shared/md-inline';
 import { resultAlternateLinks } from '../../shared/result-head';
 import { type ReauditControl, type ResultTier, type SpineInput, shortDate } from '../../shared/result-spine';
 import { brandName, cliOgIdentity, scoreOgAlt, scoreOgEdition, scoreOgKey, scoreOgUrl } from '../../shared/score-og';
@@ -74,6 +75,7 @@ import { webEnvelope } from '../audit-web/core';
 import { normalizeScorecardCategories } from '../audit-web/display';
 import { loadWebAuditRegistry } from '../audit-web/registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from '../audit-web/remediation';
+import { richMarkdown } from '../audit-web/rich-text';
 import { loadWebSeed, type WebSeedEntry } from '../audit-web/seed';
 import { freshnessHtml, freshnessState } from '../audit-web/summary-freshness';
 import type { WebSummaryInput } from '../audit-web/summary-input';
@@ -702,10 +704,11 @@ async function notFound(request: Request, env: ResultEnv, deps: ResultDeps, inpu
     return applyHeaders(new Response(JSON.stringify(body), { status: 404 }), opts);
   }
   if (input.rep === 'md') {
+    const code = richMarkdown([{ code: input.target }]);
     const lines = [
-      `# No audit exists for \`${input.target}\` yet.`,
+      `# No audit exists for ${code} yet.`,
       '',
-      `[Audit \`${input.target}\`](${origin}${audit})`,
+      `[Audit ${code}](${mdLinkDestination(`${origin}${audit}`)})`,
       '',
     ];
     if (suggestions.length > 0) {

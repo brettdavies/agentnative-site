@@ -2,6 +2,7 @@
 // resolves them, and the fenced copy-paste prompt the HTML page withholds.
 
 import { auditPath } from '../../shared/audit-routes';
+import { mdInlineText } from '../../shared/md-inline';
 import { resultFrontMatter } from '../../shared/result-spine';
 import { CANONICAL_SITE_URL } from '../../shared/site-url';
 import { WEB_SURFACE_NOTE_HOSTS } from './copy';
@@ -15,11 +16,11 @@ import type { SummaryCategory, SummaryItem, SummaryRow } from './summary-types';
 
 // Evidence strings carry probed-server values (serverInfo names, Allow-Origin
 // headers), so the target controls them. The HTML twin neutralizes them
-// through escHtml; here a newline breaks out of the bullet and a backtick
-// opens a code span, so inline text is flattened and fenced blocks lose any
-// embedded fence.
+// through escHtml; here a newline breaks out of the bullet, a backtick opens a
+// code span, and `](` forms a link, so inline text is flattened and escaped and
+// fenced blocks lose any embedded fence.
 function mdInline(text: string): string {
-  return text.replace(/[\r\n]+/g, ' ').replaceAll('`', '\\`');
+  return mdInlineText(text.replaceAll('`', '\\`'));
 }
 
 function mdFenced(text: string): string {

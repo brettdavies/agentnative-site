@@ -10,6 +10,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   BONUS_GROUPS,
   buildScorecardBody,
+  buildScorecardMarkdown,
   escHtml,
   extractTopIssues,
   formatAuditRowMarkdown,
@@ -103,6 +104,86 @@ describe('statusLabel (7-status taxonomy, schema 0.6)', () => {
   });
 });
 
+describe('buildScorecardMarkdown', () => {
+  test('a tool name or version with a newline in it cannot start a line of its own', () => {
+    const md = buildScorecardMarkdown(
+      { name: 'tool\n# Forged heading', binary: 'tool' },
+      { badge: { score_pct: 10, eligible: false }, results: [] },
+      { version: '1.0\n# Forged version' },
+    );
+    expect(md.split('\n')).toContain('# tool # Forged heading');
+    expect(md).toContain('**Version scored:** 1.0 # Forged version');
+    expect(md.split('\n').filter((line) => line.startsWith('# Forged'))).toEqual([]);
+  });
+});
+
+describe('a scorecard record is untrusted at render time', () => {
+  const markup = '<b id="inert">';
+  const record = {
+    badge: { score_pct: markup, eligible: true, embed_markdown: 'x\n```\n# Forged embed' },
+    coverage_summary: { must: { verified: markup, total: 1 }, should: { verified: 1, total: markup } },
+    results: [{ status: markup, label: 'l', group: 'P1', evidence: 'e' }],
+    anc: { version: `1.0\n# Forged build ${markup}` },
+    run: { platform: { os: 'linux`\n# Forged os', arch: 'x64' }, invocation: 'anc audit\n```\n# Forged invocation' },
+    target: { kind: `command\n# Forged mode ${markup}` },
+  };
+  const tool = { name: 'tool', binary: 'tool' };
+
+  test('no field reaches the page as markup, in the eligible render', () => {
+    expect(buildScorecardBody(tool, record)).not.toContain(markup);
+  });
+
+  test('no field reaches the page as markup, in the below-floor render', () => {
+    const below = { ...record, badge: { score_pct: markup, eligible: false } };
+    expect(buildScorecardBody(tool, below)).not.toContain(markup);
+  });
+
+  test('no field starts a line of its own in the twin', () => {
+    const md = buildScorecardMarkdown(tool, record, {
+      links: { scorecard: 'https://anc.dev/score/tool', markdown: null, json: null },
+    });
+    const lines = md.split('\n');
+    expect(lines.filter((line) => line.startsWith('# Forged'))).toEqual([]);
+    expect(md).not.toMatch(/(?<!\\)<b id="inert">/);
+    expect(lines.filter((line) => line.startsWith('```'))).toEqual(['```markdown', '```', '```bash', '```']);
+  });
+
+  test('a recorded invocation cannot close the reproduce fence', () => {
+    const md = buildScorecardMarkdown(tool, { ...record, target: { kind: 'command' } });
+    const lines = md.split('\n');
+    expect(lines.filter((line) => line.startsWith('# Forged'))).toEqual([]);
+    expect(lines.filter((line) => line.startsWith('```'))).toEqual(['```markdown', '```', '```bash', '```']);
+  });
+
+  test('a badge with no embed string keeps its blank fence', () => {
+    const md = buildScorecardMarkdown(tool, { badge: { score_pct: 90, eligible: true }, results: [] });
+    expect(md).toContain('```markdown\n\n```');
+  });
+
+  test('a status that names an Object.prototype member reads as text', () => {
+    expect(statusLabel('constructor')).toBe('CONSTRUCTOR');
+  });
+
+  test('a row status and group cannot add a column', () => {
+    const row = formatAuditRowMarkdown({ status: 'a|b', label: 'l', group: 'c|d', evidence: null });
+    expect(row).toBe('| A\\|B | l | c\\|d |  |');
+  });
+});
+
+describe('the twin front matter', () => {
+  test('a line separator in a name stays inside its quoted value', () => {
+    const name = 'tool\u2028# Forged\u0085- forged\u2029';
+    const md = buildScorecardMarkdown(
+      { name, binary: 'tool' },
+      { badge: { score_pct: 10, eligible: false }, results: [] },
+      { links: { scorecard: 'https://anc.dev/score/tool', markdown: null, json: null } },
+    );
+    const target = md.split('\n').find((line) => line.startsWith('target: '));
+    expect(target).toBe('target: "tool\\u2028# Forged\\u0085- forged\\u2029"');
+    expect(JSON.parse((target ?? '').slice('target: '.length))).toBe(name);
+  });
+});
+
 describe('formatAuditRowMarkdown', () => {
   test('emits canonical row shape with site-relative link', () => {
     const row = formatAuditRowMarkdown({
@@ -141,6 +222,20 @@ describe('formatAuditRowMarkdown', () => {
     // The row still has exactly 5 unescaped pipes (the table delimiters).
     const unescapedPipes = row.match(/(?<!\\)\|/g)?.length ?? 0;
     expect(unescapedPipes).toBe(5);
+  });
+  test('a newline in evidence cannot break out of the table row', () => {
+    const row = formatAuditRowMarkdown({
+      status: 'fail',
+      label: 'label\nsplit',
+      group: 'P3',
+      evidence: 'usage: tool\n\n# Forged heading\r\n- forged item',
+    });
+    expect(row.split('\n')).toHaveLength(1);
+    expect(row).toBe('| FAIL | label split | [P3](/p3) | usage: tool # Forged heading - forged item |');
+  });
+  test('a backslash before a pipe cannot unescape it', () => {
+    const row = formatAuditRowMarkdown({ status: 'fail', label: 'ok', group: 'P3', evidence: 'a\\|b' });
+    expect(row).toContain('a\\\\\\|b');
   });
   test('handles null evidence', () => {
     const row = formatAuditRowMarkdown({

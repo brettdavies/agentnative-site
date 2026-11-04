@@ -1018,7 +1018,7 @@ function frontpageBoardSlice(markdown: boolean, entries: WebAggregateEntry[]): s
 }
 
 function substituteTurnstileSitekey(html: string, env: Env): string {
-  return html.replaceAll('{{TURNSTILE_SITEKEY}}', env.TURNSTILE_SITEKEY ?? '');
+  return html.replaceAll('{{TURNSTILE_SITEKEY}}', () => env.TURNSTILE_SITEKEY ?? '');
 }
 
 async function injectTurnstileSitekey(
@@ -1106,8 +1106,11 @@ async function injectHomepageBoards(
     getAggregate(env as WebCacheEnv, 'leaderboard-frontpage', SPEC_VERSION),
   ]);
   const entries = aggregate?.entries ?? [];
-  let substituted = opts.markdown ? body : substituteTurnstileSitekey(body, env);
-  substituted = substituted.replaceAll('{{WEB_BOARD_ROWS}}', frontpageBoardSlice(opts.markdown, entries));
+  // A function replacement, because a row's name is an audited site's own title
+  // and a string replacement expands `$&` and its siblings.
+  const slice = frontpageBoardSlice(opts.markdown, entries);
+  const withSitekey = opts.markdown ? body : substituteTurnstileSitekey(body, env);
+  const substituted = withSitekey.replaceAll('{{WEB_BOARD_ROWS}}', () => slice);
   const headers = new Headers(upstream.headers);
   headers.delete('etag');
   headers.delete('last-modified');

@@ -3,8 +3,11 @@
 // absolute sitemap + llms.txt recovery links for the request origin so
 // staging never emits the production host.
 
+import { escHtml } from '../shared/esc-html';
+import { mdLinkDestination } from '../shared/md-inline';
+
 export function notFoundMarkdown(origin: string): string {
-  const base = origin.replace(/\/$/, '');
+  const base = mdLinkDestination(origin.replace(/\/$/, ''));
   return `# Not found
 
 This path is not a page on this site. Recover from the machine index:
@@ -15,7 +18,7 @@ This path is not a page on this site. Recover from the machine index:
 }
 
 export function notFoundHtml(origin: string): string {
-  const base = origin.replace(/\/$/, '');
+  const base = escHtml(origin.replace(/\/$/, ''));
   const sitemap = `${base}/sitemap.xml`;
   const llms = `${base}/llms.txt`;
   return `<!doctype html>

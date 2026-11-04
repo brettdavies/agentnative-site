@@ -152,8 +152,13 @@ describe('JSON-LD graph', () => {
     // The node's stand-in rides in the graph as a bare string, so the Worker
     // can swap the quoted token for the real node at request time.
     expect(graph as unknown as string[]).toContain('{{BREADCRUMB_JSONLD}}');
+    // Its article fields sit in JSON rather than HTML, so they take their own
+    // tokens and the Worker escapes them for that context.
     const article = nodeOf(graph, 'TechArticle');
-    expect(article?.url).toBe('https://anc.dev{{CANONICAL_PATH}}');
+    expect(article?.url).toBe('https://anc.dev{{JSONLD_CANONICAL_PATH}}');
+    expect(article?.headline).toBe('{{JSONLD_TITLE}}');
+    expect(article?.description).toBe('{{JSONLD_DESCRIPTION}}');
+    expect(article?.image).toBe('{{JSONLD_OG_IMAGE}}');
   });
 
   test('both applications state the version a reader would install', () => {

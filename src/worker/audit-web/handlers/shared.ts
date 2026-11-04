@@ -90,7 +90,12 @@ function originOf(url: string | null): string {
  */
 export function substituteEndpoint(value: string, mcpEndpoint: string | null): string {
   if (!value.includes('{mcp_endpoint}') && !value.includes('{mcp_origin}')) return value;
-  return value.replaceAll('{mcp_endpoint}', mcpEndpoint ?? '').replaceAll('{mcp_origin}', originOf(mcpEndpoint));
+  // One pass with a function replacement, because a declared endpoint is the
+  // site's own text: a string replacement expands `$&` and its siblings in it,
+  // and a second pass would fill a token it spells out.
+  return value.replace(/\{mcp_(endpoint|origin)\}/g, (_match, which: string) =>
+    which === 'endpoint' ? (mcpEndpoint ?? '') : originOf(mcpEndpoint),
+  );
 }
 
 type RedirectPolicy = Pick<GuardedFetchOptions, 'refuseRedirects' | 'crossOriginRedirects'>;
@@ -120,7 +125,7 @@ export function endpointRedirects(rawPath: string, followed: boolean | undefined
 
 /** Replace the `{host}` token used by DoH record names. */
 export function substituteHost(value: string, host: string): string {
-  return value.replaceAll('{host}', host);
+  return value.replaceAll('{host}', () => host);
 }
 
 /** Convert a check's optional `with.timeout` (seconds) to ms, else the default. */

@@ -340,6 +340,23 @@ describe('buildWebSummaryMarkdown (U14)', () => {
     expect(fences.length % 2).toBe(0);
     expect(rendered).not.toContain('\n```\nbreakout');
   });
+
+  // Every backtick is escaped here, so no code span survives to shield a link:
+  // a link inside backticks must be escaped along with everything else.
+  test('probed-server evidence cannot form a link, inside backticks or out', () => {
+    const scorecard = webScorecard();
+    scorecard.results = scorecard.results.map((row) =>
+      row.id === 'openapi' ? { ...row, evidence: '`[a](https://x.example)` [b](https://x.example) <c>' } : row,
+    ) as typeof scorecard.results;
+    const rendered = buildWebSummaryMarkdown({
+      scorecard,
+      domain: 'example.com',
+      targetUrl: 'https://example.com/',
+      remediation: REMEDIATION_FIXTURE,
+      origin: 'https://anc.dev',
+    });
+    expect(rendered).toContain('\\`[a\\](https://x.example)\\` [b\\](https://x.example) \\<c>');
+  });
 });
 
 // U3/KTD2: the rendered row is the canonical record, so every

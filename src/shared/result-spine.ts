@@ -106,6 +106,12 @@ export function resultFrontMatter(input: { target: string; lane: Lane; tier: Res
   return lines.join('\n');
 }
 
+// `JSON.stringify` leaves these raw, and a reader that splits lines on Unicode's
+// rules would see the rest of the value start a line of its own. YAML and JSON
+// both read `\uXXXX` back as the original character.
 function yamlString(value: string): string {
-  return JSON.stringify(value);
+  return JSON.stringify(value).replace(
+    /[\u007f-\u009f\u2028\u2029]/g,
+    (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`,
+  );
 }
