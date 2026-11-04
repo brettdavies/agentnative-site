@@ -30,9 +30,6 @@ const STAGING_BASE = process.env.ANC_STAGING_BASE_URL;
 
 test.skip(!STAGING_BASE, 'ANC_STAGING_BASE_URL not set — opt-in staging web-audit suite.');
 
-// Target both `page` navigations and `request` calls at the staging Worker.
-test.use({ baseURL: STAGING_BASE });
-
 const TARGET_DOMAIN = 'anc.dev';
 
 /**
@@ -710,13 +707,13 @@ test.describe('web audit: the /scoring progress page', () => {
 
 test.describe('@render web audit: the Access session stays on its host', () => {
   test('a page sends the session cookie to staging and to no other host', async ({ page, context, baseURL }) => {
-    const sent: Array<Promise<{ url: string; cookie: string }>> = [];
+    const sent: Array<Promise<{ url: string; carried: string }>> = [];
     page.on('request', (req) => {
       sent.push(
         req
           .allHeaders()
-          .then((headers) => ({ url: req.url(), cookie: headers.cookie ?? '' }))
-          .catch(() => ({ url: req.url(), cookie: '' })),
+          .then((headers) => ({ url: req.url(), carried: headers.cookie ?? '' }))
+          .catch(() => ({ url: req.url(), carried: '' })),
       );
     });
     await page.goto('/audit');
@@ -727,14 +724,14 @@ test.describe('@render web audit: the Access session stays on its host', () => {
     test.skip(!session, 'the target has no Access wall, so the run holds no session');
 
     const home = new URL(page.url()).hostname;
-    // Focus is the first interaction, which loads the Turnstile script from
-    // the third party a context-wide header would have reached.
+    // Focus is the first interaction, which loads the Turnstile script from a
+    // third party.
     const turnstile = page.waitForRequest((req) => new URL(req.url()).hostname === 'challenges.cloudflare.com');
     await page.locator('[data-audit-target]').focus();
     await turnstile;
 
     const requests = await Promise.all(sent);
-    const carrying = requests.filter((req) => req.cookie.includes(session?.value ?? '\0'));
+    const carrying = requests.filter((req) => req.carried.includes(session?.value ?? '\0'));
     const offHost = requests.filter((req) => new URL(req.url).hostname !== home);
     expect(offHost.length, 'the page reached no third party, so this proved nothing').toBeGreaterThan(0);
     expect(carrying.length, 'the browser sent the cookie nowhere, so Access never saw it').toBeGreaterThan(0);

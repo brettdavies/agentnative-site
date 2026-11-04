@@ -8,19 +8,22 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdtemp, readdir, readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
-import { isStagingUrl } from '../scripts/web-audit/staging-host';
+import { isStagingUrl, STAGING_HOSTNAME } from '../scripts/web-audit/staging-host';
 import globalSetup, { AccessSessionError, type AccessSessionReason, mintAccessState } from './e2e/access-session';
 
 const REPO_ROOT = join(import.meta.dir, '..');
 const SESSION_MODULE = 'tests/e2e/access-session.ts';
+const LIVE_SCOPE_SPEC = 'tests/e2e/web-audit.e2e.ts';
 const CONFIG = 'playwright.config.ts';
 
 const ID = 'fixture-client-id';
 const SECRET = 'fixture-client-secret';
 const JWT = 'fixture.jwt.value';
-const SET_COOKIE = `CF_Authorization=${JWT}; Expires=Sat, 05 Dec 2026 01:35:52 GMT; Path=/; Secure; HttpOnly; SameSite=none`;
+const EXPIRES = new Date(Date.now() + 3_600_000);
+// No Secure attribute: the jar will not send a Secure cookie to these http fixtures.
+const SET_COOKIE = `CF_Authorization=${JWT}; Expires=${EXPIRES.toUTCString()}; Path=/; HttpOnly; SameSite=none`;
 
-type Seen = { path: string; secret: string | null; cookie: string | null };
+type Seen = { secret: string | null };
 
 const servers: Array<ReturnType<typeof Bun.serve>> = [];
 afterEach(() => {
@@ -28,17 +31,13 @@ afterEach(() => {
 });
 
 /** A local host that records every request it hears. */
-function host(answer: (req: Request) => Response): { base: string; seen: Seen[] } {
+function host(answer: (req: Request) => Response | Promise<Response>): { base: string; seen: Seen[] } {
   const seen: Seen[] = [];
   const server = Bun.serve({
     port: 0,
     hostname: '127.0.0.1',
     fetch(req) {
-      seen.push({
-        path: new URL(req.url).pathname,
-        secret: req.headers.get('cf-access-client-secret'),
-        cookie: req.headers.get('cookie'),
-      });
+      seen.push({ secret: req.headers.get('cf-access-client-secret') });
       return answer(req);
     },
   });
@@ -49,36 +48,45 @@ function host(answer: (req: Request) => Response): { base: string; seen: Seen[] 
 const login = (): Response =>
   new Response(null, { status: 302, headers: { location: 'https://team.example/cdn-cgi/access/login/x?kid=1' } });
 
-const issued = (extra = ''): Response => new Response('ok', { headers: { 'set-cookie': `${SET_COOKIE}${extra}` } });
+const issued = (extra = '', status = 200): Response =>
+  new Response('ok', { status, headers: { 'set-cookie': `${SET_COOKIE}${extra}` } });
 
 /** A target behind Access: the token earns the cookie and the cookie earns the page. */
 function gated(onToken: () => Response = () => issued()): { base: string; seen: Seen[] } {
   return host((req) => {
-    if (req.headers.get('cookie') === `CF_Authorization=${JWT}`) return new Response('ok');
+    if (req.headers.get('cookie')?.includes(`CF_Authorization=${JWT}`)) return new Response('ok');
     return req.headers.get('cf-access-client-secret') ? onToken() : login();
   });
 }
 
-async function reasonOf(attempt: Promise<unknown>): Promise<AccessSessionReason> {
+const credentials = { clientId: ID, clientSecret: SECRET };
+
+async function failureOf(attempt: Promise<unknown>): Promise<AccessSessionError> {
   const err = await attempt.then(
     () => null,
     (e: unknown) => e,
   );
   if (!(err instanceof AccessSessionError)) throw new Error(`expected an AccessSessionError, got ${String(err)}`);
-  return err.reason;
+  return err;
 }
+
+const reasonOf = async (attempt: Promise<unknown>): Promise<AccessSessionReason> => (await failureOf(attempt)).reason;
 
 describe('mintAccessState', () => {
   test('a target with no Access wall never sees the service token', async () => {
     const target = host(() => new Response('ok'));
-    const state = await mintAccessState({ base: target.base, clientId: ID, clientSecret: SECRET });
-    expect(state).toEqual({ cookies: [], origins: [] });
+    expect(await mintAccessState({ base: target.base, ...credentials })).toEqual({ cookies: [], origins: [] });
     expect(target.seen.map((s) => s.secret)).toEqual([null]);
   });
 
-  test('a gated target yields only the cookie, scoped to its own host', async () => {
-    const target = gated();
-    const state = await mintAccessState({ base: target.base, clientId: ID, clientSecret: SECRET });
+  test('a gated target yields only the Access cookie, scoped to its own host', async () => {
+    const target = gated(() => {
+      const headers = new Headers();
+      headers.append('set-cookie', SET_COOKIE);
+      headers.append('set-cookie', 'CF_AppSession=other; Path=/');
+      return new Response('ok', { headers });
+    });
+    const state = await mintAccessState({ base: target.base, ...credentials });
     expect(state).toEqual({
       origins: [],
       cookies: [
@@ -87,9 +95,9 @@ describe('mintAccessState', () => {
           value: JWT,
           domain: '127.0.0.1',
           path: '/',
-          expires: Math.floor(Date.parse('Sat, 05 Dec 2026 01:35:52 GMT') / 1000),
+          expires: Math.floor(EXPIRES.getTime() / 1000),
           httpOnly: true,
-          secure: true,
+          secure: false,
           sameSite: 'None',
         },
       ],
@@ -99,17 +107,33 @@ describe('mintAccessState', () => {
   });
 
   test('a broader Domain attribute does not widen where the cookie goes', async () => {
-    const target = gated(() => issued('; Domain=example.dev'));
-    const state = await mintAccessState({ base: target.base, clientId: ID, clientSecret: SECRET });
-    expect(state.cookies[0]?.domain).toBe('127.0.0.1');
+    const target = gated(() => issued('; Domain=127.0.0.1'));
+    const state = await mintAccessState({ base: target.base, ...credentials });
+    expect(state.cookies.map((cookie) => cookie.domain)).toEqual(['127.0.0.1']);
   });
 
   test('a credentialed request does not follow a redirect to another host', async () => {
     const elsewhere = host(() => new Response('ok'));
     const target = gated(() => new Response(null, { status: 302, headers: { location: `${elsewhere.base}/landed` } }));
-    const attempt = mintAccessState({ base: target.base, clientId: ID, clientSecret: SECRET });
-    expect(await reasonOf(attempt)).toBe('access-token-rejected');
+    await reasonOf(mintAccessState({ base: target.base, ...credentials }));
     expect(elsewhere.seen).toEqual([]);
+  });
+
+  test.each([
+    ['the login redirect', login],
+    ['a 401', () => new Response(null, { status: 401 })],
+    ['a 403', () => new Response(null, { status: 403 })],
+  ])('a token answered with %s is reported as rejected', async (_name, answer) => {
+    const target = gated(answer);
+    expect(await reasonOf(mintAccessState({ base: target.base, ...credentials }))).toBe('access-token-rejected');
+  });
+
+  // Access admitted the token, so the fix is on the Worker: naming the token
+  // here would send the operator to rotate a good credential.
+  test('a Worker error behind a token Access admitted does not blame the token', async () => {
+    const target = gated(() => issued('', 500));
+    const state = await mintAccessState({ base: target.base, ...credentials });
+    expect(state.cookies.map((cookie) => cookie.value)).toEqual([JWT]);
   });
 
   test('a gated target with no credentials stops the run and sends nothing', async () => {
@@ -120,23 +144,46 @@ describe('mintAccessState', () => {
 
   test('strict service token authentication withholding the cookie stops the run', async () => {
     const target = gated(() => new Response('ok'));
-    const attempt = mintAccessState({ base: target.base, clientId: ID, clientSecret: SECRET });
-    expect(await reasonOf(attempt)).toBe('access-cookie-not-issued');
+    expect(await reasonOf(mintAccessState({ base: target.base, ...credentials }))).toBe('access-cookie-not-issued');
   });
 
   test('a cookie Access will not honor stops the run', async () => {
     const target = host((req) => (req.headers.get('cf-access-client-secret') ? issued() : login()));
-    const attempt = mintAccessState({ base: target.base, clientId: ID, clientSecret: SECRET });
-    expect(await reasonOf(attempt)).toBe('access-cookie-refused');
+    expect(await reasonOf(mintAccessState({ base: target.base, ...credentials }))).toBe('access-cookie-refused');
   });
 
-  test('no failure message carries a credential', async () => {
-    const target = gated(() => new Response('ok'));
-    const err = await mintAccessState({ base: target.base, clientId: ID, clientSecret: SECRET }).catch(
-      (e: unknown) => e,
-    );
-    expect(String(err)).not.toContain(SECRET);
-    expect(String(err)).not.toContain(ID);
+  // A bare status can come from any host a mistyped target names, so it earns
+  // no credential, and it must not read as "no wall" either: that would run
+  // every test with no session and report the result as missing features.
+  test.each([401, 403, 500, 503])('a first answer of %i stops the run and spends no token', async (status) => {
+    const target = host(() => new Response(null, { status }));
+    expect(await reasonOf(mintAccessState({ base: target.base, ...credentials }))).toBe('access-target-unavailable');
+    expect(target.seen.map((s) => s.secret)).toEqual([null]);
+  });
+
+  test('a target that does not answer stops the run with a named reason', async () => {
+    const attempt = mintAccessState({ base: 'http://127.0.0.1:1', ...credentials });
+    expect(await reasonOf(attempt)).toBe('access-target-unavailable');
+  });
+
+  test('no failure message carries a credential, even when the credentialed request itself fails', async () => {
+    const withheld = await failureOf(mintAccessState({ base: gated(() => new Response('ok')).base, ...credentials }));
+    expect(String(withheld)).not.toContain(SECRET);
+
+    // Playwright's error for a failed request prints that request's headers.
+    let hangUp = (): void => {};
+    const target = host((req) => {
+      if (!req.headers.get('cf-access-client-secret')) return login();
+      hangUp();
+      return new Promise<Response>(() => {});
+    });
+    hangUp = () => {
+      for (const server of servers) server.stop(true);
+    };
+    const dropped = await failureOf(mintAccessState({ base: target.base, ...credentials }));
+    expect(dropped.reason).toBe('access-target-unavailable');
+    expect(String(dropped)).not.toContain(SECRET);
+    expect(String(dropped)).not.toContain(ID);
   });
 });
 
@@ -228,6 +275,14 @@ describe('live e2e credential guard', () => {
     expect(hits(await e2eSources(), /cf-access-client-|CF_Authorization/i, [SESSION_MODULE])).toEqual([]);
   });
 
+  test('no spec or config sets a cookie header', async () => {
+    expect(hits(await e2eSources(), /\bcookie['"`]?\s*:/i)).toEqual([]);
+  });
+
+  test('only the live scope test reads the session', async () => {
+    expect(hits(await e2eSources(), /ACCESS_COOKIE_NAME/, [SESSION_MODULE, LIVE_SCOPE_SPEC])).toEqual([]);
+  });
+
   test('only the session module and the config read the service token', async () => {
     const sources = await e2eSources();
     expect(hits(sources, /ANC_STAGING_ACCESS_CLIENT_SECRET/, [SESSION_MODULE])).toEqual([]);
@@ -236,18 +291,32 @@ describe('live e2e credential guard', () => {
 
   test('the session module sends every request through the one that refuses redirects', async () => {
     const source = await readFile(join(REPO_ROOT, SESSION_MODULE), 'utf8');
-    expect(source.match(/\bfetch\(/g)).toHaveLength(1);
-    expect(source).toContain("fetch(url, { redirect: 'manual',");
+    expect(source.match(/\bcontext\.(get|post|put|patch|delete|head|fetch)\(/g)).toHaveLength(1);
+    expect(source).not.toMatch(/\bfetch\(/);
+    expect(source).toContain('maxRedirects: 0');
   });
 });
 
 describe('credentials outside Playwright', () => {
-  test('the local audit script sends the token to the staging Worker and no lookalike', () => {
-    expect(isStagingUrl('https://agentnative-site-staging.example-team.workers.dev/')).toBe(true);
+  test('the local audit script treats only the staging Worker itself as staging', () => {
+    expect(isStagingUrl(`https://${STAGING_HOSTNAME}/`)).toBe(true);
+    expect(isStagingUrl(`https://${STAGING_HOSTNAME}/some/path`)).toBe(true);
+    expect(isStagingUrl('https://agentnative-site-staging.another-account.workers.dev/')).toBe(false);
     expect(isStagingUrl('https://agentnative-site-staging.example.com/')).toBe(false);
-    expect(isStagingUrl('https://not-agentnative-site-staging.example-team.workers.dev/')).toBe(false);
-    expect(isStagingUrl('https://example.com/agentnative-site-staging')).toBe(false);
+    expect(isStagingUrl(`https://${STAGING_HOSTNAME}.example.com/`)).toBe(false);
+    expect(isStagingUrl(`https://example.com/${STAGING_HOSTNAME}`)).toBe(false);
     expect(isStagingUrl('https://anc.dev/')).toBe(false);
+  });
+
+  test('run.sh reads the token only when the same predicate says the target is staging', async () => {
+    const script = join(REPO_ROOT, 'scripts', 'web-audit', 'staging-host.ts');
+    const exitOf = (url: string): number | null => Bun.spawnSync(['bun', script, url]).exitCode;
+    expect(exitOf(`https://${STAGING_HOSTNAME}/`)).toBe(0);
+    expect(exitOf('https://agentnative-site-staging.another-account.workers.dev/')).toBe(1);
+
+    const source = await readFile(join(REPO_ROOT, 'scripts', 'web-audit', 'run.sh'), 'utf8');
+    expect(source).toContain('if bun "$REPO_ROOT/scripts/web-audit/staging-host.ts" "$TARGET"');
+    expect(source).not.toContain('*agentnative-site-staging*');
   });
 
   test("preflight redacts the cookie from every failed gate's tail", async () => {

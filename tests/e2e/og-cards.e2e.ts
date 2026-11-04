@@ -16,8 +16,6 @@ const CLIP_WAIT_MS = 60_000;
 
 test.skip(!BASE || HOSTS.length === 0, 'Run through scripts/og/smoke.sh, which deploys the fixture hosts.');
 
-test.use({ baseURL: BASE });
-
 const MCP_HEADERS = { 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
 const HTML = { accept: 'text/html' };
 

@@ -1,6 +1,6 @@
 // Playwright global setup for runs that target a deployed Worker: authenticate
 // to Cloudflare Access once, and start every context from the cookie Access
-// answers with instead of the service token.
+// answers with.
 //
 // Access headers follow a run wherever it goes. Set on a browser context they
 // reach every third-party script a page loads and every host a navigation
@@ -13,6 +13,7 @@
 // cookie admits a request, or stops the run and names the reason.
 
 import { rm, writeFile } from 'node:fs/promises';
+import { type APIRequestContext, request } from '@playwright/test';
 
 export const ACCESS_COOKIE_NAME = 'CF_Authorization';
 const LOGIN_PATH = '/cdn-cgi/access/login';
@@ -21,6 +22,7 @@ const STRICT_AUTH_DOCS =
 const REQUEST_TIMEOUT_MS = 30_000;
 
 export type AccessSessionReason =
+  | 'access-target-unavailable'
   | 'access-credentials-missing'
   | 'access-token-rejected'
   | 'access-cookie-not-issued'
@@ -36,18 +38,7 @@ export class AccessSessionError extends Error {
   }
 }
 
-export type AccessCookie = {
-  name: string;
-  value: string;
-  domain: string;
-  path: string;
-  expires: number;
-  httpOnly: boolean;
-  secure: boolean;
-  sameSite: 'Strict' | 'Lax' | 'None';
-};
-
-export type AccessStorageState = { cookies: AccessCookie[]; origins: [] };
+export type AccessStorageState = Awaited<ReturnType<APIRequestContext['storageState']>>;
 
 export type MintInput = {
   base: string;
@@ -55,57 +46,60 @@ export type MintInput = {
   clientSecret?: string;
 };
 
-/** A credential on a followed request goes wherever the redirect points, so nothing here follows one. */
-function getWithoutFollowing(url: URL, headers: Record<string, string> = {}): Promise<Response> {
-  return fetch(url, { redirect: 'manual', headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
-}
-
-/** Access answers an unauthenticated request with its login redirect, or 401 where an application opts into that. */
-function isAccessWall(res: Response): boolean {
-  if (res.status === 401) return true;
-  if (res.status < 300 || res.status >= 400) return false;
-  const location = res.headers.get('location');
-  return location !== null && new URL(location, res.url).pathname.startsWith(LOGIN_PATH);
-}
+type Answer = { status: number; location: string | undefined; state: AccessStorageState };
 
 /**
- * The domain is pinned to the target rather than read from the header, so a
- * broader Domain attribute cannot widen where the run sends the cookie.
+ * One request in its own context, which never follows a redirect: a credential
+ * on a followed request goes wherever the redirect points.
  */
-function parseAccessCookie(setCookie: string[], hostname: string): AccessCookie | null {
-  for (const line of setCookie) {
-    const [pair = '', ...attributes] = line.split(';').map((part) => part.trim());
-    const separator = pair.indexOf('=');
-    if (pair.slice(0, separator) !== ACCESS_COOKIE_NAME) continue;
-    const value = pair.slice(separator + 1);
-    if (value.length === 0) continue;
-    const attribute = (name: string): string | undefined =>
-      attributes.find((a) => a.toLowerCase().startsWith(`${name}=`))?.slice(name.length + 1);
-    const flag = (name: string): boolean => attributes.some((a) => a.toLowerCase() === name);
-    const expires = attribute('expires');
-    const sameSite = attribute('samesite')?.toLowerCase();
-    return {
-      name: ACCESS_COOKIE_NAME,
-      value,
-      domain: hostname,
-      path: attribute('path') ?? '/',
-      expires: expires ? Math.floor(Date.parse(expires) / 1000) : -1,
-      httpOnly: flag('httponly'),
-      secure: flag('secure'),
-      sameSite: sameSite === 'strict' ? 'Strict' : sameSite === 'lax' ? 'Lax' : 'None',
-    };
+async function visit(
+  root: URL,
+  options: { headers?: Record<string, string>; storageState?: AccessStorageState } = {},
+): Promise<Answer> {
+  const context = await request.newContext({ storageState: options.storageState });
+  try {
+    const res = await context.get(root.href, {
+      headers: options.headers,
+      maxRedirects: 0,
+      timeout: REQUEST_TIMEOUT_MS,
+    });
+    return { status: res.status(), location: res.headers().location, state: await context.storageState() };
+  } catch (err) {
+    // First line only: the rest of Playwright's message is a call log that
+    // prints the request's headers, the service token included.
+    const reason = (err instanceof Error ? err.message : String(err)).split('\n')[0];
+    throw new AccessSessionError('access-target-unavailable', `${root.origin} did not answer: ${reason}`);
+  } finally {
+    await context.dispose();
   }
-  return null;
+}
+
+function isLoginRedirect(answer: Answer): boolean {
+  return answer.status >= 300 && answer.status < 400 && answer.location?.includes(LOGIN_PATH) === true;
+}
+
+function isRefused(answer: Answer): boolean {
+  return isLoginRedirect(answer) || answer.status === 401 || answer.status === 403;
 }
 
 /**
  * The storage state a run's contexts start from: empty for a target with no
  * Access wall, which never sees the service token, otherwise the one cookie
- * Access issued.
+ * Access issued. Only the login redirect counts as a wall, because a bare 401
+ * or 403 can come from any host a mistyped target names.
  */
 export async function mintAccessState(input: MintInput): Promise<AccessStorageState> {
   const root = new URL('/', input.base);
-  if (!isAccessWall(await getWithoutFollowing(root))) return { cookies: [], origins: [] };
+  const open = await visit(root);
+  if (!isLoginRedirect(open)) {
+    if (open.status >= 400) {
+      throw new AccessSessionError(
+        'access-target-unavailable',
+        `${root.origin} answered ${open.status} with no credential, and that is not the Access login redirect.`,
+      );
+    }
+    return { cookies: [], origins: [] };
+  }
 
   if (!input.clientId || !input.clientSecret) {
     throw new AccessSessionError(
@@ -114,33 +108,35 @@ export async function mintAccessState(input: MintInput): Promise<AccessStorageSt
     );
   }
 
-  const minted = await getWithoutFollowing(root, {
-    'CF-Access-Client-Id': input.clientId,
-    'CF-Access-Client-Secret': input.clientSecret,
+  const minted = await visit(root, {
+    headers: { 'CF-Access-Client-Id': input.clientId, 'CF-Access-Client-Secret': input.clientSecret },
   });
-  if (minted.status < 200 || minted.status >= 300) {
+  if (isRefused(minted)) {
     throw new AccessSessionError(
       'access-token-rejected',
       `Access answered ${minted.status} to the service token: rotate it or re-admit it on the Access application.`,
     );
   }
 
-  const cookie = parseAccessCookie(minted.headers.getSetCookie(), root.hostname);
-  if (!cookie) {
+  const issued = minted.state.cookies.find((cookie) => cookie.name === ACCESS_COOKIE_NAME);
+  if (!issued) {
     throw new AccessSessionError(
       'access-cookie-not-issued',
-      `Access admitted the service token but set no ${ACCESS_COOKIE_NAME} cookie. Strict service token authentication withholds it: ${STRICT_AUTH_DOCS}`,
+      `The service token got ${minted.status} and no ${ACCESS_COOKIE_NAME} cookie. Strict service token authentication withholds it: ${STRICT_AUTH_DOCS}`,
     );
   }
 
-  const check = await getWithoutFollowing(root, { cookie: `${ACCESS_COOKIE_NAME}=${cookie.value}` });
-  if (check.status === 403 || isAccessWall(check)) {
+  // Pinned to the target, so a broader Domain attribute cannot widen where the
+  // run sends the cookie.
+  const state: AccessStorageState = { cookies: [{ ...issued, domain: root.hostname }], origins: [] };
+  const check = await visit(root, { storageState: state });
+  if (isRefused(check)) {
     throw new AccessSessionError(
       'access-cookie-refused',
       `Access answered ${check.status} to the ${ACCESS_COOKIE_NAME} cookie it just issued: ${STRICT_AUTH_DOCS}`,
     );
   }
-  return { cookies: [cookie], origins: [] };
+  return state;
 }
 
 /**

@@ -49,9 +49,8 @@ async function warmThenGet(
   path: string,
   extra: Record<string, string>,
 ) {
-  const headers = { ...extra };
-  await request.get(`${STAGING_BASE}${path}`, { headers });
-  return request.get(`${STAGING_BASE}${path}`, { headers });
+  await request.get(`${STAGING_BASE}${path}`, { headers: extra });
+  return request.get(`${STAGING_BASE}${path}`, { headers: extra });
 }
 
 test.describe('skip-Worker HIT — staging Workers Caching', () => {
@@ -151,7 +150,7 @@ test.describe('skip-Worker HIT — staging Workers Caching', () => {
 
   test('GET /scoring is not a skip-Worker HIT', async ({ request }) => {
     for (const path of ['/scoring', '/scoring?target=ripgrep', '/scoring.md']) {
-      const res = await request.get(`${STAGING_BASE}${path}`, { headers: { ...BROWSER } });
+      const res = await request.get(`${STAGING_BASE}${path}`, { headers: BROWSER });
       expect(res.headers()['cf-cache-status']?.toUpperCase()).not.toBe('HIT');
       expect(res.headers()['cache-control'] ?? '').toContain('no-store');
     }
@@ -170,7 +169,7 @@ test.describe('skip-Worker HIT — staging Workers Caching', () => {
 
   test('a never-audited host 404 is not a skip-Worker HIT', async ({ request }) => {
     const res = await request.get(`${STAGING_BASE}/score/never-audited.dev`, {
-      headers: { ...BROWSER },
+      headers: BROWSER,
     });
     expect(res.status()).toBe(404);
     expect(res.headers()['cf-cache-status']?.toUpperCase()).not.toBe('HIT');

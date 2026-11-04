@@ -17,12 +17,12 @@ import { type AuditEvent, runWebAudit } from '../../src/worker/audit-web/engine'
 import { ALWAYS_ADMIT_BUDGET } from '../../src/worker/audit-web/follow-requests';
 import type { WebAuditRegistry } from '../../src/worker/audit-web/registry';
 import { SPEC_VERSION } from '../../src/worker/spec-version.gen';
-import { isStagingUrl } from './staging-host';
+import { isStagingUrl, STAGING_HOSTNAME } from './staging-host';
 
 type Scorecard = Extract<AuditEvent, { type: 'complete' }>['scorecard'];
 
 const REPO_ROOT = join(import.meta.dir, '..', '..');
-const DEFAULT_TARGET = process.env.STAGING_URL ?? 'https://agentnative-site-staging.brettdavies.workers.dev/';
+const DEFAULT_TARGET = process.env.STAGING_URL ?? `https://${STAGING_HOSTNAME}/`;
 
 // Exit code by status so `--check <id>` can gate CI/agents: 0 pass, 1 the
 // surface exists but fails, 3 the check could not be evaluated.
