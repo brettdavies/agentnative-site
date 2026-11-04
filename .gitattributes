@@ -29,3 +29,7 @@
 # lines shifts the byte offsets its xref table records.
 *.pdf binary
 # <<< canonical gitattributes <<<
+
+# The CLI vendoring contract: generated data and fixtures that tests and the CLI
+# compare byte for byte.
+src/data/web-audit/contract/** -text

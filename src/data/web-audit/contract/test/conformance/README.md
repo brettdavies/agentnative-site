@@ -9,7 +9,7 @@ and `tests/web-audit-conformance-corpus.test.ts` fails when the two disagree.
 ## Layout
 
 ```text
-tests/fixtures/web-audit-conformance/
+src/data/web-audit/contract/test/conformance/
   README.md                        this file
   regex-parity.json                every registry pattern x a fixed probe table -> RegExp boolean
   scores.json                      every scenario's scores and row statuses, one line per row

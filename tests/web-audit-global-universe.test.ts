@@ -11,6 +11,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
+import { REGISTRY_PATH, REPO_ROOT, SCENARIOS_DIR } from '../scripts/web-audit/contract-paths';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import type { NaReason } from '../src/shared/web-audit-findings';
 import type { AntecedentToken, WebAuditRegistry } from '../src/worker/audit-web/registry';
@@ -22,17 +23,7 @@ import {
   type WebScorecard,
 } from '../src/worker/audit-web/scorecard';
 
-const REPO_ROOT = new URL('..', import.meta.url).pathname;
-const REGISTRY_PATH = join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml');
-const PROTECTED_FIXTURE = join(
-  REPO_ROOT,
-  'tests',
-  'fixtures',
-  'web-audit-conformance',
-  'scenarios',
-  'auth-own-endpoint',
-  'scorecard.json',
-);
+const PROTECTED_FIXTURE = join(SCENARIOS_DIR, 'auth-own-endpoint', 'scorecard.json');
 
 const registry = normalizeWebAuditRegistry(
   yaml.load(await readFile(REGISTRY_PATH, 'utf8')) as object,

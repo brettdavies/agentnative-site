@@ -7,7 +7,7 @@
 // module emits into the corpus directory.
 
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { relative } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../../src/build/13-web-audit-registry.mjs';
 import type { ExpectBlock } from '../../src/worker/audit-web/assert';
@@ -16,11 +16,7 @@ import { ALWAYS_ADMIT_BUDGET } from '../../src/worker/audit-web/follow-requests'
 import type { WebAuditRegistry, WebSiteType } from '../../src/worker/audit-web/registry';
 import type { NaReason, ScorecardStatus, WebScorecard } from '../../src/worker/audit-web/scorecard';
 import { SCENARIOS } from './conformance-scenarios';
-
-export const REPO_ROOT = join(import.meta.dir, '..', '..');
-export const REGISTRY_PATH = join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml');
-export const CORPUS_DIR = join(REPO_ROOT, 'tests', 'fixtures', 'web-audit-conformance');
-export const SCENARIOS_DIR = join(CORPUS_DIR, 'scenarios');
+import { CORPUS_DIR, REGISTRY_PATH, REPO_ROOT } from './contract-paths';
 
 /** The clock every scenario runs under; the engine's deadline never fires. */
 const FIXED_NOW_MS = Date.UTC(2026, 0, 1);
@@ -462,7 +458,7 @@ and \`tests/web-audit-conformance-corpus.test.ts\` fails when the two disagree.
 ## Layout
 
 \`\`\`text
-tests/fixtures/web-audit-conformance/
+${relative(REPO_ROOT, CORPUS_DIR)}/
   README.md                        this file
   regex-parity.json                every registry pattern x a fixed probe table -> RegExp boolean
   scores.json                      every scenario's scores and row statuses, one line per row

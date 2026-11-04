@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// Writes the web-audit conformance corpus (tests/fixtures/web-audit-conformance)
+// Writes the web-audit conformance corpus (the contract's test/conformance)
 // from the scenarios in conformance-scenarios.ts, or checks that the committed
 // corpus is current.
 //
@@ -9,8 +9,9 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { CORPUS_DIR, generateCorpus, loadRegistry, runScenario } from './conformance-corpus';
+import { generateCorpus, loadRegistry, runScenario } from './conformance-corpus';
 import { SCENARIOS } from './conformance-scenarios';
+import { CORPUS_DIR } from './contract-paths';
 
 function committed(): Map<string, string> {
   const out = new Map<string, string>();

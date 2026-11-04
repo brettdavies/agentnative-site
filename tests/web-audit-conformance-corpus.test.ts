@@ -7,14 +7,9 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  CORPUS_DIR,
-  generateCorpus,
-  loadRegistry,
-  REGISTRY_PATH,
-  SCENARIOS_DIR,
-} from '../scripts/web-audit/conformance-corpus';
+import { generateCorpus, loadRegistry } from '../scripts/web-audit/conformance-corpus';
 import { SCENARIOS } from '../scripts/web-audit/conformance-scenarios';
+import { CORPUS_DIR, REGISTRY_PATH, SCENARIOS_DIR } from '../scripts/web-audit/contract-paths';
 import { scoreWebAudit, universeMaxOf } from '../src/worker/audit-web/score';
 import type { WebScorecard } from '../src/worker/audit-web/scorecard';
 
