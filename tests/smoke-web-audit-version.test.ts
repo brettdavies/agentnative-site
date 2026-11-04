@@ -3,6 +3,7 @@
 // can break has to fail it. Runs the real script against a local server.
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -45,6 +46,10 @@ const ANSWERS: Record<string, () => Response | Promise<Response>> = {
   '/jsonp': () => new Response(JSON.stringify(VALID), { headers: { 'content-type': 'application/jsonp' } }),
   '/two-documents': () => new Response(`${JSON.stringify(VALID)}\n${JSON.stringify(VALID)}`, { headers: JSON_HEADERS }),
   '/prerelease': () => Response.json({ ...VALID, spec_version: '0.8.0-rc.1' }, { headers: JSON_HEADERS }),
+  '/old-body-once': () => {
+    oldBodiesLeft -= 1;
+    return oldBodiesLeft >= 0 ? ANSWERS['/missing-key']() : ANSWERS['/valid']();
+  },
   '/stale-once': () => {
     staleAnswersLeft -= 1;
     return staleAnswersLeft >= 0 ? new Response('not found', { status: 404 }) : ANSWERS['/valid']();
@@ -57,6 +62,7 @@ const { CF_ACCESS_CLIENT_ID: _id, CF_ACCESS_CLIENT_SECRET: _secret, ...callerEnv
 
 let server: ReturnType<typeof Bun.serve>;
 let staleAnswersLeft = 0;
+let oldBodiesLeft = 0;
 let lastHeaders: Record<string, string> = {};
 
 beforeAll(() => {
@@ -108,7 +114,6 @@ describe('scripts/smoke-web-audit-version.sh', () => {
     ['text', 'expected application/json'],
     ['html', 'expected application/json'],
     ['not-json', 'broke the contract'],
-    ['extra-key', 'broke the contract'],
     ['missing-key', 'broke the contract'],
     ['full-digest', 'broke the contract'],
     ['number', 'broke the contract'],
@@ -131,11 +136,24 @@ describe('scripts/smoke-web-audit-version.sh', () => {
     expect((await smoke(fixture('prerelease'))).exitCode).toBe(0);
   });
 
+  test('an additional field passes, so adding one does not need this script to change first', async () => {
+    expect((await smoke(fixture('extra-key'))).exitCode).toBe(0);
+  });
+
   // The window a deploy's retries exist for: a stale isolate answers 404, then
   // the new version answers.
   test('a retry that succeeds passes', async () => {
     staleAnswersLeft = 1;
     const { exitCode, stdout, stderr } = await smoke(fixture('stale-once'), { SMOKE_RETRIES: '1' });
+    expect(`${exitCode} ${stderr}`).toStartWith('0 ');
+    expect(stdout).toContain('PASS');
+  }, 30_000);
+
+  // An isolate still on the previous version answers 200 with its own body once a
+  // later release has changed the fields.
+  test('a retry that replaces a stale 200 body passes', async () => {
+    oldBodiesLeft = 1;
+    const { exitCode, stdout, stderr } = await smoke(fixture('old-body-once'), { SMOKE_RETRIES: '1' });
     expect(`${exitCode} ${stderr}`).toStartWith('0 ');
     expect(stdout).toContain('PASS');
   }, 30_000);
@@ -231,6 +249,8 @@ describe('scripts/smoke-web-audit-version.sh', () => {
     ['a leading dot', 'https://.workers.dev'],
     ['a known host used as userinfo', 'https://anc.dev:pw@evil.example'],
     ['a suffix smuggled past a backslash', 'https://evil.example\\.workers.dev'],
+    ['a query string', 'https://anc.dev?x=1'],
+    ['a fragment', 'https://anc.dev#a'],
   ] as const) {
     const credentialSets: Record<string, string>[] = [
       {},
@@ -244,6 +264,51 @@ describe('scripts/smoke-web-audit-version.sh', () => {
         expect(stderr).toContain('full http(s) origin');
       });
     }
+  }
+
+  for (const [label, secret] of [
+    ['a quote', 'sec"ret'],
+    ['a backslash', 'sec\\ret'],
+    ['a line break', 'sec\nurl = https://evil.example'],
+  ] as const) {
+    test(`a credential holding ${label} is a prerequisite failure, and its value is not printed`, async () => {
+      const { exitCode, stdout, stderr } = await smoke(fixture('valid'), {
+        CF_ACCESS_CLIENT_ID: 'id-from-env',
+        CF_ACCESS_CLIENT_SECRET: secret,
+      });
+      expect(exitCode).toBe(2);
+      expect(stderr).toContain('CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET');
+      expect(`${stdout}${stderr}`).not.toContain('sec');
+    });
+  }
+
+  // A stub curl, because this is about the rail, not the network. Read from the
+  // file the script reads, so a rename there fails here rather than on a deploy.
+  for (const name of ['STAGING_URL_DEFAULT', 'PROD_URL_DEFAULT']) {
+    test(`Access credentials reach ${name}, and curl never routes localhost through a proxy`, async () => {
+      const env = readFileSync(join(REPO_ROOT, 'scripts/release/release.env'), 'utf8');
+      const origin = env.match(new RegExp(`^${name}="([^"]+)"$`, 'm'))?.[1];
+      expect(origin).toStartWith('https://');
+      const dir = await mkdtemp(join(tmpdir(), 'smoke-origin-'));
+      try {
+        const called = join(dir, 'called');
+        const stub = join(dir, 'curl');
+        await writeFile(stub, `#!/usr/bin/env bash\nprintf '%s\\n' "$@" >"${called}"\nexit 7\n`);
+        await chmod(stub, 0o755);
+        const { exitCode } = await smoke(`${origin}`, {
+          CF_ACCESS_CLIENT_ID: 'id-from-env',
+          CF_ACCESS_CLIENT_SECRET: 'secret-from-env',
+          PATH: `${dir}:${process.env.PATH}`,
+        });
+        expect(exitCode).toBe(1);
+        const args = await readFile(called, 'utf8');
+        expect(args).toContain(`${origin}/api/web-audit/version`);
+        expect(args).toContain('--noproxy');
+        expect(args).not.toContain('secret-from-env');
+      } finally {
+        await rm(dir, { recursive: true });
+      }
+    });
   }
 
   for (const name of ['SMOKE_RETRIES', 'SMOKE_RETRY_DELAY']) {

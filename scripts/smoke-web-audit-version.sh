@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Post-deploy smoke for the web-audit version signal. Exits 0 when
-# GET /api/web-audit/version answers 200 with JSON holding exactly its three
-# fields, each in its expected shape; exits non-zero otherwise.
+# GET /api/web-audit/version answers 200 with one JSON document holding its three
+# fields, each in its expected shape; exits non-zero otherwise. An additional
+# field passes, so adding one does not need this script to change first.
 #
 # A client treats any failure of the signal as no signal, so no consumer reports
 # a broken one and this is where it turns red. Invoked from
@@ -16,10 +17,11 @@
 #   CF_ACCESS_CLIENT_SECRET  Sent as CF-Access-Client-Secret, with the id.
 #                            Both are required for staging (Worker is behind
 #                            Cloudflare Access) and unused for production.
-#   SMOKE_RETRIES            Attempts after the first. Default 5, so an isolate
-#                            still running the previous deploy inside the
-#                            propagation window cannot fail the deploy on its
-#                            own.
+#   SMOKE_RETRIES            Attempts after the first, each repeating the whole
+#                            check. Default 5, so an isolate still running the
+#                            previous deploy inside the propagation window
+#                            cannot fail the deploy on its own, whether it
+#                            answers 404 or 200 with its own body.
 #   SMOKE_RETRY_DELAY        Seconds between attempts. Default 10.
 #
 # Credentials go only to the deployed origins named in scripts/release/release.env,
@@ -45,6 +47,7 @@ fi
 authority="${BASE_URL#*://}"
 authority="${authority%%[/?#]*}"
 case "$BASE_URL" in
+  *[?#]*) authority="" ;;
   http://* | https://*) ;;
   *) authority="" ;;
 esac
@@ -79,7 +82,7 @@ may_receive_credentials() {
   # shellcheck source=scripts/release/release.env
   . "$(dirname "$0")/release/release.env"
   local origin="${BASE_URL%%://*}://$authority"
-  [ "$origin" = "$STAGING_URL_DEFAULT" ] || [ "$origin" = "$PROD_URL_DEFAULT" ]
+  [ "$origin" = "${STAGING_URL_DEFAULT:-}" ] || [ "$origin" = "${PROD_URL_DEFAULT:-}" ]
 }
 
 if { [ -n "${CF_ACCESS_CLIENT_ID:-}" ] && [ -z "${CF_ACCESS_CLIENT_SECRET:-}" ]; } ||
@@ -92,6 +95,16 @@ if [ -n "${CF_ACCESS_CLIENT_ID:-}" ] && ! may_receive_credentials; then
   exit 2
 fi
 
+# curl's config format reads these inside quotes, where a quote or backslash
+# changes the value and a line break starts a new directive, which could name
+# another URL and step around the check above.
+case "${CF_ACCESS_CLIENT_ID:-}${CF_ACCESS_CLIENT_SECRET:-}" in
+  *[$'\n\r"\\']*)
+    echo "FATAL: CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET must not hold a quote, backslash, or line break." >&2
+    exit 2
+    ;;
+esac
+
 URL="${BASE_URL%/}/api/web-audit/version"
 
 # A mode-600 config keeps the secret off curl's command line.
@@ -103,42 +116,53 @@ if [ -n "${CF_ACCESS_CLIENT_ID:-}" ]; then
   printf 'header = "CF-Access-Client-Secret: %s"\n' "$CF_ACCESS_CLIENT_SECRET" >>"$curl_config"
 fi
 
-# Stdout alone: curl reports each failed attempt on stderr, and a retry that
-# later succeeds must not read as part of the body. -q comes first so a caller's
-# .curlrc cannot turn on verbose output and print the headers.
-if ! response="$(curl -q -fsS -m 10 --retry "${SMOKE_RETRIES:-5}" --retry-delay "${SMOKE_RETRY_DELAY:-10}" \
-  --retry-all-errors -K "$curl_config" -w '\n%{http_code} %{content_type}' "$URL")"; then
-  echo "FAIL: $URL did not answer 200" >&2
-  exit 1
-fi
-trailer="${response##*$'\n'}"
-body="${response%$'\n'*}"
-status="${trailer%% *}"
-content_type="${trailer#* }"
-
-# curl -f lets 2xx and 3xx through, and Access answers a stale token with a 302.
-if [ "$status" != 200 ]; then
-  echo "FAIL: $URL answered HTTP $status, expected 200. On staging, a redirect usually means missing or stale Access credentials." >&2
-  exit 1
-fi
-
-case "$content_type" in
-  application/json | "application/json;"*) ;;
-  *)
-    echo "FAIL: $URL answered Content-Type '$content_type', expected application/json" >&2
-    exit 1
-    ;;
-esac
-
 # shellcheck disable=SC2016 # the filter is jq, not shell
-contract='(keys == ["registry_fingerprint", "spec_version", "web_schema_version"])
-  and (.registry_fingerprint | type == "string" and test("^[0-9a-f]{12}\\z"))
+contract='(.registry_fingerprint | type == "string" and test("^[0-9a-f]{12}\\z"))
   and (.spec_version | type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?\\z"))
   and (.web_schema_version | type == "string" and test("^[0-9]+\\.[0-9]+\\z"))'
 
-if ! printf '%s' "$body" | "$JQ_BIN" -se "length == 1 and (.[0] | $contract)" >/dev/null 2>&1; then
-  echo "FAIL: $URL broke the contract: $body" >&2
-  exit 1
-fi
+# Stdout alone from curl: a failed attempt's message on stderr must not read as
+# part of the body. -q comes first so a caller's .curlrc cannot turn on verbose
+# output and print the headers, and --noproxy keeps a local proxy from seeing
+# credentials sent to localhost in the clear.
+check_once() {
+  local response trailer status content_type
+  if ! response="$(curl -q -fsS -m 10 --noproxy localhost,127.0.0.1 -K "$curl_config" \
+    -w '\n%{http_code} %{content_type}' "$URL")"; then
+    failure="$URL did not answer 200"
+    return 1
+  fi
+  trailer="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+  status="${trailer%% *}"
+  content_type="${trailer#* }"
+
+  # curl -f lets 2xx and 3xx through, and Access answers a stale token with a 302.
+  if [ "$status" != 200 ]; then
+    failure="$URL answered HTTP $status, expected 200. On staging, a redirect usually means missing or stale Access credentials."
+    return 1
+  fi
+  case "$content_type" in
+    application/json | "application/json;"*) ;;
+    *)
+      failure="$URL answered Content-Type '$content_type', expected application/json"
+      return 1
+      ;;
+  esac
+  if ! printf '%s' "$body" | "$JQ_BIN" -se "length == 1 and (.[0] | $contract)" >/dev/null 2>&1; then
+    failure="$URL broke the contract: $body"
+    return 1
+  fi
+}
+
+retries_left="${SMOKE_RETRIES:-5}"
+until check_once; do
+  if [ "$retries_left" -le 0 ]; then
+    echo "FAIL: $failure" >&2
+    exit 1
+  fi
+  retries_left=$((retries_left - 1))
+  sleep "${SMOKE_RETRY_DELAY:-10}"
+done
 
 echo "PASS: $URL $body"

@@ -292,11 +292,19 @@ describe('the web-audit version smoke stays wired in', () => {
     expect(step).toContain('!cancelled()');
   });
 
-  test('the sweep production leg runs it with no retries, so a flapping signal shows', () => {
+  test('the sweep production leg runs it with no retries, since no deploy is propagating there', () => {
     const step = lastStep(jobBlock(sweepYml, 'sweep-production'));
     expect(step).toContain('scripts/smoke-web-audit-version.sh "$SWEEP_BASE_URL"');
     expect(step).toContain('!cancelled()');
     expect(step).toMatch(/SMOKE_RETRIES:\s*'0'/);
+  });
+
+  test("staging's deploy URL is the origin the smoke may send credentials to", () => {
+    const releaseEnv = readFileSync(join(REPO_ROOT, 'scripts/release/release.env'), 'utf8');
+    const staging = releaseEnv.match(/^STAGING_URL_DEFAULT="([^"]+)"$/m)?.[1];
+    const deployUrl = jobBlock(deployYml, 'staging').match(/^\s+PUBLIC_BASE_URL:\s*(\S+)\s*$/m)?.[1];
+    expect(staging).toBeTruthy();
+    expect(deployUrl).toBe(staging);
   });
 
   test('the postflight pages gate runs it', () => {
@@ -305,5 +313,8 @@ describe('the web-audit version smoke stays wired in', () => {
     expect(gate).toContain('scripts/smoke-web-audit-version.sh');
     expect(gate, 'a red smoke must fail the gate').toContain('gate_fail "${ENV_URL}/api/web-audit/version"');
     expect(gate, 'a release gate still has to ride out a stale isolate').not.toContain('SMOKE_RETRIES=0');
+    expect(gate, 'a refusal or missing token is not a broken surface').toContain(
+      'gate_skip "${ENV_URL}/api/web-audit/version"',
+    );
   });
 });
