@@ -180,10 +180,10 @@ export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
     themeInitJs: themeInitJs ?? '',
     isIndex: false,
     baseUrl,
-    // A result page publishes the read-only worksheet tools to a browser
-    // agent standing on it, so the Worker-rendered shell carries the same
-    // registration script the built entry pages do.
-    extraScripts: [WEBMCP_SCRIPT],
+    // No WebMCP script here: the progress page renders from this template,
+    // and a tool that could reach that page could make it transact. A website
+    // result carries the script in its own body.
+    extraScripts: [],
     ogImage: '{{OG_IMAGE}}',
     ogImageAlt: '{{OG_IMAGE_ALT}}',
     ogVideo: '{{OG_VIDEO}}',

@@ -949,6 +949,25 @@ describe('review pins', () => {
   });
 });
 
+describe('WebMCP script through the built shell', () => {
+  const tags = (html: string): string[] => html.match(/<script[^>]*\/js\/webmcp\.js[^>]*>/g) ?? [];
+
+  async function htmlOf(path: string): Promise<string> {
+    const shell = await readFile(join(REPO_ROOT, 'dist', '_internal', 'score-live-shell.html'), 'utf8');
+    const env = await seededEnv({ assets: { '/_internal/score-live-shell.html': shell } });
+    return (await route(path, env, { accept: 'text/html' })).text();
+  }
+
+  test('a website result loads it once, so its read-only tools register once', async () => {
+    expect(tags(await htmlOf('/score/anc.dev'))).toHaveLength(1);
+  });
+
+  test('a live CLI result and the no-audit page publish no tools', async () => {
+    expect(tags(await htmlOf('/score/ouch'))).toHaveLength(0);
+    expect(tags(await htmlOf('/score/no-such-target'))).toHaveLength(0);
+  });
+});
+
 describe('scorecard social card', () => {
   const R = `-r${SCORE_OG_TEMPLATE}`;
 

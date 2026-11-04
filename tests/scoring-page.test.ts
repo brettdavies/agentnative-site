@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { readFile } from 'node:fs/promises';
 import {
   discoveryLine,
   inlineSubline,
@@ -22,12 +23,12 @@ const SHELL = `<!doctype html><html><head><title>{{TITLE}}</title><meta name="de
 
 const SITEKEY = '1x00000000000000000000AA';
 
-function env(sitekey: string | null = SITEKEY): ScoringPageEnv {
+function env(sitekey: string | null = SITEKEY, shell: string = SHELL): ScoringPageEnv {
   return {
     ASSETS: {
       async fetch(req: Request | string): Promise<Response> {
         const path = new URL(typeof req === 'string' ? req : req.url).pathname;
-        if (path === '/_internal/score-live-shell.html') return new Response(SHELL, { status: 200 });
+        if (path === '/_internal/score-live-shell.html') return new Response(shell, { status: 200 });
         if (path === '/_internal/web-audit-registry.json')
           return new Response(await webRegistryJson(), { status: 200 });
         return new Response('not found', { status: 404 });
@@ -51,6 +52,22 @@ async function page(path: string, e: ScoringPageEnv = env()): Promise<{ res: Res
 beforeEach(() => {
   _resetShellTemplateCache();
   resetWebAuditRegistryCacheForTests();
+});
+
+describe('GET /scoring through the built shell', () => {
+  // A script the shell adds to every page is invisible to the stub above, which
+  // names no scripts at all.
+  test.each([
+    ['a CLI target', '/scoring?target=ripgrep'],
+    ['a website target', '/scoring?target=stripe.dev'],
+    ['no target', '/scoring'],
+    ['a refused target', `/scoring?target=${'a'.repeat(129)}`],
+  ])('%s loads no WebMCP script', async (_name, path) => {
+    const shell = await readFile(new URL('../dist/_internal/score-live-shell.html', import.meta.url), 'utf8');
+    const { html } = await page(path, env(SITEKEY, shell));
+    expect(html).toContain('<script src="/js/theme.js"');
+    expect(html).not.toContain('webmcp');
+  });
 });
 
 describe('GET /scoring?target=', () => {
