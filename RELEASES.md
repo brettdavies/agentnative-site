@@ -684,8 +684,8 @@ bun x wrangler deploy --env staging
 #    handler guard); the upcoming fix returns a clean 503 sandbox_unavailable.
 curl -i https://agentnative-site-staging.brettdavies.workers.dev/api/score \
   -H "Content-Type: application/json" -d '{}' | head -20
-curl -fSs https://agentnative-site-staging.brettdavies.workers.dev/ | head -5
-curl -fSs https://agentnative-site-staging.brettdavies.workers.dev/scorecards | head -5
+curl -fSsL https://agentnative-site-staging.brettdavies.workers.dev/ | head -5
+curl -fSsL https://agentnative-site-staging.brettdavies.workers.dev/scorecards | head -5
 
 # 5a. MANDATORY before v3 — delete the staging container application. Its
 #     internal binding to the old (now-deleted) DO namespace blocks the v3

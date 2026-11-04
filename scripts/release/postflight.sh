@@ -72,6 +72,12 @@
 #   - ~/.claude/skills/1password/scripts/read_field.sh (for staging CF Access token)
 
 set -euo pipefail
+{ set +x; } 2>/dev/null
+
+# Captured and unset before the first child starts, so no child's environment holds them.
+ACCESS_ID="${CF_ACCESS_CLIENT_ID:-}"
+ACCESS_SECRET="${CF_ACCESS_CLIENT_SECRET:-}"
+unset CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 readonly REPO_ROOT
@@ -170,39 +176,34 @@ esac
   exit 2
 }
 
-# Auth setup (staging only). Reads the CF Access service token from 1Password
-# and exports CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET into the env. Every
-# curl below uses `-K "$CF_CONFIG"`; mcp-smoke.sh picks up the same env vars
-# directly. Values never reach argv: shell-builtin printf into a mode-600 file
-# consumed via curl's -K flag.
+# Auth setup (staging only). Holds the CF Access service token, from the exported
+# variables or 1Password, in ACCESS_HEADERS as curl config lines. ecurl hands those to
+# curl through a process substitution, because an EXIT trap cannot clean up a file after
+# a SIGKILL, and config lines never reach argv. mcp-smoke.sh alone gets the values in its
+# environment, from gate_mcp.
 
-CF_CONFIG=""
+ACCESS_HEADERS=""
 FETCH_BODY=$(mktemp)
-trap 'rm -f "$FETCH_BODY" "$CF_CONFIG"' EXIT
+trap 'rm -f "$FETCH_BODY"' EXIT
 maybe_stage_cf_access() {
   [[ "$ENV_AUTH_NEEDED" -eq 1 ]] || return 0
-  [[ -x "$OP_SKILL/read_field.sh" ]] || {
-    echo "warn: 1Password skill not found at $OP_SKILL; staging gates that read the site through CF Access fail" >&2
-    return 0
-  }
-  local cid csec
-  cid=$("$OP_SKILL/read_field.sh" "$OP_ITEM_TOKEN" client_id 2>/dev/null) || return 0
-  csec=$("$OP_SKILL/read_field.sh" "$OP_ITEM_TOKEN" client_secret 2>/dev/null) || return 0
-  [[ -n "$cid" && -n "$csec" ]] || return 0
-
-  export CF_ACCESS_CLIENT_ID="$cid"
-  export CF_ACCESS_CLIENT_SECRET="$csec"
-
-  CF_CONFIG=$(mktemp)
-  chmod 600 "$CF_CONFIG"
-  printf 'header = "CF-Access-Client-Id: %s"\n' "$cid" >>"$CF_CONFIG"
-  printf 'header = "CF-Access-Client-Secret: %s"\n' "$csec" >>"$CF_CONFIG"
+  if [[ -z "$ACCESS_ID" || -z "$ACCESS_SECRET" ]]; then
+    [[ -x "$OP_SKILL/read_field.sh" ]] || {
+      echo "warn: 1Password skill not found at $OP_SKILL; staging gates that read the site through CF Access fail" >&2
+      return 0
+    }
+    ACCESS_ID=$("$OP_SKILL/read_field.sh" "$OP_ITEM_TOKEN" client_id 2>/dev/null) || return 0
+    ACCESS_SECRET=$("$OP_SKILL/read_field.sh" "$OP_ITEM_TOKEN" client_secret 2>/dev/null) || return 0
+  fi
+  [[ -n "$ACCESS_ID" && -n "$ACCESS_SECRET" ]] || return 0
+  printf -v ACCESS_HEADERS 'header = "CF-Access-Client-Id: %s"\nheader = "CF-Access-Client-Secret: %s"\n' \
+    "$ACCESS_ID" "$ACCESS_SECRET"
 }
 
 # Curl wrapper that attaches CF Access headers when staging.
 ecurl() {
-  if [[ -n "$CF_CONFIG" ]]; then
-    curl -K "$CF_CONFIG" "$@"
+  if [[ -n "$ACCESS_HEADERS" ]]; then
+    curl -K <(printf '%s' "$ACCESS_HEADERS") "$@"
   else
     curl "$@"
   fi
@@ -210,10 +211,13 @@ ecurl() {
 
 # Common helpers ------------------------------------------------------------
 
-# Without the token, staging answers with its Access login redirect, so a page row reads
-# as a broken page and a purge check as a skip that exits 0 having verified nothing.
+# Without the token, staging answers with its Access login redirect, so every row would
+# report the redirect rather than the missing token. A local preview sits behind no Access.
 require_access() {
-  [[ "$ENV_AUTH_NEEDED" -eq 0 || -n "$CF_CONFIG" ]] && return 0
+  [[ "$ENV_AUTH_NEEDED" -eq 0 || -n "$ACCESS_HEADERS" ]] && return 0
+  case "$ENV_URL" in
+    http://localhost* | http://127.0.0.1*) return 0 ;;
+  esac
   gate_fail "$ENV_URL $1" "no CF Access service token loaded from 1Password (OP_SKILL=$OP_SKILL), so staging cannot be read"
   return 1
 }
@@ -449,15 +453,16 @@ gate_retired() {
 # The sitemap names the canonical host on every deployment, so an entry on any other
 # host fails, and each entry's path is read from the target: walking the entry itself
 # would test production from a staging run, and send staging's Access credentials there.
-# --retry-max-time sits under the 30 s Retry-After the site answers with during a storage
-# outage, because a walk of many pages would otherwise wait out each one in turn.
+# --retry-max-time sits just under the 30 s Retry-After the site answers with during a
+# storage outage, because a walk of many pages would otherwise wait out each one in turn,
+# and above -m, so an entry that stalls once still gets its retry.
 
 gate_sitemap() {
   header "Sitemap walk against $ENV_URL"
   require_bin curl
   require_access sitemap || return 0
 
-  local locs loc path code failures=0 total=0 canonical=${PROD_URL_DEFAULT:-}
+  local locs loc path code walk_status failures=0 total=0 canonical=${PROD_URL_DEFAULT:-}
   fetch_to --retry-all-errors -m 20 "${ENV_URL}/sitemap.xml"
   locs=$(grep -oE '<loc>[^<]+</loc>' "$FETCH_BODY" | sed -E 's#</?loc>##g' || true)
   if [[ "$FETCH_STATUS" -ne 0 || "$FETCH_CODE" != "200" || -z "$locs" ]]; then
@@ -474,11 +479,12 @@ gate_sitemap() {
     fi
     path=${loc#*://}
     if [[ "$path" == */* ]]; then path=/${path#*/}; else path=/; fi
-    code=$(ecurl -sS -m 15 --retry 2 --retry-all-errors --retry-max-time 15 -o /dev/null -w '%{http_code}' \
-      -H 'Accept: text/html' "${ENV_URL}${path}" 2>/dev/null || true)
+    walk_status=0
+    code=$(ecurl -sS -m 15 --retry 2 --retry-all-errors --retry-max-time 29 -o /dev/null -w '%{http_code}' \
+      -H 'Accept: text/html' "${ENV_URL}${path}" 2>/dev/null) || walk_status=$?
     code=${code:-000}
-    if [[ "$code" != "200" ]]; then
-      gate_fail "sitemap entry ${ENV_URL}${path}" "code=$code"
+    if [[ "$walk_status" -ne 0 || "$code" != "200" ]]; then
+      gate_fail "sitemap entry ${ENV_URL}${path}" "curl exited $walk_status, code=$code"
       failures=$((failures + 1))
     fi
   done <<<"$locs"
@@ -488,13 +494,10 @@ gate_sitemap() {
 }
 
 # Gate: mcp -----------------------------------------------------------------
-# Thin wrapper around scripts/release/mcp-smoke.sh. mcp-smoke.sh reads CF_ACCESS_CLIENT_ID
-# / CF_ACCESS_CLIENT_SECRET from the env, which maybe_stage_cf_access exported
-# above when --env staging.
+# Thin wrapper around scripts/release/mcp-smoke.sh.
 
 gate_mcp() {
-  # mcp-smoke.sh reads exported credentials itself, so those count as a staged token does.
-  [[ -n "${CF_ACCESS_CLIENT_ID:-}" && -n "${CF_ACCESS_CLIENT_SECRET:-}" ]] || require_access mcp || return 0
+  require_access mcp || return 0
 
   # mcp-smoke.sh prints its own section header ("Live MCP surface against $BASE_URL"),
   # so we delegate directly without a duplicate header here.
@@ -509,8 +512,15 @@ gate_mcp() {
   if [[ "$ENV" == "staging" ]]; then
     extra+=(--full-cache-coverage)
   fi
-  delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" \
-    --mcp-binary "$MCP_BINARY" "${extra[@]}"
+  # The credentials go to this child alone, and only for a target behind Access.
+  if [[ -n "$ACCESS_HEADERS" ]]; then
+    CF_ACCESS_CLIENT_ID="$ACCESS_ID" CF_ACCESS_CLIENT_SECRET="$ACCESS_SECRET" \
+      delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" \
+      --mcp-binary "$MCP_BINARY" "${extra[@]}"
+  else
+    delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" \
+      --mcp-binary "$MCP_BINARY" "${extra[@]}"
+  fi
 }
 
 # Gate: purge ----------------------------------------------------------------

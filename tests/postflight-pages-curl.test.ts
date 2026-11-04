@@ -33,6 +33,7 @@ interface Plan {
   home?: Answer[];
   score?: Answer[];
   token?: boolean;
+  staging?: boolean;
 }
 
 function respond(status: string, body: string, headers = ''): string {
@@ -40,7 +41,7 @@ function respond(status: string, body: string, headers = ''): string {
 }
 
 /** The real gate and real curl against a socket that answers `/` and `/api/score` in turn from `plan`. */
-async function gate({ home = ['page'], score = ['score'], token = false }: Plan) {
+async function gate({ home = ['page'], score = ['score'], token = false, staging = token }: Plan) {
   const elsewhere: string[] = [];
   const otherHost = Bun.listen({
     hostname: '127.0.0.1',
@@ -98,10 +99,15 @@ async function gate({ home = ['page'], score = ['score'], token = false }: Plan)
     writeFileSync(join(op, 'read_field.sh'), `#!/usr/bin/env bash\necho ${SECRET}\n`);
     chmodSync(join(op, 'read_field.sh'), 0o755);
     const url = `http://127.0.0.1:${server.port}`;
-    const target = token ? ['--env', 'staging', '--staging-url', url] : ['--env', 'prod', '--prod-url', url];
+    const target = staging ? ['--env', 'staging', '--staging-url', url] : ['--env', 'prod', '--prod-url', url];
     const proc = Bun.spawn(['bash', POSTFLIGHT, ...target, 'pages'], {
       cwd: REPO_ROOT,
-      env: { ...process.env, OP_SKILL: op },
+      env: {
+        ...process.env,
+        OP_SKILL: token ? op : '/nonexistent',
+        CF_ACCESS_CLIENT_ID: '',
+        CF_ACCESS_CLIENT_SECRET: '',
+      },
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -177,6 +183,14 @@ describe('postflight pages gate over real curl', () => {
   }, 30_000);
 });
 
+describe('a staging run against a local preview', () => {
+  test('needs no token, because a local preview sits behind no Access', async () => {
+    const { output } = await gate({ staging: true });
+    expect(output).not.toContain('no CF Access service token');
+    expect(output).toContain('home page renders (has hero__title)');
+  }, 30_000);
+});
+
 describe('fetches carrying the CF Access credentials', () => {
   const CURL = /\be?curl\b/;
   const CREDENTIALED = /\becurl\s|\s-K\s|\s--config\s|\s-H @|CF-Access-Client|ACCESS_HEADERS/;
@@ -224,6 +238,17 @@ describe('fetches carrying the CF Access credentials', () => {
       .filter((line) => /\bcurl\b/.test(line) && line.includes('ENV_URL'));
     expect(recipes.length).toBeGreaterThan(0);
     expect(recipes.filter((line) => FOLLOWS_REDIRECTS.test(line))).toEqual([]);
+  });
+
+  test.each([
+    ['a config file on disk', /-K\s+"?\$/],
+    ['a config written to a file', /header = "CF-Access.*>>/],
+    ['an exported credential', /^\s*export\s+CF_ACCESS_/m],
+  ])('no release script keeps the credentials in %s', (_shape, pattern) => {
+    const offenders = sources
+      .filter((path) => path.startsWith('scripts/release/') && path.endsWith('.sh'))
+      .filter((path) => pattern.test(readFileSync(join(REPO_ROOT, path), 'utf8')));
+    expect(offenders).toEqual([]);
   });
 
   test('every retry in postflight bounds how long curl may sleep through a Retry-After', () => {

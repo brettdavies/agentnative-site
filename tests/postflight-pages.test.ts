@@ -4,19 +4,26 @@
 // curl itself, so those cases live in postflight-pages-curl.test.ts.
 
 import { describe, expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { REPO_ROOT } from './helpers/workflows';
 
 const FAKE_CURL = `#!/usr/bin/env bash
 url="" html="" out=/dev/stdout format=""
+case " $* " in *" fixture-secret "*) echo 'secret in argv' >>"$FAKE_CURL_DIR/credentials.log" ;; esac
+env | grep -q '^CF_ACCESS_' && echo 'secret in environment' >>"$FAKE_CURL_DIR/credentials.log"
 while [ $# -gt 0 ]; do
   case "$1" in
     https://*) url="$1" ;;
     'Accept: text/html') html=1 ;;
     -o) out="$2"; shift ;;
     -w) format="$2"; shift ;;
+    -K)
+      if [ -p "$2" ]; then echo 'config through a pipe' >>"$FAKE_CURL_DIR/credentials.log"
+      else echo 'config in a file' >>"$FAKE_CURL_DIR/credentials.log"; fi
+      grep -q fixture-secret "$2" && echo 'config carries the secret' >>"$FAKE_CURL_DIR/credentials.log"
+      shift ;;
   esac
   shift
 done
@@ -93,18 +100,19 @@ function postflight(
   home: string,
   scorecards: string,
   { gate = 'pages', sitemap = SITEMAP, args = PROD, env = {}, token = false }: Run = {},
-): { status: number; output: string; urls: string[] } {
+): { status: number; output: string; urls: string[]; credentials: string } {
   const bin = mkdtempSync(join(tmpdir(), 'postflight-pages-'));
   try {
     writeFileSync(join(bin, 'curl'), FAKE_CURL);
     chmodSync(join(bin, 'curl'), 0o755);
-    writeFileSync(join(bin, 'read_field.sh'), '#!/usr/bin/env bash\necho fixture-value\n');
+    writeFileSync(join(bin, 'read_field.sh'), '#!/usr/bin/env bash\necho fixture-secret\n');
     chmodSync(join(bin, 'read_field.sh'), 0o755);
     writeFileSync(join(bin, 'home.html'), home);
     writeFileSync(join(bin, 'scorecards.html'), scorecards);
     writeFileSync(join(bin, 'score.json'), SCORE);
     writeFileSync(join(bin, 'sitemap.xml'), sitemap);
     writeFileSync(join(bin, 'urls.log'), '');
+    writeFileSync(join(bin, 'credentials.log'), '');
     const proc = Bun.spawnSync(['bash', join(REPO_ROOT, 'scripts/release/postflight.sh'), ...args, gate], {
       cwd: REPO_ROOT,
       env: {
@@ -112,6 +120,8 @@ function postflight(
         PATH: `${bin}:${process.env.PATH}`,
         FAKE_CURL_DIR: bin,
         OP_SKILL: token ? bin : '/nonexistent',
+        CF_ACCESS_CLIENT_ID: '',
+        CF_ACCESS_CLIENT_SECRET: '',
         ...env,
       },
     });
@@ -119,6 +129,7 @@ function postflight(
       status: proc.exitCode,
       output: proc.stdout.toString() + proc.stderr.toString(),
       urls: readFileSync(join(bin, 'urls.log'), 'utf8').split('\n').filter(Boolean),
+      credentials: readFileSync(join(bin, 'credentials.log'), 'utf8'),
     };
   } finally {
     rmSync(bin, { recursive: true, force: true });
@@ -173,6 +184,35 @@ describe('postflight pages gate', () => {
   });
 });
 
+describe('a run killed before its EXIT trap', () => {
+  test('leaves the Access secret nowhere on disk', async () => {
+    const bin = mkdtempSync(join(tmpdir(), 'postflight-killed-'));
+    const scratch = mkdtempSync(join(tmpdir(), 'postflight-killed-tmp-'));
+    try {
+      writeFileSync(join(bin, 'curl'), `#!/usr/bin/env bash\ntouch "${bin}/started"\nexec sleep 5\n`);
+      chmodSync(join(bin, 'curl'), 0o755);
+      writeFileSync(join(bin, 'read_field.sh'), '#!/usr/bin/env bash\necho fixture-secret\n');
+      chmodSync(join(bin, 'read_field.sh'), 0o755);
+      const proc = Bun.spawn(['bash', join(REPO_ROOT, 'scripts/release/postflight.sh'), ...STAGING, 'pages'], {
+        cwd: REPO_ROOT,
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, OP_SKILL: bin, TMPDIR: scratch },
+        stdout: 'ignore',
+        stderr: 'ignore',
+      });
+      while (!existsSync(join(bin, 'started'))) await Bun.sleep(20);
+      proc.kill('SIGKILL');
+      await proc.exited;
+      const leftBehind = readdirSync(scratch).filter((name) =>
+        readFileSync(join(scratch, name), 'utf8').includes('fixture-secret'),
+      );
+      expect(leftBehind).toEqual([]);
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  }, 15_000);
+});
+
 describe('postflight gates that read staging through CF Access', () => {
   test.each(['pages', 'retired', 'sitemap', 'purge', 'mcp'])('%s fails and names a missing token', (gate) => {
     const { status, output } = postflight(LOGIN, LOGIN, { gate, args: STAGING });
@@ -215,13 +255,56 @@ describe('postflight gates that read staging through CF Access', () => {
     expect(status).toBe(1);
   });
 
-  test('mcp accepts exported credentials, because mcp-smoke.sh reads them itself', () => {
-    const { output } = postflight(HOME, SCORECARDS, {
-      gate: 'mcp',
+  test.each(['pages', 'purge', 'sitemap'])('%s runs on staging with credentials exported instead of staged', (gate) => {
+    const { output, urls, credentials } = postflight(HOME, SCORECARDS, {
+      gate,
       args: STAGING,
       env: { CF_ACCESS_CLIENT_ID: 'fixture-id', CF_ACCESS_CLIENT_SECRET: 'fixture-secret' },
     });
     expect(output).not.toContain('no CF Access service token');
+    expect(urls.length).toBeGreaterThan(0);
+    expect(credentials).toContain('config carries the secret');
+  });
+
+  test('sitemap fails an entry whose transfer failed after it answered 200', () => {
+    const { status, output } = postflight(HOME, SCORECARDS, {
+      gate: 'sitemap',
+      env: { FAKE_WALK_CODE: '200', FAKE_WALK_EXIT: '18' },
+    });
+    expect(output).toContain('curl exited 18, code=200');
+    expect(status).toBe(1);
+  });
+
+  test('mcp runs on staging with credentials exported instead of staged', () => {
+    const { output, credentials } = postflight(HOME, SCORECARDS, {
+      gate: 'mcp',
+      args: STAGING,
+      env: { CF_ACCESS_CLIENT_ID: 'fixture-id', CF_ACCESS_CLIENT_SECRET: 'fixture-secret' },
+    });
+    expect(output).toContain('Live MCP surface');
+    expect(credentials).toContain('config carries the secret');
+  });
+
+  test.each(['pages', 'mcp'])(
+    "%s holds the credentials off disk, out of argv and out of curl's environment",
+    (gate) => {
+      const { credentials } = postflight(HOME, SCORECARDS, { gate, args: STAGING, token: true });
+      expect(credentials).toContain('config through a pipe');
+      expect(credentials).toContain('config carries the secret');
+      expect(credentials).not.toContain('config in a file');
+      expect(credentials).not.toContain('secret in argv');
+      expect(credentials).not.toContain('secret in environment');
+    },
+  );
+
+  test.each(['pages', 'mcp'])('%s against production sends exported staging credentials nowhere', (gate) => {
+    const { output, credentials } = postflight(HOME, SCORECARDS, {
+      gate,
+      env: { CF_ACCESS_CLIENT_ID: 'fixture-id', CF_ACCESS_CLIENT_SECRET: 'fixture-secret' },
+    });
+    expect(output).not.toContain('no CF Access service token');
+    expect(credentials).not.toContain('config carries the secret');
+    expect(credentials).not.toContain('secret in environment');
   });
 
   test('sitemap names where a rejected token was sent', () => {
@@ -277,8 +360,9 @@ describe('postflight gates that read staging through CF Access', () => {
     expect(drifted.status).toBe(1);
   });
 
-  test.each(['retired', 'sitemap', 'purge'])('%s needs no token on production', (gate) => {
-    const { output } = postflight(HOME, SCORECARDS, { gate });
+  test.each(['retired', 'sitemap', 'purge'])('%s needs no token on production, and fetches', (gate) => {
+    const { output, urls } = postflight(HOME, SCORECARDS, { gate });
     expect(output).not.toContain('no CF Access service token');
+    expect(urls.length).toBeGreaterThan(0);
   });
 });
