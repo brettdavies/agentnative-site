@@ -463,7 +463,8 @@ engine against a public URL) and for operating the web-board rescore (weekly cro
 - **Live e2e runs carry the Access cookie, never the service token.** A Playwright run against a deployed Worker
   authenticates once in global setup (`tests/e2e/access-session.ts`): one request that refuses redirects spends the
   service token, and every context starts from the `CF_Authorization` cookie Access answers with. A header reaches every
-  third-party script a page loads and every host a redirect names; a cookie stays on the host that set it. No spec or
+  third-party script a page loads and every host a redirect names; a cookie stays on the host that set it. Setup
+  sends the token only to the staging Worker over https, or to loopback for a fixture. No spec or
   config may set `extraHTTPHeaders` or name the service-token headers (`tests/e2e-access-session.test.ts`). A run
   holding the token records no traces and writes no HTML or JSON report, because Playwright writes request headers into
   all of them and this repo's Actions artifacts are public; a local debug run can pass `--trace on`. Access issues the

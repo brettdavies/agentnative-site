@@ -5,11 +5,17 @@
 // Access wall, and Playwright's own output reaching what CI uploads.
 
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { mkdtemp, readdir, readFile, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
+import type { FullConfig } from '@playwright/test';
 import { isStagingUrl, STAGING_HOSTNAME } from '../scripts/web-audit/staging-host';
-import globalSetup, { AccessSessionError, type AccessSessionReason, mintAccessState } from './e2e/access-session';
+import globalSetup, {
+  AccessSessionError,
+  type AccessSessionReason,
+  mayReceiveToken,
+  mintAccessState,
+} from './e2e/access-session';
 
 const REPO_ROOT = join(import.meta.dir, '..');
 const SESSION_MODULE = 'tests/e2e/access-session.ts';
@@ -155,10 +161,36 @@ describe('mintAccessState', () => {
   // A bare status can come from any host a mistyped target names, so it earns
   // no credential, and it must not read as "no wall" either: that would run
   // every test with no session and report the result as missing features.
-  test.each([401, 403, 500, 503])('a first answer of %i stops the run and spends no token', async (status) => {
-    const target = host(() => new Response(null, { status }));
+  test.each([401, 403, 500, 503, 301, 302])(
+    'a first answer of %i stops the run and spends no token',
+    async (status) => {
+      const target = host(
+        () => new Response(null, { status, headers: { location: 'https://elsewhere.example/landed' } }),
+      );
+      expect(await reasonOf(mintAccessState({ base: target.base, ...credentials }))).toBe('access-target-unavailable');
+      expect(target.seen.map((s) => s.secret)).toEqual([null]);
+    },
+  );
+
+  test('a redirect that only mentions the login path in its query is not the wall', async () => {
+    const target = host(
+      () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: 'https://elsewhere.example/landed?next=/cdn-cgi/access/login/x' },
+        }),
+    );
     expect(await reasonOf(mintAccessState({ base: target.base, ...credentials }))).toBe('access-target-unavailable');
     expect(target.seen.map((s) => s.secret)).toEqual([null]);
+  });
+
+  test('only the staging Worker over https and this machine may receive the token', () => {
+    expect(mayReceiveToken(new URL(`https://${STAGING_HOSTNAME}/`))).toBe(true);
+    expect(mayReceiveToken(new URL('http://127.0.0.1:8787/'))).toBe(true);
+    expect(mayReceiveToken(new URL('http://localhost:8787/'))).toBe(true);
+    expect(mayReceiveToken(new URL(`http://${STAGING_HOSTNAME}/`))).toBe(false);
+    expect(mayReceiveToken(new URL('https://agentnative-site-staging.another-account.workers.dev/'))).toBe(false);
+    expect(mayReceiveToken(new URL('https://anc.dev/'))).toBe(false);
   });
 
   test('a target that does not answer stops the run with a named reason', async () => {
@@ -198,9 +230,13 @@ describe('global setup', () => {
 
   async function run(env: {
     actions: boolean;
+    outputDir?: string;
   }): Promise<{ logged: string[]; statePath: string; done: () => Promise<void> }> {
     const before = Object.fromEntries(VARS.map((name) => [name, process.env[name]]));
     const statePath = join(await mkdtemp(join(tmpdir(), 'anc-access-session-')), 'state.json');
+    const config = {
+      projects: [{ outputDir: env.outputDir ?? join(statePath, 'no-output') }],
+    } as unknown as FullConfig;
     process.env.ANC_STAGING_BASE_URL = gated().base;
     process.env.ANC_E2E_ACCESS_STATE = statePath;
     process.env.ANC_STAGING_ACCESS_CLIENT_ID = ID;
@@ -209,7 +245,7 @@ describe('global setup', () => {
     else delete process.env.GITHUB_ACTIONS;
     const log = spyOn(console, 'log').mockImplementation(() => {});
     try {
-      const done = await globalSetup();
+      const done = await globalSetup(config);
       return { logged: log.mock.calls.map((call) => String(call[0])), statePath, done };
     } finally {
       log.mockRestore();
@@ -236,6 +272,16 @@ describe('global setup', () => {
     await done();
   });
 
+  test("teardown redacts the cookie from a failed test's error context", async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'anc-access-session-output-'));
+    const contextPath = join(outputDir, 'a-failed-test', 'error-context.md');
+    await mkdir(dirname(contextPath), { recursive: true });
+    await writeFile(contextPath, `- cookie: CF_Authorization=${JWT}\n- accept: */*\n`);
+    const { done } = await run({ actions: false, outputDir });
+    await done();
+    expect(await readFile(contextPath, 'utf8')).toBe('- cookie: CF_Authorization=<redacted>\n- accept: */*\n');
+  });
+
   test('prints no cookie off CI', async () => {
     const { logged, done } = await run({ actions: false });
     expect(logged).toEqual([]);
@@ -245,20 +291,31 @@ describe('global setup', () => {
 
 type Source = { path: string; text: string };
 
+// Every spec, the config, and the helpers the specs import, which merge into the
+// same requests.
 async function e2eSources(): Promise<Source[]> {
   const dir = join(REPO_ROOT, 'tests', 'e2e');
   const names = (await readdir(dir, { recursive: true })).filter((name) => name.endsWith('.ts'));
-  const paths = [...names.map((name) => join(dir, name)), join(REPO_ROOT, CONFIG)];
+  const paths = new Set([...names.map((name) => join(dir, name)), join(REPO_ROOT, CONFIG)]);
+  for (const path of [...paths]) {
+    for (const match of (await readFile(path, 'utf8')).matchAll(/from '(\.\.\/helpers\/[^']+)'/g)) {
+      paths.add(join(dirname(path), `${match[1]}.ts`));
+    }
+  }
   return Promise.all(
-    paths.map(async (path) => ({ path: relative(REPO_ROOT, path), text: await readFile(path, 'utf8') })),
+    [...paths].map(async (path) => ({ path: relative(REPO_ROOT, path), text: await readFile(path, 'utf8') })),
   );
 }
+
+const isComment = (line: string): boolean => /^\s*(\/\/|\*|\/\*)/.test(line);
 
 function hits(sources: Source[], pattern: RegExp, except: string[] = []): string[] {
   return sources
     .filter((source) => !except.includes(source.path))
     .flatMap((source) =>
-      source.text.split('\n').flatMap((line, index) => (pattern.test(line) ? [`${source.path}:${index + 1}`] : [])),
+      source.text
+        .split('\n')
+        .flatMap((line, index) => (!isComment(line) && pattern.test(line) ? [`${source.path}:${index + 1}`] : [])),
     );
 }
 
@@ -271,16 +328,23 @@ describe('live e2e credential guard', () => {
 
   // A spec that could build these headers, or copy the cookie into one, could
   // pass them to a request that follows a redirect.
-  test('only the session module names the service-token headers or the cookie', async () => {
-    expect(hits(await e2eSources(), /cf-access-client-|CF_Authorization/i, [SESSION_MODULE])).toEqual([]);
+  test('only the session module names the service-token headers, the Access token header, or the cookie', async () => {
+    const pattern = /cf-access-client-|cf-access-token|cf-access-jwt|CF_Authorization/i;
+    expect(hits(await e2eSources(), pattern, [SESSION_MODULE])).toEqual([]);
   });
 
-  test('no spec or config sets a cookie header', async () => {
-    expect(hits(await e2eSources(), /\bcookie['"`]?\s*:/i)).toEqual([]);
+  test('no spec or config sets a cookie header, in any shape', async () => {
+    const pattern = /\bcookie['"`]?\s*[:,}\]]/i;
+    expect(hits(await e2eSources(), pattern, [SESSION_MODULE])).toEqual([]);
+    for (const shape of ['headers: { cookie }', 'headers: { cookie: value }', "headers.set('cookie', value)"]) {
+      expect(pattern.test(shape)).toBe(true);
+    }
   });
 
   test('only the live scope test reads the session', async () => {
-    expect(hits(await e2eSources(), /ACCESS_COOKIE_NAME/, [SESSION_MODULE, LIVE_SCOPE_SPEC])).toEqual([]);
+    const pattern = /ACCESS_COOKIE_NAME|\.cookies\(|\.storageState\(/;
+    expect(hits(await e2eSources(), pattern, [SESSION_MODULE, LIVE_SCOPE_SPEC])).toEqual([]);
+    expect(hits(await e2eSources(), /ANC_E2E_ACCESS_STATE/, [SESSION_MODULE, CONFIG])).toEqual([]);
   });
 
   test('only the session module and the config read the service token', async () => {
@@ -330,6 +394,66 @@ describe('credentials outside Playwright', () => {
     expect(tails.length).toBeGreaterThan(0);
     expect(tails.filter((text) => !text.includes('redact_access_cookie'))).toEqual([]);
   });
+});
+
+describe('the real Playwright runner holding a fixture token', () => {
+  // GitHub only honours a workflow command that starts a line of the step's
+  // stdout, and a mask that never registers prints the cookie in a public log, so
+  // this runs the runner rather than spying on console.log.
+  test('registers the mask before any test, seeds the cookie, and leaves no state behind', async () => {
+    const heard: Array<string | null> = [];
+    const target = host((req) => {
+      const path = new URL(req.url).pathname;
+      if (path === '/score/never-audited.dev') {
+        heard.push(req.headers.get('cookie'));
+        return new Response('none', { status: 404, headers: { 'cache-control': 'no-store' } });
+      }
+      if (req.headers.get('cookie')?.includes(`CF_Authorization=${JWT}`)) return new Response('ok');
+      return req.headers.get('cf-access-client-secret') ? issued() : login();
+    });
+    const work = await mkdtemp(join(tmpdir(), 'anc-access-runner-'));
+    const statePath = join(work, 'state.json');
+    const run = Bun.spawn(
+      [
+        'bun',
+        'x',
+        'playwright',
+        'test',
+        '--project=edge-hit',
+        '-g',
+        'a never-audited host 404',
+        `--output=${join(work, 'output')}`,
+      ],
+      {
+        cwd: REPO_ROOT,
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: {
+          PATH: process.env.PATH ?? '',
+          HOME: process.env.HOME ?? '',
+          CI: 'true',
+          GITHUB_ACTIONS: 'true',
+          ANC_STAGING_BASE_URL: target.base,
+          ANC_STAGING_ACCESS_CLIENT_ID: ID,
+          ANC_STAGING_ACCESS_CLIENT_SECRET: SECRET,
+          ANC_E2E_ACCESS_STATE: statePath,
+        },
+      },
+    );
+    const [stdout, stderr] = await Promise.all([new Response(run.stdout).text(), new Response(run.stderr).text()]);
+    expect(await run.exited, `${stdout}\n${stderr}`).toBe(0);
+
+    const lines = stdout.split('\n');
+    const mask = lines.indexOf(`::add-mask::${JWT}`);
+    expect(mask).toBeGreaterThanOrEqual(0);
+    expect(mask).toBeLessThan(lines.findIndex((line) => line.includes('never-audited')));
+    expect(`${stdout}${stderr}`).not.toContain(SECRET);
+
+    expect(heard.length).toBeGreaterThan(0);
+    expect(heard.every((cookie) => cookie?.includes(`CF_Authorization=${JWT}`))).toBe(true);
+    expect(target.seen.filter((s) => s.secret !== null)).toHaveLength(1);
+    expect(await Bun.file(statePath).exists()).toBe(false);
+  }, 60_000);
 });
 
 describe('a run holding the token writes no credential to what CI uploads', () => {
