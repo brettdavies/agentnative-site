@@ -11,6 +11,7 @@ import { describe, expect, test } from 'bun:test';
 import { AUDIT_USER_AGENT } from '../src/shared/user-agents';
 import {
   AUDIT_PROBE_MAX_BODY_BYTES,
+  blockedHostReason,
   guardedFetch,
   STATUS_ONLY_BODY_BYTES,
   validatePublicUrl,
@@ -80,6 +81,78 @@ describe('validatePublicUrl', () => {
   test('canonicalizes before range-checking: mixed-radix dotted forms', () => {
     expect(validatePublicUrl('http://0x0a.1.2.3/').ok).toBe(false);
     expect(validatePublicUrl('http://0300.0250.0.1/').ok).toBe(false);
+  });
+});
+
+// The CLI's port classifies these same spellings, so a change to this list has
+// a counterpart there.
+describe('IPv6 spellings that carry an IPv4 address', () => {
+  const FORMS: Array<[string, (hi: string, lo: string) => string]> = [
+    ['NAT64 well-known 64:ff9b::/96', (hi, lo) => `[64:ff9b::${hi}:${lo}]`],
+    ['NAT64 local-use 64:ff9b:1::/48', (hi, lo) => `[64:ff9b:1::${hi}:${lo}]`],
+    ['IPv4-translated ::ffff:0:0:0/96', (hi, lo) => `[::ffff:0:${hi}:${lo}]`],
+    ['6to4 2002::/16', (hi, lo) => `[2002:${hi}:${lo}::]`],
+    ['IPv4-mapped ::ffff:0:0/96', (hi, lo) => `[::ffff:${hi}:${lo}]`],
+    ['IPv4-compatible ::/96', (hi, lo) => `[::${hi}:${lo}]`],
+  ];
+  const BLOCKED: Array<[string, string, string, string]> = [
+    ['169.254.169.254', 'a9fe', 'a9fe', '169.254.0.0/16'],
+    ['100.100.100.200', '6464', '64c8', '100.64.0.0/10'],
+    ['127.0.0.2', '7f00', '2', '127.0.0.0/8'],
+    ['10.1.2.3', 'a01', '203', '10.0.0.0/8'],
+    ['172.20.1.1', 'ac14', '101', '172.16.0.0/12'],
+    ['192.168.0.5', 'c0a8', '5', '192.168.0.0/16'],
+    ['0.1.2.3', '1', '203', '0.0.0.0/8'],
+  ];
+
+  describe.each(FORMS)('%s', (_form, spell) => {
+    test.each(BLOCKED)('blocks %s, naming the embedded address and its range', (dotted, hi, lo, range) => {
+      expect(blockedHostReason(spell(hi, lo))).toBe(`ipv4-in-ipv6: ipv4 ${dotted} is in blocked range ${range}`);
+    });
+
+    test('a public address stays allowed', () => {
+      expect(blockedHostReason(spell('808', '808'))).toBeNull();
+    });
+
+    test('a redirect from a public target is refused before it is sent', async () => {
+      const fetched: string[] = [];
+      const fetchImpl = stubFetch((url) => {
+        fetched.push(url);
+        return new Response(null, { status: 302, headers: { Location: `https://${spell('a9fe', 'a9fe')}/` } });
+      });
+      const resp = await guardedFetch('https://example.com/', {}, { fetchImpl });
+      expect(fetched).toEqual(['https://example.com/']);
+      expect(resp.status).toBeNull();
+      expect(resp.error).toContain('blocked');
+    });
+  });
+
+  test.each([
+    ['a dotted tail', '[64:ff9b::169.254.169.254]'],
+    ['uppercase hex', '[64:FF9B::A9FE:A9FE]'],
+    ['every zero written out', '[0064:ff9b:0000:0000:0000:0000:a9fe:a9fe]'],
+    ['bits inside the local-use /48', '[64:ff9b:1:abcd::a9fe:a9fe]'],
+    ['subnet and interface bits after a 6to4 address', '[2002:a9fe:a9fe:1::5]'],
+  ])('reads the same address through %s', (_how, host) => {
+    expect(blockedHostReason(host)).toBe('ipv4-in-ipv6: ipv4 169.254.169.254 is in blocked range 169.254.0.0/16');
+  });
+
+  test('a URL reaches the check in the form its parser writes', () => {
+    expect(validatePublicUrl('https://[64:ff9b::169.254.169.254]/').ok).toBe(false);
+    expect(validatePublicUrl('https://[2002:a9fe:a9fe::]/').ok).toBe(false);
+    expect(validatePublicUrl('https://[2002:808:808::]/').ok).toBe(true);
+  });
+
+  // An address one bit outside a prefix is an ordinary public IPv6 address.
+  test.each([
+    ['beside the well-known prefix', '[64:ff9a::a9fe:a9fe]'],
+    ['bits set inside the well-known /96', '[64:ff9b:0:1::a9fe:a9fe]'],
+    ['past the local-use /48', '[64:ff9b:2::a9fe:a9fe]'],
+    ['beside the translated prefix', '[::fffe:0:a9fe:a9fe]'],
+    ['bits set after the translated marker', '[::ffff:1:a9fe:a9fe]'],
+    ['beside 6to4', '[2003:a9fe:a9fe::]'],
+  ])('does not read an IPv4 address %s', (_where, host) => {
+    expect(blockedHostReason(host)).toBeNull();
   });
 });
 

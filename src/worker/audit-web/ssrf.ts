@@ -5,7 +5,7 @@
 //   - allows only http/https schemes,
 //   - canonicalizes the host to a normalized IP BEFORE range-checking
 //     (decimal / octal / hex / short dotted IPv4 literal forms,
-//     IPv4-mapped IPv6, bracketed IPv6),
+//     IPv6 spellings that carry an IPv4 address, bracketed IPv6),
 //   - blocks private RFC1918, loopback, link-local, unique-local, CGNAT,
 //     unspecified, and cloud-metadata destinations plus the well-known
 //     metadata hostnames (localhost, *.internal),
@@ -220,6 +220,31 @@ function formatIpv4(value: number): string {
   return [24, 16, 8, 0].map((shift) => (value >>> shift) & 0xff).join('.');
 }
 
+const ZEROS = (count: number): number[] => new Array(count).fill(0);
+
+// IPv6 prefixes whose addresses carry an IPv4 address, with the byte it starts
+// at. A host behind a translator answers for that IPv4 address, so each one gets
+// its range check. The local-use /48 reads only the /96 layout, though RFC 6052
+// allows other prefix lengths there; the CLI's port reads the same.
+const IPV4_CARRYING_PREFIXES: ReadonlyArray<{ prefix: readonly number[]; ipv4At: number }> = [
+  { prefix: [...ZEROS(10), 0xff, 0xff], ipv4At: 12 }, // IPv4-mapped ::ffff:0:0/96
+  { prefix: ZEROS(12), ipv4At: 12 }, // IPv4-compatible ::/96
+  { prefix: [...ZEROS(8), 0xff, 0xff, 0, 0], ipv4At: 12 }, // IPv4-translated ::ffff:0:0:0/96 (RFC 2765)
+  { prefix: [0x00, 0x64, 0xff, 0x9b, ...ZEROS(8)], ipv4At: 12 }, // NAT64 well-known 64:ff9b::/96 (RFC 6052)
+  { prefix: [0x00, 0x64, 0xff, 0x9b, 0x00, 0x01], ipv4At: 12 }, // NAT64 local-use 64:ff9b:1::/48 (RFC 8215)
+  { prefix: [0x20, 0x02], ipv4At: 2 }, // 6to4 2002::/16 (RFC 3056)
+];
+
+function carriedIpv4(bytes: Uint8Array): number | null {
+  for (const { prefix, ipv4At } of IPV4_CARRYING_PREFIXES) {
+    if (prefix.every((byte, i) => bytes[i] === byte)) {
+      const [a, b, c, d] = bytes.subarray(ipv4At, ipv4At + 4);
+      return ((a << 24) | (b << 16) | (c << 8) | d) >>> 0;
+    }
+  }
+  return null;
+}
+
 function blockedIpv6Reason(bytes: Uint8Array): string | null {
   const allZero = bytes.every((b) => b === 0);
   if (allZero) return 'ipv6 unspecified address (::)';
@@ -227,15 +252,9 @@ function blockedIpv6Reason(bytes: Uint8Array): string | null {
   if (isLoopback) return 'ipv6 loopback (::1)';
   if ((bytes[0] & 0xfe) === 0xfc) return 'ipv6 unique-local (fc00::/7)';
   if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return 'ipv6 link-local (fe80::/10)';
-  // IPv4-mapped (::ffff:a.b.c.d) and IPv4-compatible (::a.b.c.d) forms
-  // range-check the embedded IPv4 address.
-  const first10Zero = bytes.slice(0, 10).every((b) => b === 0);
-  if (first10Zero && ((bytes[10] === 0xff && bytes[11] === 0xff) || (bytes[10] === 0 && bytes[11] === 0))) {
-    const v4 = ((bytes[12] << 24) | (bytes[13] << 16) | (bytes[14] << 8) | bytes[15]) >>> 0;
-    const reason = blockedIpv4Reason(v4);
-    if (reason) return `ipv4-in-ipv6: ${reason}`;
-  }
-  return null;
+  const v4 = carriedIpv4(bytes);
+  const reason = v4 === null ? null : blockedIpv4Reason(v4);
+  return reason ? `ipv4-in-ipv6: ${reason}` : null;
 }
 
 /** Returns a block reason for the hostname, or null when it may be fetched. */
