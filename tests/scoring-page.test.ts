@@ -106,6 +106,14 @@ describe('GET /scoring?target=', () => {
     }
   });
 
+  test('the page of a target refused for good tells a browser without scripts the same thing', async () => {
+    const res = await handleScoringPage(get('/scoring?target=localhost%3A3000'), env());
+    expect(res.status).toBe(200);
+    const noscript = (await res.text()).split('<noscript>')[1]?.split('</noscript>')[0] ?? '';
+    expect(noscript).toContain('<code>anc web localhost:3000</code>');
+    expect(noscript).not.toContain('saved result');
+  });
+
   test('the twin of a metadata endpoint names no command', async () => {
     const res = await handleScoringPage(get('/scoring.md?target=169.254.169.254'), env());
     expect(await res.text()).not.toContain('anc web');

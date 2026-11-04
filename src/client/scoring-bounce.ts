@@ -7,7 +7,7 @@
 
 import type { AuditError } from '../shared/audit-events';
 import { escHtml } from '../shared/esc-html';
-import { ANC_WEB_DOCS_PATH, localTargetCta } from '../shared/scoring-copy';
+import { localTargetNextHtml } from '../shared/scoring-copy';
 
 export type BouncePanel = {
   headline: string;
@@ -80,10 +80,9 @@ function installUnsupported(pm: string | undefined): BouncePanel {
 /** The panel for an error object from a JSON error body or a `bounce` or `error` event. */
 export function bouncePanel(error: AuditError): BouncePanel {
   if (error.reason === 'local-target' && error.next_step) {
-    const command = `<code>${escHtml(error.next_step.command)}</code>`;
     return {
       headline: error.message,
-      bodyHtml: `${localTargetCta(command)} <a href="${ANC_WEB_DOCS_PATH}">See how to install and run it</a>.`,
+      bodyHtml: localTargetNextHtml(error.next_step.command),
       final: true,
     };
   }

@@ -325,6 +325,23 @@ test.describe('/scoring progress page', () => {
     expect(await linkMatchesAccent()).toBe(true);
   });
 
+  test('the Audit button on a never-audited result page reads in both themes', async ({ page }) => {
+    await page.goto('/score/never-audited.example');
+    const button = page.locator('article a.btn--primary');
+    await expect(button).toBeVisible();
+    const readable = () =>
+      button.evaluate((a) => {
+        const style = getComputedStyle(a);
+        return style.color !== style.backgroundColor;
+      });
+    expect(await readable()).toBe(true);
+    await page.locator('[data-theme-cycle]').click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    // The button's background transitions, and mid-transition the two strings differ whatever the rule says.
+    await page.waitForTimeout(300);
+    expect(await readable()).toBe(true);
+  });
+
   test('verification being unavailable holds Start through the countdown, then says Ready to retry, never that it failed', async ({
     page,
   }) => {

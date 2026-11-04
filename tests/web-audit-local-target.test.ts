@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { ancWebCommand } from '../src/worker/audit-web/anc-web-command';
 import { prepareWebTarget, type WebTargetRefusal } from '../src/worker/audit-web/core';
 import { localTargetRefusal } from '../src/worker/audit-web/local-target';
-import { ancWebCommand } from '../src/worker/audit-web/provenance-copy';
 import { isMetadataHost } from '../src/worker/audit-web/ssrf';
 
 const ORIGIN = 'https://anc.dev';

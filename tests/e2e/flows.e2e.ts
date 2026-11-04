@@ -154,7 +154,15 @@ test.describe('keyboard + a11y', () => {
   // wrangler-dev server (empty R2) it exercises the scoring-in-progress
   // empty state. The populated result-page archetype is covered by the
   // staging-targeting web-audit project.
-  for (const path of ['/score/ripgrep', '/score/anc.dev', '/scorecards', '/audit', '/scoring?target=anc.dev']) {
+  for (const path of [
+    '/score/ripgrep',
+    '/score/anc.dev',
+    '/score/never-audited.example',
+    '/score/localhost:3000',
+    '/scorecards',
+    '/audit',
+    '/scoring?target=anc.dev',
+  ]) {
     for (const scheme of ['light', 'dark'] as const) {
       test(`axe: 0 serious/critical violations on ${path} in ${scheme} mode`, async ({ page }) => {
         await page.emulateMedia({ colorScheme: scheme });
@@ -186,6 +194,21 @@ test.describe('keyboard + a11y', () => {
           .toBeGreaterThanOrEqual(landed.headerBottom);
       }
     }
+  });
+
+  test('focus reaching the sticky header leaves the page where it is', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 500 });
+    await page.goto('/install');
+    await page.evaluate(() => window.scrollTo(0, 400));
+    await page
+      .locator('main a')
+      .first()
+      .evaluate((a) => (a as HTMLElement).blur());
+    const before = await page.evaluate(() => window.scrollY);
+    expect(before).toBeGreaterThan(0);
+    await page.locator('.site-header a').first().focus();
+    await page.waitForTimeout(200);
+    expect(await page.evaluate(() => window.scrollY)).toBe(before);
   });
 
   test('no horizontal overflow at 390/768/1440 on each archetype', async ({ page }) => {

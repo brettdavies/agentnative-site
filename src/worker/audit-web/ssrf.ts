@@ -254,7 +254,7 @@ export function blockedHostReason(rawHostname: string): string | null {
   const hostname = normalizedHostname(rawHostname);
   if (hostname.length === 0) return 'empty hostname';
   if (hostname === 'localhost' || hostname.endsWith('.localhost')) return 'localhost is not a public host';
-  if (hostname === 'metadata.google.internal') return 'cloud metadata hostnames are blocked';
+  if (METADATA_HOSTS.names.includes(hostname)) return 'cloud metadata hostnames are blocked';
   if (hostname.endsWith('.internal')) return 'internal hostnames are not public hosts';
   if (hostname.startsWith('[') && hostname.endsWith(']')) {
     const v6 = parseIpv6Literal(hostname.slice(1, -1));

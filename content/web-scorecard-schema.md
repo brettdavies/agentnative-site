@@ -49,7 +49,7 @@ The web scorecard is site-owned. Its `schema_version` is **0.5**, independent of
 | `audit_profile`        | null                | engine  | Always `null` for web targets; audit profiles are a CLI concept.                                                                   |
 | `site_type`            | string \| null      | engine  | The declared site type the run scoped to: `content`, `api`, or `null` (everything ran).                                            |
 | `public_listing`       | boolean             | engine  | The submitter's opt-in to the public board listing. `false` unless explicitly set.                                                 |
-| `vantage`              | object              | engine  | Where the audit ran and whether it presented a credential. See [vantage](#vantage).                                                |
+| `vantage`              | object              | engine  | What the audit could reach and whether a request carried a credential. See [vantage](#vantage).                                                |
 | `follow_declarations`  | boolean, optional   | engine  | Whether the audit followed the hosts the site declares (its MCP server, its API host). Absent means no follow state was recorded.  |
 | `declared_hosts`       | array, optional     | engine  | The declared-hosts trail: one entry per host the site declares, with how the audit treated it. Absent means no trail was recorded. |
 | `registry_fingerprint` | string, optional    | stored  | The first 12 characters of the fingerprint of the check registry the score was computed under. The engine never sets it.           |
@@ -120,7 +120,7 @@ Web identity. The CLI-only header fields (`tier`, `language`, `repo`, `install`)
 
 ## `vantage`
 
-Where the audit ran and what it could present. A score covers what an agent at that vantage can verify.
+What the audit could reach and whether a request carried a credential. A score covers what an agent at that vantage can verify.
 
 ```json
 "vantage": { "network": "public", "credentialed": false }
@@ -129,10 +129,10 @@ Where the audit ran and what it could present. A score covers what an agent at t
 | Field          | Type    | Meaning                                                                                                                         |
 | -------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `network`      | string  | `public` for a target on the public internet, whichever machine ran the audit; `local` for a target on the runner's own network. |
-| `credentialed` | boolean | `true` when an `anc web` run held a credential for the audited MCP endpoint; otherwise `false`.                                 |
+| `credentialed` | boolean | `true` when a request of an `anc web` run carried its credential; otherwise `false`.                                 |
 
 Every anc.dev audit writes `public` and `false`. An `anc web` run writes `public` or `local` by its target, with
-`credentialed` `true` when it held a credential. The public board lists anc.dev's own audits only, so a local or
+`credentialed` `true` when a request carried its credential. The public board lists anc.dev's own audits only, so a local or
 credentialed score is never ranked beside a public one. A scorecard stored before the field existed carries no
 `vantage`; every such scorecard anc.dev holds is its own public audit.
 
@@ -407,8 +407,8 @@ A row with one of the six declared-host reasons also carries `access_remedy`: wh
 it, and, when `anc web` can, the command that evaluates it from the reader's own network. `declared-host-blocked` and
 `reciprocity-refused` name no command, because `anc web` applies the same rules, and `declared-host-budget-exceeded`
 names none, because `anc web` stops at the same per-audit cap and the row does not say which limit it hit. A row that
-needs sign-in names the host with `--token-host` and reads the token with `--token-stdin`, so run as printed it takes
-nothing from the environment. The audited site chooses that host, so treat it as untrusted. A scorecard holding any such row carries `access_note` beside `results`: the sentence saying global
+needs sign-in names the host with `--token-host` and reads the token from a file with `--token-stdin`, so the command
+takes nothing from the environment. The audited site chooses that host, so treat it as untrusted. A scorecard holding any such row carries `access_note` beside `results`: the sentence saying global
 keeps those rows in its maximum, and the command for the ones a run of the audited site can evaluate. Both are the sentences the result page shows.
 
 ```json

@@ -25,9 +25,15 @@ import {
   scoreMarkdownPath,
 } from '../../shared/audit-routes';
 import { escHtml } from '../../shared/esc-html';
-import { LANE_EXPECTATION, scoringHeadingHtml, scoringTitle, TITLE_SUFFIX } from '../../shared/scoring-copy';
+import {
+  LANE_EXPECTATION,
+  localTargetNextHtml,
+  scoringHeadingHtml,
+  scoringTitle,
+  TITLE_SUFFIX,
+} from '../../shared/scoring-copy';
 import { detectPreference } from '../accept';
-import { localTargetMarkdown, refusalForHost } from '../audit-web/local-target';
+import { type LocalTargetError, localTargetMarkdown, refusalForHost } from '../audit-web/local-target';
 import { loadWebAuditRegistry, type WebAuditRegistryEnv } from '../audit-web/registry';
 import { applyHeaders } from '../headers';
 import { loadShellTemplate, substituteShell } from '../shell-template';
@@ -62,9 +68,13 @@ export async function handleScoringPage(request: Request, env: ScoringPageEnv): 
         ? 'That target has no result page. Start the audit from the audit page.'
         : null;
 
+  // A host the public audit refuses for good still gets the page, whose client
+  // shows the refusal in its panel. The twin and a browser without scripts have
+  // no client, so they carry the refusal themselves.
+  const refusal = accepted?.lane === 'web' ? refusalForHost(accepted.target, url.origin)?.error : undefined;
+
   if (url.pathname.endsWith('.md') || detectPreference(request) === 'markdown') {
-    const refusal = accepted?.lane === 'web' ? refusalForHost(accepted.target, url.origin) : null;
-    if (refusal) return transient(request, new Response(localTargetMarkdown(refusal.error), { status: 400 }), true);
+    if (refusal) return transient(request, new Response(localTargetMarkdown(refusal), { status: 400 }), true);
     const body = pointerMarkdown(url.origin, accepted, refused);
     // The twin answers a refusal with the status the page gives it: an agent
     // reading 200 here would take a rejection for a result.
@@ -81,7 +91,7 @@ export async function handleScoringPage(request: Request, env: ScoringPageEnv): 
     });
   }
   const refresh = url.searchParams.get('refresh') === '1';
-  const page = accepted ? await progressPage(env, accepted, refresh) : pointerPage(refused);
+  const page = accepted ? await progressPage(env, accepted, refresh, refusal) : pointerPage(refused);
   const html = substituteShell(template, {
     title: page.title,
     description: page.description,
@@ -116,7 +126,12 @@ async function checkTotal(env: ScoringPageEnv): Promise<number | null> {
   }
 }
 
-async function progressPage(env: ScoringPageEnv, accepted: Accepted, refresh: boolean): Promise<Page> {
+async function progressPage(
+  env: ScoringPageEnv,
+  accepted: Accepted,
+  refresh: boolean,
+  refusal: LocalTargetError | undefined,
+): Promise<Page> {
   const { lane, target } = accepted;
   const t = escHtml(target);
   const total = lane === 'web' ? await checkTotal(env) : null;
@@ -131,6 +146,9 @@ async function progressPage(env: ScoringPageEnv, accepted: Accepted, refresh: bo
     .join(' ');
   const saved = escHtml(scoreMarkdownPath(target));
   const readTool = lane === 'cli' ? 'get_scorecard' : 'get_website_audit';
+  const noscript = refusal
+    ? `${escHtml(refusal.message)} ${localTargetNextHtml(refusal.next_step.command)}`
+    : `This page runs a live audit with JavaScript. Without it, read the saved result at <a href="${saved}">${saved}</a>, or call the <code>${readTool}</code> MCP tool (<code>POST /mcp</code>, <a href="/mcp-docs">docs</a>).`;
   const body = `<article class="container scorecard-page scoring" ${attrs}>
   <meta name="turnstile-sitekey" content="${escHtml(env.TURNSTILE_SITEKEY ?? '')}" />
   <header class="scorecard-header">
@@ -145,7 +163,7 @@ async function progressPage(env: ScoringPageEnv, accepted: Accepted, refresh: bo
     <a class="btn btn--ghost" href="${auditPath()}" data-scoring-other hidden>Audit something else</a>
   </div>
   <noscript>
-    <p>This page runs a live audit with JavaScript. Without it, read the saved result at <a href="${saved}">${saved}</a>, or call the <code>${readTool}</code> MCP tool (<code>POST /mcp</code>, <a href="/mcp-docs">docs</a>).</p>
+    <p>${noscript}</p>
   </noscript>
   <script defer src="${SCRIPT_SRC}"></script>
 </article>`;

@@ -209,10 +209,10 @@ surfaces scores higher, and global breaks ties between equal relative scores on 
 
 ### Vantage
 
-What a web audit could reach and whether it held a credential, recorded on every web scorecard: public (a target on the
-public internet, from anc.dev or an `anc web` run) or local (an `anc web` run against a target on the runner's own
-network), with `anc web` optionally holding a credential for the audited MCP endpoint. A score covers what an agent at
-that vantage can verify, and the public board lists anc.dev's own audits only.
+What a web audit could reach and whether a request carried a credential, recorded on every web scorecard: public (a
+target on the public internet, from anc.dev or an `anc web` run) or local (an `anc web` run against a target on the
+runner's own network), with an `anc web` request optionally carrying a credential to the audited MCP endpoint. A score
+covers what an agent at that vantage can verify, and the public board lists anc.dev's own audits only.
 
 ### Fix skill
 

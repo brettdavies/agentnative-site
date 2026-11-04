@@ -606,6 +606,14 @@ describe('a target the public audit refuses for good', () => {
     });
   });
 
+  test('a bracketed IPv6 target reaches the refusal with its command quoted', async () => {
+    const env = await seededEnv();
+    const json = await route('/score/%5B::1%5D:3000/json', env);
+    expect(json.status).toBe(404);
+    const body = (await json.json()) as { error: { next_step: { command: string } } };
+    expect(body.error.next_step.command).toBe("anc web '[::1]:3000'");
+  });
+
   test('a metadata endpoint, which anc web also refuses, keeps the ordinary 404', async () => {
     const env = await seededEnv();
     const json = await route('/score/169.254.169.254/json', env);

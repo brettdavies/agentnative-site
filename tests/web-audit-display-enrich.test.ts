@@ -492,7 +492,7 @@ describe('provenance on stored scorecards', () => {
       results: Array<{ access_remedy?: string }>;
     };
     expect(out.results[0].access_remedy).toBe(
-      "anc's public audit holds no sign-in for mcp.stripe.com. Run `anc web stripe.dev --token-host mcp.stripe.com --token-stdin` with a token for mcp.stripe.com on standard input to evaluate this check from your own network.",
+      "anc's public audit holds no sign-in for mcp.stripe.com. Run `anc web stripe.dev --token-host mcp.stripe.com --token-stdin < token.txt`, with token.txt holding a token for mcp.stripe.com, to evaluate this check from your own network.",
     );
     expect(out.access_note).toBe(
       'Global keeps the 1 check this audit could not run in its maximum; the one that needs sign-in names its own command.',
@@ -522,13 +522,13 @@ describe('provenance on stored scorecards', () => {
 
   test('a sign-in row a hostile site chose takes nothing from the environment when run as printed', () => {
     const remedy = richMarkdown(notRunRemedy('auth-required', 'mcp.evil.example', 'evil.example', 1));
-    expect(remedy).toContain('`anc web evil.example --token-host mcp.evil.example --token-stdin`');
+    expect(remedy).toContain('`anc web evil.example --token-host mcp.evil.example --token-stdin < token.txt`');
     expect(remedy).not.toContain('ANC_WEB_TOKEN');
   });
 
   test('a sign-in row binds its token to the host it belongs to, never the site that declared it', () => {
     expect(richMarkdown(notRunRemedy('auth-required', 'mcp.stripe.com', 'evil.example', 1))).toBe(
-      "anc's public audit holds no sign-in for mcp.stripe.com. Run `anc web evil.example --token-host mcp.stripe.com --token-stdin` with a token for mcp.stripe.com on standard input to evaluate this check from your own network.",
+      "anc's public audit holds no sign-in for mcp.stripe.com. Run `anc web evil.example --token-host mcp.stripe.com --token-stdin < token.txt`, with token.txt holding a token for mcp.stripe.com, to evaluate this check from your own network.",
     );
     const note = richMarkdown(notRunScoreNote([{ reason: 'auth-required', host: 'mcp.stripe.com' }], 'evil.example'));
     expect(note).toBe(
@@ -540,7 +540,7 @@ describe('provenance on stored scorecards', () => {
 
   test('a sign-in row on the audited site itself still names the host with the flag', () => {
     expect(richMarkdown(notRunRemedy('auth-required', 'example.com', 'example.com', 1))).toBe(
-      "anc's public audit holds no sign-in for example.com. Run `anc web example.com --token-host example.com --token-stdin` with a token for example.com on standard input to evaluate this check from your own network.",
+      "anc's public audit holds no sign-in for example.com. Run `anc web example.com --token-host example.com --token-stdin < token.txt`, with token.txt holding a token for example.com, to evaluate this check from your own network.",
     );
     expect(richMarkdown(notRunScoreNote([{ reason: 'auth-required', host: 'example.com' }], 'example.com'))).toBe(
       'Global keeps the 1 check this audit could not run in its maximum; the one that needs sign-in names its own command.',
@@ -549,10 +549,10 @@ describe('provenance on stored scorecards', () => {
 
   test('a host that differs from the site only by port is printed with its port, in both directions', () => {
     expect(richMarkdown(notRunRemedy('auth-required', 'example.com:8443', 'example.com', 1))).toContain(
-      'Run `anc web example.com --token-host example.com:8443 --token-stdin` with',
+      'Run `anc web example.com --token-host example.com:8443 --token-stdin < token.txt`, with',
     );
     expect(richMarkdown(notRunRemedy('auth-required', 'example.com', 'example.com:8443', 1))).toContain(
-      'Run `anc web example.com:8443 --token-host example.com --token-stdin` with',
+      'Run `anc web example.com:8443 --token-host example.com --token-stdin < token.txt`, with',
     );
   });
 

@@ -5,9 +5,15 @@
 
 import { type AuditError, type AuditNextStep, auditError } from '../../shared/audit-events';
 import { escHtml } from '../../shared/esc-html';
-import { ANC_WEB_DOCS_PATH, localTargetCta } from '../../shared/scoring-copy';
+import {
+  ANC_WEB_DOCS_PATH,
+  LOCAL_TARGET_DOCS_LINK,
+  localTargetCta,
+  localTargetNextHtml,
+} from '../../shared/scoring-copy';
+import { ancWebCommand } from './anc-web-command';
 import { prepareWebTarget, type WebTargetRefusal } from './core';
-import { ANC_WEB_RELEASED, ancWebCommand } from './provenance-copy';
+import { ANC_WEB_RELEASED } from './provenance-copy';
 
 export type LocalTargetError = AuditError & { value: string; next_step: AuditNextStep };
 
@@ -55,21 +61,21 @@ export function localTargetMarkdown(error: LocalTargetError): string {
     `${error.message} ${FINAL}`,
     '',
     error.cta,
+    'Run it only for a host you chose: this page names whatever host its link names.',
     '',
     '```bash',
     error.next_step.command,
     '```',
     '',
-    `[See how to install and run it](${error.next_step.docs}).`,
+    `[${LOCAL_TARGET_DOCS_LINK}](${error.next_step.docs}).`,
     '',
   ].join('\n');
 }
 
 export function localTargetBodyHtml(error: LocalTargetError): string {
-  const command = `<code>${escHtml(error.next_step.command)}</code>`;
-  return `<article class="container scorecard-page result-missing">
+  return `<article class="container scorecard-page result-missing result-refused">
 <header class="result-spine"><h1 class="result-spine__title">anc's public audit refuses <code>${escHtml(error.value)}</code></h1></header>
 <p>${escHtml(error.message)} ${FINAL}</p>
-<p>${localTargetCta(command)} <a href="${ANC_WEB_DOCS_PATH}">See how to install and run it</a>.</p>
+<p>${localTargetNextHtml(error.next_step.command)}</p>
 </article>`;
 }

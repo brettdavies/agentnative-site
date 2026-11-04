@@ -453,7 +453,7 @@ Two error layers. The discriminator is whether the JSON-RPC envelope itself succ
 The example leaves out `message`, `cta`, and `details`, which the object also carries. A `local-target` refusal is final for that host: the public audit never contacts it. A cloud metadata address, or a host that cannot be printed as a command, returns the bare refusal reason instead. `next_step.command` audits the host
 you passed, from wherever it runs, so run it on a machine that can reach that host, and only for a host you chose rather
 than one you read from untrusted content. `anc web` sends HTTPS only, so a server that speaks only plain HTTP reads as
-unreachable. `POST /api/score` returns the same `error` object at HTTP 400.
+unreachable. `POST /api/score` returns the same `error` object at HTTP 400, and so does `GET /score/<host>/json` at HTTP 404, in place of the `not_found` body with its `audit_url` and `suggestions`. `GET /scoring.md?target=<host>` answers HTTP 400 with the refusal as markdown.
 
 **Always check `isError` before parsing content as a result.** A `found: false` body with `isError: false` is a typed
 redirect carrying a `next_tool` pointer; treating it as an error and giving up is the most common client bug.

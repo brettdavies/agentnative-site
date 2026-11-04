@@ -25,6 +25,14 @@ export function localTargetCta(command: string): string {
   return `Run ${command} to audit it from your own network; it sends HTTPS only, so the site must serve TLS.`;
 }
 
+/** The words of the link beside that call to action, on every surface that shows it. */
+export const LOCAL_TARGET_DOCS_LINK = 'See how to install and run it';
+
+/** That call to action and its link, as markup. */
+export function localTargetNextHtml(command: string): string {
+  return `${localTargetCta(`<code>${escHtml(command)}</code>`)} <a href="${ANC_WEB_DOCS_PATH}">${LOCAL_TARGET_DOCS_LINK}</a>.`;
+}
+
 /** The website lane's status line once the run starts, until its first event arrives. */
 export function webReadingLine(target: string, follow: boolean): string {
   return follow ? `Reading ${target} and any hosts it declares…` : `Reading ${target}…`;
