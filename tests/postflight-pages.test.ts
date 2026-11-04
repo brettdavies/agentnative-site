@@ -95,6 +95,13 @@ describe('postflight pages gate', () => {
     expect(status).toBe(1);
   });
 
+  test('runs against production with no Access token, because production is public', () => {
+    const { status, output } = gatePages(HOME, SCORECARDS, { env: { OP_SKILL: '/nonexistent' } });
+    expect(output).not.toContain('no CF Access service token');
+    expect(output).toContain('/scorecards renders (has lrow)');
+    expect(status).toBe(0);
+  });
+
   test('names a missing Access token instead of passing on the staging login page', () => {
     const { status, output } = gatePages('<title>Sign in</title>', '<title>Sign in</title>', {
       args: ['--env', 'staging', '--staging-url', 'https://fixture.invalid'],
