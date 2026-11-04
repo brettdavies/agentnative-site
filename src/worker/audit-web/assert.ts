@@ -59,6 +59,23 @@ export type ExpectBlock = {
 
 export type AssertOutcome = { ok: boolean; reasons: string[] };
 
+const READS_BODY: Record<keyof ExpectBlock, boolean> = {
+  status: false,
+  status_below: false,
+  sse_when_success: false,
+  content_type: false,
+  header_present: false,
+  header_regex: false,
+  body_regex: true,
+  body_not_regex: true,
+  same_origin_recovery_link: true,
+};
+
+/** Whether evaluating `expect` looks at the response body. */
+export function expectReadsBody(expect: ExpectBlock): boolean {
+  return (Object.keys(expect) as Array<keyof ExpectBlock>).some((key) => expect[key] !== undefined && READS_BODY[key]);
+}
+
 /**
  * Evaluate an `expect` block against a fetched response. All present
  * keys AND together; the first failing key short-circuits with the
