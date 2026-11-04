@@ -465,7 +465,7 @@ engine against a public URL) and for operating the web-board rescore (weekly cro
   service token, and every context starts from the `CF_Authorization` cookie Access answers with. A header reaches every
   third-party script a page loads and every host a redirect names; a cookie stays on the host that set it. Setup
   sends the token only to the staging Worker over https, or to loopback for a fixture. No spec or
-  config may set `extraHTTPHeaders` or name the service-token headers (`tests/e2e-access-session.test.ts`). A run
+  config may set `extraHTTPHeaders` or name the service-token headers (`tests/e2e-credential-guard.test.ts`). A run
   holding the token records no traces and writes no HTML or JSON report, because Playwright writes request headers into
   all of them and this repo's Actions artifacts are public; a local debug run can pass `--trace on`. Access issues the
   cookie only while strict service token authentication is off for the Zero Trust organization: turning it on stops

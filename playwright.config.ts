@@ -39,7 +39,7 @@ const ACCESS_STATE = process.env.ANC_E2E_ACCESS_STATE;
 // Playwright writes a request's headers, the Access cookie included, into its
 // traces and its HTML and JSON reports, and a CI failure uploads those from a
 // public repository. A local debug run can still pass --trace on.
-const HOLDS_ACCESS_TOKEN = Boolean(process.env.ANC_STAGING_ACCESS_CLIENT_ID);
+const HOLDS_ACCESS_TOKEN = Boolean(REMOTE_BASE && process.env.ANC_STAGING_ACCESS_CLIENT_ID);
 
 export default defineConfig({
   testDir: './tests/e2e',

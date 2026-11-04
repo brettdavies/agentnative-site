@@ -58,13 +58,12 @@ function redirectsToLogin(status: number, location: string | undefined, root: UR
 }
 
 /**
- * Who may be sent the service token: the staging Worker over https, or this
- * machine for a fixture. An answer cannot prove a host is Access, because any
- * host a mistyped target names can imitate the login redirect.
+ * Who may be sent the service token: the staging Worker, or this machine for a
+ * fixture. An answer cannot prove a host is Access, because any host a mistyped
+ * target names can imitate the login redirect.
  */
 export function mayReceiveToken(target: URL): boolean {
-  if (LOOPBACK_HOSTS.has(target.hostname)) return true;
-  return target.protocol === 'https:' && isStagingUrl(target.href);
+  return LOOPBACK_HOSTS.has(target.hostname) || isStagingUrl(target.href);
 }
 
 /**

@@ -47,7 +47,7 @@ done
 # the Access login wall, so the engine's self-fetches need service-token
 # headers. Resolve them from 1Password (never inline the values). Public
 # targets (e.g. anc.dev after a release) need no token.
-if bun "$REPO_ROOT/scripts/web-audit/staging-host.ts" "$TARGET" 2>/dev/null; then
+if bun "$REPO_ROOT/scripts/web-audit/staging-host.ts" "$TARGET"; then
   OP_READ="${OP_READ:-$HOME/.claude/skills/1password/scripts/read_field.sh}"
   # CF Service Token - Staging CLI (agentnative-site)
   OP_ITEM="iuutxdlnh3ujmylvzmuflraeia"
