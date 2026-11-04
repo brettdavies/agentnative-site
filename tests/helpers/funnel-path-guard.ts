@@ -2,9 +2,10 @@
 // text so the test can feed it fixtures as well as the real tree.
 
 import { readdir, readFile } from 'node:fs/promises';
-import { extname, join, relative } from 'node:path';
+import { extname, join, relative, sep } from 'node:path';
 import {
   API_SCORE_PATH,
+  API_WEB_AUDIT_VERSION_PATH,
   AUDIT_PATH,
   FIX_PREFIX,
   SCORE_PREFIX,
@@ -26,6 +27,7 @@ export const CURRENT_PATHS: readonly string[] = [
   SCORECARDS_PATH,
   AUDIT_PATH,
   API_SCORE_PATH,
+  API_WEB_AUDIT_VERSION_PATH,
   SCORE_PREFIX,
   FIX_PREFIX,
 ];
@@ -93,12 +95,22 @@ export function scanSource(source: string, file: string): Hit[] {
   return hits;
 }
 
-/** Repo-relative source files under src/ except the route module, the vendored spec, and generated types. */
+/** Whether `file` sits in a dot directory under `root`, such as the bundle `wrangler dev` writes to `.wrangler/`. */
+function inDotDirectory(root: string, file: string): boolean {
+  return relative(root, file)
+    .split(sep)
+    .slice(0, -1)
+    .some((segment) => segment.startsWith('.'));
+}
+
+/** Repo-relative source files under src/ except the route module, the vendored spec, generated types, and dot directories. */
 export async function listScannedFiles(root: string = SRC_DIR): Promise<string[]> {
   const entries = await readdir(root, { recursive: true, withFileTypes: true });
   return entries
     .filter((entry) => entry.isFile() && SCANNED_EXTENSIONS.has(extname(entry.name)))
-    .map((entry) => relative(REPO_ROOT, join(entry.parentPath, entry.name)))
+    .map((entry) => join(entry.parentPath, entry.name))
+    .filter((file) => !inDotDirectory(root, file))
+    .map((file) => relative(REPO_ROOT, file))
     .filter((rel) => !EXCLUDED_PREFIXES.some((p) => rel.startsWith(p)))
     .sort();
 }

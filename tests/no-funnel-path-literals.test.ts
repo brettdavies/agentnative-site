@@ -5,8 +5,12 @@
 // hit at once, which is what a sweep wants and a build never does.
 
 import { describe, expect, test } from 'bun:test';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   API_SCORE_PATH,
+  API_WEB_AUDIT_VERSION_PATH,
   AUDIT_PATH,
   FIX_PREFIX,
   SCORE_PREFIX,
@@ -106,6 +110,7 @@ describe('funnel path literal guard: review fixtures', () => {
       SCORECARDS_PATH,
       AUDIT_PATH,
       API_SCORE_PATH,
+      API_WEB_AUDIT_VERSION_PATH,
       SCORE_PREFIX,
       FIX_PREFIX,
     ]);
@@ -120,6 +125,20 @@ describe('funnel path literal guard: review fixtures', () => {
     expect(files).toContain('src/worker/index.ts');
     expect(files).toContain('src/build/shell.mjs');
     expect(files).not.toContain('src/shared/audit-routes.ts');
+  });
+
+  test('a generated bundle in a dot directory is not source', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'funnel-guard-'));
+    try {
+      await mkdir(join(root, 'og-render/.wrangler/tmp'), { recursive: true });
+      await writeFile(join(root, 'og-render/.wrangler/tmp/index.js'), "a('/audit');");
+      await writeFile(join(root, 'og-render/worker.ts'), '');
+      const files = await listScannedFiles(root);
+      expect(files.filter((f) => f.includes('.wrangler'))).toEqual([]);
+      expect(files.filter((f) => f.endsWith('og-render/worker.ts'))).toHaveLength(1);
+    } finally {
+      await rm(root, { recursive: true });
+    }
   });
 
   test('an unrecognized mode value throws instead of defaulting to a mode', () => {

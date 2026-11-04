@@ -260,10 +260,11 @@ describe('llms.txt Programmatic access section', () => {
     expect(princIdx).toBeGreaterThan(progIdx);
   });
 
-  test('links the MCP endpoint, both server cards, the AI catalog, and the client skill', async () => {
+  test('links the MCP endpoint, both server cards, the AI catalog, the client skill, and the version signal', async () => {
     const llms = await readFile(join(DIST_DIR, 'llms.txt'), 'utf8');
     const section = llms.slice(llms.indexOf('## Programmatic access'), llms.indexOf('## Principles'));
-    expect(section.match(/^- \[/gm)).toHaveLength(6);
+    expect(section.match(/^- \[/gm)).toHaveLength(7);
+    expect(section).toContain('(https://anc.dev/api/web-audit/version)');
     expect(section).toContain('https://anc.dev/mcp');
     expect(section).toContain('https://anc.dev/mcp-docs.md');
     expect(section).toContain('returns 405');

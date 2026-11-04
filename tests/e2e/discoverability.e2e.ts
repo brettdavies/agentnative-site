@@ -170,6 +170,32 @@ test.describe('staging /llms.txt', () => {
   });
 });
 
+// The CLI skips its staleness note silently when this endpoint fails, so no
+// consumer would report a broken deploy; this is the live gate that does.
+test.describe('staging web-audit version signal', () => {
+  const VERSION_SIGNAL = '/api/web-audit/version';
+
+  test('GET serves the three fields as noindexed JSON', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}${VERSION_SIGNAL}`, { headers: ACCESS_HEADERS });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toBe('application/json; charset=utf-8');
+    expect(res.headers()['x-robots-tag']).toBe('noindex');
+    expect(res.headers()['cache-control']).toBe('public, max-age=300, stale-while-revalidate=60');
+    const body = (await res.json()) as Record<string, string>;
+    expect(Object.keys(body).sort()).toEqual(['registry_fingerprint', 'spec_version', 'web_schema_version']);
+    expect(body.registry_fingerprint).toMatch(/^[0-9a-f]{12}$/);
+    expect(body.spec_version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(body.web_schema_version).toMatch(/^\d+\.\d+$/);
+  });
+
+  test('HEAD answers 200 with no body', async ({ request }) => {
+    const res = await request.fetch(`${STAGING_BASE}${VERSION_SIGNAL}`, { method: 'HEAD', headers: ACCESS_HEADERS });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toBe('application/json; charset=utf-8');
+    expect(await res.text()).toBe('');
+  });
+});
+
 test.describe('staging discovery pointers', () => {
   test('/ Link header names every discovery document with its relation and type', async ({ request }) => {
     const res = await request.get(`${STAGING_BASE}/`, { headers: { ...ACCESS_HEADERS, accept: 'text/html' } });
