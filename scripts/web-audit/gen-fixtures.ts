@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 // Writes every generated file of the CLI vendoring contract: `build/` from the
-// registry, the fix catalog and the vendored schema, and `test/conformance/`
-// from the scenarios in conformance-scenarios.ts. Or checks that the committed
-// contract is current. contract-paths.ts owns the layout.
+// registry, the fix catalog, the vendored schema and the engine's settings, and
+// `test/conformance/` from the scenarios in conformance-scenarios.ts. Or checks
+// that the committed contract is current. contract-paths.ts owns the layout.
 //
 //   bun scripts/web-audit/gen-fixtures.ts                 regenerate every file in place
 //   bun scripts/web-audit/gen-fixtures.ts --check         exit 1 naming any stale, missing or unpinned file

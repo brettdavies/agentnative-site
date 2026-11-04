@@ -31,6 +31,6 @@ export const REGENERATE_COMMAND = 'bun scripts/web-audit/gen-fixtures.ts';
  */
 export const CONTRACT_LISTING: Readonly<Record<'.' | 'build' | 'test', readonly string[]>> = {
   '.': ['.editorconfig', 'README.md', 'build', 'test'],
-  build: ['registry.json', 'remediation.json', 'server-card.schema.json'],
+  build: ['constants.json', 'registry.json', 'remediation.json', 'server-card.schema.json'],
   test: ['conformance', 'score-parity.json'],
 };

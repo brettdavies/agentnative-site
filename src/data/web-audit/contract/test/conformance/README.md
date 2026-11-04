@@ -15,6 +15,7 @@ src/data/web-audit/contract/test/conformance/
   scores.json                      every scenario's scores and row statuses, one line per row
   scenarios/<name>/scenario.json   input: target, site type, exchanges, unmatched policy
   scenarios/<name>/scorecard.json  output: the engine's scorecard, normalized as described below
+  scenarios/<name>/requests.json   output: every request the engine sent, each once, sorted as described below
 ```
 
 ## scenario.json
@@ -53,6 +54,21 @@ refused redirect. A probe of an endpoint on a declared host takes no redirect at
 document on that endpoint's origin (a registry path written with `{mcp_origin}`, which the engine replaces with the
 endpoint's scheme, host, and port). The GET an API anchor host off the audited origin receives takes only hops that
 keep the scheme, host, and port, and a redirect to another origin is its answer.
+
+## requests.json
+
+Every request the engine sent for the scenario, recorded where the stub fetch receives it, before matching. An engine
+under comparison sends the same set, whatever order its requests complete in.
+
+- `method`: uppercase.
+- `url`: as the URL parser writes it.
+- `headers`: lowercase names, sorted by name.
+- `body`: the raw string, or `null` for a request with none.
+
+Entries are sorted by the request memo's identity key, `requestIdentityKey` in
+`src/worker/audit-web/request-hop.ts`: the JSON array `[method, url, [[name, value], ...], body]`, compared by UTF-16
+code unit. Generation fails when a scenario sends one request twice, and when its scorecard or request set at
+concurrency 1 differs from the default run.
 
 ## scorecard.json
 

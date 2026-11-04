@@ -14,7 +14,9 @@ import type { ExpectBlock } from '../../src/worker/audit-web/assert';
 import { runWebAudit } from '../../src/worker/audit-web/engine';
 import { ALWAYS_ADMIT_BUDGET } from '../../src/worker/audit-web/follow-requests';
 import type { WebAuditRegistry, WebSiteType } from '../../src/worker/audit-web/registry';
+import type { HopRequest } from '../../src/worker/audit-web/request-hop';
 import type { NaReason, ScorecardStatus, WebScorecard } from '../../src/worker/audit-web/scorecard';
+import { assertScheduleIndependent, requestsJson, sortedRequests } from './conformance-requests';
 import { SCENARIOS } from './conformance-scenarios';
 import { CORPUS_DIR, REGISTRY_PATH, REPO_ROOT } from './contract-paths';
 
@@ -117,7 +119,11 @@ function toResponse(spec: ExchangeResponse): Response {
   return new Response(body, { status: spec.status, headers: spec.headers });
 }
 
-export type StubLog = { unmatched: string[] };
+export type StubLog = {
+  unmatched: string[];
+  /** Every request the stub received, recorded before matching, so an unmatched one still counts. */
+  sent?: HopRequest[];
+};
 
 /** The stub fetch for a scenario: first matching exchange wins, else the unmatched policy. */
 export function stubFetchFor(scenario: Scenario, log: StubLog): typeof fetch {
@@ -129,6 +135,12 @@ export function stubFetchFor(scenario: Scenario, log: StubLog): typeof fetch {
       headers: lowercaseHeaders(init?.headers),
       body: init?.body === undefined || init?.body === null ? '' : String(init.body),
     };
+    log.sent?.push({
+      method: seen.method,
+      url: seen.url,
+      headers: seen.headers,
+      body: init?.body === undefined || init?.body === null ? undefined : seen.body,
+    });
     const hit = scenario.exchanges.find((exchange) => matches(exchange.request, seen));
     if (hit) return toResponse(hit.response);
     log.unmatched.push(`${seen.method} ${seen.url}`);
@@ -150,15 +162,23 @@ export function normalizeScorecard(scorecard: WebScorecard, registry: WebAuditRe
   return { ...scorecard, results };
 }
 
-export type ScenarioRun = { output: string; unmatched: string[] };
+export type ScenarioRun = { output: string; unmatched: string[]; requests: HopRequest[] };
 
-export async function runScenario(name: string, scenario: Scenario, registry: WebAuditRegistry): Promise<ScenarioRun> {
-  const log: StubLog = { unmatched: [] };
+/** Runs a scenario at `concurrency`, or at the engine's default when absent. */
+export async function runScenario(
+  name: string,
+  scenario: Scenario,
+  registry: WebAuditRegistry,
+  concurrency?: number,
+): Promise<ScenarioRun> {
+  const sent: HopRequest[] = [];
+  const log: StubLog = { unmatched: [], sent };
   const audit = runWebAudit({
     url: scenario.target,
     registry,
     siteType: scenario.site_type,
     specVersion: scenario.spec_version,
+    concurrency,
     followDeclarations: scenario.follow_declarations ?? true,
     domainBudget: ALWAYS_ADMIT_BUDGET,
     fetchOptions: { fetchImpl: stubFetchFor(scenario, log) },
@@ -173,9 +193,16 @@ export async function runScenario(name: string, scenario: Scenario, registry: We
   if (log.unmatched.length > 0 && !scenario.allow_unmatched) {
     throw new Error(`scenario ${name} hit its unmatched policy: ${log.unmatched.join(', ')}`);
   }
-  if (unreachable !== null) return { output: `${JSON.stringify({ unreachable }, null, 2)}\n`, unmatched: log.unmatched };
+  const requests = sortedRequests(name, sent);
+  if (unreachable !== null) {
+    return { output: `${JSON.stringify({ unreachable }, null, 2)}\n`, unmatched: log.unmatched, requests };
+  }
   if (scorecard === null) throw new Error(`scenario ${name} produced neither a scorecard nor an unreachable event`);
-  return { output: `${JSON.stringify(normalizeScorecard(scorecard, registry), null, 2)}\n`, unmatched: log.unmatched };
+  return {
+    output: `${JSON.stringify(normalizeScorecard(scorecard, registry), null, 2)}\n`,
+    unmatched: log.unmatched,
+    requests,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -464,6 +491,7 @@ ${relative(REPO_ROOT, CORPUS_DIR)}/
   scores.json                      every scenario's scores and row statuses, one line per row
   scenarios/<name>/scenario.json   input: target, site type, exchanges, unmatched policy
   scenarios/<name>/scorecard.json  output: the engine's scorecard, normalized as described below
+  scenarios/<name>/requests.json   output: every request the engine sent, each once, sorted as described below
 \`\`\`
 
 ## scenario.json
@@ -502,6 +530,21 @@ refused redirect. A probe of an endpoint on a declared host takes no redirect at
 document on that endpoint's origin (a registry path written with \`{mcp_origin}\`, which the engine replaces with the
 endpoint's scheme, host, and port). The GET an API anchor host off the audited origin receives takes only hops that
 keep the scheme, host, and port, and a redirect to another origin is its answer.
+
+## requests.json
+
+Every request the engine sent for the scenario, recorded where the stub fetch receives it, before matching. An engine
+under comparison sends the same set, whatever order its requests complete in.
+
+- \`method\`: uppercase.
+- \`url\`: as the URL parser writes it.
+- \`headers\`: lowercase names, sorted by name.
+- \`body\`: the raw string, or \`null\` for a request with none.
+
+Entries are sorted by the request memo's identity key, \`requestIdentityKey\` in
+\`src/worker/audit-web/request-hop.ts\`: the JSON array \`[method, url, [[name, value], ...], body]\`, compared by UTF-16
+code unit. Generation fails when a scenario sends one request twice, and when its scorecard or request set at
+concurrency 1 differs from the default run.
 
 ## scorecard.json
 
@@ -573,8 +616,10 @@ export async function generateCorpus(registry: WebAuditRegistry): Promise<Map<st
     const scenario = SCENARIOS[name];
     validateScenario(name, scenario, ids);
     const run = await runScenario(name, scenario, registry);
+    assertScheduleIndependent(name, run, await runScenario(name, scenario, registry, 1));
     files.set(`scenarios/${name}/scenario.json`, scenarioJson(scenario));
     files.set(`scenarios/${name}/scorecard.json`, run.output);
+    files.set(`scenarios/${name}/requests.json`, requestsJson(run.requests));
     scores.push([name, scoreIndexEntry(run.output)]);
   }
   files.set('regex-parity.json', `${JSON.stringify(regexParityFixture(registry), null, 2)}\n`);

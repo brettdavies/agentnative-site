@@ -466,7 +466,7 @@ function normalizeAlternatives(groups, checks) {
 /**
  * The bytes of a projection: what this stage writes to dist/_internal, before
  * minifyDist compacts it, and what the CLI vendoring contract commits under
- * build/. A test holds the two equal.
+ * build/. A test holds the registry and fix catalog equal in both.
  *
  * @param {unknown} projection
  * @returns {string}

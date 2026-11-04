@@ -7,7 +7,38 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { projectionBytes, projectWebRemediation } from '../../src/build/13-web-audit-registry.mjs';
 import { VENDORED_CARD_SCHEMA_PATH } from '../../src/build/web-audit-card-schema.mjs';
-import type { WebAuditRegistry } from '../../src/worker/audit-web/registry';
+import { AUDIT_USER_AGENT, PROBE_UA_TOKENS } from '../../src/shared/user-agents';
+import { MAX_CATALOG_ANCHORS } from '../../src/worker/audit-web/api-catalog';
+import { DISCOVERY_BUDGET_MS } from '../../src/worker/audit-web/discovery';
+import { MAX_CATALOG_CARDS } from '../../src/worker/audit-web/discovery-documents';
+import {
+  DEFAULT_CONCURRENCY,
+  DEFAULT_PER_AUDIT_DEADLINE_MS,
+  DEFAULT_PER_CHECK_TIMEOUT_MS,
+  DEGRADED_PER_CHECK_TIMEOUT_MS,
+} from '../../src/worker/audit-web/engine';
+import { CARD_DOCUMENT_TIMEOUT_MS, ENDPOINT_GET_TIMEOUT_MS, FOLLOW_SLICE_MS } from '../../src/worker/audit-web/follow';
+import { DESCRIPTION_TIMEOUT_MS } from '../../src/worker/audit-web/follow-api';
+import { MAX_FOLLOW_REQUESTS, MAX_FOLLOWED_HOSTS } from '../../src/worker/audit-web/follow-requests';
+import { MAX_TWIN_PROBES, MIN_TWIN_CHARS, MIN_VISIBLE_CHARS } from '../../src/worker/audit-web/handlers/content-without-js';
+import { DEFAULT_MAX_LINKS } from '../../src/worker/audit-web/handlers/llms-txt-quality';
+import {
+  MAX_AUTHORIZATION_SERVERS,
+  MAX_SHOWN_LENGTH,
+  MAX_URL_LENGTH,
+} from '../../src/worker/audit-web/handlers/protected-resource';
+import { DEFAULT_MAX_CANDIDATES } from '../../src/worker/audit-web/handlers/scoped-llms';
+import { registryFingerprintPrefix, type WebAuditRegistry } from '../../src/worker/audit-web/registry';
+import { MEMO_BODY_MAX_BYTES, MEMO_TOTAL_MAX_BYTES } from '../../src/worker/audit-web/request-hop';
+import {
+  AUDIT_PROBE_MAX_BODY_BYTES,
+  DEFAULT_MAX_REDIRECTS,
+  DEFAULT_TIMEOUT_MS,
+  DOCUMENT_MAX_BODY_BYTES,
+  METADATA_MAX_BODY_BYTES,
+  OPENAPI_MAX_BODY_BYTES,
+  STATUS_ONLY_BODY_BYTES,
+} from '../../src/worker/audit-web/ssrf';
 import { generateCorpus } from './conformance-corpus';
 import {
   CONTRACT_BUILD_TREE,
@@ -19,9 +50,52 @@ import {
   REMEDIATION_PATH,
 } from './contract-paths';
 
+/**
+ * What `build/constants.json` carries: every setting the port reads, under the
+ * name its owning module exports it by, so one search finds it in both repos.
+ */
+async function contractConstants(registry: WebAuditRegistry): Promise<Record<string, unknown>> {
+  return {
+    REGISTRY_FINGERPRINT: await registryFingerprintPrefix(registry),
+    AUDIT_USER_AGENT,
+    PROBE_UA_TOKENS,
+    DEFAULT_CONCURRENCY,
+    DEFAULT_PER_CHECK_TIMEOUT_MS,
+    DEFAULT_PER_AUDIT_DEADLINE_MS,
+    DEGRADED_PER_CHECK_TIMEOUT_MS,
+    DISCOVERY_BUDGET_MS,
+    DEFAULT_TIMEOUT_MS,
+    DEFAULT_MAX_REDIRECTS,
+    STATUS_ONLY_BODY_BYTES,
+    AUDIT_PROBE_MAX_BODY_BYTES,
+    DOCUMENT_MAX_BODY_BYTES,
+    METADATA_MAX_BODY_BYTES,
+    OPENAPI_MAX_BODY_BYTES,
+    MEMO_BODY_MAX_BYTES,
+    MEMO_TOTAL_MAX_BYTES,
+    FOLLOW_SLICE_MS,
+    ENDPOINT_GET_TIMEOUT_MS,
+    CARD_DOCUMENT_TIMEOUT_MS,
+    DESCRIPTION_TIMEOUT_MS,
+    MAX_FOLLOWED_HOSTS,
+    MAX_FOLLOW_REQUESTS,
+    MAX_CATALOG_CARDS,
+    MAX_CATALOG_ANCHORS,
+    MIN_VISIBLE_CHARS,
+    MAX_TWIN_PROBES,
+    MIN_TWIN_CHARS,
+    DEFAULT_MAX_LINKS,
+    DEFAULT_MAX_CANDIDATES,
+    MAX_AUTHORIZATION_SERVERS,
+    MAX_URL_LENGTH,
+    MAX_SHOWN_LENGTH,
+  };
+}
+
 /** The generated files of `build/`, by file name. */
-export function generateContractBuild(registry: WebAuditRegistry): Map<string, string> {
+export async function generateContractBuild(registry: WebAuditRegistry): Promise<Map<string, string>> {
   return new Map([
+    ['constants.json', projectionBytes(await contractConstants(registry))],
     ['registry.json', projectionBytes(registry)],
     ['remediation.json', projectionBytes(projectWebRemediation(readFileSync(REMEDIATION_PATH, 'utf8'), registry))],
     ['server-card.schema.json', readFileSync(VENDORED_CARD_SCHEMA_PATH, 'utf8')],
@@ -31,7 +105,7 @@ export function generateContractBuild(registry: WebAuditRegistry): Map<string, s
 /** Every generated file of the contract, by its path under the contract root. */
 export async function generateContract(registry: WebAuditRegistry): Promise<Map<string, string>> {
   const files = new Map<string, string>();
-  for (const [name, content] of generateContractBuild(registry)) files.set(`${CONTRACT_BUILD_TREE}/${name}`, content);
+  for (const [name, content] of await generateContractBuild(registry)) files.set(`${CONTRACT_BUILD_TREE}/${name}`, content);
   for (const [name, content] of await generateCorpus(registry)) files.set(`${CONTRACT_CORPUS_TREE}/${name}`, content);
   return files;
 }

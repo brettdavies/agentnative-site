@@ -6,7 +6,9 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { loadRegistry } from '../scripts/web-audit/conformance-corpus';
+import { loadRegistry, stubFetchFor } from '../scripts/web-audit/conformance-corpus';
+import { assertScheduleIndependent, requestsJson, sortedRequests } from '../scripts/web-audit/conformance-requests';
+import { SCENARIOS } from '../scripts/web-audit/conformance-scenarios';
 import {
   contractDrift,
   contractDriftMessage,
@@ -21,9 +23,14 @@ import {
   REGISTRY_PATH,
   REMEDIATION_PATH,
   REPO_ROOT,
+  SCENARIOS_DIR,
 } from '../scripts/web-audit/contract-paths';
 import { emitWebAuditRegistry, emitWebRemediation } from '../src/build/13-web-audit-registry.mjs';
 import { VENDORED_CARD_SCHEMA_PATH } from '../src/build/web-audit-card-schema.mjs';
+import { runWebAudit } from '../src/worker/audit-web/engine';
+import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
+import { registryFingerprintPrefix } from '../src/worker/audit-web/registry';
+import { type HopRequest, requestIdentityKey } from '../src/worker/audit-web/request-hop';
 
 const registry = loadRegistry();
 const generated = await generateContract(registry);
@@ -59,9 +66,9 @@ describe('the committed web-audit vendoring contract', () => {
     expect(contractDriftMessage(contractDrift(generated))).toBeNull();
   });
 
-  test('two generations of build/ produce identical bytes', () => {
-    const first = generateContractBuild(registry);
-    const second = generateContractBuild(registry);
+  test('two generations of build/ produce identical bytes', async () => {
+    const first = await generateContractBuild(registry);
+    const second = await generateContractBuild(registry);
     expect([...second.keys()]).toEqual([...first.keys()]);
     for (const [name, content] of first) {
       if (second.get(name) !== content) throw new Error(`${name} differs between two generations`);
@@ -90,6 +97,14 @@ describe('the committed web-audit vendoring contract', () => {
     expect(copy.equals(readFileSync(VENDORED_CARD_SCHEMA_PATH))).toBe(true);
   });
 
+  // A stored scorecard records this prefix, so the port compares it to know
+  // which registry version a score was computed under.
+  test('constants.json carries the fingerprint the Worker computes from registry.json', async () => {
+    const constants = JSON.parse(readFileSync(join(CONTRACT_BUILD_DIR, 'constants.json'), 'utf8'));
+    const shipped = JSON.parse(readFileSync(join(CONTRACT_BUILD_DIR, 'registry.json'), 'utf8'));
+    expect(constants.REGISTRY_FINGERPRINT).toBe(await registryFingerprintPrefix(shipped));
+  });
+
   test('the contract root, build/ and test/ list exactly the pinned entries', () => {
     for (const [dir, pinned] of Object.entries(CONTRACT_LISTING)) {
       expect({ dir, entries: readdirSync(join(CONTRACT_DIR, dir)).sort() }).toEqual({
@@ -109,6 +124,81 @@ describe('the committed web-audit vendoring contract', () => {
     if (proc.exitCode !== 0) throw new Error(proc.stderr.toString());
     expect(proc.exitCode).toBe(0);
   }, 30_000);
+});
+
+describe("each scenario's requests.json", () => {
+  type Recorded = Omit<HopRequest, 'body'> & { body: string | null };
+
+  const recorded = (name: string): HopRequest[] =>
+    (JSON.parse(readFileSync(join(SCENARIOS_DIR, name, 'requests.json'), 'utf8')) as Recorded[]).map((request) => ({
+      ...request,
+      body: request.body ?? undefined,
+    }));
+
+  test('run-healthy lists every request its audit sent, sorted by the identity key, each once', async () => {
+    const scenario = SCENARIOS['run-healthy'];
+    const stub = stubFetchFor(scenario, { unmatched: [] });
+    const received: string[] = [];
+    const fetchImpl = ((input: string, init?: RequestInit) => {
+      received.push(`${init?.method ?? 'GET'} ${input}`);
+      return stub(input, init);
+    }) as typeof fetch;
+    for await (const _event of runWebAudit({
+      url: scenario.target,
+      registry,
+      siteType: scenario.site_type,
+      specVersion: scenario.spec_version,
+      followDeclarations: scenario.follow_declarations ?? true,
+      domainBudget: ALWAYS_ADMIT_BUDGET,
+      fetchOptions: { fetchImpl },
+      now: () => 0,
+    })) {
+      // drain the audit
+    }
+    const requests = recorded('run-healthy');
+    expect(received.length).toBeGreaterThan(0);
+    expect(requests.map(({ method, url }) => `${method} ${url}`).sort()).toEqual(received.sort());
+    const keys = requests.map(requestIdentityKey);
+    expect(keys).toEqual([...new Set(keys)].sort());
+  });
+
+  test('every scenario records a sorted set of its requests, and at least one request', () => {
+    for (const name of Object.keys(SCENARIOS)) {
+      const keys = recorded(name).map(requestIdentityKey);
+      expect({ name, sorted: keys }).toEqual({ name, sorted: [...new Set(keys)].sort() });
+      expect({ name, some: keys.length > 0 }).toEqual({ name, some: true });
+    }
+  });
+
+  const request = (url: string): HopRequest => ({ method: 'GET', url, headers: {}, body: undefined });
+
+  test('a scenario that sends one request twice fails generation, naming the scenario and the request', () => {
+    expect(() => sortedRequests('twice', [request('https://a.test/'), request('https://a.test/')])).toThrow(
+      /scenario twice sent one request twice: .*https:\/\/a\.test\//,
+    );
+  });
+
+  test('a scenario whose scorecard differs at concurrency 1 fails generation, naming the scenario', () => {
+    const concurrent = { output: 'a', requests: [request('https://a.test/')] };
+    expect(() => assertScheduleIndependent('moves', concurrent, { ...concurrent, output: 'b' })).toThrow(
+      'scenario moves: the scorecard at concurrency 1 differs',
+    );
+  });
+
+  test('a scenario whose request set differs at concurrency 1 fails generation, naming the request', () => {
+    const concurrent = { output: 'a', requests: [request('https://a.test/')] };
+    const serial = { output: 'a', requests: [request('https://b.test/')] };
+    expect(() => assertScheduleIndependent('moves', concurrent, serial)).toThrow(
+      /scenario moves: the request set at concurrency 1 differs.*only at concurrency 1: .*b\.test.*only at the default: .*a\.test/,
+    );
+  });
+
+  test('the file form names an absent body null and sorts headers by name', () => {
+    const entry = { method: 'POST', url: 'https://a.test/', headers: { b: '2', a: '1' }, body: undefined };
+    expect(requestsJson([entry])).toBe(
+      `${JSON.stringify([{ method: 'POST', url: 'https://a.test/', headers: { a: '1', b: '2' }, body: null }], null, 2)}\n`,
+    );
+  });
 });
 
 describe('a contract that has drifted', () => {
@@ -163,11 +253,11 @@ describe('a contract that has drifted', () => {
 
   test('a generated file the pin does not name fails once it is written', () => {
     const { root, files } = cleanContract();
-    writeFileSync(join(root, 'build', 'constants.json'), '{}\n');
-    const widened = new Map([...files, ['build/constants.json', '{}\n']]);
+    writeFileSync(join(root, 'build', 'unpinned.json'), '{}\n');
+    const widened = new Map([...files, ['build/unpinned.json', '{}\n']]);
     expect(contractDrift(widened, root)).toEqual({
       stale: [],
-      listing: ['build/constants.json (not in the pinned listing)'],
+      listing: ['build/unpinned.json (not in the pinned listing)'],
     });
   });
 });
