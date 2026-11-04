@@ -3,7 +3,7 @@
 // can break has to fail it. Runs the real script against a local server.
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
@@ -30,6 +30,14 @@ const ANSWERS: Record<string, () => Response> = {
   '/spec-suffix': () => Response.json({ ...VALID, spec_version: '0.7.0garbage' }, { headers: JSON_HEADERS }),
   '/spec-newline': () => Response.json({ ...VALID, spec_version: '0.7.0\n' }, { headers: JSON_HEADERS }),
   '/schema-three-parts': () => Response.json({ ...VALID, web_schema_version: '0.5.1' }, { headers: JSON_HEADERS }),
+  '/created': () => Response.json(VALID, { status: 201, headers: JSON_HEADERS }),
+  '/redirect': () =>
+    new Response(JSON.stringify(VALID), {
+      status: 302,
+      headers: { ...JSON_HEADERS, location: 'https://example.com/' },
+    }),
+  '/jsonp': () => new Response(JSON.stringify(VALID), { headers: { 'content-type': 'application/jsonp' } }),
+  '/two-documents': () => new Response(`${JSON.stringify(VALID)}\n${JSON.stringify(VALID)}`, { headers: JSON_HEADERS }),
   '/prerelease': () => Response.json({ ...VALID, spec_version: '0.8.0-rc.1' }, { headers: JSON_HEADERS }),
   '/stale-once': () => {
     staleAnswersLeft -= 1;
@@ -97,6 +105,10 @@ describe('scripts/smoke-web-audit-version.sh', () => {
     ['spec-suffix', 'broke the contract'],
     ['spec-newline', 'broke the contract'],
     ['schema-three-parts', 'broke the contract'],
+    ['created', 'answered HTTP 201'],
+    ['redirect', 'answered HTTP 302'],
+    ['jsonp', 'expected application/json'],
+    ['two-documents', 'broke the contract'],
   ] as const) {
     test(`fails on ${name}`, async () => {
       const { exitCode, stderr } = await smoke(fixture(name));
@@ -149,7 +161,82 @@ describe('scripts/smoke-web-audit-version.sh', () => {
     }
   });
 
+  test('a failing run leaves the secret out of its output and no credential file behind', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'smoke-tmp-'));
+    try {
+      const { exitCode, stdout, stderr } = await smoke(fixture('missing'), {
+        CF_ACCESS_CLIENT_ID: 'id-from-env',
+        CF_ACCESS_CLIENT_SECRET: 'secret-from-env',
+        TMPDIR: dir,
+      });
+      expect(exitCode).toBe(1);
+      expect(`${stdout}${stderr}`).not.toContain('secret-from-env');
+      expect(await readdir(dir)).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true });
+    }
+  });
+
+  test("a verbose .curlrc cannot print the secret, because curl ignores the caller's config", async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'smoke-curlrc-'));
+    try {
+      await writeFile(join(dir, '.curlrc'), 'verbose\n');
+      const { exitCode, stdout, stderr } = await smoke(fixture('valid'), {
+        CF_ACCESS_CLIENT_ID: 'id-from-env',
+        CF_ACCESS_CLIENT_SECRET: 'secret-from-env',
+        CURL_HOME: dir,
+      });
+      expect(exitCode).toBe(0);
+      expect(`${stdout}${stderr}`).not.toContain('secret-from-env');
+    } finally {
+      await rm(dir, { recursive: true });
+    }
+  });
+
+  for (const [label, base] of [
+    ['a plain-http public host', 'http://anc.dev'],
+    ['an unknown https host', 'https://example.com'],
+    ['a host that only starts like a known one', 'https://anc.dev.example.com'],
+    ['a host that only ends like a known one', 'https://not-anc.dev'],
+    ['a look-alike staging suffix', 'https://evil.workers.dev.example.com'],
+    ['a known host used as userinfo', 'https://anc.dev:pw@evil.example'],
+    ['a staging suffix smuggled past a backslash', 'https://evil.example\\.workers.dev'],
+    ['plain-http staging', 'http://site.workers.dev'],
+  ] as const) {
+    test(`refuses to send Access credentials to ${label}, before any request`, async () => {
+      const { exitCode, stderr } = await smoke(base, {
+        CF_ACCESS_CLIENT_ID: 'id-from-env',
+        CF_ACCESS_CLIENT_SECRET: 'secret-from-env',
+      });
+      expect(exitCode).toBe(2);
+      expect(stderr).toContain('refusing to send Access credentials');
+    });
+  }
+
+  test('the same unknown host with no credentials is checked as a request, not refused', async () => {
+    const { exitCode, stderr } = await smoke('http://localhost:1');
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('did not answer 200');
+  });
+
+  for (const [label, env] of [
+    ['only the id', { CF_ACCESS_CLIENT_ID: 'id-from-env' }],
+    ['only the secret', { CF_ACCESS_CLIENT_SECRET: 'secret-from-env' }],
+  ] as const) {
+    test(`${label} is a prerequisite failure, because a dropped header looks like a broken surface`, async () => {
+      const { exitCode, stderr } = await smoke(fixture('valid'), env);
+      expect(exitCode).toBe(2);
+      expect(stderr).toContain('both');
+    });
+  }
+
   test('a missing base URL is a prerequisite failure, not a smoke failure', async () => {
     expect((await smoke(null)).exitCode).toBe(2);
+  });
+
+  test('a base URL that is not an http origin is a prerequisite failure', async () => {
+    const { exitCode, stderr } = await smoke('anc.dev');
+    expect(exitCode).toBe(2);
+    expect(stderr).toContain('full http(s) origin');
   });
 });

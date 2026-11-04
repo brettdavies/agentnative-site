@@ -106,6 +106,15 @@ describe('GET /api/web-audit/version', () => {
     }
   });
 
+  test('a different registry gets its own fingerprint, not the one already computed', async () => {
+    const first = (await (await send({}, env().env)).json()) as WebAuditVersionSignal;
+    resetWebAuditRegistryCacheForTests();
+    const other = { schema_version: 1, checks: [{ id: 'another-check' }] };
+    const { env: e } = env(() => new Response(JSON.stringify(other)));
+    const second = (await (await send({}, e)).json()) as WebAuditVersionSignal;
+    expect(second.registry_fingerprint).not.toBe(first.registry_fingerprint);
+  });
+
   test('carries the machine-surface headers and the HIT-1d class', async () => {
     const { headers } = await send();
     expect(headers.get('content-type')).toBe('application/json; charset=utf-8');

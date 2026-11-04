@@ -9,8 +9,10 @@
 // itself lives in docs/runbooks/live-surface-sweep.md.
 
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import * as yaml from 'js-yaml';
-import { workflowText } from './helpers/workflows';
+import { REPO_ROOT, workflowText } from './helpers/workflows';
 
 /** Job ids: the two-space-indented keys after the top-level `jobs:` line. */
 function jobIds(workflow: string): string[] {
@@ -263,5 +265,37 @@ describe('deep-check.yml leaves reruns to the crash-retry workflow', () => {
       runLines(deepCheck).filter((line) => /\brerun\b/.test(line)),
       'deep-check.yml must not rerun its own jobs: the API refuses a rerun while the run is in progress, and a job inside deep-check is what keeps it in progress; the retry lives in deep-check-crash-retry.yml',
     ).toEqual([]);
+  });
+});
+
+describe('the web-audit version smoke stays wired in', () => {
+  // A client treats any failure of the signal as no signal, so deleting one of
+  // these would lose the check with nothing turning red.
+  const lastStep = (job: string) => job.slice(job.lastIndexOf('- name:'));
+
+  test('it is the last step of the staging job, so a red signal skips nothing', () => {
+    const step = lastStep(jobBlock(deployYml, 'staging'));
+    expect(step).toContain('scripts/smoke-web-audit-version.sh "$PUBLIC_BASE_URL"');
+    expect(step).toContain('!cancelled()');
+  });
+
+  test('the production smoke job runs it even after an earlier smoke goes red', () => {
+    const job = jobBlock(deployYml, 'production-smoke');
+    const step = job.slice(job.indexOf('- name: Smoke /api/web-audit/version'));
+    expect(step).toContain('scripts/smoke-web-audit-version.sh https://anc.dev');
+    expect(step).toContain('!cancelled()');
+  });
+
+  test('the sweep production leg runs it with no retries, so a flapping signal shows', () => {
+    const step = lastStep(jobBlock(sweepYml, 'sweep-production'));
+    expect(step).toContain('scripts/smoke-web-audit-version.sh "$SWEEP_BASE_URL"');
+    expect(step).toContain('!cancelled()');
+    expect(step).toMatch(/SMOKE_RETRIES:\s*'0'/);
+  });
+
+  test('the postflight pages gate runs it', () => {
+    const postflight = readFileSync(join(REPO_ROOT, 'scripts/release/postflight.sh'), 'utf8');
+    const gate = postflight.match(/^gate_pages\(\) \{[\s\S]*?^\}/m)?.[0];
+    expect(gate).toContain('scripts/smoke-web-audit-version.sh');
   });
 });

@@ -168,6 +168,11 @@ jobs:
         run: scripts/release/ua-ban-probe.sh "$SWEEP_BASE_URL"
 
       # A client treats any failure of this signal as no signal, so nothing
-      # else reports a broken one.
+      # else reports a broken one. No retries: no deploy is propagating here, and
+      # retries would hide a signal that fails five times in six. It still runs
+      # when an earlier probe in this leg fails.
       - name: Smoke web-audit version signal
+        if: ${{ !cancelled() }}
+        env:
+          SMOKE_RETRIES: '0'
         run: scripts/smoke-web-audit-version.sh "$SWEEP_BASE_URL"

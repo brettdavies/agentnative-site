@@ -304,8 +304,10 @@ jobs:
           assert_self_hosted "AI catalog" "$ai_catalog"
 
       # Last, so a red signal marks the job failed without skipping the rescore,
-      # the curated pass, or the link smoke above it.
+      # the curated pass, or the link smoke above it. It still runs when one of
+      # them fails.
       - name: Smoke /api/web-audit/version
+        if: ${{ !cancelled() }}
         env:
           CF_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
@@ -426,9 +428,10 @@ jobs:
       - name: Smoke /api/score (registry-fast-path)
         run: scripts/smoke-api-score.sh https://anc.dev
 
-      # A client treats any failure of this signal as no signal, so nothing
-      # else reports a broken one. Always runs: an earlier red smoke must not
-      # leave the signal unchecked for this deploy.
+      # A client treats any failure of this signal as no signal, so it reports
+      # nothing itself. An earlier red smoke must not leave the signal unchecked
+      # for this deploy. Under this job's burn-in a red step marks the job failed
+      # and the run stays green; the sweep and the postflight are the hard reds.
       - name: Smoke /api/web-audit/version
-        if: always()
+        if: ${{ !cancelled() }}
         run: scripts/smoke-web-audit-version.sh https://anc.dev

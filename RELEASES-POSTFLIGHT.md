@@ -127,6 +127,7 @@ manual recipe below skips the headers; for prod the recipe runs unauthenticated.
   ```bash
   ENV_URL=https://anc.dev   # or https://agentnative-site-staging.brettdavies.workers.dev for staging
   # When staging, also: -H "CF-Access-Client-Id: $CFID" -H "CF-Access-Client-Secret: $CFSEC" (from 1Password)
+  # and, for the version smoke, which reads no flags: export CF_ACCESS_CLIENT_ID="$CFID" CF_ACCESS_CLIENT_SECRET="$CFSEC"
 
   # Accept: text/html is required — curl's default Accept negotiates markdown on
   # extensionless URLs (same as the scripted gate_pages() in postflight.sh).
