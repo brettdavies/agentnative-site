@@ -317,6 +317,15 @@ describe('scripts/smoke-web-audit-version.sh', () => {
       expect(exitCode).toBe(2);
       expect(stderr).toContain(name);
     });
+
+    // Bash reads a leading zero as octal, and 08 is an arithmetic error that drops
+    // out of the retry loop onto the PASS line.
+    test(`a leading-zero ${name} is a prerequisite failure, so it cannot print a false PASS`, async () => {
+      const { exitCode, stdout, stderr } = await smoke(fixture('not-json'), { [name]: '08' });
+      expect(exitCode).toBe(2);
+      expect(stderr).toContain(name);
+      expect(stdout).not.toContain('PASS');
+    });
   }
 
   // A stub curl, so this needs no DNS: an unresolvable name can take the full

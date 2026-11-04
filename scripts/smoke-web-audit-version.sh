@@ -57,7 +57,7 @@ if ! [[ "$authority" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]+)?$ ]]; 
 fi
 
 for setting in "SMOKE_RETRIES=${SMOKE_RETRIES:-5}" "SMOKE_RETRY_DELAY=${SMOKE_RETRY_DELAY:-10}"; do
-  if ! [[ "${setting#*=}" =~ ^[0-9]+$ ]]; then
+  if ! [[ "${setting#*=}" =~ ^(0|[1-9][0-9]*)$ ]]; then
     echo "FATAL: ${setting%%=*} must be a whole number, got: ${setting#*=}" >&2
     exit 2
   fi
