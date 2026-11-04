@@ -4,7 +4,7 @@
 // the memo's promise to a target, and a set that moves with the schedule is one
 // no second engine, running its checks on its own threads, could match.
 
-import { type HopRequest, requestIdentityKey } from '../../src/worker/audit-web/request-hop';
+import { type HopRequest, normalizedHeaders, requestIdentityKey } from '../../src/worker/audit-web/request-hop';
 
 export type ScheduledRun = { output: string; requests: readonly HopRequest[] };
 
@@ -19,29 +19,30 @@ export function sortedRequests(name: string, sent: readonly HopRequest[]): HopRe
   return [...byKey.keys()].sort().map((key) => byKey.get(key) as HopRequest);
 }
 
-function byName<T>([a]: [string, T], [b]: [string, T]): number {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-
-/** The bytes of `requests.json`: `body` is null for a request with none, and `headers` is sorted by name. */
+/** The bytes of `requests.json`: `body` is null for a request with none, and `headers` holds lowercase names sorted by name. */
 export function requestsJson(requests: readonly HopRequest[]): string {
   const entries = requests.map(({ method, url, headers, body }) => ({
     method,
     url,
-    headers: Object.fromEntries(Object.entries(headers).sort(byName)),
+    headers: Object.fromEntries(normalizedHeaders(headers)),
     body: body ?? null,
   }));
   return `${JSON.stringify(entries, null, 2)}\n`;
 }
 
-/** Throws naming the scenario when its scorecard or request set at concurrency 1 differs from the default run. */
-export function assertScheduleIndependent(name: string, concurrent: ScheduledRun, serial: ScheduledRun): void {
+/**
+ * The concurrent run's requests in identity-key order. Throws naming the scenario
+ * when either run sent one request twice, or when its scorecard or request set at
+ * concurrency 1 differs from the default run.
+ */
+export function scheduleIndependentRequests(name: string, concurrent: ScheduledRun, serial: ScheduledRun): HopRequest[] {
+  const requests = sortedRequests(name, concurrent.requests);
+  const serialRequests = sortedRequests(name, serial.requests);
   if (serial.output !== concurrent.output) {
     throw new Error(`scenario ${name}: the scorecard at concurrency 1 differs from the default run`);
   }
-  const keys = (run: ScheduledRun): Set<string> => new Set(run.requests.map(requestIdentityKey));
-  const concurrentKeys = keys(concurrent);
-  const serialKeys = keys(serial);
+  const concurrentKeys = new Set(requests.map(requestIdentityKey));
+  const serialKeys = new Set(serialRequests.map(requestIdentityKey));
   const onlySerial = [...serialKeys].filter((key) => !concurrentKeys.has(key));
   const onlyConcurrent = [...concurrentKeys].filter((key) => !serialKeys.has(key));
   if (onlySerial.length > 0 || onlyConcurrent.length > 0) {
@@ -50,4 +51,5 @@ export function assertScheduleIndependent(name: string, concurrent: ScheduledRun
         `only at concurrency 1: ${onlySerial.join(', ') || '(none)'}; only at the default: ${onlyConcurrent.join(', ') || '(none)'}`,
     );
   }
+  return requests;
 }

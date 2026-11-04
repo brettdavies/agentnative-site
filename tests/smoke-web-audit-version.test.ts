@@ -7,15 +7,26 @@ import { readFileSync } from 'node:fs';
 import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { CONTRACT_FINGERPRINT_ASSET_PATH } from '../src/shared/web-audit-contract';
 import worker from '../src/worker/index';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 import { REPO_ROOT } from './helpers/workflows';
 
 const SCRIPT = join(REPO_ROOT, 'scripts/smoke-web-audit-version.sh');
-const VALID = { spec_version: SPEC_VERSION, registry_fingerprint: 'c06f1efd281b', web_schema_version: '0.5' };
+const VALID = {
+  spec_version: SPEC_VERSION,
+  registry_fingerprint: 'c06f1efd281b',
+  contract_fingerprint: '0a1b2c3d4e5f',
+  web_schema_version: '0.5',
+};
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 const HANDLER_ENV = {
-  ASSETS: { fetch: async () => new Response(JSON.stringify({ schema_version: 1, checks: [] })) },
+  ASSETS: {
+    fetch: async (request: Request) =>
+      new URL(request.url).pathname === CONTRACT_FINGERPRINT_ASSET_PATH
+        ? new Response(`${VALID.contract_fingerprint}\n`)
+        : new Response(JSON.stringify({ schema_version: 1, checks: [] })),
+  },
 } as unknown as Parameters<typeof worker.fetch>[1];
 
 const ANSWERS: Record<string, () => Response | Promise<Response>> = {
@@ -54,6 +65,30 @@ const ANSWERS: Record<string, () => Response | Promise<Response>> = {
     staleAnswersLeft -= 1;
     return staleAnswersLeft >= 0 ? new Response('not found', { status: 404 }) : ANSWERS['/valid']();
   },
+  // An isolate on the previous deploy answers with a body that has no such field, or with another value.
+  '/no-contract-fingerprint': () => {
+    const { contract_fingerprint: _absent, ...previous } = VALID;
+    return Response.json(previous, { headers: JSON_HEADERS });
+  },
+  '/propagating-no-field': () => {
+    fingerprintHits += 1;
+    propagatingAnswers -= 1;
+    return propagatingAnswers >= 0 ? ANSWERS['/no-contract-fingerprint']() : ANSWERS['/valid']();
+  },
+  '/propagating-other-value': () => {
+    fingerprintHits += 1;
+    propagatingAnswers -= 1;
+    return propagatingAnswers >= 0
+      ? Response.json({ ...VALID, contract_fingerprint: 'ffffffffffff' }, { headers: JSON_HEADERS })
+      : ANSWERS['/valid']();
+  },
+  '/counted-missing': () => {
+    fingerprintHits += 1;
+    return new Response('not found', { status: 404 });
+  },
+  '/right-value-broken-field': () => Response.json({ ...VALID, web_schema_version: 0.5 }, { headers: JSON_HEADERS }),
+  '/contract-not-hex': () =>
+    Response.json({ ...VALID, contract_fingerprint: '<!doctype ht>' }, { headers: JSON_HEADERS }),
 };
 
 // A caller's real Access credentials must not reach the fixture server or change
@@ -63,6 +98,8 @@ const { CF_ACCESS_CLIENT_ID: _id, CF_ACCESS_CLIENT_SECRET: _secret, ...callerEnv
 let server: ReturnType<typeof Bun.serve>;
 let staleAnswersLeft = 0;
 let oldBodiesLeft = 0;
+let propagatingAnswers = 0;
+let fingerprintHits = 0;
 let lastHeaders: Record<string, string> = {};
 
 beforeAll(() => {
@@ -124,6 +161,8 @@ describe('scripts/smoke-web-audit-version.sh', () => {
     ['redirect', 'answered HTTP 302'],
     ['jsonp', 'expected application/json'],
     ['two-documents', 'broke the contract'],
+    ['no-contract-fingerprint', 'broke the contract'],
+    ['contract-not-hex', 'broke the contract'],
   ] as const) {
     test(`fails on ${name}`, async () => {
       const { exitCode, stderr } = await smoke(fixture(name));
@@ -356,6 +395,96 @@ describe('scripts/smoke-web-audit-version.sh', () => {
       expect(stderr).toContain('both');
     });
   }
+
+  describe('with SMOKE_EXPECT_CONTRACT_FINGERPRINT', () => {
+    const expecting = (extra: Record<string, string> = {}) => ({
+      SMOKE_EXPECT_CONTRACT_FINGERPRINT: VALID.contract_fingerprint,
+      SMOKE_RETRIES: '3',
+      SMOKE_RETRY_DELAY: '0',
+      ...extra,
+    });
+
+    test('passes on the value it expects', async () => {
+      const { exitCode, stdout } = await smoke(fixture('valid'), expecting());
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain('PASS');
+    });
+
+    test.each([
+      ['with no such field', 'propagating-no-field'],
+      ['with another value', 'propagating-other-value'],
+    ])('an isolate answering %s reads as not yet propagated, then passes', async (_how, name) => {
+      propagatingAnswers = 2;
+      fingerprintHits = 0;
+      const { exitCode, stdout } = await smoke(fixture(name), expecting());
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain('PASS');
+      expect(fingerprintHits).toBe(3);
+    });
+
+    test('a value that never arrives fails once the retries are spent, naming the served and expected values', async () => {
+      propagatingAnswers = 1_000;
+      fingerprintHits = 0;
+      const { exitCode, stderr } = await smoke(fixture('propagating-other-value'), expecting());
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('serves contract_fingerprint ffffffffffff');
+      expect(stderr).toContain(`expected contract_fingerprint ${VALID.contract_fingerprint}`);
+      expect(fingerprintHits).toBe(4);
+    });
+
+    test.each([
+      ['no-contract-fingerprint', 'broke the contract'],
+      ['right-value-broken-field', 'broke the contract'],
+      ['two-documents', 'broke the contract'],
+      ['not-json', 'broke the contract'],
+      ['text', 'expected application/json'],
+      ['missing', 'did not answer 200'],
+      ['redirect', 'Access credentials'],
+    ])('%s fails with its own reason and the expected value', async (name, reason) => {
+      const { exitCode, stderr } = await smoke(fixture(name), expecting());
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain(reason);
+      expect(stderr).toContain(`expected contract_fingerprint ${VALID.contract_fingerprint}`);
+    });
+
+    // Without the longer wait a deploy that moves the value goes red while old isolates drain.
+    test.each([
+      ['with', { SMOKE_EXPECT_CONTRACT_FINGERPRINT: VALID.contract_fingerprint }, 25],
+      ['without', {}, 6],
+    ])(
+      '%s an expected value, the default retries give the attempts its wait needs',
+      async (_with, extra, attempts) => {
+        fingerprintHits = 0;
+        const { exitCode } = await smoke(fixture('counted-missing'), {
+          SMOKE_RETRIES: '',
+          SMOKE_RETRY_DELAY: '0',
+          ...extra,
+        });
+        expect(exitCode).toBe(1);
+        expect(fingerprintHits).toBe(attempts);
+      },
+      30_000,
+    );
+
+    // The production job records nothing for a ref without the file, and its smoke then checks the shape alone.
+    test('an empty value compares nothing', async () => {
+      propagatingAnswers = 1;
+      const { exitCode } = await smoke(
+        fixture('propagating-other-value'),
+        expecting({ SMOKE_EXPECT_CONTRACT_FINGERPRINT: '' }),
+      );
+      expect(exitCode).toBe(0);
+    });
+
+    test.each(['not-a-print', '0A1B2C3D4E5F', '0a1b2c3d4e5'])('%s is a prerequisite failure', async (value) => {
+      const { exitCode, stderr } = await smoke(
+        fixture('valid'),
+        expecting({ SMOKE_EXPECT_CONTRACT_FINGERPRINT: value }),
+      );
+      expect(exitCode).toBe(2);
+      expect(stderr).toContain('SMOKE_EXPECT_CONTRACT_FINGERPRINT');
+    });
+  });
 
   test('a missing base URL is a prerequisite failure, not a smoke failure', async () => {
     expect((await smoke(null)).exitCode).toBe(2);

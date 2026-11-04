@@ -313,7 +313,10 @@ jobs:
         env:
           CF_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
-        run: scripts/smoke-web-audit-version.sh "$PUBLIC_BASE_URL"
+        run: |
+          expected="$(tr -d '[:space:]' < src/data/web-audit/contract/build/FINGERPRINT)"
+          test -n "$expected"
+          SMOKE_EXPECT_CONTRACT_FINGERPRINT="$expected" scripts/smoke-web-audit-version.sh "$PUBLIC_BASE_URL"
 
   production:
     name: build + deploy production
@@ -321,6 +324,8 @@ jobs:
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && inputs.environment == 'production')
     runs-on: ubuntu-latest
+    outputs:
+      contract_fingerprint: ${{ steps.contract.outputs.fingerprint }}
     timeout-minutes: 15
     concurrency:
       group: deploy-production
@@ -334,6 +339,19 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref || github.ref }}
+
+      # The smoke job checks out the branch again, and its tip can have moved past
+      # what this job deployed. A rollback to a ref without this file deploys with
+      # nothing to compare, and the smoke then checks the signal's shape alone.
+      - name: Record the deployed contract fingerprint
+        id: contract
+        run: |
+          file=src/data/web-audit/contract/build/FINGERPRINT
+          if [ -e "$file" ]; then
+            fingerprint="$(tr -d '[:space:]' < "$file")"
+            test -n "$fingerprint"
+            echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -436,4 +454,6 @@ jobs:
       # and the run stays green; the sweep and the postflight are the hard reds.
       - name: Smoke /api/web-audit/version
         if: ${{ !cancelled() }}
+        env:
+          SMOKE_EXPECT_CONTRACT_FINGERPRINT: ${{ needs.production.outputs.contract_fingerprint }}
         run: scripts/smoke-web-audit-version.sh https://anc.dev

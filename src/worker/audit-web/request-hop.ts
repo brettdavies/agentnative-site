@@ -252,10 +252,19 @@ function retained(record: HopRecord, stats: MemoStats): HopRecord {
  * conformance corpus records and sorts each scenario's requests by it.
  */
 export function requestIdentityKey(request: HopRequest): string {
-  const headers = Object.entries(request.headers)
+  return JSON.stringify([
+    request.method.toUpperCase(),
+    request.url,
+    normalizedHeaders(request.headers),
+    request.body ?? null,
+  ]);
+}
+
+/** Lowercase names sorted by name: the form a request's headers compare and commit in. */
+export function normalizedHeaders(headers: Readonly<Record<string, string>>): [string, string][] {
+  return Object.entries(headers)
     .map(([name, value]): [string, string] => [name.toLowerCase(), value])
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return JSON.stringify([request.method.toUpperCase(), request.url, headers, request.body ?? null]);
 }
 
 const DEADLINE_PASSED = Symbol('deadline passed');

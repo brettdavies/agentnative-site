@@ -8,7 +8,7 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { SCORE_PARITY_PATH } from '../scripts/web-audit/contract-paths';
+import { REPO_ROOT, SCORE_PARITY_PATH } from '../src/build/web-audit-contract-paths.mjs';
 import { NA_REASONS } from '../src/shared/web-audit-findings';
 import {
   categoryRollups,
@@ -21,7 +21,6 @@ import {
 } from '../src/worker/audit-web/score';
 import { buildWebScorecard, type EngineResult, WEB_SCHEMA_VERSION } from '../src/worker/audit-web/scorecard';
 
-const REPO_ROOT = new URL('..', import.meta.url).pathname;
 const PY_TOOL = join(REPO_ROOT, 'scripts', 'scoring', 'score_model.py');
 
 type TierOutcome = [keyof ScoreWeights, 'pass' | 'noncompliant' | 'broken' | 'absent' | 'n_a'];

@@ -16,9 +16,9 @@ import { ALWAYS_ADMIT_BUDGET } from '../../src/worker/audit-web/follow-requests'
 import type { WebAuditRegistry, WebSiteType } from '../../src/worker/audit-web/registry';
 import type { HopRequest } from '../../src/worker/audit-web/request-hop';
 import type { NaReason, ScorecardStatus, WebScorecard } from '../../src/worker/audit-web/scorecard';
-import { assertScheduleIndependent, requestsJson, sortedRequests } from './conformance-requests';
+import { requestsJson, scheduleIndependentRequests } from './conformance-requests';
 import { SCENARIOS } from './conformance-scenarios';
-import { CORPUS_DIR, REGISTRY_PATH, REPO_ROOT } from './contract-paths';
+import { CORPUS_DIR, WEB_AUDIT_REGISTRY_PATH, REPO_ROOT } from '../../src/build/web-audit-contract-paths.mjs';
 
 /** The clock every scenario runs under; the engine's deadline never fires. */
 const FIXED_NOW_MS = Date.UTC(2026, 0, 1);
@@ -54,7 +54,7 @@ export type Scenario = {
 };
 
 export function loadRegistry(): WebAuditRegistry {
-  return normalizeWebAuditRegistry(yaml.load(readFileSync(REGISTRY_PATH, 'utf8')) as object) as WebAuditRegistry;
+  return normalizeWebAuditRegistry(yaml.load(readFileSync(WEB_AUDIT_REGISTRY_PATH, 'utf8')) as object) as WebAuditRegistry;
 }
 
 function normalizeUrl(raw: string): string {
@@ -162,7 +162,12 @@ export function normalizeScorecard(scorecard: WebScorecard, registry: WebAuditRe
   return { ...scorecard, results };
 }
 
-export type ScenarioRun = { output: string; unmatched: string[]; requests: HopRequest[] };
+export type ScenarioRun = {
+  output: string;
+  unmatched: string[];
+  /** Every request the run sent, in the order it sent them, repeats included. */
+  requests: HopRequest[];
+};
 
 /** Runs a scenario at `concurrency`, or at the engine's default when absent. */
 export async function runScenario(
@@ -193,15 +198,14 @@ export async function runScenario(
   if (log.unmatched.length > 0 && !scenario.allow_unmatched) {
     throw new Error(`scenario ${name} hit its unmatched policy: ${log.unmatched.join(', ')}`);
   }
-  const requests = sortedRequests(name, sent);
   if (unreachable !== null) {
-    return { output: `${JSON.stringify({ unreachable }, null, 2)}\n`, unmatched: log.unmatched, requests };
+    return { output: `${JSON.stringify({ unreachable }, null, 2)}\n`, unmatched: log.unmatched, requests: sent };
   }
   if (scorecard === null) throw new Error(`scenario ${name} produced neither a scorecard nor an unreachable event`);
   return {
     output: `${JSON.stringify(normalizeScorecard(scorecard, registry), null, 2)}\n`,
     unmatched: log.unmatched,
-    requests,
+    requests: sent,
   };
 }
 
@@ -616,10 +620,11 @@ export async function generateCorpus(registry: WebAuditRegistry): Promise<Map<st
     const scenario = SCENARIOS[name];
     validateScenario(name, scenario, ids);
     const run = await runScenario(name, scenario, registry);
-    assertScheduleIndependent(name, run, await runScenario(name, scenario, registry, 1));
+    const serial = await runScenario(name, scenario, registry, 1);
+    const requests = scheduleIndependentRequests(name, run, serial);
     files.set(`scenarios/${name}/scenario.json`, scenarioJson(scenario));
     files.set(`scenarios/${name}/scorecard.json`, run.output);
-    files.set(`scenarios/${name}/requests.json`, requestsJson(run.requests));
+    files.set(`scenarios/${name}/requests.json`, requestsJson(requests));
     scores.push([name, scoreIndexEntry(run.output)]);
   }
   files.set('regex-parity.json', `${JSON.stringify(regexParityFixture(registry), null, 2)}\n`);

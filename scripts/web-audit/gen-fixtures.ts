@@ -2,7 +2,8 @@
 // Writes every generated file of the CLI vendoring contract: `build/` from the
 // registry, the fix catalog, the vendored schema and the engine's settings, and
 // `test/conformance/` from the scenarios in conformance-scenarios.ts. Or checks
-// that the committed contract is current. contract-paths.ts owns the layout.
+// that the committed contract is current. src/build/web-audit-contract-paths.mjs
+// owns the layout.
 //
 //   bun scripts/web-audit/gen-fixtures.ts                 regenerate every file in place
 //   bun scripts/web-audit/gen-fixtures.ts --check         exit 1 naming any stale, missing or unpinned file
@@ -13,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { loadRegistry, runScenario } from './conformance-corpus';
 import { SCENARIOS } from './conformance-scenarios';
 import { contractDrift, contractDriftMessage, generateContract } from './contract';
-import { CONTRACT_DIR, GENERATED_TREES } from './contract-paths';
+import { CONTRACT_DIR, GENERATED_TREES } from '../../src/build/web-audit-contract-paths.mjs';
 
 async function main(argv: string[]): Promise<number> {
   const registry = loadRegistry();

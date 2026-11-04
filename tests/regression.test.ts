@@ -28,8 +28,8 @@
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { CONTRACT_BUILD_DIR } from '../scripts/web-audit/contract-paths';
 import { minifyJson } from '../src/build/12-minify-dist.mjs';
+import { CONTRACT_BUILD_DIR, CONTRACT_FINGERPRINT_PATH } from '../src/build/web-audit-contract-paths.mjs';
 
 const REPO_ROOT = join(import.meta.dir, '..');
 const DIST = join(REPO_ROOT, 'dist');
@@ -555,5 +555,10 @@ describe('web-audit projections', () => {
     const shipped = await readFile(join(DIST, '_internal', distName), 'utf8');
     const vendored = await readFile(join(CONTRACT_BUILD_DIR, contractName), 'utf8');
     expect(shipped === minifyJson(vendored)).toBe(true);
+  });
+
+  test("the fingerprint the Worker serves is the contract's FINGERPRINT", async () => {
+    const shipped = await readFile(join(DIST, '_internal', 'web-audit-contract-fingerprint.txt'), 'utf8');
+    expect(shipped).toBe(await readFile(CONTRACT_FINGERPRINT_PATH, 'utf8'));
   });
 });

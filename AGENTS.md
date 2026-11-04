@@ -60,8 +60,9 @@ anchors, and semantic HTML. Keep this framing in every decision.
   `X-Robots-Tag: noindex`. Both `/skill` and `/skill.json` derive from `src/data/skill/skill.json` at build time; full
   surface contract in `DESIGN.md` §3.9
 - `/api/web-audit/version`: JSON signal (GET and HEAD) a client with a vendored web-audit contract compares against:
-  `spec_version`, `registry_fingerprint` (the 12-character prefix scorecards record), `web_schema_version`. Fixed for a
-  given Worker version; HIT-1d, `X-Robots-Tag: noindex`, no `.md` twin
+  `spec_version`, `registry_fingerprint` (the 12-character prefix scorecards record), `contract_fingerprint` (the
+  vendoring contract's `build/FINGERPRINT`, which moves with anything the CLI mirrors except prose),
+  `web_schema_version`. Fixed for a given Worker version; HIT-1d, `X-Robots-Tag: noindex`, no `.md` twin
 - `content/*.md`: markdown source of truth for every page (principle files, check, about, index)
 - Cloudflare Worker: routes requests. `.md` suffix OR `Accept: text/markdown` returns raw markdown source; otherwise
   returns HTML rendered from the same markdown via CommonMark

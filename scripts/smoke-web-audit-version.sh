@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Post-deploy smoke for the web-audit version signal. Exits 0 when
-# GET /api/web-audit/version answers 200 with one JSON document holding its three
+# GET /api/web-audit/version answers 200 with one JSON document holding its four
 # fields, each in its expected shape; exits non-zero otherwise. An additional
 # field passes, so adding one does not need this script to change first.
 #
@@ -21,8 +21,18 @@
 #                            check. Default 5, so an isolate still running the
 #                            previous deploy inside the propagation window
 #                            cannot fail the deploy on its own, whether it
-#                            answers 404 or 200 with its own body.
+#                            answers 404 or 200 with its own body. Default 24
+#                            when an expected fingerprint is set, at most 8
+#                            minutes 10 seconds at the default delay, which fits
+#                            both deploy jobs' timeouts.
 #   SMOKE_RETRY_DELAY        Seconds between attempts. Default 10.
+#   SMOKE_EXPECT_CONTRACT_FINGERPRINT
+#                            The deployed tree's build/FINGERPRINT, trimmed. The
+#                            check then also requires exactly this value. On a
+#                            deploy that moves the value, an isolate still on the
+#                            previous deploy cannot pass. A deploy that leaves
+#                            the value alone can pass on such an isolate's
+#                            identical answer. Empty compares nothing.
 #
 # Credentials go only to the deployed origins named in scripts/release/release.env,
 # or to localhost; any other target with credentials set exits 2 before a request
@@ -30,9 +40,11 @@
 #
 # Exit codes:
 #   0  smoke passed
-#   1  smoke failed (no 200, not JSON, or the body breaks the contract)
+#   1  smoke failed (no 200, not JSON, the body breaks the contract, or the
+#      expected fingerprint never arrived)
 #   2  prerequisite missing or unsafe (no or malformed base URL, no curl or jq,
-#      one Access variable without the other, credentials for an unknown target)
+#      one Access variable without the other, credentials for an unknown target,
+#      a malformed expected fingerprint)
 
 set -euo pipefail
 
@@ -56,7 +68,16 @@ if ! [[ "$authority" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]+)?$ ]]; 
   exit 2
 fi
 
-for setting in "SMOKE_RETRIES=${SMOKE_RETRIES:-5}" "SMOKE_RETRY_DELAY=${SMOKE_RETRY_DELAY:-10}"; do
+EXPECTED="${SMOKE_EXPECT_CONTRACT_FINGERPRINT:-}"
+if [ -n "$EXPECTED" ] && ! [[ "$EXPECTED" =~ ^[0-9a-f]{12}$ ]]; then
+  echo "FATAL: SMOKE_EXPECT_CONTRACT_FINGERPRINT must be 12 lowercase hex characters, got: $EXPECTED" >&2
+  exit 2
+fi
+
+default_retries=5
+[ -z "$EXPECTED" ] || default_retries=24
+retries="${SMOKE_RETRIES:-$default_retries}"
+for setting in "SMOKE_RETRIES=$retries" "SMOKE_RETRY_DELAY=${SMOKE_RETRY_DELAY:-10}"; do
   if ! [[ "${setting#*=}" =~ ^(0|[1-9][0-9]*)$ ]]; then
     echo "FATAL: ${setting%%=*} must be a whole number, got: ${setting#*=}" >&2
     exit 2
@@ -118,6 +139,7 @@ fi
 
 # shellcheck disable=SC2016 # the filter is jq, not shell
 contract='(.registry_fingerprint | type == "string" and test("^[0-9a-f]{12}\\z"))
+  and (.contract_fingerprint | type == "string" and test("^[0-9a-f]{12}\\z"))
   and (.spec_version | type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?\\z"))
   and (.web_schema_version | type == "string" and test("^[0-9]+\\.[0-9]+\\z"))'
 
@@ -126,7 +148,7 @@ contract='(.registry_fingerprint | type == "string" and test("^[0-9a-f]{12}\\z")
 # output and print the headers, and --noproxy keeps a local proxy from seeing
 # credentials sent to localhost in the clear.
 check_once() {
-  local response trailer status content_type
+  local response trailer status content_type served
   if ! response="$(curl -q -fsS -m 10 --noproxy localhost,127.0.0.1 -K "$curl_config" \
     -w '\n%{http_code} %{content_type}' "$URL")"; then
     failure="$URL did not answer 200"
@@ -153,12 +175,19 @@ check_once() {
     failure="$URL broke the contract: $body"
     return 1
   fi
+  if [ -n "$EXPECTED" ]; then
+    served="$(printf '%s' "$body" | "$JQ_BIN" -r .contract_fingerprint)"
+    if [ "$served" != "$EXPECTED" ]; then
+      failure="$URL serves contract_fingerprint $served"
+      return 1
+    fi
+  fi
 }
 
-retries_left="${SMOKE_RETRIES:-5}"
+retries_left="$retries"
 until check_once; do
   if [ "$retries_left" -le 0 ]; then
-    echo "FAIL: $failure" >&2
+    echo "FAIL: $failure${EXPECTED:+ (expected contract_fingerprint $EXPECTED)}" >&2
     exit 1
   fi
   retries_left=$((retries_left - 1))

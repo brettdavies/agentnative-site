@@ -9,7 +9,12 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateCorpus, loadRegistry } from '../scripts/web-audit/conformance-corpus';
 import { SCENARIOS } from '../scripts/web-audit/conformance-scenarios';
-import { CORPUS_DIR, REGENERATE_COMMAND, REGISTRY_PATH, SCENARIOS_DIR } from '../scripts/web-audit/contract-paths';
+import {
+  CORPUS_DIR,
+  REGENERATE_COMMAND,
+  SCENARIOS_DIR,
+  WEB_AUDIT_REGISTRY_PATH,
+} from '../src/build/web-audit-contract-paths.mjs';
 import { scoreWebAudit, universeMaxOf } from '../src/worker/audit-web/score';
 import type { WebScorecard } from '../src/worker/audit-web/scorecard';
 
@@ -132,7 +137,7 @@ describe('web-audit conformance corpus', () => {
   }, 30_000);
 
   test('the registry carries no lookaround or backreference (the CLI compiles every pattern)', () => {
-    const source = readFileSync(REGISTRY_PATH, 'utf8');
+    const source = readFileSync(WEB_AUDIT_REGISTRY_PATH, 'utf8');
     expect(source).not.toMatch(/\(\?[=!<]/);
     for (const check of registry.checks) {
       const expectBlock = (check.with as { expect?: Record<string, unknown> }).expect ?? {};

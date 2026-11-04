@@ -2,6 +2,7 @@
 // literal so a rename fails this suite instead of following the constant.
 
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { CONTRACT_FINGERPRINT_ASSET_PATH } from '../src/shared/web-audit-contract';
 import {
   isRegistryFingerprintPrefix,
   registryFingerprintPrefix,
@@ -17,10 +18,14 @@ import { withLogCapture } from './helpers/log-capture';
 
 const URL_ = 'https://anc.dev/api/web-audit/version';
 const REGISTRY = { schema_version: 1, checks: [{ id: 'fixture-check' }] } as unknown as WebAuditRegistry;
+const CONTRACT_FINGERPRINT = '0a1b2c3d4e5f';
 
 type WorkerEnv = Parameters<typeof worker.fetch>[1];
 
-function env(registry: () => Response = () => new Response(JSON.stringify(REGISTRY))): {
+function env(
+  registry: () => Response = () => new Response(JSON.stringify(REGISTRY)),
+  fingerprint: () => Response = () => new Response(`${CONTRACT_FINGERPRINT}\n`),
+): {
   env: WorkerEnv;
   assetPaths: string[];
 } {
@@ -32,6 +37,7 @@ function env(registry: () => Response = () => new Response(JSON.stringify(REGIST
         fetch: async (request: Request): Promise<Response> => {
           const { pathname } = new URL(request.url);
           assetPaths.push(pathname);
+          if (pathname === CONTRACT_FINGERPRINT_ASSET_PATH) return fingerprint();
           return pathname === '/_internal/web-audit-registry.json' ? registry() : new Response('asset');
         },
       },
@@ -48,13 +54,14 @@ beforeEach(() => {
 });
 
 describe('GET /api/web-audit/version', () => {
-  test('serves exactly the three version fields', async () => {
+  test('serves exactly the four version fields', async () => {
     const res = await send();
     expect(res.status).toBe(200);
     const body = (await res.json()) as WebAuditVersionSignal;
     expect(body).toEqual({
       spec_version: SPEC_VERSION,
       registry_fingerprint: await registryFingerprintPrefix(REGISTRY),
+      contract_fingerprint: CONTRACT_FINGERPRINT,
       web_schema_version: WEB_SCHEMA_VERSION,
     });
   });
@@ -64,6 +71,15 @@ describe('GET /api/web-audit/version', () => {
     const stored = await withRegistryFingerprint({}, REGISTRY);
     expect(registry_fingerprint).toBe(stored.registry_fingerprint);
     expect(isRegistryFingerprintPrefix(registry_fingerprint)).toBe(true);
+  });
+
+  test('contract_fingerprint moves independently of registry_fingerprint', async () => {
+    const before = (await (await send()).json()) as WebAuditVersionSignal;
+    resetWebAuditRegistryCacheForTests();
+    const moved = env(undefined, () => new Response('ffffffffffff\n')).env;
+    const after = (await (await send({}, moved)).json()) as WebAuditVersionSignal;
+    expect(after.registry_fingerprint).toBe(before.registry_fingerprint);
+    expect(after.contract_fingerprint).toBe('ffffffffffff');
   });
 
   test('the body is byte-stable across requests and never negotiates', async () => {
@@ -116,6 +132,32 @@ describe('HEAD /api/web-audit/version', () => {
 });
 
 describe('/api/web-audit/version outside the contract', () => {
+  test('reads the fingerprint asset once per isolate, so a cache-buster cannot drive repeat reads', async () => {
+    const { env: e, assetPaths } = env();
+    await send({}, e);
+    await send({}, e);
+    expect(assetPaths.filter((path) => path === CONTRACT_FINGERPRINT_ASSET_PATH)).toHaveLength(1);
+  });
+
+  test('the fingerprint asset itself is not public', async () => {
+    const res = await worker.fetch(
+      new Request(`https://anc.dev${CONTRACT_FINGERPRINT_ASSET_PATH}`),
+      env().env,
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  test.each([
+    ['unreadable', () => new Response('nope', { status: 500 })],
+    ['malformed', () => new Response('<!doctype html>')],
+  ])('a contract fingerprint that is %s is an unstored 503, never a wrong value', async (_how, fingerprint) => {
+    const { result: res } = await withLogCapture(() => send({}, env(undefined, fingerprint).env));
+    expect(res.status).toBe(503);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('retry-after')).toBe('30');
+  });
+
   for (const method of ['POST', 'PUT', 'DELETE', 'OPTIONS']) {
     test(`${method} is 405 naming GET and HEAD, unstored, and reads nothing`, async () => {
       const { env: e, assetPaths } = env();
@@ -145,5 +187,19 @@ describe('/api/web-audit/version outside the contract', () => {
 
     readable = true;
     expect((await send({}, e)).status).toBe(200);
+  });
+
+  test('an unreadable contract fingerprint recovers on the next request', async () => {
+    let readable = false;
+    const { env: e } = env(undefined, () =>
+      readable ? new Response(`${CONTRACT_FINGERPRINT}\n`) : new Response('nope', { status: 500 }),
+    );
+    const { result: failed } = await withLogCapture(() => send({}, e));
+    expect(failed.status).toBe(503);
+
+    readable = true;
+    const recovered = await send({}, e);
+    expect(recovered.status).toBe(200);
+    expect(((await recovered.json()) as WebAuditVersionSignal).contract_fingerprint).toBe(CONTRACT_FINGERPRINT);
   });
 });

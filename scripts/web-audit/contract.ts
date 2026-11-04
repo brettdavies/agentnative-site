@@ -3,8 +3,9 @@
 // this repo's sources, so a drifted file is a wrong input in another repo; the
 // `--check` mode and the contract test both report through this module.
 
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { projectionBytes, projectWebRemediation } from '../../src/build/13-web-audit-registry.mjs';
 import { VENDORED_CARD_SCHEMA_PATH } from '../../src/build/web-audit-card-schema.mjs';
 import { AUDIT_USER_AGENT, PROBE_UA_TOKENS } from '../../src/shared/user-agents';
@@ -28,7 +29,7 @@ import {
   MAX_URL_LENGTH,
 } from '../../src/worker/audit-web/handlers/protected-resource';
 import { DEFAULT_MAX_CANDIDATES } from '../../src/worker/audit-web/handlers/scoped-llms';
-import { registryFingerprintPrefix, type WebAuditRegistry } from '../../src/worker/audit-web/registry';
+import { fingerprintPrefix, registryFingerprintPrefix, type WebAuditRegistry } from '../../src/worker/audit-web/registry';
 import { MEMO_BODY_MAX_BYTES, MEMO_TOTAL_MAX_BYTES } from '../../src/worker/audit-web/request-hop';
 import {
   AUDIT_PROBE_MAX_BODY_BYTES,
@@ -44,14 +45,16 @@ import {
   CONTRACT_BUILD_TREE,
   CONTRACT_CORPUS_TREE,
   CONTRACT_DIR,
+  CONTRACT_FINGERPRINT_FILE,
   CONTRACT_LISTING,
   GENERATED_TREES,
+  MIRRORED_TREES,
   REGENERATE_COMMAND,
-  REMEDIATION_PATH,
-} from './contract-paths';
+  WEB_AUDIT_REMEDIATION_PATH,
+} from '../../src/build/web-audit-contract-paths.mjs';
 
 /**
- * What `build/constants.json` carries: every setting the port reads, under the
+ * What `build/constants.json` carries: the engine settings the port reads, under the
  * name its owning module exports it by, so one search finds it in both repos.
  */
 async function contractConstants(registry: WebAuditRegistry): Promise<Record<string, unknown>> {
@@ -97,17 +100,9 @@ export async function generateContractBuild(registry: WebAuditRegistry): Promise
   return new Map([
     ['constants.json', projectionBytes(await contractConstants(registry))],
     ['registry.json', projectionBytes(registry)],
-    ['remediation.json', projectionBytes(projectWebRemediation(readFileSync(REMEDIATION_PATH, 'utf8'), registry))],
+    ['remediation.json', projectionBytes(projectWebRemediation(readFileSync(WEB_AUDIT_REMEDIATION_PATH, 'utf8'), registry))],
     ['server-card.schema.json', readFileSync(VENDORED_CARD_SCHEMA_PATH, 'utf8')],
   ]);
-}
-
-/** Every generated file of the contract, by its path under the contract root. */
-export async function generateContract(registry: WebAuditRegistry): Promise<Map<string, string>> {
-  const files = new Map<string, string>();
-  for (const [name, content] of await generateContractBuild(registry)) files.set(`${CONTRACT_BUILD_TREE}/${name}`, content);
-  for (const [name, content] of await generateCorpus(registry)) files.set(`${CONTRACT_CORPUS_TREE}/${name}`, content);
-  return files;
 }
 
 function filesUnder(root: string, tree: string): string[] {
@@ -117,6 +112,51 @@ function filesUnder(root: string, tree: string): string[] {
     const path = `${tree}/${entry.name}`;
     return entry.isDirectory() ? filesUnder(root, path) : [path];
   });
+}
+
+/** The bytes of every file the CLI mirrors, by its path under the contract root. */
+export function mirroredFiles(root: string = CONTRACT_DIR): Map<string, Buffer> {
+  const files = new Map<string, Buffer>();
+  for (const tree of MIRRORED_TREES) {
+    for (const path of filesUnder(root, tree)) files.set(path, readFileSync(join(root, path)));
+  }
+  return files;
+}
+
+/** Its own line is the output, and a README is prose: an edit to one must not make an older CLI report a difference. */
+function isHashed(path: string): boolean {
+  return path !== CONTRACT_FINGERPRINT_FILE && basename(path) !== 'README.md';
+}
+
+/**
+ * The bytes of `FINGERPRINT`: a sha256 prefix over each hashed file's path, length
+ * and bytes, in path order. It moves when any hashed byte moves, so a difference
+ * means the mirrored data differs, not necessarily that behavior does. A corpus
+ * scorecard moving is how it catches the handler and scoring changes a registry
+ * fingerprint cannot see; a logic change no scenario reaches moves nothing.
+ */
+export function contractFingerprint(files: ReadonlyMap<string, string | Buffer>): string {
+  const hash = createHash('sha256');
+  for (const path of [...files.keys()].filter(isHashed).sort()) {
+    const bytes = Buffer.from(files.get(path) as string);
+    hash.update(`${path}\0${bytes.byteLength}\0`);
+    hash.update(bytes);
+  }
+  return `${fingerprintPrefix(hash.digest('hex'))}\n`;
+}
+
+/** Every generated file of the contract, by its path under the contract root. */
+export async function generateContract(registry: WebAuditRegistry): Promise<Map<string, string>> {
+  const files = new Map<string, string>();
+  for (const [name, content] of await generateContractBuild(registry)) files.set(`${CONTRACT_BUILD_TREE}/${name}`, content);
+  for (const [name, content] of await generateCorpus(registry)) files.set(`${CONTRACT_CORPUS_TREE}/${name}`, content);
+  // What generation does not write, the fingerprint still covers: a hand-authored
+  // fixture is an input the CLI mirrors too.
+  const handAuthored = MIRRORED_TREES.flatMap((tree) => filesUnder(CONTRACT_DIR, tree))
+    .filter((path) => !GENERATED_TREES.some((tree) => path.startsWith(`${tree}/`)))
+    .map((path): [string, Buffer] => [path, readFileSync(join(CONTRACT_DIR, path))]);
+  files.set(CONTRACT_FINGERPRINT_FILE, contractFingerprint(new Map<string, string | Buffer>([...files, ...handAuthored])));
+  return files;
 }
 
 export type ContractDrift = {
@@ -166,7 +206,7 @@ export function contractDriftMessage({ stale, listing }: ContractDrift): string 
   if (listing.length > 0) {
     sections.push(
       `contract listing differs (${listing.length}):\n  ${listing.join('\n  ')}\n` +
-        'remove the file, or add it to CONTRACT_LISTING in scripts/web-audit/contract-paths.ts: ' +
+        'remove the file, or add it to CONTRACT_LISTING in src/build/web-audit-contract-paths.mjs: ' +
         'the CLI vendors these directories whole, so a new file is a change to its inputs.',
     );
   }

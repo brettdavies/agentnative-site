@@ -11,8 +11,8 @@ import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
-import { REGISTRY_PATH, REPO_ROOT, SCENARIOS_DIR } from '../scripts/web-audit/contract-paths';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
+import { REPO_ROOT, SCENARIOS_DIR, WEB_AUDIT_REGISTRY_PATH } from '../src/build/web-audit-contract-paths.mjs';
 import type { NaReason } from '../src/shared/web-audit-findings';
 import type { AntecedentToken, WebAuditRegistry } from '../src/worker/audit-web/registry';
 import { scoreWebAudit, universeMaxOf } from '../src/worker/audit-web/score';
@@ -26,7 +26,7 @@ import {
 const PROTECTED_FIXTURE = join(SCENARIOS_DIR, 'auth-own-endpoint', 'scorecard.json');
 
 const registry = normalizeWebAuditRegistry(
-  yaml.load(await readFile(REGISTRY_PATH, 'utf8')) as object,
+  yaml.load(await readFile(WEB_AUDIT_REGISTRY_PATH, 'utf8')) as object,
 ) as unknown as WebAuditRegistry;
 
 const SESSION: ReadonlySet<AntecedentToken> = new Set(['mcp-session', 'mcp-resources']);
