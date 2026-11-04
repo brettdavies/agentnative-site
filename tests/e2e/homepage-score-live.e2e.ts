@@ -10,10 +10,8 @@
 //   ANC_STAGING_BASE_URL=https://agentnative-site-staging.brettdavies.workers.dev \
 //     bun x playwright test --project=homepage-score-live
 //
-// The staging Worker is gated by Cloudflare Access. Set
-// ANC_STAGING_ACCESS_CLIENT_ID + ANC_STAGING_ACCESS_CLIENT_SECRET to a
-// service-token pair if running headless (CI / cron); otherwise interactive
-// auth works in a real browser via the Access challenge.
+// The staging Worker is gated by Cloudflare Access: tests/e2e/access-session.ts
+// authenticates the run once from the service token in the environment.
 //
 // Turnstile note: staging uses CF's always-passes test SECRET, so a
 // turnstile_token of "x" passes siteverify. This test posts a real token
@@ -30,16 +28,10 @@ test.skip(
   'ANC_STAGING_BASE_URL not set — opt-in live-sandbox suite. Set it to the staging Worker URL to run.',
 );
 
-const ACCESS_HEADERS: Record<string, string> = {};
-if (process.env.ANC_STAGING_ACCESS_CLIENT_ID && process.env.ANC_STAGING_ACCESS_CLIENT_SECRET) {
-  ACCESS_HEADERS['CF-Access-Client-Id'] = process.env.ANC_STAGING_ACCESS_CLIENT_ID;
-  ACCESS_HEADERS['CF-Access-Client-Secret'] = process.env.ANC_STAGING_ACCESS_CLIENT_SECRET;
-}
-
 test.describe('staging /api/score — live round-trip', () => {
   test('POST {target: "ripgrep"} returns curated registry_hit with response triad', async ({ request }) => {
     const res = await request.post(`${STAGING_BASE}/api/score`, {
-      headers: { 'content-type': 'application/json', ...ACCESS_HEADERS },
+      headers: { 'content-type': 'application/json' },
       data: JSON.stringify({ target: 'ripgrep', turnstile_token: 'x' }),
     });
     expect(res.status()).toBe(200);
@@ -63,7 +55,7 @@ test.describe('staging /api/score — live round-trip', () => {
   }) => {
     test.setTimeout(120_000); // live path may take ~30-60s on cold cache
     const res = await request.post(`${STAGING_BASE}/api/score`, {
-      headers: { 'content-type': 'application/json', ...ACCESS_HEADERS },
+      headers: { 'content-type': 'application/json' },
       data: JSON.stringify({ target: 'cargo install ripgrep', turnstile_token: 'x' }),
     });
     expect(res.status()).toBe(200);
@@ -76,10 +68,10 @@ test.describe('staging /api/score — live round-trip', () => {
     test.setTimeout(60_000);
     // Prime the cache first via a POST (cached or live).
     await request.post(`${STAGING_BASE}/api/score`, {
-      headers: { 'content-type': 'application/json', ...ACCESS_HEADERS },
+      headers: { 'content-type': 'application/json' },
       data: JSON.stringify({ target: 'cargo install ripgrep', turnstile_token: 'x' }),
     });
-    const res = await request.get(`${STAGING_BASE}/score/ripgrep`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/score/ripgrep`);
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('text/html');
     const html = await res.text();
@@ -91,10 +83,10 @@ test.describe('staging /api/score — live round-trip', () => {
   test('GET /score/ripgrep/md returns the markdown twin', async ({ request }) => {
     test.setTimeout(60_000);
     await request.post(`${STAGING_BASE}/api/score`, {
-      headers: { 'content-type': 'application/json', ...ACCESS_HEADERS },
+      headers: { 'content-type': 'application/json' },
       data: JSON.stringify({ target: 'cargo install ripgrep', turnstile_token: 'x' }),
     });
-    const res = await request.get(`${STAGING_BASE}/score/ripgrep/md`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/score/ripgrep/md`);
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('text/markdown');
     const md = await res.text();
@@ -104,7 +96,6 @@ test.describe('staging /api/score — live round-trip', () => {
 
   test('GET /score/ripgrep.html → 301 to /score/ripgrep', async ({ request }) => {
     const res = await request.get(`${STAGING_BASE}/score/ripgrep.html`, {
-      headers: ACCESS_HEADERS,
       maxRedirects: 0,
     });
     expect(res.status()).toBe(301);
@@ -112,7 +103,7 @@ test.describe('staging /api/score — live round-trip', () => {
   });
 
   test('GET /score/unknown-binary-xyz → 404 HTML', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/score/unknown-binary-xyz`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/score/unknown-binary-xyz`);
     expect(res.status()).toBe(404);
     expect(res.headers()['content-type']).toContain('text/html');
   });
@@ -121,10 +112,6 @@ test.describe('staging /api/score — live round-trip', () => {
 test.describe('staging homepage form — real Turnstile + real /api/score', () => {
   test('full submit flow: paste registry slug → redirect to /score/ripgrep', async ({ page }) => {
     test.setTimeout(60_000);
-    // Cloudflare Access challenge happens on first navigation. If the
-    // session is already authenticated, the page loads directly. Service-
-    // token headers are scoped to API requests; full-browser nav uses
-    // interactive Access auth or a pre-warmed cookie.
     await page.goto(`${STAGING_BASE}/`);
     await expect(page.locator('#live-score-input')).toBeVisible({ timeout: 30_000 });
 

@@ -183,6 +183,12 @@ read_op_field() {
   "$OP_SKILL/read_field.sh" "$1" "$2" 2>/dev/null
 }
 
+# Playwright prints a failed request's headers, and a failed gate's tail reaches
+# the operator's terminal and any agent transcript reading it.
+redact_access_cookie() {
+  sed -E 's/(CF_Authorization=)[^;[:space:]]+/\1<redacted>/g'
+}
+
 # Stages CF Access service-token headers into a curl config file. Caller passes the
 # config path; the function fills it with `header = "..."` lines. Values flow through
 # bash-builtin printf — no argv leak.
@@ -739,7 +745,7 @@ gate_e2e() {
     gate_pass "${#E2E_PROJECTS[@]} live projects, $passed tests passing (${E2E_PROJECTS[*]})"
   else
     gate_fail "live e2e suites" "passed=${passed:-0} failed=${failed:-0} exit=$status"
-    printf '%s\n' "$out" | tail -25 | sed 's/^/    /'
+    printf '%s\n' "$out" | tail -25 | redact_access_cookie | sed 's/^/    /'
   fi
 
   gate_og_cards "$cid" "$csec"
@@ -782,7 +788,7 @@ gate_og_cards() {
   fi
 
   gate_fail "og-cards smoke" "passed=${passed:-0} failed=${failed:-0} exit=$status"
-  printf '%s\n' "$out" | tail -25 | sed 's/^/    /'
+  printf '%s\n' "$out" | tail -25 | redact_access_cookie | sed 's/^/    /'
 }
 
 # Gate: changelog-sections ---------------------------------------------------

@@ -16,29 +16,22 @@
 // local `wrangler dev --local --env staging` on :8787 also runs this suite
 // locally for a pre-deploy check.
 //
-// The staging Worker is gated by Cloudflare Access. Set
-// ANC_STAGING_ACCESS_CLIENT_ID + ANC_STAGING_ACCESS_CLIENT_SECRET to a
-// service-token pair for headless runs; interactive browser auth works
-// otherwise. Staging binds WEB_AUDIT_ENABLED="true" so the form and the
-// MCP fresh path are live.
+// The staging Worker is gated by Cloudflare Access: tests/e2e/access-session.ts
+// authenticates the run once from the service token in the environment.
+// Staging binds WEB_AUDIT_ENABLED="true" so the form and the MCP fresh path
+// are live.
 
 import { expect, test } from '@playwright/test';
 
 import { SPEC_VERSION } from '../../src/worker/spec-version.gen';
+import { ACCESS_COOKIE_NAME } from './access-session';
 
 const STAGING_BASE = process.env.ANC_STAGING_BASE_URL;
 
 test.skip(!STAGING_BASE, 'ANC_STAGING_BASE_URL not set — opt-in staging web-audit suite.');
 
-const ACCESS_HEADERS: Record<string, string> = {};
-if (process.env.ANC_STAGING_ACCESS_CLIENT_ID && process.env.ANC_STAGING_ACCESS_CLIENT_SECRET) {
-  ACCESS_HEADERS['CF-Access-Client-Id'] = process.env.ANC_STAGING_ACCESS_CLIENT_ID;
-  ACCESS_HEADERS['CF-Access-Client-Secret'] = process.env.ANC_STAGING_ACCESS_CLIENT_SECRET;
-}
-
-// Target both `page` navigations and `request` calls at the staging Worker
-// with the Access service-token headers applied.
-test.use({ baseURL: STAGING_BASE, extraHTTPHeaders: ACCESS_HEADERS });
+// Target both `page` navigations and `request` calls at the staging Worker.
+test.use({ baseURL: STAGING_BASE });
 
 const TARGET_DOMAIN = 'anc.dev';
 
@@ -712,5 +705,39 @@ test.describe('web audit: the /scoring progress page', () => {
     await expect(page.locator('.result-score .bigscore__n').first()).toContainText(/\d/);
     await page.goBack();
     await expect(page).not.toHaveURL(/\/scoring/);
+  });
+});
+
+test.describe('@render web audit: the Access session stays on its host', () => {
+  test('a page sends the session cookie to staging and to no other host', async ({ page, context, baseURL }) => {
+    const sent: Array<Promise<{ url: string; cookie: string }>> = [];
+    page.on('request', (req) => {
+      sent.push(
+        req
+          .allHeaders()
+          .then((headers) => ({ url: req.url(), cookie: headers.cookie ?? '' }))
+          .catch(() => ({ url: req.url(), cookie: '' })),
+      );
+    });
+    await page.goto('/audit');
+    // A gated target with no session lands on the Access login host and fails
+    // here. Only a target with no wall at all may skip.
+    expect(new URL(page.url()).origin).toBe(new URL(baseURL ?? '').origin);
+    const session = (await context.cookies()).find((cookie) => cookie.name === ACCESS_COOKIE_NAME);
+    test.skip(!session, 'the target has no Access wall, so the run holds no session');
+
+    const home = new URL(page.url()).hostname;
+    // Focus is the first interaction, which loads the Turnstile script from
+    // the third party a context-wide header would have reached.
+    const turnstile = page.waitForRequest((req) => new URL(req.url()).hostname === 'challenges.cloudflare.com');
+    await page.locator('[data-audit-target]').focus();
+    await turnstile;
+
+    const requests = await Promise.all(sent);
+    const carrying = requests.filter((req) => req.cookie.includes(session?.value ?? '\0'));
+    const offHost = requests.filter((req) => new URL(req.url).hostname !== home);
+    expect(offHost.length, 'the page reached no third party, so this proved nothing').toBeGreaterThan(0);
+    expect(carrying.length, 'the browser sent the cookie nowhere, so Access never saw it').toBeGreaterThan(0);
+    expect(carrying.map((req) => new URL(req.url).hostname).filter((hostname) => hostname !== home)).toEqual([]);
   });
 });

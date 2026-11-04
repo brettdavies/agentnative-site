@@ -17,12 +17,12 @@ import { type AuditEvent, runWebAudit } from '../../src/worker/audit-web/engine'
 import { ALWAYS_ADMIT_BUDGET } from '../../src/worker/audit-web/follow-requests';
 import type { WebAuditRegistry } from '../../src/worker/audit-web/registry';
 import { SPEC_VERSION } from '../../src/worker/spec-version.gen';
+import { isStagingUrl } from './staging-host';
 
 type Scorecard = Extract<AuditEvent, { type: 'complete' }>['scorecard'];
 
 const REPO_ROOT = join(import.meta.dir, '..', '..');
 const DEFAULT_TARGET = process.env.STAGING_URL ?? 'https://agentnative-site-staging.brettdavies.workers.dev/';
-const STAGING_HOST_MARK = 'agentnative-site-staging';
 
 // Exit code by status so `--check <id>` can gate CI/agents: 0 pass, 1 the
 // surface exists but fails, 3 the check could not be evaluated.
@@ -76,7 +76,7 @@ function accessInjectingFetch(): typeof fetch | undefined {
   return ((input: Request | string | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
     const headers = new Headers(init?.headers);
-    if (new URL(url).host.includes(STAGING_HOST_MARK)) {
+    if (isStagingUrl(url)) {
       headers.set('CF-Access-Client-Id', id);
       headers.set('CF-Access-Client-Secret', secret);
     }
@@ -97,7 +97,7 @@ async function main(): Promise<number> {
   }
 
   const fetchImpl = accessInjectingFetch();
-  if (new URL(args.target).host.includes(STAGING_HOST_MARK) && !fetchImpl) {
+  if (isStagingUrl(args.target) && !fetchImpl) {
     console.error('target is staging (behind Cloudflare Access) but CF_ACCESS_CLIENT_ID/SECRET are unset; use run.sh.');
     return 2;
   }

@@ -306,9 +306,9 @@ jobs:
           ANC_STAGING_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
         run: bun x playwright test --project=staging-mcp
 
-      # The result-page suite reaches staging the same way: the spec pins its
-      # own baseURL and Access headers, so it needs this step's env and not a
-      # project of its own. It runs here rather than in the `e2e` job because
+      # The result-page suite reaches staging the same way: Playwright's global
+      # setup authenticates from this step's env, so it needs no project of its
+      # own. It runs here rather than in the `e2e` job because
       # that job deliberately leaves ANC_STAGING_BASE_URL unset, which makes
       # the spec skip its whole body. Both engines run: see web-audit-webkit
       # in playwright.config.ts for what WebKit adds over Chromium.
@@ -331,15 +331,18 @@ jobs:
           ANC_STAGING_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
         run: bun x playwright test --project=edge-hit
 
-      - name: Upload Playwright artifacts on failure
+      # Screenshots only: this job holds the Access token, and error-context.md
+      # beside them records a failed request's headers, cookie included, in an
+      # artifact a public repository serves to anyone. The test failures
+      # themselves are in this job's log, where the cookie is masked. A failure in
+      # a request-only spec takes no screenshot, so an empty capture only warns.
+      - name: Upload Playwright screenshots on failure
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: playwright-report-staging-mcp
-          path: |
-            playwright-report/
-            .context/test-results/
-          if-no-files-found: error
+          name: playwright-screenshots-staging-mcp
+          path: .context/test-results/**/*.png
+          if-no-files-found: warn
           retention-days: 14
 
   lhci:

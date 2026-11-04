@@ -231,9 +231,9 @@ its messages after 60 s, then 120 s, up to 300 s; the sixth refusal acknowledges
 **Diagnostic headers.** Every card PNG response carries `x-anc-card` (`drawn`, `stored`, or `fallback` when the render
 Worker could not draw and the site-wide card was served) and, for a drawn or stored card, `x-anc-card-logo` (`homepage`,
 `brand`, `stored`, `tile`). A scorecard page carries `x-anc-clip`: `present`, `off`, the job's state (`queued`,
-`rendering`, `failed`), `none` when no job holds the card, or `unknown` when the job did not answer within 250 ms; a live
-or failed job adds `x-anc-clip-run`, the run id its `og.render` log records carry. Read both from a `?v=` fetch, which
-is served uncached.
+`rendering`, `failed`), `none` when no job holds the card, or `unknown` when the job did not answer within 250 ms; a
+live or failed job adds `x-anc-clip-run`, the run id its `og.render` log records carry. Read both from a `?v=` fetch,
+which is served uncached.
 
 **Commands.**
 
@@ -460,6 +460,15 @@ engine against a public URL) and for operating the web-board rescore (weekly cro
   never run `playwright install` locally (the node extractor deadlocks on that kernel). This repo exact-pins
   `@playwright/test` (see `package.json`) to the dotfiles-canonical version so the resolved browser revisions match
   what's provisioned; bump it in dotfiles first. CI runners install their own browsers.
+- **Live e2e runs carry the Access cookie, never the service token.** A Playwright run against a deployed Worker
+  authenticates once in global setup (`tests/e2e/access-session.ts`): one request that refuses redirects spends the
+  service token, and every context starts from the `CF_Authorization` cookie Access answers with. A header reaches every
+  third-party script a page loads and every host a redirect names; a cookie stays on the host that set it. No spec or
+  config may set `extraHTTPHeaders` or name the service-token headers (`tests/e2e-access-session.test.ts`). A run
+  holding the token records no traces and writes no HTML or JSON report, because Playwright writes request headers into
+  all of them and this repo's Actions artifacts are public; a local debug run can pass `--trace on`. Access issues the
+  cookie only while strict service token authentication is off for the Zero Trust organization: turning it on stops
+  every live run at setup with `access-cookie-not-issued`, so change the session module in the same step.
 - `deploy.yml`: publishes to the `*.workers.dev` staging on every push to `main`.
 - `guard-main-docs.yml`: blocks `docs/plans/`, `docs/solutions/`, `docs/brainstorms/` from reaching main.
 - `guard-release-branch.yml`: rejects PRs to main whose head isn't `release/*`.
