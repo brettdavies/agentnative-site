@@ -268,6 +268,37 @@ describe('the MCP step', () => {
   const mcpRow = (id: string, op: string, antecedent: WebCheck['antecedent']): WebCheck =>
     makeCheck({ id, handler: 'mcp', antecedent, site_types: ['mcp'], with: { op } });
 
+  test('a deadline passing during the notification marks the run incomplete', async () => {
+    let clock = 1_000;
+    const fetchImpl = stubFetch(async (url, init) => {
+      const path = pathOf(url);
+      if (path === '/.well-known/mcp.json') {
+        return new Response(card, { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (path !== '/mcp') return new Response('ok', { status: path === '/' ? 200 : 404, headers: HTML });
+      if (String(init?.body ?? '').includes('notifications/initialized')) {
+        clock += 5_000;
+        return new Response('', { status: 202 });
+      }
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { capabilities: {} } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json', 'mcp-session-id': 'sid-1' },
+      });
+    });
+    const events = await collect(
+      runWebAudit({
+        url: BASE,
+        registry: registryOf([mcpRow('mcp-initialize', 'initialize', 'mcp-present')]),
+        now: () => clock,
+        perAuditDeadlineMs: 1_000,
+        fetchOptions: { fetchImpl },
+        domainBudget: ALWAYS_ADMIT_BUDGET,
+      }),
+    );
+    const terminal = events.find((event) => event.type === 'complete');
+    expect(terminal?.type === 'complete' && terminal.complete).toBe(false);
+  });
+
   test('every later MCP request follows the notification, and a check outside MCP does not wait for it', async () => {
     const seen = gate();
     let notifyOpen = false;

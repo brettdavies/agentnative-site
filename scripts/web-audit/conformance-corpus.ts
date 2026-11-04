@@ -603,14 +603,18 @@ The set is unordered, so some rules it cannot show, and an engine under comparis
 
 - Every request carrying the session goes out after the \`notifications/initialized\` request has settled.
 - A root that fails at the network level cuts the first document reads still in flight to the degraded 2 s budget,
-  measured from their start. A redirect hop held for the root spends none of its read's budget while it waits. The
-  discovery budget counts from when the root settled.
-- Six checks are in flight at most. A free slot goes to the MCP steps,
-  then the source checks, then the rows in registry order, then a fan-out's extra probes, and one row's fan-out always
-  leaves a slot free. Rank orders only what is waiting, so it favours the earlier ranks under deadline pressure
+  measured from their start. A redirect hop held for the root spends none of its read's budget while it waits, and a
+  hop whose budget a cut has already spent when the wait ends is not sent. The discovery budget counts from when the
+  root settled.
+- Six checks are in flight at most, and a cap that is not a whole number from 1 is refused before any request. A free
+  slot goes to the MCP steps, then the source checks, then the rows in registry order, then a fan-out's extra probes,
+  one item per slot, and one row's fan-out always leaves a slot free. Rank orders only what is waiting, so it favours the earlier ranks under deadline pressure
   without promising which rows go unprobed.
 - A link in \`llms-txt-links\` not answered by the check's deadline reads as budget-exhausted and marks the run
-  incomplete, whether or not it was the last link.
+  incomplete, whether or not it was the last link. A link the deadline stopped before its request went out also carries
+  \`blocked\`, so the row names no host it never contacted.
+- An http check whose \`expect\` reads no body, with no \`retain_body\` and no \`with.timeout\`, reads status and headers
+  only, so a body that fails or stalls after a clean status does not change its row.
 - A source check that measured nothing, because its handler threw or the deadline came first, keeps its own row, unless
   it is outside the declared site type. The checks gated on it read as they do on any failed antecedent.
 
@@ -732,19 +736,26 @@ export function assertHandlersFailed(name: string, scenario: Pick<Scenario, 'fai
   }
 }
 
-/** Every corpus file by path relative to the corpus directory. */
 /**
  * Side by side, event-loop lag on a busy host can outrun a real timeout. A real
  * dependence on the order also moves the scenario alone, and lag does not, so
- * only a job that fails again alone fails.
+ * only a job that fails again alone fails. One that holds alone is reported,
+ * because a race that needs the crowd would look the same.
  */
-export async function holdsAloneIfMoved<T>(jobs: readonly T[], holds: (job: T) => Promise<void>): Promise<void> {
+export async function holdsAloneIfMoved<T>(
+  jobs: readonly T[],
+  holds: (job: T) => Promise<void>,
+  report: (message: string) => void = console.warn,
+): Promise<void> {
   const crowded = await Promise.allSettled(jobs.map(holds));
   for (const [index, outcome] of crowded.entries()) {
-    if (outcome.status === 'rejected') await holds(jobs[index]);
+    if (outcome.status !== 'rejected') continue;
+    await holds(jobs[index]);
+    report(`moved side by side, held alone: ${outcome.reason}`);
   }
 }
 
+/** Every corpus file by path relative to the corpus directory. */
 export async function generateCorpus(
   registry: WebAuditRegistry,
   orders: ReadonlyArray<ScenarioSchedule & { label: string }> = answerOrders(registry),

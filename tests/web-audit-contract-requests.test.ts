@@ -131,17 +131,23 @@ describe("each scenario's requests.json", () => {
     );
   });
 
-  test('a job that moved in the crowd passes once it holds alone, and the others run once', async () => {
+  test('a job that moved in the crowd passes once it holds alone, is reported, and the others run once', async () => {
     const attempts = new Map<string, number>();
-    await holdsAloneIfMoved(['moved', 'held'], async (job) => {
-      const attempt = (attempts.get(job) ?? 0) + 1;
-      attempts.set(job, attempt);
-      if (job === 'moved' && attempt === 1) throw new Error('moved under load');
-    });
+    const reported: string[] = [];
+    await holdsAloneIfMoved(
+      ['moved', 'held'],
+      async (job) => {
+        const attempt = (attempts.get(job) ?? 0) + 1;
+        attempts.set(job, attempt);
+        if (job === 'moved' && attempt === 1) throw new Error('moved under load');
+      },
+      (message) => reported.push(message),
+    );
     expect([...attempts]).toEqual([
       ['moved', 2],
       ['held', 1],
     ]);
+    expect(reported).toEqual(['moved side by side, held alone: Error: moved under load']);
   });
 
   test('a job that moves again alone fails', async () => {
