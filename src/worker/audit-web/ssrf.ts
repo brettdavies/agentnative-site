@@ -279,7 +279,9 @@ const METADATA_HOSTS = {
     [ipv4('100.100.100.200'), 32],
     [ipv4('168.63.129.16'), 32],
   ] as Array<[number, number]>,
-  ipv6: ['fd00:ec2::254', 'fd20:ce::254'].flatMap((literal) => parseIpv6Literal(literal) ?? []),
+  ipv6: ['fd00:ec2::254', 'fd20:ce::254', 'fe80::a9fe:a9fe', 'fd00:a9fe:a9fe::1', 'fd00:42::42'].flatMap(
+    (literal) => parseIpv6Literal(literal) ?? [],
+  ),
 };
 
 /** Whether a hostname, without its port, is a cloud metadata destination, in any literal form that names one. */

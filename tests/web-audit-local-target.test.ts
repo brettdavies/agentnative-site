@@ -61,6 +61,9 @@ describe('isMetadataHost', () => {
       'metadata.google.internal.',
       '[fd00:ec2::254]',
       '[fd20:ce::254]',
+      '[fe80::a9fe:a9fe]',
+      '[fd00:a9fe:a9fe::1]',
+      '[fd00:42::42]',
       '100.100.100.200',
       '168.63.129.16',
       '[::ffff:a9fe:a9fe]',
@@ -84,6 +87,8 @@ describe('isMetadataHost', () => {
       '100.100.100.199',
       '168.63.129.17',
       '[fd20:ce::255]',
+      '[fe80::a9fe:a9ff]',
+      '[fd00:42::43]',
     ]) {
       expect({ host, metadata: isMetadataHost(host) }).toEqual({ host, metadata: false });
     }
