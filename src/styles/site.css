@@ -20,8 +20,10 @@
   font-display: swap;
 }
 
+/* The sticky header covers the top of the viewport, so a fragment jump or a focused control has to stop below it. */
 html {
   --site-header-h: 62px;
+  scroll-padding-top: calc(var(--site-header-h) + var(--space-4));
   font-family: var(--font-sans, "Uncut Sans", system-ui, sans-serif);
   font-size: var(--text-base, 1.0625rem);
   color: var(--fg-body, #1a2026);
@@ -36,11 +38,6 @@ body {
   flex-direction: column;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-}
-
-/* The sticky header covers the top of the viewport, so a fragment jump has to stop below it. */
-:where([id]) {
-  scroll-margin-top: calc(var(--site-header-h) + var(--space-4));
 }
 
 h1,
@@ -3598,6 +3595,7 @@ main .code-wrap > pre {
   border-radius: 3px;
 }
 
-.live-score__status--bounce .live-score__bounce-body a {
+.live-score__status--bounce .live-score__bounce-body a,
+.result-missing p a {
   color: var(--accent);
 }

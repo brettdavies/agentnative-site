@@ -12,7 +12,6 @@ import { resultLine } from '../../shared/web-audit-result-line';
 import { type RetiredIds, successorOf } from './display';
 import {
   entryHostOf,
-  notRunHostOf,
   type RowHost,
   readDeclaredHosts,
   readFollowState,
@@ -119,7 +118,7 @@ type RowNoteInput = { endpoint: string | null; locations: CardLocations | null; 
 
 function notRunOf(row: WebScorecardRow, entryHost: string): NotRun | null {
   return row.status === 'n_a' && isNotRunReason(row.na_reason)
-    ? { reason: row.na_reason, host: notRunHostOf(row, entryHost) }
+    ? { reason: row.na_reason, host: rowHostOf(row, entryHost) }
     : null;
 }
 

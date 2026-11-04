@@ -280,7 +280,7 @@ const METADATA_HOSTS = {
     [ipv4('100.100.100.200'), 32],
     [ipv4('168.63.129.16'), 32],
   ] as Array<[number, number]>,
-  ipv6: ['fd00:ec2::254', 'fd20:ce::254'],
+  ipv6: ['fd00:ec2::254', 'fd20:ce::254'].flatMap((literal) => parseIpv6Literal(literal) ?? []),
 };
 
 /** Whether a hostname, without its port, is a cloud metadata destination, in any literal form that names one. */
@@ -291,10 +291,7 @@ export function isMetadataHost(rawHostname: string): boolean {
     v4 !== null && METADATA_HOSTS.ipv4.some((range) => inIpv4Range(v4, range));
   const v6 = parseIpv6Literal(hostname.replace(/^\[|\]$/g, ''));
   if (v6 === null) return inMetadataIpv4(parseIpv4Literal(hostname));
-  const isListed = METADATA_HOSTS.ipv6.some((listed) => {
-    const bytes = parseIpv6Literal(listed);
-    return v6.every((b, i) => b === bytes?.[i]);
-  });
+  const isListed = METADATA_HOSTS.ipv6.some((listed) => v6.every((b, i) => b === listed[i]));
   return isListed || inMetadataIpv4(embeddedIpv4(v6));
 }
 

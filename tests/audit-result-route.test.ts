@@ -569,6 +569,53 @@ describe('website records', () => {
   });
 });
 
+describe('a target the public audit refuses for good', () => {
+  const COMMAND = 'anc web localhost:3000';
+
+  test('its /score page says so in every representation and names the command, with no way to retry', async () => {
+    const env = await seededEnv();
+    const html = await route('/score/localhost:3000', env);
+    expect(html.status).toBe(404);
+    const page = await html.text();
+    expect(page).toContain(`<code>${COMMAND}</code>`);
+    expect(page).toContain('href="/install#audit-a-local-site"');
+    expect(page).not.toContain('No audit exists');
+    expect(page).not.toContain('href="/audit?');
+
+    const md = await route('/score/localhost:3000/md', env);
+    expect(md.status).toBe(404);
+    const twin = await md.text();
+    expect(twin).toContain(`\`\`\`bash\n${COMMAND}\n\`\`\``);
+    expect(twin).toContain(`${ORIGIN}/install#audit-a-local-site`);
+    expect(twin).toContain('Auditing it again returns the same answer.');
+    expect(twin).not.toContain('No audit exists');
+    expect(twin).not.toContain('/audit?');
+
+    const json = await route('/score/localhost:3000/json', env);
+    expect(json.status).toBe(404);
+    expect((await json.json()) as Record<string, unknown>).toEqual({
+      error: {
+        code: 'invalid_target',
+        message: "anc's public audit never contacts localhost:3000, a local, private, or internal host.",
+        cta: 'Run anc web localhost:3000 to audit it from your own network; it sends HTTPS only, so the site must serve TLS.',
+        details: 'blocked: localhost is not a public host',
+        reason: 'local-target',
+        value: 'localhost:3000',
+        next_step: { action: 'run', command: COMMAND, docs: `${ORIGIN}/install#audit-a-local-site` },
+      },
+    });
+  });
+
+  test('a metadata endpoint, which anc web also refuses, keeps the ordinary 404', async () => {
+    const env = await seededEnv();
+    const json = await route('/score/169.254.169.254/json', env);
+    expect(json.status).toBe(404);
+    expect(((await json.json()) as { error: { code: string } }).error.code).toBe('not_found');
+    const twin = await (await route('/score/169.254.169.254/md', env)).text();
+    expect(twin).not.toContain('anc web');
+  });
+});
+
 describe('404 bodies', () => {
   test('never-audited targets answer the lane-appropriate 404 in all three representations; /json carries only code, message, audit_url, suggestions', async () => {
     const env = await seededEnv();

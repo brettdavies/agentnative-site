@@ -72,6 +72,12 @@ import {
 } from '../audit-web/cache';
 import { webEnvelope } from '../audit-web/core';
 import { normalizeScorecardCategories } from '../audit-web/display';
+import {
+  type LocalTargetError,
+  localTargetBodyHtml,
+  localTargetMarkdown,
+  refusalForHost,
+} from '../audit-web/local-target';
 import { loadWebAuditRegistry } from '../audit-web/registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from '../audit-web/remediation';
 import { loadWebSeed, type WebSeedEntry } from '../audit-web/seed';
@@ -244,6 +250,8 @@ type RenderContext = {
 };
 
 async function serveWeb(ctx: RenderContext, host: string): Promise<Response> {
+  const refusal = refusalForHost(host, ctx.origin);
+  if (refusal) return refusedTarget(ctx, refusal.error);
   const inFlight = await inFlightResponse(ctx, 'web', host);
   if (inFlight) return inFlight;
   const canonical = canonicalTargetOf(new URL(`https://${host}/`));
@@ -723,6 +731,36 @@ async function notFound(request: Request, env: ResultEnv, deps: ResultDeps, inpu
 <header class="result-spine"><h1 class="result-spine__title">No audit exists for <code>${escHtml(input.target)}</code> yet.</h1>
 <p class="live-score-summary__meta"><a class="btn btn--primary" href="${escHtml(audit)}">Audit <code>${escHtml(input.target)}</code></a></p></header>${did}
 </article>`;
+  return missingPage(env, opts, {
+    title: 'Not audited yet — anc.dev',
+    description: message,
+    breadcrumb: input.target,
+    markdownTwinPath: input.legacy ? undefined : `${pathname}/md`,
+    body,
+  });
+}
+
+/** A target with no result, which the public audit refuses for good: the command that audits it, and no way to retry. */
+async function refusedTarget(ctx: RenderContext, error: LocalTargetError): Promise<Response> {
+  const { request, env, representation, served } = ctx;
+  const { pathname } = ctx.url;
+  const opts = { request, pathname, servedMarkdown: representation === 'md', servedJson: representation === 'json' };
+  if (representation === 'json') return applyHeaders(new Response(JSON.stringify({ error }), { status: 404 }), opts);
+  if (representation === 'md') return applyHeaders(new Response(localTargetMarkdown(error), { status: 404 }), opts);
+  return missingPage(env, opts, {
+    title: 'Refused — anc.dev',
+    description: error.message,
+    breadcrumb: error.value,
+    markdownTwinPath: served.legacy ? undefined : `${pathname}/md`,
+    body: localTargetBodyHtml(error),
+  });
+}
+
+async function missingPage(
+  env: ResultEnv,
+  opts: Parameters<typeof applyHeaders>[1],
+  page: { title: string; description: string; breadcrumb: string; markdownTwinPath: string | undefined; body: string },
+): Promise<Response> {
   let template: string;
   try {
     template = await loadShellTemplate(env);
@@ -732,15 +770,7 @@ async function notFound(request: Request, env: ResultEnv, deps: ResultDeps, inpu
       headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
     });
   }
-  const html = substituteShell(template, {
-    title: 'Not audited yet — anc.dev',
-    description: message,
-    canonicalPath: pathname,
-    breadcrumb: input.target,
-    markdownTwinPath: input.legacy ? undefined : `${pathname}/md`,
-    body,
-    alternatesHtml: '',
-  });
+  const html = substituteShell(template, { ...page, canonicalPath: opts.pathname, alternatesHtml: '' });
   return applyHeaders(
     new Response(html, { status: 404, headers: { 'content-type': 'text/html; charset=utf-8' } }),
     opts,

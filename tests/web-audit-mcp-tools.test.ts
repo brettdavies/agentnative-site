@@ -331,6 +331,13 @@ describe('a local, private, or internal target', () => {
       });
     });
 
+    test(`${tool} reads a bare host:port as the same target, not as a URL scheme`, async () => {
+      const env = await makeEnv();
+      const res = await callTool(env, tool, { url: 'localhost:3000' });
+      expect(res.result?.isError).toBe(true);
+      expect(JSON.parse(res.result?.content?.[0].text ?? '{}').error.next_step.command).toBe('anc web localhost:3000');
+    });
+
     test(`${tool} never prints a host a shell or a flag parser would read as anything else`, async () => {
       const env = await makeEnv();
       for (const url of ['https://a$(id).internal/', 'https://--ca-cert=x.internal/', 'https://a;b.internal/']) {
@@ -2171,7 +2178,7 @@ describe('provenance reaches every reader of a stored website result', () => {
     expect(md).toContain(scorecard.access_note ?? 'missing');
     const corsActual = scorecard.results.find((r) => r.id === 'mcp-cors-actual');
     expect(corsActual?.access_remedy).toBe(
-      "anc's public audit holds no sign-in for mcp.stripe.com. Run `anc web stripe.dev --token-host mcp.stripe.com` with `ANC_WEB_TOKEN` set to a token for mcp.stripe.com to evaluate this check from your own network.",
+      "anc's public audit holds no sign-in for mcp.stripe.com. Run `anc web stripe.dev --token-host mcp.stripe.com --token-stdin` with a token for mcp.stripe.com on standard input to evaluate this check from your own network.",
     );
     expect(md).toContain(`- Note: ${corsActual?.access_remedy}`);
     expect(scorecard.results.filter((r) => r.access_remedy !== undefined)).toHaveLength(18);

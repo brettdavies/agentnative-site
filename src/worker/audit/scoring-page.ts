@@ -7,7 +7,9 @@
 //   GET /scoring ................... no target: the prose pointer to the audit page
 //   GET /scoring?target=t .......... accepted target: the page for its lane
 //                                    refused target: the pointer with the reason (400)
-//   GET /scoring.md, or markdown ... the prose pointer naming the read tools
+//   GET /scoring.md, or markdown ... the prose pointer naming the read tools; a
+//                                    host the public audit refuses for good: the
+//                                    command that audits it (400)
 //   any other method ............... 405
 //
 // The page carries a request-time sitekey and exists for one run, so no
@@ -25,6 +27,7 @@ import {
 import { escHtml } from '../../shared/esc-html';
 import { LANE_EXPECTATION, scoringHeadingHtml, scoringTitle, TITLE_SUFFIX } from '../../shared/scoring-copy';
 import { detectPreference } from '../accept';
+import { localTargetMarkdown, refusalForHost } from '../audit-web/local-target';
 import { loadWebAuditRegistry, type WebAuditRegistryEnv } from '../audit-web/registry';
 import { applyHeaders } from '../headers';
 import { loadShellTemplate, substituteShell } from '../shell-template';
@@ -60,6 +63,8 @@ export async function handleScoringPage(request: Request, env: ScoringPageEnv): 
         : null;
 
   if (url.pathname.endsWith('.md') || detectPreference(request) === 'markdown') {
+    const refusal = accepted?.lane === 'web' ? refusalForHost(accepted.target, url.origin) : null;
+    if (refusal) return transient(request, new Response(localTargetMarkdown(refusal.error), { status: 400 }), true);
     const body = pointerMarkdown(url.origin, accepted, refused);
     // The twin answers a refusal with the status the page gives it: an agent
     // reading 200 here would take a rejection for a result.

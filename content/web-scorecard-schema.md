@@ -128,12 +128,12 @@ Where the audit ran and what it could present. A score covers what an agent at t
 
 | Field          | Type    | Meaning                                                                                                                         |
 | -------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `network`      | string  | `public` for an anc.dev audit, run from the public internet; `local` for a run on the runner's own network.                     |
-| `credentialed` | boolean | `true` when a local run presented a credential to the audited MCP endpoint; otherwise `false`.                                  |
+| `network`      | string  | `public` for a target on the public internet, whichever machine ran the audit; `local` for a target on the runner's own network. |
+| `credentialed` | boolean | `true` when an `anc web` run held a credential for the audited MCP endpoint; otherwise `false`.                                 |
 
-Every anc.dev audit writes `public` and `false`. A local run writes `local`, with `credentialed` `true` when it presented
-a credential. The public board lists public-vantage scorecards only, so a
-local or credentialed score is never ranked beside a public one. A scorecard stored before the field existed carries no
+Every anc.dev audit writes `public` and `false`. An `anc web` run writes `public` or `local` by its target, with
+`credentialed` `true` when it held a credential. The public board lists anc.dev's own audits only, so a local or
+credentialed score is never ranked beside a public one. A scorecard stored before the field existed carries no
 `vantage`; every such scorecard anc.dev holds is its own public audit.
 
 ## `declared_hosts`
@@ -407,8 +407,8 @@ A row with one of the six declared-host reasons also carries `access_remedy`: wh
 it, and, when `anc web` can, the command that evaluates it from the reader's own network. `declared-host-blocked` and
 `reciprocity-refused` name no command, because `anc web` applies the same rules, and `declared-host-budget-exceeded`
 names none, because `anc web` stops at the same per-audit cap and the row does not say which limit it hit. A row that
-needs sign-in names the host its token belongs to with `--token-host`, because `anc web` sends a token only to the host
-that flag names. A scorecard holding any such row carries `access_note` beside `results`: the sentence saying global
+needs sign-in names the host with `--token-host` and reads the token with `--token-stdin`, so run as printed it takes
+nothing from the environment. The audited site chooses that host, so treat it as untrusted. A scorecard holding any such row carries `access_note` beside `results`: the sentence saying global
 keeps those rows in its maximum, and the command for the ones a run of the audited site can evaluate. Both are the sentences the result page shows.
 
 ```json

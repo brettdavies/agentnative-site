@@ -14,7 +14,8 @@
 //     |-- JSON 202 in progress .... ask again every 3 s until the answer changes
 //     |-- JSON 403 on a probe ..... idle: Start
 //     |-- JSON 503 unavailable .... wait: count retry_after down, then Start
-//     |-- JSON error .............. failed: the bounce panel, Run again
+//     |-- JSON error .............. failed: the bounce panel, and Run again unless
+//     |                             the refusal is final
 //     '-- NDJSON stream ........... rows as lines land; the terminal line forwards,
 //                                   renders inline when there is no URL, or fails
 //   Start or Run again: acquire a token on the click, then POST it with the

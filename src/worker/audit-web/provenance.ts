@@ -107,17 +107,6 @@ export function rowHostOf(row: { hosts?: unknown; host?: unknown }, entryHost: s
   return rowHostsOf(row, entryHost)[0] ?? '';
 }
 
-/**
- * The host a not-run row's reason is about: on a row over several hosts, the
- * first that carries the reason, since an earlier host may have answered.
- */
-export function notRunHostOf(
-  row: { hosts?: unknown; host?: unknown; na_reason?: unknown },
-  entryHost: string | null,
-): string {
-  return rowHostOutcomes(row).find((outcome) => outcome.na_reason === row.na_reason)?.host ?? rowHostOf(row, entryHost);
-}
-
 /** The hosts the row recorded, without the audited-host reading a row that recorded none gets. */
 export function recordedHostsOf(row: { hosts?: unknown; host?: unknown }): string[] {
   return rowHostsOf(row, null);

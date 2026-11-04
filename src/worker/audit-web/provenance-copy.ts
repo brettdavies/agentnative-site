@@ -193,17 +193,19 @@ const ANC_WEB_ALSO_REFUSES: readonly NaReason[] = [
 
 /**
  * The command that evaluates a not-run row from the reader's own network, or
- * null when none does. `anc web` sends a token only to the host `--token-host`
- * names, so a sign-in row always names it; running the audited site with the
- * flag reaches the endpoint through the site's own declaration, which finds an
- * endpoint off the common paths that a run of the host alone would miss.
+ * null when none does. The audited site chooses the host a sign-in row prints,
+ * so the row binds it with `--token-host` and reads the token with
+ * `--token-stdin`: run as printed, it takes nothing from the environment, and a
+ * token the reader exported for another host stays put. Running the audited site
+ * reaches the endpoint through its own declaration, which finds an endpoint off
+ * the common paths that a run of the host alone would miss.
  */
 function notRunCommand(reason: NaReason, host: string, domain: string, commandReleased: boolean): string | null {
   if (ANC_WEB_ALSO_REFUSES.includes(reason)) return null;
   const onSite = ancWebCommand(domain, commandReleased);
   if (onSite === null || reason !== 'auth-required') return onSite;
   const tokenHost = printableHost(host);
-  return tokenHost === null ? null : `${onSite} --token-host ${tokenHost}`;
+  return tokenHost === null ? null : `${onSite} --token-host ${tokenHost} --token-stdin`;
 }
 
 /**
@@ -226,7 +228,7 @@ export function notRunRemedy(
   const command = { code: invocation };
   const tail = ` to evaluate ${what} from your own network.`;
   return reason === 'auth-required'
-    ? [run, command, ' with ', { code: 'ANC_WEB_TOKEN' }, ` set to a token for ${host}${tail}`]
+    ? [run, command, ` with a token for ${host} on standard input${tail}`]
     : [run, command, tail];
 }
 

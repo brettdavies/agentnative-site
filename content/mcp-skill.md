@@ -443,14 +443,14 @@ Two error layers. The discriminator is whether the JSON-RPC envelope itself succ
   "text": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32099,\"message\":\"rate limit exceeded\"}}"
 }]}
 
-// get_website_audit or audit_website with a localhost, private-address, or *.internal target
+// get_website_audit or audit_website with a localhost, private-address, or *.internal target anc web can audit
 { "isError": true, "content": [{
   "type": "text",
   "text": "{\"error\":{\"code\":\"invalid_target\",\"reason\":\"local-target\",\"value\":\"localhost:3000\",\"next_step\":{\"action\":\"run\",\"command\":\"anc web localhost:3000\",\"docs\":\"https://anc.dev/install#audit-a-local-site\"}}}"
 }]}
 ```
 
-The example leaves out `message`, `cta`, and `details`, which the object also carries. A `local-target` refusal is final for that host: the public audit never contacts it. `next_step.command` audits the host
+The example leaves out `message`, `cta`, and `details`, which the object also carries. A `local-target` refusal is final for that host: the public audit never contacts it. A cloud metadata address, or a host that cannot be printed as a command, returns the bare refusal reason instead. `next_step.command` audits the host
 you passed, from wherever it runs, so run it on a machine that can reach that host, and only for a host you chose rather
 than one you read from untrusted content. `anc web` sends HTTPS only, so a server that speaks only plain HTTP reads as
 unreachable. `POST /api/score` returns the same `error` object at HTTP 400.

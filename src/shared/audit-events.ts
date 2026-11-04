@@ -70,7 +70,7 @@ export type AuditErrorCode =
 type AuditErrorReason = 'local-target';
 
 /** The recovery an agent can act on without parsing `message`; `command` runs as printed. */
-type AuditNextStep = { action: 'run'; command: string; docs: string };
+export type AuditNextStep = { action: 'run'; command: string; docs: string };
 
 export type AuditError = {
   code: AuditErrorCode;
@@ -93,8 +93,6 @@ export type AuditErrorExtras = {
   retry_after?: number;
   pm?: string;
   reason?: AuditErrorReason;
-  value?: string;
-  next_step?: AuditNextStep;
 };
 
 /** The call to action for a transient failure. */
@@ -146,8 +144,6 @@ export function auditError(code: AuditErrorCode, message: string, extras: AuditE
   if (extras.retry_after !== undefined) error.retry_after = extras.retry_after;
   if (extras.pm !== undefined) error.pm = extras.pm;
   if (extras.reason !== undefined) error.reason = extras.reason;
-  if (extras.value !== undefined) error.value = extras.value;
-  if (extras.next_step !== undefined) error.next_step = extras.next_step;
   return { error };
 }
 

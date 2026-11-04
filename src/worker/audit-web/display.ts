@@ -28,15 +28,7 @@
 
 import { isNotRunReason } from '../../shared/web-audit-findings';
 import { resultLine } from '../../shared/web-audit-result-line';
-import {
-  entryHostOf,
-  notRunHostOf,
-  type RowHost,
-  recordedHostOf,
-  recordsRowHosts,
-  rowHostOf,
-  rowHostOutcomes,
-} from './provenance';
+import { entryHostOf, type RowHost, recordedHostOf, recordsRowHosts, rowHostOf, rowHostOutcomes } from './provenance';
 import { notRunRemedy, notRunScoreNote } from './provenance-copy';
 import { assembleRemediation, isFixableStatus, type WebRemediationCatalog } from './remediation';
 import { richMarkdown } from './rich-text';
@@ -170,14 +162,8 @@ export function attachInlineRemediation(
     const successor = successorOf(row.id, retired);
     const named = successor === undefined ? {} : { successor };
     if (row.status === 'n_a' && isNotRunReason(row.na_reason)) {
-      const notRunHost = notRunHostOf(row, entryHost);
-      notRun.push({ reason: row.na_reason, host: notRunHost });
-      return {
-        ...row,
-        result,
-        ...named,
-        access_remedy: richMarkdown(notRunRemedy(row.na_reason, notRunHost, domain, 1)),
-      };
+      notRun.push({ reason: row.na_reason, host });
+      return { ...row, result, ...named, access_remedy: richMarkdown(notRunRemedy(row.na_reason, host, domain, 1)) };
     }
     if (successor !== undefined) return { ...row, result, ...named };
     if (row.unprobed !== true && isFixableStatus(row.status)) {

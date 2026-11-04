@@ -303,6 +303,28 @@ test.describe('/scoring progress page', () => {
     expect(await linkMatchesAccent()).toBe(true);
   });
 
+  test('the result page of a target refused for good shows the command, with a link that reads in both themes', async ({
+    page,
+  }) => {
+    await page.goto('/score/localhost:3000');
+    await expect(page.locator('article code').last()).toHaveText('anc web localhost:3000');
+    const link = page.locator('article p a');
+    await expect(link).toHaveAttribute('href', '/install#audit-a-local-site');
+    const linkMatchesAccent = () =>
+      link.evaluate((a) => {
+        const probe = document.createElement('span');
+        probe.style.color = 'var(--accent)';
+        document.body.appendChild(probe);
+        const matches = getComputedStyle(a).color === getComputedStyle(probe).color;
+        probe.remove();
+        return matches;
+      });
+    expect(await linkMatchesAccent()).toBe(true);
+    await page.locator('[data-theme-cycle]').click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    expect(await linkMatchesAccent()).toBe(true);
+  });
+
   test('verification being unavailable holds Start through the countdown, then says Ready to retry, never that it failed', async ({
     page,
   }) => {

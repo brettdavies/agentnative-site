@@ -94,6 +94,23 @@ describe('GET /scoring?target=', () => {
     expect(html).not.toContain('/js/scoring.js');
   });
 
+  test('the twin of a target the public audit refuses for good is a 400 naming the command, not a promised result', async () => {
+    for (const target of ['localhost%3A3000', '10.0.0.1']) {
+      const res = await handleScoringPage(get(`/scoring.md?target=${target}`), env());
+      expect(res.status).toBe(400);
+      expect(res.headers.get('cache-control')).toBe('no-store');
+      const text = await res.text();
+      expect(text).toContain('anc web ');
+      expect(text).toContain('Auditing it again returns the same answer.');
+      expect(text).not.toContain('once the audit finishes');
+    }
+  });
+
+  test('the twin of a metadata endpoint names no command', async () => {
+    const res = await handleScoringPage(get('/scoring.md?target=169.254.169.254'), env());
+    expect(await res.text()).not.toContain('anc web');
+  });
+
   test('a GitHub repo URL renders the page for its owner/repo, the way the audit form sends it', async () => {
     const { res, html } = await page('/scoring?target=https://github.com/sindresorhus/gh-home');
     expect(res.status).toBe(200);
