@@ -174,7 +174,7 @@ describe('POST /api/score: unmetered tiers', () => {
         'build.internal',
         'build.internal',
         'anc web build.internal',
-        'blocked: internal metadata hostnames are blocked',
+        'blocked: internal hostnames are not public hosts',
       ],
     ]) {
       const tracker = newTracker();

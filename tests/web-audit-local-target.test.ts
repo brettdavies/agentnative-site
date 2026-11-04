@@ -118,6 +118,7 @@ describe('localTargetRefusal', () => {
     expect(localTargetRefusal(refused('100.100.100.200'), ORIGIN)).toBeNull();
     expect(localTargetRefusal(refused('[fd20:ce::254]'), ORIGIN)).toBeNull();
     expect(localTargetRefusal(refused('metadata.google.internal'), ORIGIN)).toBeNull();
+    expect(refused('metadata.google.internal').reason).toBe('blocked: cloud metadata hostnames are blocked');
     expect(localTargetRefusal(refused('a$(id).internal'), ORIGIN)).toBeNull();
     expect(localTargetRefusal({ ok: false, refused: 'url', reason: 'invalid url' }, ORIGIN)).toBeNull();
   });

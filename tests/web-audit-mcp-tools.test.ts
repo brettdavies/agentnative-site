@@ -343,7 +343,7 @@ describe('a local, private, or internal target', () => {
       for (const url of ['https://a$(id).internal/', 'https://--ca-cert=x.internal/', 'https://a;b.internal/']) {
         const res = await callTool(env, tool, { url });
         expect(res.result?.isError).toBe(true);
-        expect(res.result?.content?.[0].text).toBe('blocked: internal metadata hostnames are blocked');
+        expect(res.result?.content?.[0].text).toBe('blocked: internal hostnames are not public hosts');
       }
     });
 
