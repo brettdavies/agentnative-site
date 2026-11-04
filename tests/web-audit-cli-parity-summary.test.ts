@@ -108,6 +108,12 @@ running 1 test
 test reads_the_contract ... ok
 `;
 
+const DUMP_FAILED_ONCE = `     Running tests/web_audit_divergences.rs (target/debug/deps/web_audit_divergences-06b78d95cce71c39)
+
+running 1 test
+test dump_corpus_divergences ... FAILED
+`;
+
 const NO_TARGET_LOG = `error: no test target named \`web_audit_divergences\` in default-run packages
 
 help: a target with a similar name exists: \`web_audit_api\`
@@ -136,6 +142,7 @@ const input = (overrides: Partial<ParityInput> = {}): ParityInput => ({
   siteSha: 'b536c19bf282ac87c43b89c2c2807504d986a26f',
   cliRef: 'dev',
   cliSha: '6b616b4aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  cliPin: 'd5772289d71d056fd1c427ccb994e8c547ea2a43\n',
   runUrl: 'https://github.com/brettdavies/agentnative-site/actions/runs/1',
   syncExit: 0,
   syncLog: '',
@@ -156,7 +163,8 @@ describe('a run that produced a dump', () => {
     expect(report.summary).toContain('**The CLI reproduces every conformance scenario at this contract.**');
     expect(report.summary).not.toContain('| Scenario |');
     expect(report.summary).toContain('`b536c19bf282`');
-    expect(report.summary).toContain('CLI `dev` at `6b616b4aaaaa`');
+    expect(report.summary).toContain('CLI `dev` at `6b616b4aaaaa` (pinned to site `d5772289d71d`)');
+    expect(report.summary).toContain('site changes merged since that pin');
   });
 
   test('a changed golden names its scenario and element as new, and the failing test', () => {
@@ -223,6 +231,26 @@ describe('a run that produced a dump', () => {
     const report = renderParityReport(input({ testExit: 101, testLog: LIB_SUITE_LOG }));
     expect(report.summary).toContain('- `src/lib::web_audit::scorecard::keeps_order`');
     expect(report.summary).toContain('Ran 2 CLI test suites.');
+  });
+
+  test("the dump's suite running twice counts once, and its failure lists once", () => {
+    const report = renderParityReport(
+      input({ testExit: 101, testLog: `${DUMP_FAILED_ONCE}${DUMP_FAILED_ONCE}`, dump: '[]' }),
+    );
+    expect(report.summary).toContain('Ran 1 CLI test suite.');
+    expect(report.summary.match(/dump_corpus_divergences/g)).toHaveLength(1);
+  });
+
+  test('a failing-test list that would overrun a comment is capped and says where the rest are', () => {
+    const lines = Array.from(
+      { length: 1400 },
+      (_, i) => `test web_audit::a_long_unit_test_name_of_ordinary_length_${i} ... FAILED`,
+    );
+    const testLog = `     Running unittests src/lib.rs (target/debug/deps/agentnative-3)\n${lines.join('\n')}\n`;
+    const pairs = Array.from({ length: 300 }, (_, i) => [`scenario-name-of-ordinary-length-${i}`, `row:check-${i}`]);
+    const report = renderParityReport(input({ testExit: 101, testLog, dump: JSON.stringify(pairs) }));
+    expect(report.comment.length).toBeLessThan(65536);
+    expect(report.comment).toContain('1300 more failing tests in the [run log]');
   });
 
   test('a large report stays within what a PR comment holds, and says what it left out', () => {
@@ -307,6 +335,13 @@ describe('a run with no dump never reads as zero divergences', () => {
     expectUnavailable(report.summary, 'the CLI tests ended with exit code 101 and wrote no divergence dump');
   });
 
+  test("a long log's excerpt keeps the end, where the failure is named", () => {
+    const testLog = `${'x'.repeat(5000)}\nerror: the line that names the failure\n`;
+    const report = renderParityReport(input({ testExit: 101, testLog, dump: null }));
+    expect(report.exitCode).toBe(1);
+    expect(report.summary).toContain('error: the line that names the failure');
+  });
+
   test('a dump test that cannot write its file fails the run', () => {
     const report = renderParityReport(input({ testExit: 101, testLog: DUMP_WRITE_PANIC_LOG, dump: null }));
     expect(report.exitCode).toBe(1);
@@ -346,7 +381,7 @@ describe('a run with no dump never reads as zero divergences', () => {
   test('a golden the suites cannot load stays green and quotes the panic', () => {
     const report = renderParityReport(input({ testExit: 101, testLog: MALFORMED_GOLDEN_LOG, dump: null }));
     expect(report.exitCode).toBe(0);
-    expectUnavailable(report.summary, 'the CLI could not load this contract');
+    expectUnavailable(report.summary, 'the CLI could not replay this contract');
     expect(report.summary).toContain('scorecard.json: key must be a string');
   });
 
@@ -406,6 +441,7 @@ describe('the script as the workflow runs it', () => {
       'site-sha': 'b536c19bf282ac87c43b89c2c2807504d986a26f',
       'cli-ref': 'dev',
       'cli-sha': '6b616b4aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'cli-pin': join(dir, 'absent-SITE_SHA'),
       'run-url': 'https://github.com/brettdavies/agentnative-site/actions/runs/1',
       'sync-exit': '0',
       'sync-log': join(dir, 'absent-sync.log'),
@@ -471,7 +507,10 @@ describe('the workflow', () => {
     jobs: { report: Job; comment: Job };
     env: Record<string, string>;
     // js-yaml reads the `on` key as the string it is written as.
-    on: { pull_request: { paths: string[] }; workflow_dispatch: { inputs: { cli_ref: { default: string } } } };
+    on: {
+      pull_request: { paths: string[]; 'branches-ignore': string[] };
+      workflow_dispatch: { inputs: { cli_ref: { default: string } } };
+    };
   };
 
   test('the build holds no write scope and only the comment job can write', () => {
@@ -484,18 +523,33 @@ describe('the workflow', () => {
   test('it reports on the contract and defaults to the CLI on dev', () => {
     expect(doc.on.pull_request.paths).toContain('src/data/web-audit/contract/**');
     expect(doc.on.workflow_dispatch.inputs.cli_ref.default).toBe('dev');
+    expect(doc.on.pull_request['branches-ignore']).toEqual(['main']);
   });
 
   test('the test step passes the flags without which a clean run is a false reading', () => {
-    const run = doc.jobs.report.steps.find((step) => step.id === 'tests')?.run ?? '';
-    for (const flag of ['--features web', '--no-fail-fast', '--locked', '--lib', "--test 'web_audit_*'"]) {
-      expect(run).toContain(flag);
+    const step = doc.jobs.report.steps.find((candidate) => candidate.id === 'tests');
+    const [dumpRun, suitesRun] = (step?.run ?? '').split('tee "$RUNNER_TEMP/tests.log"');
+    for (const flag of ['--features web', '--no-fail-fast', '--locked']) {
+      expect(dumpRun).toContain(flag);
+      expect(suitesRun).toContain(flag);
     }
-    expect(run).toContain('--test build_registry');
-    expect(run).not.toContain('sync_web_audit');
-    const env = doc.jobs.report.steps.find((step) => step.id === 'tests')?.env;
-    expect(env?.WEB_AUDIT_DIVERGENCE_OUT).toBeDefined();
-    expect(env?.WEB_AUDIT_UNPORTED_OUT).toBeDefined();
+    expect(dumpRun).toContain('--test web_audit_divergences');
+    for (const flag of ['--lib', "--test 'web_audit_*'", '--test build_registry']) expect(suitesRun).toContain(flag);
+    expect(suitesRun).not.toContain('sync_web_audit');
+  });
+
+  test('the dump paths reach only the run of the dump suite, not the bump suite and its fixtures', () => {
+    const step = doc.jobs.report.steps.find((candidate) => candidate.id === 'tests');
+    const [dumpRun, suitesRun] = (step?.run ?? '').split('tee "$RUNNER_TEMP/tests.log"');
+    expect(dumpRun).toContain('WEB_AUDIT_DIVERGENCE_OUT=');
+    expect(dumpRun).toContain('WEB_AUDIT_UNPORTED_OUT=');
+    expect(suitesRun).not.toContain('WEB_AUDIT_');
+    expect(step?.env).toBeUndefined();
+  });
+
+  test('a failure in either cargo run reaches the exit code the report reads', () => {
+    const run = doc.jobs.report.steps.find((candidate) => candidate.id === 'tests')?.run ?? '';
+    expect(run).toContain('if [ "$code" = 0 ]; then code=$suites; fi');
   });
 
   test('crate downloads stay on HTTP/1.1, as the CLI needs on hosted runners', () => {

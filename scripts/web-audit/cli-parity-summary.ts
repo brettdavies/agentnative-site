@@ -11,13 +11,13 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { CONTRACT_FINGERPRINT_PATH } from '../../src/build/web-audit-contract-paths.mjs';
-import { classify, type Outcome, type ParityInput, type Row } from './cli-parity-outcome';
+import { classify, DETAIL_CHAR_CAP, type Outcome, type ParityInput, type Row } from './cli-parity-outcome';
 
 // A PR comment holds 65,536 characters and a step summary 1 MiB; a contract change
 // can diverge every row of every scenario, which overruns both.
 const COMMENT_ROW_CAP = 200;
 const SUMMARY_ROW_CAP = 2000;
-const DETAIL_CHAR_CAP = 2000;
+const FAILED_TEST_CAP = 100;
 
 const plural = (count: number, one: string, many: string): string => `${count} ${count === 1 ? one : many}`;
 
@@ -97,17 +97,21 @@ function unportedLine(unported: string | null): string {
 
 function render(input: ParityInput, outcome: Outcome, cap: number, overflow: string): string {
   const suites = outcome.kind === 'report' ? ` Ran ${plural(outcome.suiteCount, 'CLI test suite', 'CLI test suites')}.` : '';
-  const context = `Contract at ${code(input.siteSha.slice(0, 12))}, CLI ${code(input.cliRef)} at ${code(input.cliSha.slice(0, 12))}.${suites} [Run](${input.runUrl})`;
+  const pin = input.cliPin === null ? '' : ` (pinned to site ${code(input.cliPin.trim().slice(0, 12))})`;
+  const context = `Contract at ${code(input.siteSha.slice(0, 12))}, CLI ${code(input.cliRef)} at ${code(input.cliSha.slice(0, 12))}${pin}.${suites} [Run](${input.runUrl})`;
   const sections = ['## CLI parity'];
   if (outcome.kind === 'report') {
     sections.push(`**${verdict(outcome, input.testExit)}**`, context);
     if (outcome.rows.length > 0) sections.push(table(outcome.rows, cap, overflow));
     if (outcome.failedTests.length > 0) {
-      sections.push(`Failing CLI tests:\n\n${outcome.failedTests.map((name) => `- ${code(name)}`).join('\n')}`);
+      const shown = outcome.failedTests.slice(0, FAILED_TEST_CAP).map((name) => `- ${code(name)}`);
+      const hidden = outcome.failedTests.length - shown.length;
+      const more = hidden > 0 ? `\n\n${plural(hidden, 'more failing test', 'more failing tests')} in the [run log](${input.runUrl}).` : '';
+      sections.push(`Failing CLI tests:\n\n${shown.join('\n')}${more}`);
     }
     sections.push(unportedLine(input.unported));
     sections.push(
-      'Informational: this check is not required and asks nothing of this PR. A divergence reaches the CLI through its next bump PR, where a port closes it.',
+      "Informational: this check is not required and asks nothing of this PR. It compares this contract with the CLI's ledger at its pin, so it includes site changes merged since that pin as well as this PR's. A divergence reaches the CLI through its next bump PR, where a port closes it.",
     );
     return sections.join('\n\n');
   }
@@ -140,6 +144,7 @@ function main(argv: string[]): number {
         'site-sha',
         'cli-ref',
         'cli-sha',
+        'cli-pin',
         'run-url',
         'sync-exit',
         'sync-log',
@@ -169,6 +174,7 @@ function main(argv: string[]): number {
     siteSha: required('site-sha'),
     cliRef: required('cli-ref'),
     cliSha: required('cli-sha'),
+    cliPin: optionalFile(required('cli-pin')),
     runUrl: required('run-url'),
     syncExit: exitCode('sync-exit'),
     syncLog: optionalFile(required('sync-log')) ?? '',

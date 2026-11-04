@@ -1,6 +1,7 @@
-# Informational report: which CLI conformance scenarios a site change to the
-# web-audit vendoring contract would diverge. Builds agentnative-cli against the
-# PR's contract, then writes a job summary and keeps one PR comment current.
+# Informational report: what the CLI's next bump would carry at a site PR's web-audit
+# vendoring contract, measured against the CLI's ledger at its pin. Builds
+# agentnative-cli against the PR's contract, then writes a job summary and keeps one
+# PR comment current.
 #
 # Never name this check in a ruleset. A divergence is expected whenever the engine
 # changes and reaches the CLI through its next bump PR, so divergences, a CLI that
@@ -18,7 +19,9 @@
 name: web-audit-cli-parity
 
 on:
+  # Every contract change in a release PR was reported on its own PR into dev.
   pull_request:
+    branches-ignore: [main]
     paths:
       - 'src/data/web-audit/contract/**'
       - '.github/workflows/web-audit-cli-parity.yml'
@@ -35,7 +38,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: web-audit-cli-parity-${{ github.event.pull_request.number || github.ref }}
+  group: web-audit-cli-parity-${{ github.event.pull_request.number || github.ref }}-${{ inputs.cli_ref }}
   cancel-in-progress: true
 
 env:
@@ -64,6 +67,11 @@ jobs:
           ref: ${{ env.SITE_SHA }}
           persist-credentials: false
 
+      # Before the CLI's checkout, so a mistyped cli_ref still gets a written report.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
       - name: Check out the CLI
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -71,10 +79,6 @@ jobs:
           ref: ${{ env.CLI_REF }}
           path: cli
           persist-credentials: false
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
 
       # WEB_AUDIT_SITE_SHA, not --pin: moving the pin would fail the CLI's ledger
       # check on the pin itself and hide what this contract changes.
@@ -107,23 +111,29 @@ jobs:
         with:
           workspaces: cli
 
-      # The suites the CLI's next bump runs, so a clean report means a clean bump.
-      # sync_web_audit is left out: it holds the vendored copies to the pin this run
-      # leaves alone. --features web is explicit because tests/web_audit_divergences.rs
-      # compiles to nothing without it, which passes and looks like a clean run.
-      # --no-fail-fast because the dump's suite must run after another suite fails.
+      # The dump's suite runs alone with the dump paths set: tests/web_audit_bump.rs
+      # drives a cargo shim that writes fixture data to whatever those variables name,
+      # which would pass for a real dump. Then the suites the CLI's next bump runs, so
+      # a clean report means a clean bump; sync_web_audit is left out because it holds
+      # the vendored copies to the pin this run leaves alone. --features web is explicit
+      # because tests/web_audit_divergences.rs compiles to nothing without it, which
+      # passes and looks like a clean run.
       - name: Replay the corpus through the CLI
         id: tests
         if: steps.sync.outputs.exit == '0'
         working-directory: cli
-        env:
-          WEB_AUDIT_DIVERGENCE_OUT: ${{ runner.temp }}/divergences.json
-          WEB_AUDIT_UNPORTED_OUT: ${{ runner.temp }}/unported.json
         run: |
+          WEB_AUDIT_DIVERGENCE_OUT="$RUNNER_TEMP/divergences.json" \
+            WEB_AUDIT_UNPORTED_OUT="$RUNNER_TEMP/unported.json" \
+            cargo test --locked --features web --no-fail-fast --test web_audit_divergences \
+            2>&1 | tee "$RUNNER_TEMP/tests.log"
+          code=${PIPESTATUS[0]}
           cargo test --locked --features web --no-fail-fast \
             --lib --test 'web_audit_*' --test build_registry \
-            2>&1 | tee "$RUNNER_TEMP/tests.log"
-          echo "exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+            2>&1 | tee -a "$RUNNER_TEMP/tests.log"
+          suites=${PIPESTATUS[0]}
+          if [ "$code" = 0 ]; then code=$suites; fi
+          echo "exit=$code" >> "$GITHUB_OUTPUT"
 
       - name: Write the report
         id: report
@@ -138,6 +148,7 @@ jobs:
             --site-sha "$SITE_SHA" \
             --cli-ref "$CLI_REF" \
             --cli-sha "$(git -C cli rev-parse HEAD)" \
+            --cli-pin cli/src/web_audit/vendored/SITE_SHA \
             --run-url "$RUN_URL" \
             --sync-exit "$SYNC_EXIT" \
             --sync-log "$RUNNER_TEMP/sync.log" \

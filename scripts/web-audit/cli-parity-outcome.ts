@@ -7,6 +7,7 @@ export interface ParityInput {
   siteSha: string;
   cliRef: string;
   cliSha: string;
+  cliPin: string | null;
   runUrl: string;
   syncExit: number | null;
   syncLog: string;
@@ -46,8 +47,12 @@ const DUMP_TEST_PANIC = /^thread 'dump_corpus_divergences'.* panicked at /;
 // write to the path this workflow passes.
 const DUMP_WRITE_PANIC = 'panicked at tests/web_audit_divergences.rs';
 
+export const DETAIL_CHAR_CAP = 2000;
+
 const rowKey = (scenario: string, element: string): string => `${scenario}\0${element}`;
-const lastLines = (text: string, count: number): string => text.trimEnd().split('\n').slice(-count).join('\n');
+// From the end: the tail of a log is where its failure is named.
+const lastLines = (text: string, count: number): string =>
+  text.trimEnd().split('\n').slice(-count).join('\n').slice(-DETAIL_CHAR_CAP);
 
 function parseDump(text: string): [string, string][] | null {
   try {
@@ -70,21 +75,21 @@ function parseLedger(text: string): Map<string, LedgerEntry> | null {
   }
 }
 
-/** Failing tests as `<suite>::<test>` and the suites that ran, from libtest's text output. */
+/** Failing tests as `<suite>::<test>` and the suites that ran, from libtest's text output. The dump's suite runs twice. */
 function parseTestLog(log: string): { failedTests: string[]; suiteCount: number } {
   let suite = '';
-  let suiteCount = 0;
-  const failedTests: string[] = [];
+  const suites = new Set<string>();
+  const failedTests = new Set<string>();
   for (const line of log.split('\n')) {
     const running = /^\s*Running (?:unittests )?(?:tests\/)?(\S+)\.rs /.exec(line);
     if (running) {
       suite = running[1] ?? '';
-      suiteCount += 1;
+      suites.add(suite);
     }
     const test = /^test (\S+) \.\.\. FAILED$/.exec(line);
-    if (test) failedTests.push(`${suite}::${test[1]}`);
+    if (test) failedTests.add(`${suite}::${test[1]}`);
   }
-  return { failedTests, suiteCount };
+  return { failedTests: [...failedTests], suiteCount: suites.size };
 }
 
 /** The lines from the first match of `pattern`, the part of a log that names a failure. */
@@ -105,7 +110,7 @@ function classifyMissingDump(input: ParityInput): Outcome {
   }
   const dumpPanic = excerptFrom(log, DUMP_TEST_PANIC, 8);
   if (dumpPanic !== null && !dumpPanic.includes(DUMP_WRITE_PANIC)) {
-    return { kind: 'unavailable', reason: 'the CLI could not load this contract', detail: dumpPanic };
+    return { kind: 'unavailable', reason: 'the CLI could not replay this contract', detail: dumpPanic };
   }
   return {
     kind: 'broken',
