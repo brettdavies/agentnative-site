@@ -268,6 +268,13 @@ export function blockedHostReason(rawHostname: string): string | null {
   return null;
 }
 
+/** A listed address that does not parse would silently leave the list, so it stops the module loading instead. */
+function metadataIpv6(literal: string): Uint8Array {
+  const bytes = parseIpv6Literal(literal);
+  if (bytes === null) throw new Error(`METADATA_HOSTS: not an IPv6 literal: ${literal}`);
+  return bytes;
+}
+
 // What `anc web` refuses as cloud metadata from any network, matching the
 // metadata class in its `locality.rs`. Every other host this gate blocks is one
 // `anc web` can audit from a network that reaches it. 168.63.129.16 is a public
@@ -279,9 +286,7 @@ const METADATA_HOSTS = {
     [ipv4('100.100.100.200'), 32],
     [ipv4('168.63.129.16'), 32],
   ] as Array<[number, number]>,
-  ipv6: ['fd00:ec2::254', 'fd20:ce::254', 'fe80::a9fe:a9fe', 'fd00:a9fe:a9fe::1', 'fd00:42::42'].flatMap(
-    (literal) => parseIpv6Literal(literal) ?? [],
-  ),
+  ipv6: ['fd00:ec2::254', 'fd20:ce::254', 'fe80::a9fe:a9fe', 'fd00:a9fe:a9fe::1', 'fd00:42::42'].map(metadataIpv6),
 };
 
 /** Whether a hostname, without its port, is a cloud metadata destination, in any literal form that names one. */

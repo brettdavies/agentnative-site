@@ -106,12 +106,18 @@ describe('GET /scoring?target=', () => {
     }
   });
 
-  test('the page of a target refused for good tells a browser without scripts the same thing', async () => {
+  test('the page of a target refused for good says so in its first paint, at the status its twin gives', async () => {
     const res = await handleScoringPage(get('/scoring?target=localhost%3A3000'), env());
-    expect(res.status).toBe(200);
-    const noscript = (await res.text()).split('<noscript>')[1]?.split('</noscript>')[0] ?? '';
+    expect(res.status).toBe(400);
+    const page = await res.text();
+    const noscript = page.split('<noscript>')[1]?.split('</noscript>')[0] ?? '';
     expect(noscript).toContain('<code>anc web localhost:3000</code>');
+    expect(noscript).toContain('Run it only for a host you chose');
     expect(noscript).not.toContain('saved result');
+    expect(page).toContain('anc&#39;s public audit never contacts localhost:3000');
+    expect(page).not.toContain('Usually under 30 seconds');
+    expect(page).not.toContain('Checking for a recent result');
+    expect(page).toContain('data-scoring ');
   });
 
   test('the twin of a metadata endpoint names no command', async () => {

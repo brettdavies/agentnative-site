@@ -11,17 +11,14 @@ import { isMetadataHost } from './ssrf';
 // as neither shell syntax nor a flag is printed as a command an agent may run.
 const COMMAND_SAFE_HOST = /^(?:[a-z0-9_][a-z0-9_.-]*|\[[0-9a-f:.]+\])(?::\d+)?$/i;
 
-// `anc web` holds a declared host to the same rules the public audit does: it
-// never probes an IP literal or a host of another class than the target's, it
-// needs the same confirmation from a declared host, and it stops at the same
-// per-audit cap, which a budget row does not tell apart from the hourly limit a
-// local run escapes. Naming the command for these would promise a result it may
-// not produce.
-const ANC_WEB_ALSO_REFUSES: readonly NaReason[] = [
-  'declared-host-blocked',
-  'reciprocity-refused',
-  'declared-host-budget-exceeded',
-];
+// The reasons a run from the reader's own network can change. `anc web` holds a
+// declared host to the same rules the public audit does: it never probes an IP
+// literal or a host of another class than the target's, it needs the same
+// confirmation from a declared host, and it stops at the same per-audit cap,
+// which a budget row does not tell apart from the hourly limit a local run
+// escapes. Anything not listed names no command, so a new reason cannot promise a
+// result by default.
+const ANC_WEB_EVALUATES: readonly NaReason[] = ['follow-disabled', 'declared-host-unreachable', 'auth-required'];
 
 /**
  * The host as a command argument, or null when it cannot be printed safely or
@@ -41,18 +38,26 @@ export function ancWebCommand(host: string, commandReleased: boolean): string | 
 }
 
 /**
+ * The file a sign-in row reads its token from, named for the host. The audited
+ * site chooses that host, so a shared name would send a token kept for one host
+ * to whichever site's row the reader ran next.
+ */
+export function tokenFileFor(host: string): string {
+  return `token-for-${host.toLowerCase().replace(/[^a-z0-9._-]/g, '_')}.txt`;
+}
+
+/**
  * The command that evaluates a not-run row from the reader's own network, or
- * null when none does. The audited site chooses the host a sign-in row prints,
- * so the row binds it with `--token-host` and reads the token with
- * `--token-stdin`: run as printed, it takes nothing from the environment, and a
- * token the reader exported for another host stays put. Running the audited site
- * reaches the endpoint through its own declaration, which finds an endpoint off
- * the common paths that a run of the host alone would miss.
+ * null when none does. A sign-in row binds the host with `--token-host` and reads
+ * the token from that host's own file with `--token-stdin`, so a command run as
+ * printed takes nothing from the environment. Running the audited site reaches
+ * the endpoint through its own declaration, which finds an endpoint off the
+ * common paths that a run of the host alone would miss.
  */
 export function notRunCommand(reason: NaReason, host: string, domain: string, commandReleased: boolean): string | null {
-  if (ANC_WEB_ALSO_REFUSES.includes(reason)) return null;
+  if (!ANC_WEB_EVALUATES.includes(reason)) return null;
   const onSite = ancWebCommand(domain, commandReleased);
   if (onSite === null || reason !== 'auth-required') return onSite;
   const tokenHost = printableHost(host);
-  return tokenHost === null ? null : `${onSite} --token-host ${tokenHost} --token-stdin < token.txt`;
+  return tokenHost === null ? null : `${onSite} --token-host ${tokenHost} --token-stdin < ${tokenFileFor(host)}`;
 }

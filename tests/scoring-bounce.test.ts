@@ -84,6 +84,7 @@ describe('bouncePanel: a local, private, or internal target', () => {
     expect(panel.bodyHtml).toContain('href="/install#audit-a-local-site"');
     expect(panel.bodyHtml).toContain('HTTPS only');
     expect(panel.bodyHtml).toContain('See how to install and run it');
+    expect(panel.bodyHtml).toContain('Run it only for a host you chose');
     expect(panel.final).toBe(true);
     // The headline already says why; the gate's own wording stays in the JSON.
     expect(panel.details).toBeUndefined();

@@ -6,6 +6,7 @@
 //
 //   GET /scoring ................... no target: the prose pointer to the audit page
 //   GET /scoring?target=t .......... accepted target: the page for its lane
+//                                    a host refused for good: that page, failed (400)
 //                                    refused target: the pointer with the reason (400)
 //   GET /scoring.md, or markdown ... the prose pointer naming the read tools; a
 //                                    host the public audit refuses for good: the
@@ -68,9 +69,9 @@ export async function handleScoringPage(request: Request, env: ScoringPageEnv): 
         ? 'That target has no result page. Start the audit from the audit page.'
         : null;
 
-  // A host the public audit refuses for good still gets the page, whose client
-  // shows the refusal in its panel. The twin and a browser without scripts have
-  // no client, so they carry the refusal themselves.
+  // A host the public audit refuses for good still gets the page, because its
+  // client shows the refusal in a panel. The first paint already says so, for a
+  // browser without scripts, and the twin carries the refusal itself.
   const refusal = accepted?.lane === 'web' ? refusalForHost(accepted.target, url.origin)?.error : undefined;
 
   if (url.pathname.endsWith('.md') || detectPreference(request) === 'markdown') {
@@ -99,7 +100,7 @@ export async function handleScoringPage(request: Request, env: ScoringPageEnv): 
     breadcrumb: 'Scoring',
     body: page.body,
   });
-  const status = refused ? 400 : 200;
+  const status = refused || refusal ? 400 : 200;
   return transient(
     request,
     new Response(html, { status, headers: { 'content-type': 'text/html; charset=utf-8' } }),
@@ -133,6 +134,7 @@ async function progressPage(
   refusal: LocalTargetError | undefined,
 ): Promise<Page> {
   const { lane, target } = accepted;
+  const state = refusal ? 'failed' : 'running';
   const t = escHtml(target);
   const total = lane === 'web' ? await checkTotal(env) : null;
   const attrs = [
@@ -152,10 +154,10 @@ async function progressPage(
   const body = `<article class="container scorecard-page scoring" ${attrs}>
   <meta name="turnstile-sitekey" content="${escHtml(env.TURNSTILE_SITEKEY ?? '')}" />
   <header class="scorecard-header">
-    <h1 tabindex="-1" data-scoring-heading>${scoringHeadingHtml('running', target, lane)}</h1>
-    <p class="live-score-summary__meta" data-scoring-subline>${escHtml(LANE_EXPECTATION[lane])}</p>
+    <h1 tabindex="-1" data-scoring-heading>${scoringHeadingHtml(state, target, lane)}</h1>
+    <p class="live-score-summary__meta" data-scoring-subline>${refusal ? '' : escHtml(LANE_EXPECTATION[lane])}</p>
   </header>
-  <p class="live-score__status" data-scoring-status role="status" aria-live="polite">Checking for a recent result&hellip;</p>
+  <p class="live-score__status" data-scoring-status role="status" aria-live="polite">${refusal ? escHtml(refusal.message) : 'Checking for a recent result&hellip;'}</p>
   <div class="scoring__body" data-scoring-body></div>
   <div class="scoring__actions" data-scoring-actions>
     <button type="button" class="btn btn--primary" data-scoring-start hidden>Start</button>
@@ -168,7 +170,11 @@ async function progressPage(
   <script defer src="${SCRIPT_SRC}"></script>
 </article>`;
   const kind = lane === 'cli' ? 'CLI' : 'website';
-  return { title: scoringTitle('running', target), description: `The live ${kind} audit of ${target}.`, body };
+  return {
+    title: scoringTitle(state, target),
+    description: refusal ? refusal.message : `The live ${kind} audit of ${target}.`,
+    body,
+  };
 }
 
 function pointerPage(refused: string | null): Page {

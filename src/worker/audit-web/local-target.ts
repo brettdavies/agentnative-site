@@ -7,6 +7,7 @@ import { type AuditError, type AuditNextStep, auditError } from '../../shared/au
 import { escHtml } from '../../shared/esc-html';
 import {
   ANC_WEB_DOCS_PATH,
+  LOCAL_TARGET_CAUTION,
   LOCAL_TARGET_DOCS_LINK,
   localTargetCta,
   localTargetNextHtml,
@@ -61,7 +62,7 @@ export function localTargetMarkdown(error: LocalTargetError): string {
     `${error.message} ${FINAL}`,
     '',
     error.cta,
-    'Run it only for a host you chose: this page names whatever host its link names.',
+    LOCAL_TARGET_CAUTION,
     '',
     '```bash',
     error.next_step.command,

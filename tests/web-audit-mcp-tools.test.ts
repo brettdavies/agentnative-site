@@ -2178,7 +2178,7 @@ describe('provenance reaches every reader of a stored website result', () => {
     expect(md).toContain(scorecard.access_note ?? 'missing');
     const corsActual = scorecard.results.find((r) => r.id === 'mcp-cors-actual');
     expect(corsActual?.access_remedy).toBe(
-      "anc's public audit holds no sign-in for mcp.stripe.com. Run `anc web stripe.dev --token-host mcp.stripe.com --token-stdin < token.txt`, with token.txt holding a token for mcp.stripe.com, to evaluate this check from your own network.",
+      "anc's public audit holds no sign-in for mcp.stripe.com. Run `anc web stripe.dev --token-host mcp.stripe.com --token-stdin < token-for-mcp.stripe.com.txt`, with token-for-mcp.stripe.com.txt holding a token for mcp.stripe.com, to evaluate this check from your own network.",
     );
     expect(md).toContain(`- Note: ${corsActual?.access_remedy}`);
     expect(scorecard.results.filter((r) => r.access_remedy !== undefined)).toHaveLength(18);

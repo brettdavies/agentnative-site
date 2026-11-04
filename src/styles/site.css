@@ -41,7 +41,8 @@ body {
 /* The sticky header covers the top of the viewport, so a fragment jump or a focused control in the page has to stop
  * below it. On the root scroller this would also scroll the page whenever focus reached the header itself. */
 main,
-main :is([id], a, button, input, select, textarea, summary, [tabindex]) {
+main :is([id], a, button, input, select, textarea, summary, [tabindex]),
+.site-footer :is(a, button) {
   scroll-margin-top: calc(var(--site-header-h) + var(--space-4));
 }
 

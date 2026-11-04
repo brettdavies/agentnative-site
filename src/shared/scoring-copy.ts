@@ -28,9 +28,12 @@ export function localTargetCta(command: string): string {
 /** The words of the link beside that call to action, on every surface that shows it. */
 export const LOCAL_TARGET_DOCS_LINK = 'See how to install and run it';
 
-/** That call to action and its link, as markup. */
+/** A link can name any host, and the command runs from the reader's own network. */
+export const LOCAL_TARGET_CAUTION = 'Run it only for a host you chose: this page names whatever host its link names.';
+
+/** That call to action, its caution, and its link, as markup. */
 export function localTargetNextHtml(command: string): string {
-  return `${localTargetCta(`<code>${escHtml(command)}</code>`)} <a href="${ANC_WEB_DOCS_PATH}">${LOCAL_TARGET_DOCS_LINK}</a>.`;
+  return `${localTargetCta(`<code>${escHtml(command)}</code>`)} ${LOCAL_TARGET_CAUTION} <a href="${ANC_WEB_DOCS_PATH}">${LOCAL_TARGET_DOCS_LINK}</a>.`;
 }
 
 /** The website lane's status line once the run starts, until its first event arrives. */

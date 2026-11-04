@@ -196,6 +196,22 @@ test.describe('keyboard + a11y', () => {
     }
   });
 
+  test('a focused link with no id, in the page or the footer, stops below the sticky header', async ({ page }) => {
+    await page.setViewportSize({ width: 640, height: 360 });
+    await page.goto('/install');
+    for (const selector of ['main a:not([id])', '.site-footer a']) {
+      const link = page.locator(selector).first();
+      await link.evaluate((a) => (a as HTMLElement).scrollIntoView({ block: 'start' }));
+      const landed = await link.evaluate((a) => ({
+        top: a.getBoundingClientRect().top,
+        headerBottom: document.querySelector('.site-header')?.getBoundingClientRect().bottom ?? Number.NaN,
+      }));
+      expect
+        .soft(landed.top, `${selector} under a ${landed.headerBottom}px header`)
+        .toBeGreaterThanOrEqual(landed.headerBottom);
+    }
+  });
+
   test('focus reaching the sticky header leaves the page where it is', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 500 });
     await page.goto('/install');

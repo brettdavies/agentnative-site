@@ -5,7 +5,7 @@
 // reads say the same sentences.
 
 import type { NaReason } from '../../shared/web-audit-findings';
-import { ancWebCommand, notRunCommand } from './anc-web-command';
+import { ancWebCommand, notRunCommand, tokenFileFor } from './anc-web-command';
 import { MAX_FOLLOWED_HOSTS } from './follow-requests';
 import type { BudgetCause, NotFollowedReason } from './follow-trail';
 import type { AdmittedBy } from './reciprocity';
@@ -174,7 +174,7 @@ export function notRunRemedy(
   const command = { code: invocation };
   const tail = ` to evaluate ${what} from your own network.`;
   return reason === 'auth-required'
-    ? [run, command, `, with token.txt holding a token for ${host},${tail}`]
+    ? [run, command, `, with ${tokenFileFor(host)} holding a token for ${host},${tail}`]
     : [run, command, tail];
 }
 

@@ -72,12 +72,7 @@ import {
 } from '../audit-web/cache';
 import { webEnvelope } from '../audit-web/core';
 import { normalizeScorecardCategories } from '../audit-web/display';
-import {
-  type LocalTargetError,
-  localTargetBodyHtml,
-  localTargetMarkdown,
-  refusalForHost,
-} from '../audit-web/local-target';
+import { refusalForHost } from '../audit-web/local-target';
 import { loadWebAuditRegistry } from '../audit-web/registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from '../audit-web/remediation';
 import { loadWebSeed, type WebSeedEntry } from '../audit-web/seed';
@@ -96,6 +91,7 @@ import { SPEC_VERSION } from '../spec-version.gen';
 import { emitLog } from '../telemetry/log';
 import { envelopeJsonBody } from './api';
 import { readInFlight } from './inflight';
+import { missingPage, refusedTarget } from './result-missing';
 
 export type ResultEnv = OgVideoEnv & {
   TURNSTILE_SITEKEY?: string;
@@ -251,7 +247,13 @@ type RenderContext = {
 
 async function serveWeb(ctx: RenderContext, host: string): Promise<Response> {
   const refusal = refusalForHost(host, ctx.origin);
-  if (refusal) return refusedTarget(ctx, refusal.error);
+  if (refusal) {
+    const { request, env, representation, served } = ctx;
+    return refusedTarget(
+      { request, env, pathname: ctx.url.pathname, representation, legacy: served.legacy },
+      refusal.error,
+    );
+  }
   const inFlight = await inFlightResponse(ctx, 'web', host);
   if (inFlight) return inFlight;
   const canonical = canonicalTargetOf(new URL(`https://${host}/`));
@@ -738,41 +740,4 @@ async function notFound(request: Request, env: ResultEnv, deps: ResultDeps, inpu
     markdownTwinPath: input.legacy ? undefined : `${pathname}/md`,
     body,
   });
-}
-
-/** A target with no result, which the public audit refuses for good: the command that audits it, and no way to retry. */
-async function refusedTarget(ctx: RenderContext, error: LocalTargetError): Promise<Response> {
-  const { request, env, representation, served } = ctx;
-  const { pathname } = ctx.url;
-  const opts = { request, pathname, servedMarkdown: representation === 'md', servedJson: representation === 'json' };
-  if (representation === 'json') return applyHeaders(new Response(JSON.stringify({ error }), { status: 404 }), opts);
-  if (representation === 'md') return applyHeaders(new Response(localTargetMarkdown(error), { status: 404 }), opts);
-  return missingPage(env, opts, {
-    title: 'Refused — anc.dev',
-    description: error.message,
-    breadcrumb: error.value,
-    markdownTwinPath: served.legacy ? undefined : `${pathname}/md`,
-    body: localTargetBodyHtml(error),
-  });
-}
-
-async function missingPage(
-  env: ResultEnv,
-  opts: Parameters<typeof applyHeaders>[1],
-  page: { title: string; description: string; breadcrumb: string; markdownTwinPath: string | undefined; body: string },
-): Promise<Response> {
-  let template: string;
-  try {
-    template = await loadShellTemplate(env);
-  } catch (err) {
-    return new Response(`shell template unavailable: ${err instanceof Error ? err.message : String(err)}`, {
-      status: 500,
-      headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
-    });
-  }
-  const html = substituteShell(template, { ...page, canonicalPath: opts.pathname, alternatesHtml: '' });
-  return applyHeaders(
-    new Response(html, { status: 404, headers: { 'content-type': 'text/html; charset=utf-8' } }),
-    opts,
-  );
 }

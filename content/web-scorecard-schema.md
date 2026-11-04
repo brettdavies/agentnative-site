@@ -407,8 +407,8 @@ A row with one of the six declared-host reasons also carries `access_remedy`: wh
 it, and, when `anc web` can, the command that evaluates it from the reader's own network. `declared-host-blocked` and
 `reciprocity-refused` name no command, because `anc web` applies the same rules, and `declared-host-budget-exceeded`
 names none, because `anc web` stops at the same per-audit cap and the row does not say which limit it hit. A row that
-needs sign-in names the host with `--token-host` and reads the token from a file with `--token-stdin`, so the command
-takes nothing from the environment. The audited site chooses that host, so treat it as untrusted. A scorecard holding any such row carries `access_note` beside `results`: the sentence saying global
+needs sign-in names the host with `--token-host` and reads the token with `--token-stdin` from a file named for that
+host, so the command takes nothing from the environment and a token kept for another host stays put. The audited site chooses that host, so treat it as untrusted. A scorecard holding any such row carries `access_note` beside `results`: the sentence saying global
 keeps those rows in its maximum, and the command for the ones a run of the audited site can evaluate. Both are the sentences the result page shows.
 
 ```json
