@@ -125,11 +125,13 @@ describe("each scenario's requests.json", () => {
   // Generation stays away from real timeouts, because a stall on a busy host moves
   // every scenario in the crowd. This one needs one: the root answers inside its
   // timeout, and the root's answer plus any other outruns it, so a wait for the root
-  // charged to a redirect hop's budget runs out. Each scenario here reads through
-  // such a hop. The margin is wide and the retry covers a stall longer than it; a
-  // wait that spends the budget fails both tries.
+  // charged to a later read's budget runs out. These scenarios hold a redirect hop
+  // for the root, read a catalog's card after it, or follow a declared host. The memo
+  // answers their held hops, so they pin the deadline a hop carries, and
+  // web-audit-root-and-documents.test.ts pins its abort timer. The margin is wide and
+  // the retry covers a stall longer than it; a charged budget fails both tries.
   test(
-    'a redirect hop held for a slow root keeps its budget in the scenarios that read through one',
+    'a slow root spends no budget in the reads that wait for it',
     async () => {
       const slowRoot = {
         perCheckTimeoutMs: 1000,
@@ -139,12 +141,12 @@ describe("each scenario's requests.json", () => {
         [
           'alias-redirect-pass',
           'cors-full-pass',
+          'discovery-catalog-card',
+          'follow-redirect-hop',
           'mcp-dual-stack',
           'mcp-www-authenticate',
           'run-all-pass',
           'run-healthy',
-          'run-root-redirects-to-http-catalog-card',
-          'run-root-redirects-to-http-document-redirect',
         ].map(async (name) => {
           const expected = await runScenario(name, SCENARIOS[name], registry);
           const held = await runScenario(name, SCENARIOS[name], registry, slowRoot);
