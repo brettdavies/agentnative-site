@@ -165,6 +165,29 @@ test.describe('keyboard + a11y', () => {
     }
   }
 
+  test('a fragment link lands its target below the sticky header at 390/768/1440', async ({ page }) => {
+    const targets = [
+      '/install#audit-a-local-site',
+      '/install#homebrew',
+      '/#board',
+      '/p1#p1-non-interactive-by-default',
+    ];
+    for (const url of targets) {
+      for (const width of [390, 768, 1440]) {
+        // Short enough that every target has room to scroll to the top of the viewport.
+        await page.setViewportSize({ width, height: 500 });
+        await page.goto(url);
+        const landed = await page.evaluate(() => ({
+          top: document.querySelector(window.location.hash)?.getBoundingClientRect().top ?? Number.NaN,
+          headerBottom: document.querySelector('.site-header')?.getBoundingClientRect().bottom ?? Number.NaN,
+        }));
+        expect
+          .soft(landed.top, `${url} at ${width}px under a ${landed.headerBottom}px header`)
+          .toBeGreaterThanOrEqual(landed.headerBottom);
+      }
+    }
+  });
+
   test('no horizontal overflow at 390/768/1440 on each archetype', async ({ page }) => {
     for (const path of ['/p1', '/score/ripgrep', '/scorecards', '/audit', '/install']) {
       for (const width of [390, 768, 1440]) {
