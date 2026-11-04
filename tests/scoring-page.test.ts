@@ -16,7 +16,8 @@ import { scriptSources } from './helpers/html-elements';
 // GET /scoring renders the progress page's first paint from the target
 // alone. These tests drive the handler against a stub shell and the real
 // website registry, and pin the page's contract with its client, its
-// headers, and its prose pointer.
+// headers, and its prose pointer. The suite that checks which scripts load
+// uses the real shell template instead, because the stub names none.
 
 const SHELL = `<!doctype html><html><head><title>{{TITLE}}</title><meta name="description" content="{{DESCRIPTION}}" /><link rel="canonical" href="https://anc.dev{{CANONICAL_PATH}}" />
     {{ALTERNATES}}
@@ -59,15 +60,17 @@ describe('GET /scoring through the real shell template', () => {
   // A script the shell adds to every page is invisible to the stub above, which
   // names no scripts at all.
   test.each([
-    ['a CLI target', '/scoring?target=ripgrep'],
-    ['a website target', '/scoring?target=stripe.dev'],
-    ['no target', '/scoring'],
-    ['a refused target', `/scoring?target=${'a'.repeat(129)}`],
-  ])('%s loads no WebMCP script', async (_name, path) => {
-    const { html } = await page(path, env(SITEKEY, emitShellTemplate()));
-    const scripts = await scriptSources(html);
-    expect(scripts).toContain('/js/theme.js');
-    expect(scripts.filter((src) => src.includes('webmcp'))).toEqual([]);
+    ['a CLI target', '/scoring?target=ripgrep', 200, true],
+    ['a website target', '/scoring?target=stripe.dev', 200, true],
+    ['no target', '/scoring', 200, false],
+    ['a refused target', `/scoring?target=${'a'.repeat(129)}`, 400, false],
+  ])('%s loads no WebMCP script', async (_name, path, status, isProgressPage) => {
+    const { res, html } = await page(path, env(SITEKEY, emitShellTemplate()));
+    expect(res.status).toBe(status);
+    expect(html.includes('data-lane=')).toBe(isProgressPage);
+    expect(await scriptSources(html)).toContain('/js/theme.js');
+    // The whole page, so a preload hint or an inline import counts as well as a tag.
+    expect(html).not.toContain('webmcp');
   });
 });
 

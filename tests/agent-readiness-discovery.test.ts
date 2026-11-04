@@ -236,6 +236,8 @@ describe('agent-readiness cross-surface drift (built dist/)', () => {
       const html = await readFile(join(DIST_DIR, page), 'utf8');
       expect(html).toContain(WEBMCP_SCRIPT);
     }
+    const workerShell = await readFile(join(DIST_DIR, '_internal', 'score-live-shell.html'), 'utf8');
+    expect(workerShell).not.toContain(WEBMCP_SCRIPT);
     const about = await readFile(join(DIST_DIR, 'about.html'), 'utf8');
     expect(about).not.toContain(WEBMCP_SCRIPT);
     const scorecard = await readFile(join(DIST_DIR, 'score', 'curl.html'), 'utf8');
