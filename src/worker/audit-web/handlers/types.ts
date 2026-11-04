@@ -8,6 +8,7 @@ import type { RetainedDocumentKey } from '../../../shared/web-audit-documents';
 import type { NaReason, RowAdvisory } from '../../../shared/web-audit-findings';
 import type { ApiTargets } from '../api-targets';
 import type { ProbeResponse } from '../assert';
+import type { FanOut } from '../audit-slots';
 import type { RetainedDocument } from '../discovery-documents';
 import type { SignInChallenge } from '../mcp-auth';
 import type { AuditFetchOptions } from '../ssrf';
@@ -119,6 +120,8 @@ export interface HandlerContext {
   scopedDirs?: string[];
   /** Passed straight to guardedFetch (fetchImpl injection for tests, hop cap). */
   fetchOptions?: AuditFetchOptions;
+  /** Runs one row's parallel probes under the audit's cap; absent, they run one at a time. */
+  fanOut?: FanOut;
   /**
    * Source checks' retained response bodies keyed by check id (e.g. `llms-txt`).
    * Handlers that soften on a discoverable twin read this instead of

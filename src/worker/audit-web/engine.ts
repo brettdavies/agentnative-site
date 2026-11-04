@@ -487,6 +487,7 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
     apiDescriptionBodies: apiDescriptionBodies(sources.get('openapi')?.evidence ?? []),
     apiHostProbes,
     fetchOptions,
+    fanOut: slots.fanOut,
     mcpSessionId,
     mcpLanes,
     mcpAuth: actx.mcpAuth,

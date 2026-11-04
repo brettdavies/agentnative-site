@@ -2,6 +2,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { resultLine } from '../src/shared/web-audit-result-line';
+import { createAuditSlots } from '../src/worker/audit-web/audit-slots';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
 import { ALWAYS_ADMIT_BUDGET } from '../src/worker/audit-web/follow-requests';
 import { runLlmsTxtQuality } from '../src/worker/audit-web/handlers/llms-txt-quality';
@@ -172,7 +173,7 @@ describe('llms.txt quality trio', () => {
     }
   });
 
-  test('link probes stop when the nested budget is exhausted', async () => {
+  test('link probes stop going out once the nested budget is exhausted', async () => {
     const links = Array.from({ length: 8 }, (_, i) => `- [p${i}](https://example.com/p${i})`).join('\n');
     const body = `# Site\n\n> Summary\n\n${links}\n`;
     let calls = 0;
@@ -197,6 +198,128 @@ describe('llms.txt quality trio', () => {
     expect(outcome.status).toBe('error');
     expect(outcome.incomplete).toBe(true);
     expect(JSON.stringify(outcome.evidence)).toContain('nested-probe budget exhausted');
+  });
+
+  describe('link probes side by side', () => {
+    const LINKS = CHECKS.find((c) => c.id === 'llms-txt-links') as WebCheck;
+    const LINK_COUNT = 6;
+    const hrefs = Array.from({ length: LINK_COUNT }, (_, i) => `https://example.com/p${i}`);
+    const body = `# Site\n\n> Summary\n\n${hrefs.map((href, i) => `- [p${i}](${href})`).join('\n')}\n`;
+    const context = (fetchImpl: typeof fetch, fanOut: HandlerContext['fanOut'], defaultTimeoutMs = 2_000) => ({
+      base: 'https://example.com/',
+      host: 'example.com',
+      mcpEndpoint: null,
+      protocolVersion: '2025-06-18',
+      defaultTimeoutMs,
+      retainedBodies: new Map([['llms-txt', body]]),
+      fetchOptions: { fetchImpl },
+      fanOut,
+    });
+    const hangsUntilAborted = (init: RequestInit | undefined): Promise<Response> =>
+      new Promise((_, reject) => {
+        const aborted = (): void => reject(new DOMException('aborted', 'AbortError'));
+        if (init?.signal?.aborted) aborted();
+        else init?.signal?.addEventListener('abort', aborted, { once: true });
+      });
+
+    test('the probes run under the cap, and evidence keeps link order however they finish', async () => {
+      let inFlight = 0;
+      let peak = 0;
+      const answered: string[] = [];
+      const fetchImpl = stubFetch(async (url) => {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await Bun.sleep((LINK_COUNT - hrefs.indexOf(url)) * 4);
+        inFlight -= 1;
+        answered.push(url);
+        return new Response('', { status: 200 });
+      });
+      const slots = createAuditSlots(3);
+      const outcome = await slots.run(() => runLlmsTxtQuality(LINKS, context(fetchImpl, slots.fanOut)));
+      expect(peak).toBe(3);
+      expect(answered).not.toEqual(hrefs);
+      expect(outcome.evidence.map((row) => row.url)).toEqual(hrefs);
+      expect(outcome.status).toBe('pass');
+    });
+
+    test('the check spends its own slot when no other frees, so a cap of 1 finishes in link order', async () => {
+      const asked: string[] = [];
+      const fetchImpl = stubFetch(async (url) => {
+        asked.push(url);
+        return new Response('', { status: 200 });
+      });
+      const slots = createAuditSlots(1);
+      const outcome = await slots.run(() => runLlmsTxtQuality(LINKS, context(fetchImpl, slots.fanOut)));
+      expect(asked).toEqual(hrefs);
+      expect(outcome.status).toBe('pass');
+      expect(await slots.run(async () => 'slot came back')).toBe('slot came back');
+    });
+
+    test('a link unanswered at the deadline reads as the budget running out, and every other link still counts', async () => {
+      const fetchImpl = stubFetch((url, init) =>
+        url === hrefs[2] ? hangsUntilAborted(init) : new Response('', { status: url === hrefs[4] ? 404 : 200 }),
+      );
+      const slots = createAuditSlots(6);
+      const outcome = await slots.run(() => runLlmsTxtQuality(LINKS, context(fetchImpl, slots.fanOut, 60)));
+      expect(outcome.evidence.map((row) => row.url)).toEqual(hrefs);
+      expect(outcome.evidence[2]).toEqual({
+        url: hrefs[2],
+        ok: false,
+        why: ['nested-probe budget exhausted'],
+        link_verdict: 'error',
+      });
+      expect(outcome.status).toBe('absent');
+      expect(outcome.incomplete).toBe(true);
+    });
+
+    test('a link still waiting for a slot at the deadline sends nothing and reads the same way', async () => {
+      const asked: string[] = [];
+      const fetchImpl = stubFetch(async (url, init) => {
+        asked.push(url);
+        return hangsUntilAborted(init);
+      });
+      const slots = createAuditSlots(1);
+      const outcome = await slots.run(() => runLlmsTxtQuality(LINKS, context(fetchImpl, slots.fanOut, 40)));
+      expect(asked[0]).toBe(hrefs[0]);
+      expect(asked.length).toBeLessThan(LINK_COUNT);
+      expect(outcome.evidence.map((row) => row.why)).toEqual(hrefs.map(() => ['nested-probe budget exhausted']));
+      expect(outcome.status).toBe('error');
+      expect(outcome.incomplete).toBe(true);
+    });
+
+    test('the audit counts link probes against the cap it runs every other check under', async () => {
+      let inFlight = 0;
+      let peak = 0;
+      const fetchImpl = stubFetch(async (url) => {
+        const { pathname } = new URL(url);
+        if (pathname === '/llms.txt') return new Response(body, { status: 200 });
+        if (pathname === '/' || pathname.startsWith('/.well-known')) return new Response('', { status: 404 });
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await Bun.sleep(3);
+        inFlight -= 1;
+        return new Response('', { status: 200 });
+      });
+      const others = Array.from({ length: 6 }, (_, i) =>
+        makeCheck({
+          id: `other-${i}`,
+          antecedent: 'none',
+          handler: 'http',
+          with: { path: `/other-${i}`, expect: { status: [200] } },
+        }),
+      );
+      const events = await collect(
+        runWebAudit({
+          url: 'https://example.com/',
+          registry: registryOf([CHECKS[0], LINKS, ...others]),
+          concurrency: 3,
+          fetchOptions: { fetchImpl },
+          domainBudget: ALWAYS_ADMIT_BUDGET,
+        }),
+      );
+      expect(peak).toBe(3);
+      expect(resultsOf(events).find((row) => row.id === 'llms-txt-links')?.status).toBe('pass');
+    });
   });
 
   describe('links over http', () => {
