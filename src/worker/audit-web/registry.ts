@@ -196,17 +196,9 @@ export function fingerprintPrefix(fingerprint: string): string {
   return fingerprint.slice(0, FINGERPRINT_PREFIX_LENGTH);
 }
 
-// A loaded registry is never mutated, so one hash serves every audit that saves
-// under it and every request the version signal answers.
-const fingerprintPrefixes = new WeakMap<WebAuditRegistry, string>();
-
 /** The prefix a scorecard scored under `registry` records. */
 export async function registryFingerprintPrefix(registry: WebAuditRegistry): Promise<string> {
-  const known = fingerprintPrefixes.get(registry);
-  if (known !== undefined) return known;
-  const prefix = fingerprintPrefix(await registryFingerprint(registry));
-  fingerprintPrefixes.set(registry, prefix);
-  return prefix;
+  return fingerprintPrefix(await registryFingerprint(registry));
 }
 
 /** Whether `value` is a recorded fingerprint prefix; anything else reads as an unknown registry version. */

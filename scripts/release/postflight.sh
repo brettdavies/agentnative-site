@@ -345,7 +345,7 @@ gate_pages() {
   fi
 
   local signal_error
-  if signal_error=$(SMOKE_RETRIES=0 "$REPO_ROOT/scripts/smoke-web-audit-version.sh" "$ENV_URL" 2>&1); then
+  if signal_error=$(SMOKE_RETRIES=2 "$REPO_ROOT/scripts/smoke-web-audit-version.sh" "$ENV_URL" 2>&1); then
     gate_pass "${ENV_URL}/api/web-audit/version serves the version signal"
   else
     gate_fail "${ENV_URL}/api/web-audit/version" "$signal_error"

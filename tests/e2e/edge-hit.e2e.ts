@@ -130,17 +130,29 @@ test.describe('skip-Worker HIT — staging Workers Caching', () => {
   });
 
   // The one HIT-1d surface under /api/, where the gateway keeps the raw inbound
-  // Accept: only the absent Vary keeps its stored object unsharded. A HEAD goes
-  // first so a stored bodyless answer would show up as an empty GET.
+  // Accept: only the absent Vary keeps its stored object unsharded.
   test('repeat GET /api/web-audit/version is HIT with Age in the HIT-1d class with no Vary', async ({ request }) => {
-    const path = '/api/web-audit/version';
-    await request.fetch(`${STAGING_BASE}${path}`, { method: 'HEAD', headers: ACCESS_HEADERS });
-    const second = await warmThenGet(request, path, { accept: 'application/json' });
+    const second = await warmThenGet(request, '/api/web-audit/version', { accept: 'application/json' });
     expect(second.status()).toBe(200);
     expect(second.headers()['vary'] ?? '').toBe('');
     expect(isSkipWorkerHit(second.headers())).toBe(true);
     expect(second.headers()['cache-control']).toBe('public, max-age=300, stale-while-revalidate=60');
     expect(Object.keys((await second.json()) as object).sort()).toEqual([
+      'registry_fingerprint',
+      'spec_version',
+      'web_schema_version',
+    ]);
+  });
+
+  // A unique key, because a key another suite already filled with a GET could not
+  // show a bodyless answer stored by a cold HEAD.
+  test('a cold HEAD on /api/web-audit/version leaves the next GET its full body', async ({ request }) => {
+    const path = `/api/web-audit/version?probe=${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const head = await request.fetch(`${STAGING_BASE}${path}`, { method: 'HEAD', headers: ACCESS_HEADERS });
+    expect(head.status()).toBe(200);
+    const get = await request.get(`${STAGING_BASE}${path}`, { headers: ACCESS_HEADERS });
+    expect(get.status()).toBe(200);
+    expect(Object.keys((await get.json()) as object).sort()).toEqual([
       'registry_fingerprint',
       'spec_version',
       'web_schema_version',

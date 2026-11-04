@@ -1,7 +1,7 @@
 // The route and body here are a contract the anc CLI reads; the path stays a
 // literal so a rename fails this suite instead of following the constant.
 
-import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import {
   isRegistryFingerprintPrefix,
   registryFingerprintPrefix,
@@ -89,30 +89,6 @@ describe('GET /api/web-audit/version', () => {
     expect(await queried.text()).toBe(await plain.text());
     expect(queried.headers.get('cache-control')).toBe('public, max-age=0, must-revalidate');
     expect(queried.headers.get('cloudflare-cdn-cache-control')).toBe('public, max-age=300');
-  });
-
-  test('hashes the registry once however many requests miss the edge', async () => {
-    const { env: e } = env();
-    const digest = spyOn(crypto.subtle, 'digest');
-    try {
-      await send({}, e);
-      const afterFirst = digest.mock.calls.length;
-      await send({}, e);
-      await worker.fetch(new Request(`${URL_}?x=2`), e, {} as ExecutionContext);
-      expect(afterFirst).toBeGreaterThan(0);
-      expect(digest.mock.calls.length).toBe(afterFirst);
-    } finally {
-      digest.mockRestore();
-    }
-  });
-
-  test('a different registry gets its own fingerprint, not the one already computed', async () => {
-    const first = (await (await send({}, env().env)).json()) as WebAuditVersionSignal;
-    resetWebAuditRegistryCacheForTests();
-    const other = { schema_version: 1, checks: [{ id: 'another-check' }] };
-    const { env: e } = env(() => new Response(JSON.stringify(other)));
-    const second = (await (await send({}, e)).json()) as WebAuditVersionSignal;
-    expect(second.registry_fingerprint).not.toBe(first.registry_fingerprint);
   });
 
   test('carries the machine-surface headers and the HIT-1d class', async () => {

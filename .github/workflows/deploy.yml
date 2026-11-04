@@ -113,6 +113,7 @@ jobs:
         run: scripts/og/deploy-render.sh staging
 
       - name: Deploy to staging
+        id: deploy_staging
         uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
@@ -305,9 +306,10 @@ jobs:
 
       # Last, so a red signal marks the job failed without skipping the rescore,
       # the curated pass, or the link smoke above it. It still runs when one of
-      # them fails.
+      # them fails, but not after a failed deploy, when it would be checking the
+      # previous Worker.
       - name: Smoke /api/web-audit/version
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.deploy_staging.outcome == 'success' }}
         env:
           CF_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}

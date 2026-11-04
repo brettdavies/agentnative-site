@@ -22,8 +22,9 @@
 #                            own.
 #   SMOKE_RETRY_DELAY        Seconds between attempts. Default 10.
 #
-# Credentials go only to anc.dev or *.workers.dev over https, or to localhost;
-# any other target with credentials set exits 2 before a request is sent.
+# Credentials go only to the deployed origins named in scripts/release/release.env,
+# or to localhost; any other target with credentials set exits 2 before a request
+# is sent.
 #
 # Exit codes:
 #   0  smoke passed
@@ -39,13 +40,25 @@ if [ -z "$BASE_URL" ]; then
   exit 2
 fi
 
+# The whole authority has to parse: a naive split reads
+# https://anc.dev:pw@evil.example as anc.dev, and curl would send it to evil.example.
+authority="${BASE_URL#*://}"
+authority="${authority%%[/?#]*}"
 case "$BASE_URL" in
   http://* | https://*) ;;
-  *)
-    echo "FATAL: base URL must be a full http(s) origin, got: $BASE_URL" >&2
-    exit 2
-    ;;
+  *) authority="" ;;
 esac
+if ! [[ "$authority" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]+)?$ ]]; then
+  echo "FATAL: base URL must be a full http(s) origin, got: $BASE_URL" >&2
+  exit 2
+fi
+
+for setting in "SMOKE_RETRIES=${SMOKE_RETRIES:-5}" "SMOKE_RETRY_DELAY=${SMOKE_RETRY_DELAY:-10}"; do
+  if ! [[ "${setting#*=}" =~ ^[0-9]+$ ]]; then
+    echo "FATAL: ${setting%%=*} must be a whole number, got: ${setting#*=}" >&2
+    exit 2
+  fi
+done
 
 if ! command -v curl >/dev/null; then
   echo "FATAL: curl is not installed." >&2
@@ -58,18 +71,15 @@ if [ -z "$JQ_BIN" ]; then
   exit 2
 fi
 
-# The whole authority has to parse before its host is trusted: a naive split reads
-# https://anc.dev:pw@evil.example as anc.dev, and curl would send it to evil.example.
+# Read only when credentials are set, so a check without them needs nothing else.
 may_receive_credentials() {
-  local scheme="${BASE_URL%%://*}" authority="${BASE_URL#*://}" host
-  authority="${authority%%[/?#]*}"
-  [[ "$authority" =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]] || return 1
-  host="${authority%%:*}"
-  case "$host" in
+  case "${authority%%:*}" in
     localhost | 127.0.0.1) return 0 ;;
-    anc.dev | *.workers.dev) [ "$scheme" = https ] ;;
-    *) return 1 ;;
   esac
+  # shellcheck source=scripts/release/release.env
+  . "$(dirname "$0")/release/release.env"
+  local origin="${BASE_URL%%://*}://$authority"
+  [ "$origin" = "$STAGING_URL_DEFAULT" ] || [ "$origin" = "$PROD_URL_DEFAULT" ]
 }
 
 if { [ -n "${CF_ACCESS_CLIENT_ID:-}" ] && [ -z "${CF_ACCESS_CLIENT_SECRET:-}" ]; } ||

@@ -279,6 +279,12 @@ describe('the web-audit version smoke stays wired in', () => {
     expect(step).toContain('!cancelled()');
   });
 
+  test('the staging smoke runs only after a deploy that succeeded, so it cannot vouch for the previous Worker', () => {
+    const job = jobBlock(deployYml, 'staging');
+    expect(job).toMatch(/- name: Deploy to staging\n\s+id: deploy_staging\n/);
+    expect(lastStep(job)).toContain("steps.deploy_staging.outcome == 'success'");
+  });
+
   test('the production smoke job runs it even after an earlier smoke goes red', () => {
     const job = jobBlock(deployYml, 'production-smoke');
     const step = job.slice(job.indexOf('- name: Smoke /api/web-audit/version'));
@@ -297,5 +303,7 @@ describe('the web-audit version smoke stays wired in', () => {
     const postflight = readFileSync(join(REPO_ROOT, 'scripts/release/postflight.sh'), 'utf8');
     const gate = postflight.match(/^gate_pages\(\) \{[\s\S]*?^\}/m)?.[0];
     expect(gate).toContain('scripts/smoke-web-audit-version.sh');
+    expect(gate, 'a red smoke must fail the gate').toContain('gate_fail "${ENV_URL}/api/web-audit/version"');
+    expect(gate, 'a release gate still has to ride out a stale isolate').not.toContain('SMOKE_RETRIES=0');
   });
 });

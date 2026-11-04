@@ -6,15 +6,21 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import worker from '../src/worker/index';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 import { REPO_ROOT } from './helpers/workflows';
 
 const SCRIPT = join(REPO_ROOT, 'scripts/smoke-web-audit-version.sh');
 const VALID = { spec_version: SPEC_VERSION, registry_fingerprint: 'c06f1efd281b', web_schema_version: '0.5' };
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
+const HANDLER_ENV = {
+  ASSETS: { fetch: async () => new Response(JSON.stringify({ schema_version: 1, checks: [] })) },
+} as unknown as Parameters<typeof worker.fetch>[1];
 
-const ANSWERS: Record<string, () => Response> = {
+const ANSWERS: Record<string, () => Response | Promise<Response>> = {
   '/valid': () => Response.json(VALID, { headers: JSON_HEADERS }),
+  '/handler': () =>
+    worker.fetch(new Request('https://anc.dev/api/web-audit/version'), HANDLER_ENV, {} as ExecutionContext),
   '/missing': () => new Response('not found', { status: 404 }),
   '/text': () => new Response(JSON.stringify(VALID), { headers: { 'content-type': 'text/plain' } }),
   '/html': () => new Response('<!doctype html>', { headers: { 'content-type': 'text/html' } }),
@@ -45,6 +51,10 @@ const ANSWERS: Record<string, () => Response> = {
   },
 };
 
+// A caller's real Access credentials must not reach the fixture server or change
+// what these cases exercise.
+const { CF_ACCESS_CLIENT_ID: _id, CF_ACCESS_CLIENT_SECRET: _secret, ...callerEnv } = process.env;
+
 let server: ReturnType<typeof Bun.serve>;
 let staleAnswersLeft = 0;
 let lastHeaders: Record<string, string> = {};
@@ -67,7 +77,7 @@ afterAll(() => {
 
 async function smoke(base: string | null, env: Record<string, string> = {}) {
   const proc = Bun.spawn(['bash', SCRIPT, ...(base === null ? [] : [base])], {
-    env: { ...process.env, SMOKE_RETRIES: '0', SMOKE_RETRY_DELAY: '1', ...env },
+    env: { ...callerEnv, SMOKE_RETRIES: '0', SMOKE_RETRY_DELAY: '1', ...env },
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -199,9 +209,10 @@ describe('scripts/smoke-web-audit-version.sh', () => {
     ['a host that only starts like a known one', 'https://anc.dev.example.com'],
     ['a host that only ends like a known one', 'https://not-anc.dev'],
     ['a look-alike staging suffix', 'https://evil.workers.dev.example.com'],
-    ['a known host used as userinfo', 'https://anc.dev:pw@evil.example'],
-    ['a staging suffix smuggled past a backslash', 'https://evil.example\\.workers.dev'],
-    ['plain-http staging', 'http://site.workers.dev'],
+    ['a stranger on workers.dev', 'https://attacker.workers.dev'],
+    ['the staging name under another account', 'https://agentnative-site-staging.attacker.workers.dev'],
+    ['plain-http staging', 'http://agentnative-site-staging.brettdavies.workers.dev'],
+    ['a known host on another port', 'https://anc.dev:8443'],
   ] as const) {
     test(`refuses to send Access credentials to ${label}, before any request`, async () => {
       const { exitCode, stderr } = await smoke(base, {
@@ -213,10 +224,52 @@ describe('scripts/smoke-web-audit-version.sh', () => {
     });
   }
 
-  test('the same unknown host with no credentials is checked as a request, not refused', async () => {
-    const { exitCode, stderr } = await smoke('http://localhost:1');
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain('did not answer 200');
+  for (const [label, base] of [
+    ['no scheme', 'anc.dev'],
+    ['no host', 'https://'],
+    ['a space in the host', 'http://exa mple'],
+    ['a leading dot', 'https://.workers.dev'],
+    ['a known host used as userinfo', 'https://anc.dev:pw@evil.example'],
+    ['a suffix smuggled past a backslash', 'https://evil.example\\.workers.dev'],
+  ] as const) {
+    const credentialSets: Record<string, string>[] = [
+      {},
+      { CF_ACCESS_CLIENT_ID: 'id', CF_ACCESS_CLIENT_SECRET: 'secret' },
+    ];
+    for (const credentials of credentialSets) {
+      const withOrWithout = 'CF_ACCESS_CLIENT_ID' in credentials ? 'with' : 'without';
+      test(`${label} is a prerequisite failure ${withOrWithout} credentials, not a broken surface`, async () => {
+        const { exitCode, stderr } = await smoke(base, credentials);
+        expect(exitCode).toBe(2);
+        expect(stderr).toContain('full http(s) origin');
+      });
+    }
+  }
+
+  for (const name of ['SMOKE_RETRIES', 'SMOKE_RETRY_DELAY']) {
+    test(`a non-numeric ${name} is a prerequisite failure, not a broken surface`, async () => {
+      const { exitCode, stderr } = await smoke(fixture('valid'), { [name]: 'soon' });
+      expect(exitCode).toBe(2);
+      expect(stderr).toContain(name);
+    });
+  }
+
+  // A stub curl, so this needs no DNS: an unresolvable name can take the full
+  // timeout to fail on some resolvers.
+  test('an unknown host with no credentials is checked as a request, not refused', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'smoke-stub-'));
+    try {
+      const called = join(dir, 'called');
+      const stub = join(dir, 'curl');
+      await writeFile(stub, `#!/usr/bin/env bash\nprintf '%s\\n' "$@" >"${called}"\nexit 7\n`);
+      await chmod(stub, 0o755);
+      const { exitCode, stderr } = await smoke('https://unknown.example', { PATH: `${dir}:${process.env.PATH}` });
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('did not answer 200');
+      expect(await readFile(called, 'utf8')).toContain('https://unknown.example/api/web-audit/version');
+    } finally {
+      await rm(dir, { recursive: true });
+    }
   });
 
   for (const [label, env] of [
@@ -234,9 +287,9 @@ describe('scripts/smoke-web-audit-version.sh', () => {
     expect((await smoke(null)).exitCode).toBe(2);
   });
 
-  test('a base URL that is not an http origin is a prerequisite failure', async () => {
-    const { exitCode, stderr } = await smoke('anc.dev');
-    expect(exitCode).toBe(2);
-    expect(stderr).toContain('full http(s) origin');
+  test("the real handler's answer passes, so a change to its fields cannot first show as a red deploy", async () => {
+    const { exitCode, stdout } = await smoke(fixture('handler'));
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain(SPEC_VERSION);
   });
 });
