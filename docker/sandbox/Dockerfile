@@ -55,6 +55,17 @@ RUN apt-get update \
         xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
+# Debian's npm runs a git dependency's `prepare` under --ignore-scripts. This
+# release honors the setting when it packs a dependency directory, and the
+# inner npm a dependency starts takes it from the install environment set in
+# sandbox-exec.ts. npm 12 needs a newer Node than this base provides. The
+# upgrade copies Debian's builtin config, and npm 11 warns on every command
+# about the one key it does not know; that warning would lead each install
+# failure's details.
+RUN npm install -g --ignore-scripts npm@11.21.2 \
+    && sed -i '/^globalignorefile=/d' /usr/local/lib/node_modules/npm/npmrc \
+    && /usr/local/bin/npm --version
+
 # Upstream Go (NOT Debian's golang-go). Debian builds Go with
 # CGO_ENABLED=0, which makes GODEBUG=netdns=cgo silently fall back to
 # Go's pure-Go resolver. The pure-Go resolver's IPv6 dual-stack

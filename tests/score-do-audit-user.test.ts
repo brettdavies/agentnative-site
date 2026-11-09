@@ -110,10 +110,16 @@ describe("installs stay in the audit user's home", () => {
     expect(commands.find(isInstall)).toContain('uv tool install --no-build ');
   });
 
-  test('npm cannot fetch a git dependency', async () => {
+  test('npm cannot clone a git dependency', async () => {
     const { stub, commands } = record();
     await score(stub, { pm: 'npm', package: 'typescript', binary: 'tsc' });
     expect(commands.find(isInstall)).toContain('--git=/bin/false');
+  });
+
+  test('the install environment carries ignore-scripts into the inner npm a dependency starts', async () => {
+    const { stub, commands } = record();
+    await score(stub, { pm: 'npm', package: 'typescript', binary: 'tsc' });
+    expect(commands.find(isInstall)).toContain('npm_config_ignore_scripts=true');
   });
 
   test('verification starts which by absolute path', async () => {

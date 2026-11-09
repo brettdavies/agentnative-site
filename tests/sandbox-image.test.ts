@@ -22,6 +22,11 @@ describe('sandbox image permissions', () => {
     expect(dockerfile).toMatch(/install -d -o root -g root -m 0755 \/opt\/anc-empty/);
   });
 
+  test('the image installs an npm at least as new as the one that honors ignore-scripts for a dependency directory', () => {
+    const version = dockerfile.match(/npm install -g --ignore-scripts npm@(\d+)\.\d+\.\d+/);
+    expect(Number(version?.[1])).toBeGreaterThanOrEqual(11);
+  });
+
   test('the image declares no USER, so the control server stays root', () => {
     expect(dockerfile).not.toMatch(/^\s*USER\s/im);
   });

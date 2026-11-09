@@ -50,6 +50,7 @@ const INSTALL_PREFIX_ENV = [
   `UV_TOOL_BIN_DIR=${AUDIT_BIN}`,
   `UV_TOOL_DIR=${AUDIT_HOME}/.local/share/uv/tools`,
   `npm_config_prefix=${AUDIT_HOME}/.local`,
+  'npm_config_ignore_scripts=true',
   'PIP_USER=1',
 ].join(' ');
 // Without these, anc reads an .anc.toml from the audited package's own files.
@@ -491,8 +492,10 @@ function installCommandFor(spec: InstallSpec): string | null {
       // --ignore-scripts suppresses preinstall/install/postinstall
       // lifecycle hooks — keeps Phase 1 egress from being abused by
       // lifecycle scripts before the Phase 2 lockdown fires. npm prepares
-      // a git dependency with an inner install that does not honor that
-      // flag, so --git=/bin/false fails such a dependency instead.
+      // a git dependency with an inner install that takes no flags from this
+      // command, so npm_config_ignore_scripts in the install environment
+      // carries the setting there. A full-commit dependency on a hosted
+      // repository arrives as a tarball; --git=/bin/false fails the rest.
       return `npm install -g --ignore-scripts --git=/bin/false ${shellQuote(spec.package)}`;
     case 'go':
       // pm=go bounces here so resolveSpec()'s go discovery-fallback
