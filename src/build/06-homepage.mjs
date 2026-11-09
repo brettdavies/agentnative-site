@@ -21,10 +21,11 @@ import { join } from 'node:path';
 import { AUDIT_PATH, auditPath, leaderboardPath, scorePath } from '../shared/audit-routes.ts';
 import { bandOf, principleTier, renderMeter } from '../shared/scorecard-format.mjs';
 import { buildWebHeroCardEmptyState, buildWebHeroCardFromSnapshot } from '../shared/web-hero-card.mjs';
+import { WEBMCP_SCRIPT } from '../shared/webmcp-script.ts';
 import { renderAuditForm } from './audit-form.mjs';
 import { extractDescription, extractFirstParagraph, extractIntroSummary, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
-import { emitShell, WEBMCP_SCRIPT } from './shell.mjs';
+import { emitShell } from './shell.mjs';
 import { composeTwin, countWord, escHtml } from './util.mjs';
 
 const BOARD_ROWS = 5;

@@ -9,9 +9,11 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
+import { emitShellTemplate } from '../src/build/shell.mjs';
 import { scoreJsonPath, scoreMarkdownPath, scorePath } from '../src/shared/audit-routes';
 import type { RenderService } from '../src/shared/og-render';
 import { SCORE_OG_TEMPLATE, scoreOgClipPath, scoreOgPath } from '../src/shared/score-og';
+import { WEBMCP_SCRIPT } from '../src/shared/webmcp-script';
 import { _resetResultCaches, badgeAliasRedirect, handleResultRoute, type ResultEnv } from '../src/worker/audit/result';
 import { sha256Hex, keyFor as webKeyFor } from '../src/worker/audit-web/cache';
 import { webEnvelope } from '../src/worker/audit-web/core';
@@ -20,7 +22,7 @@ import { keyFor as cliKeyFor } from '../src/worker/score/cache';
 import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
 import { _resetShellTemplateCache } from '../src/worker/shell-template';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
-import { parseHtml } from './helpers/html-elements';
+import { parseHtml, scriptSources } from './helpers/html-elements';
 import { captureLogs } from './helpers/log-capture';
 import { fakeRender } from './helpers/og-site-fakes';
 
@@ -946,6 +948,35 @@ describe('review pins', () => {
     expect(html).not.toContain('<img');
     expect(html).not.toContain('onerror=1>');
     expect(html).toContain('&lt;img');
+  });
+});
+
+describe('WebMCP script through the real shell template', () => {
+  async function scriptsOf(path: string): Promise<{ status: number; scripts: string[] }> {
+    const env = await seededEnv({ assets: { '/_internal/score-live-shell.html': emitShellTemplate() } });
+    const res = await route(path, env, { accept: 'text/html' });
+    return { status: res.status, scripts: await scriptSources(await res.text()) };
+  }
+
+  test('a website result loads it once, so its read-only tools register once', async () => {
+    const { status, scripts } = await scriptsOf('/score/anc.dev');
+    expect(status).toBe(200);
+    expect(scripts).toContain('/js/theme.js');
+    expect(scripts.filter((src) => src.includes('webmcp'))).toEqual([WEBMCP_SCRIPT]);
+  });
+
+  // The status and the shell's own script tell a real page from the plain-text
+  // 500 a missing shell answers with, which also loads no WebMCP script.
+  test.each([
+    ['a live CLI result', '/score/ouch', 200],
+    ['a branch-scoped result', '/score/o/r@feature', 200],
+    ['the no-audit page for a CLI target', '/score/no-such-target', 404],
+    ['the no-audit page for a website target', '/score/never-audited.dev', 404],
+  ])('%s publishes no tools', async (_name, path, expected) => {
+    const { status, scripts } = await scriptsOf(path);
+    expect(status).toBe(expected);
+    expect(scripts).toContain('/js/theme.js');
+    expect(scripts.filter((src) => src.includes('webmcp'))).toEqual([]);
   });
 });
 

@@ -144,9 +144,6 @@ const DISCOVERY_HEAD_LINKS = MCP_DISCOVERY_DOCUMENTS.map(
 
 const esc = escHtml;
 
-/** Deferred client bundle for browser-agent (WebMCP) tool registration. */
-export const WEBMCP_SCRIPT = '/js/webmcp.js';
-
 // A template-rendered page's footer twin follows the result-path rule:
 // the canonical path plus the segment the route builder appends. The
 // segment is read off the builders so the footer and the substituted
@@ -168,6 +165,10 @@ export const WEBMCP_SCRIPT = '/js/webmcp.js';
  * Same shell layout as the static pages; the only difference is the
  * placeholders for the dynamic fields. The footer's markdown-twin anchor
  * is `{{CANONICAL_PATH}}` plus the route builder's twin segment.
+ *
+ * The template loads no WebMCP script: the progress page renders from it,
+ * and a tool that could reach that page could make it transact. A website
+ * result carries the script in its own body.
  */
 export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
   return emitShell({
@@ -180,10 +181,6 @@ export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
     themeInitJs: themeInitJs ?? '',
     isIndex: false,
     baseUrl,
-    // A result page publishes the read-only worksheet tools to a browser
-    // agent standing on it, so the Worker-rendered shell carries the same
-    // registration script the built entry pages do.
-    extraScripts: [WEBMCP_SCRIPT],
     ogImage: '{{OG_IMAGE}}',
     ogImageAlt: '{{OG_IMAGE_ALT}}',
     ogVideo: '{{OG_VIDEO}}',
