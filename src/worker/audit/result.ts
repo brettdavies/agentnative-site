@@ -227,7 +227,7 @@ async function serveResult(request: Request, env: ResultEnv, deps: ResultDeps, s
   };
 
   if (classified.lane === 'web') return serveWeb(ctx, classified.target);
-  if (classified.kind === 'cli-branch') return serveBranch(ctx, classified.target);
+  if (classified.kind === 'cli-branch') return serveBranch(ctx, classified.target, classified.branch);
   return serveCli(ctx, classified.target);
 }
 
@@ -331,7 +331,7 @@ function webPageNoindex(seeded: boolean, scorecard: unknown): boolean {
   return !(typeof headline === 'number' && headline >= WEB_INDEXABLE_MIN_SCORE_PCT);
 }
 
-async function serveBranch(ctx: RenderContext, target: string): Promise<Response> {
+async function serveBranch(ctx: RenderContext, target: string, branch: string): Promise<Response> {
   const inFlight = await inFlightResponse(ctx, 'cli', target);
   if (inFlight) return inFlight;
   const registry = await registryOrNull(ctx.env);
@@ -350,9 +350,9 @@ async function serveBranch(ctx: RenderContext, target: string): Promise<Response
   const sha = envelope.source_sha ? envelope.source_sha.slice(0, 7) : null;
   const scored = sha ? `Scored at <code>${escHtml(sha)}</code>` : 'Scored';
   const freshness = `${scored}${date ? ` on ${escHtml(date)}` : ''}. Re-audit runs a fresh audit.`;
-  // Only a repo's default branch should be indexable, and neither the stored
-  // record nor the request says which branch that is.
-  const noindex = true;
+  // Only a repo's default branch is indexable, and a record that does not
+  // name it stays out of the index.
+  const noindex = !earnedBadge(record) || record.default_branch !== branch;
   return respondCli(ctx, envelope, record, noindex, {
     target,
     lane: 'cli',
@@ -386,9 +386,7 @@ async function serveCli(ctx: RenderContext, target: string): Promise<Response> {
   const date = shortDate(cliScoredAt(record));
   const version = record.tool_version ? `v${escHtml(record.tool_version)}` : '';
   const freshness = `Scored${version ? ` ${version}` : ''}${date ? ` on ${escHtml(date)}` : ''}. Re-audit runs a fresh audit.`;
-  // Indexable only once it earns the badge, the same field that decides
-  // whether the page offers the embed.
-  const noindex = (record.scorecard as { badge?: { eligible?: boolean } }).badge?.eligible !== true;
+  const noindex = !earnedBadge(record);
   return respondCli(ctx, envelope, record, noindex, {
     target,
     lane: 'cli',
@@ -397,6 +395,11 @@ async function serveCli(ctx: RenderContext, target: string): Promise<Response> {
     linked: true,
     control: { kind: 'refresh', target, lane: 'cli' },
   });
+}
+
+/** The same field that decides whether the page offers the badge embed. */
+function earnedBadge(record: { scorecard: unknown }): boolean {
+  return (record.scorecard as { badge?: { eligible?: boolean } }).badge?.eligible === true;
 }
 
 async function seedEntryFor(env: ResultEnv, host: string): Promise<WebSeedEntry | undefined> {

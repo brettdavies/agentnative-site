@@ -40,6 +40,7 @@ import { SPEC_VERSION } from '../spec-version.gen';
 import { emitLog } from '../telemetry/log';
 import * as cache from './cache';
 import type { InstallSpec } from './discover-binary';
+import { fetchDefaultBranch } from './github-accessibility';
 import { score as runSandboxScore, type SandboxPhase, type ScoreResult } from './sandbox-exec';
 
 // ---------------------------------------------------------------------------
@@ -253,6 +254,7 @@ export async function writeCacheBestEffort(
   value: ScoredValue,
   purge?: (tags: string[]) => Promise<void>,
   purgeTimeoutMs: number = PURGE_TIMEOUT_MS,
+  lookupDefaultBranch: typeof fetchDefaultBranch = fetchDefaultBranch,
 ): Promise<void> {
   const bucket = env.SCORE_CACHE;
   if (!bucket) {
@@ -283,6 +285,8 @@ export async function writeCacheBestEffort(
   // the key vs. payload split is intentional. See cache.ts module
   // header for the full rationale.
   const key = cache.keyFor(target, SPEC_VERSION);
+  // Asked of GitHub here so indexing never depends on what the audit reports.
+  const defaultBranch = spec.pm === 'git-clone' ? await lookupDefaultBranch(spec.owner, spec.repo) : null;
   let wrote = false;
   try {
     wrote = await cache.put(
@@ -293,6 +297,7 @@ export async function writeCacheBestEffort(
       toolVersion,
       SPEC_VERSION,
       sourceSha,
+      defaultBranch,
     );
   } catch (err) {
     // cache.put only throws on refusal-to-cache-half-state, which the
