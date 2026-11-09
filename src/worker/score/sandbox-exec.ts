@@ -491,11 +491,12 @@ function installCommandFor(spec: InstallSpec): string | null {
     case 'npm':
       // --ignore-scripts suppresses preinstall/install/postinstall
       // lifecycle hooks — keeps Phase 1 egress from being abused by
-      // lifecycle scripts before the Phase 2 lockdown fires. npm prepares
-      // a git dependency with an inner install that takes no flags from this
-      // command, so npm_config_ignore_scripts in the install environment
-      // carries the setting there. A full-commit dependency on a hosted
-      // repository arrives as a tarball; --git=/bin/false fails the rest.
+      // lifecycle scripts before the Phase 2 lockdown fires. For a git
+      // dependency, the image's npm (11 or later) is what skips `prepare`
+      // under this setting, and npm_config_ignore_scripts states it for the
+      // inner npm such a dependency starts. A full-commit dependency on a
+      // hosted repository arrives as a tarball; --git=/bin/false fails the
+      // rest.
       return `npm install -g --ignore-scripts --git=/bin/false ${shellQuote(spec.package)}`;
     case 'go':
       // pm=go bounces here so resolveSpec()'s go discovery-fallback
