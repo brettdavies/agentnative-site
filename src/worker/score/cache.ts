@@ -30,6 +30,8 @@ export type CachedScorecard = {
   /** Empty only on a branch record, which carries `source_sha` instead. */
   tool_version: string;
   source_sha?: string;
+  /** On a branch record, the repo's default branch when GitHub reported it at write time. */
+  default_branch?: string;
   scorecard: unknown;
 };
 
@@ -96,6 +98,7 @@ export async function put(
   toolVersion: string,
   specVersion: string,
   sourceSha?: string,
+  defaultBranch?: string | null,
 ): Promise<boolean> {
   if (!ancVersion) throw new Error('cache.put: ancVersion required (refusal-to-cache-half-state)');
   if (!toolVersion && !sourceSha) {
@@ -108,6 +111,7 @@ export async function put(
     anc_version: ancVersion,
     tool_version: toolVersion,
     ...(sourceSha ? { source_sha: sourceSha } : {}),
+    ...(defaultBranch ? { default_branch: defaultBranch } : {}),
     scorecard,
   };
 
