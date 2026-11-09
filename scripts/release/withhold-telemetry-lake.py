@@ -28,7 +28,10 @@ pending changes.
 Drift is a hard error, never a skip. A file that exists but no longer contains
 the expected text means the feature changed shape on `dev`; silently skipping
 it would ship the lake. The residue check at the end is the real guard: it
-fails on any surviving reference regardless of which edit missed.
+fails on any surviving reference regardless of which edit missed. It does not
+scan what `rg` skips by default (hidden, gitignored and binary files),
+`bun.lock`, `node_modules`, `dist`, this script, the guarded paths, which never
+reach `main`, or top-level `scorecards/*.json`, which is audit data.
 """
 
 from __future__ import annotations
@@ -349,6 +352,11 @@ RESIDUE = (
     "/privacy",
 )
 
+# Scorecard JSON is audit output about third-party CLIs. Its evidence strings
+# and subcommand lists can name a Cloudflare feature or a URL path that RESIDUE
+# also matches, and the lake's own wiring never lives in a data file.
+AUDIT_DATA = re.compile(r"^scorecards/[^/]+\.json$")
+
 
 def _drop_block(text: str, opening: str) -> str | None:
     """Removes a brace-balanced block starting at `opening`, plus trailing blanks."""
@@ -538,7 +546,10 @@ def main() -> int:
     residue = [
         ln
         for ln in found.stdout.splitlines()
-        if ln.strip() and ln != self_rel and not (guarded_re and guarded_re.search(ln))
+        if ln.strip()
+        and ln != self_rel
+        and not AUDIT_DATA.match(ln)
+        and not (guarded_re and guarded_re.search(ln))
     ]
     if residue:
         print("DRIFT: telemetry-lake references survive in:", file=sys.stderr)
