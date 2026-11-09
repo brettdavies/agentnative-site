@@ -39,6 +39,16 @@ function firstPositional(tokens: string[], from: number): string | undefined {
   return undefined;
 }
 
+// A URL, git form, owner/repo shorthand, or path bypasses the registry, and
+// with it pip's wheel-only filter and the script-free installs the install
+// table relies on. A slash is a registry name only in npm's @scope/name form.
+function registryPositional(tokens: string[], from: number): string | undefined {
+  const pkg = firstPositional(tokens, from);
+  if (pkg === undefined || pkg.includes(':') || /^[./~]/.test(pkg)) return undefined;
+  if (pkg.includes('/') && !/^@[^/]+\/[^/]+$/.test(pkg)) return undefined;
+  return pkg;
+}
+
 export function parseInstallCommand(raw: string): ParseResult {
   const tokens = tokenize(raw);
   if (tokens.length === 0) return FAIL;
@@ -58,7 +68,7 @@ export function parseInstallCommand(raw: string): ParseResult {
       // time and bounce as chain_resolved_install_failed.
       const verb = tokens[1];
       if (verb !== 'install' && verb !== 'binstall') return FAIL;
-      const pkg = firstPositional(tokens, 2);
+      const pkg = registryPositional(tokens, 2);
       if (!pkg) return FAIL;
       return { ok: true, value: { pm: 'cargo-binstall', package: pkg, binary: pkg } };
     }
@@ -66,7 +76,7 @@ export function parseInstallCommand(raw: string): ParseResult {
       // bun add -g <pkg> | bun install -g <pkg> | bun i -g <pkg>
       const verb = tokens[1];
       if (verb !== 'add' && verb !== 'install' && verb !== 'i') return FAIL;
-      const pkg = firstPositional(tokens, 2);
+      const pkg = registryPositional(tokens, 2);
       if (!pkg) return FAIL;
       return { ok: true, value: { pm: 'bun', package: pkg, binary: pkg } };
     }
@@ -80,7 +90,7 @@ export function parseInstallCommand(raw: string): ParseResult {
       // wheel-fetch paths differ enough that conflating them masked the
       // pip metadata 403 (Bug M) that uv does not exhibit.
       if (tokens[1] !== 'tool' || tokens[2] !== 'install') return FAIL;
-      const pkg = firstPositional(tokens, 3);
+      const pkg = registryPositional(tokens, 3);
       if (!pkg) return FAIL;
       return { ok: true, value: { pm: 'uv', package: pkg, binary: pkg } };
     }
@@ -89,7 +99,7 @@ export function parseInstallCommand(raw: string): ParseResult {
     case 'pipx': {
       // pip install <pkg> | pip3 install <pkg> | pipx install <pkg>
       if (tokens[1] !== 'install') return FAIL;
-      const pkg = firstPositional(tokens, 2);
+      const pkg = registryPositional(tokens, 2);
       if (!pkg) return FAIL;
       return { ok: true, value: { pm: 'pip', package: pkg, binary: pkg } };
     }
@@ -97,7 +107,7 @@ export function parseInstallCommand(raw: string): ParseResult {
       // npm install -g <pkg> | npm i -g <pkg>
       const verb = tokens[1];
       if (verb !== 'install' && verb !== 'i') return FAIL;
-      const pkg = firstPositional(tokens, 2);
+      const pkg = registryPositional(tokens, 2);
       if (!pkg) return FAIL;
       // binary name for npm packages frequently differs from the package
       // name (e.g. `npm i -g typescript` -> `tsc`). U6 resolves the real
@@ -109,14 +119,14 @@ export function parseInstallCommand(raw: string): ParseResult {
     case 'yarn': {
       // yarn global add <pkg>
       if (tokens[1] !== 'global' || tokens[2] !== 'add') return FAIL;
-      const pkg = firstPositional(tokens, 3);
+      const pkg = registryPositional(tokens, 3);
       if (!pkg) return FAIL;
       return { ok: true, value: { pm: 'npm', package: pkg, binary: pkg } };
     }
     case 'pnpm': {
       // pnpm add -g <pkg>
       if (tokens[1] !== 'add') return FAIL;
-      const pkg = firstPositional(tokens, 2);
+      const pkg = registryPositional(tokens, 2);
       if (!pkg) return FAIL;
       return { ok: true, value: { pm: 'npm', package: pkg, binary: pkg } };
     }

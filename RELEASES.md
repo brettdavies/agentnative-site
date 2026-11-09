@@ -518,6 +518,9 @@ GIT_SHA=$(git rev-parse --short HEAD)
 bun x wrangler containers build -p -t "anc-sandbox:$GIT_SHA" docker/sandbox/
 ```
 
+A command audit sets `AGENTNATIVE_REPO` and `AGENTNATIVE_HOME_CONFIG` (`src/worker/score/sandbox-exec.ts`), and anc ignores
+a variable it does not recognize. Check both names against the new anc before bumping.
+
 Update **only `env.staging.containers[0].image`** in `wrangler.jsonc` with the new tag. Commit Dockerfile change +
 staging-pin update together. PR to `dev`.
 

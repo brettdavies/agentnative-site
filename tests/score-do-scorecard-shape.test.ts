@@ -4,6 +4,7 @@ import { type ScoreSandboxEnv, streamScore } from '../src/worker/score/do';
 import { type ContainerLike, type ExecLike, score } from '../src/worker/score/sandbox-exec';
 import { scorecardShapeIssue } from '../src/worker/score/scorecard-shape';
 import { ANC_VERSION } from '../src/worker/spec-version.gen';
+import { plainCommand } from './helpers/sandbox-command';
 import { loadScorecardFixture, SCORECARD_FIXTURES, validScorecard } from './helpers/scorecard-fixture';
 
 const SPEC: InstallSpec = { pm: 'cargo-binstall', package: 'ripgrep', binary: 'rg' };
@@ -150,7 +151,8 @@ describe('scorecard shape: refused', () => {
 function stubContainer(ancStdout: string, success = true): ContainerLike {
   return {
     async setOutboundHandler(): Promise<void> {},
-    async exec(command: string): Promise<ExecLike> {
+    async exec(wrapped: string): Promise<ExecLike> {
+      const command = plainCommand(wrapped);
       if (command.startsWith('which ')) return { success: true, stdout: '/usr/local/bin/rg\n', stderr: '' };
       if (command === 'anc --version') return { success: true, stdout: `anc ${ANC_VERSION}\n`, stderr: '' };
       if (command.startsWith('anc audit ')) return { success, stdout: ancStdout, stderr: '' };
