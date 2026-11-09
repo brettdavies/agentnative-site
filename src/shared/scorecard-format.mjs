@@ -492,7 +492,10 @@ export function buildScorecardBody(tool, scorecard, opts = {}) {
     metaParts.push(`<span class="tier-badge tier-badge--${escHtml(tool.tier)}">${escHtml(tool.tier)}</span>`);
   if (tool.language) metaParts.push(`<span>${escHtml(tool.language)}</span>`);
   if (tool.repo) metaParts.push(`<a href="https://github.com/${escHtml(tool.repo)}">${escHtml(tool.repo)}</a>`);
-  else if (tool.url) metaParts.push(`<a href="${escHtml(tool.url)}">${escHtml(tool.url)}</a>`);
+  else if (tool.url)
+    metaParts.push(
+      `<a href="${escHtml(tool.url)}" referrerpolicy="no-referrer-when-downgrade">${escHtml(tool.url)}</a>`,
+    );
 
   // Summary chips: MUST/SHOULD coverage, non-pass counts, audit stamp.
   const chips = [];
