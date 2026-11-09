@@ -185,7 +185,7 @@ git diff --cached --name-only origin/main | grep -E "$GUARDED" \
 #    D: what this release ADDS to main. The leak check screens against the registered
 #       set, so it is blind to a category nobody registered yet; that blind spot is how
 #       docs/TODOS.md and docs/designs/ reached an open release with a green guard-docs.
-#       Every docs/ entry and every added markdown file needs a reason to ship, or it
+#       Every entry under docs/ and every added markdown file needs a reason to ship, or it
 #       needs registering in the workflow's extra_paths and removing from the branch.
 #       `--no-renames` lists a doc moved from one main carries as added; rename detection
 #       would report it as R, and the A filter would drop it.
@@ -271,7 +271,7 @@ guarded set: that gate is how a withholding stays visible rather than becoming i
 The overlay is the release construction for this repo. Cherry-picking the dev squash-commits onto the `origin/main` base
 is the exception, kept only for a release with a stated reason it cannot overlay; the per-PR changelog is not such a
 reason, since `--from-dev-prs` builds it from `dev` either way. A cherry-pick release ships no single `dev` commit's
-tree, so step 1 names it after the newest commit it picks (`site-version.sh --commit <newest picked sha>`), and
+tree, so step 1 names it after the newest commit it picks (`site-version.sh --commit <newest-picked-sha>`), and
 preflight's diff-B then lists the `dev` changes it leaves out. When cherry-picking, run the triple-diff verification:
 
 ```bash
@@ -568,7 +568,7 @@ command above.
 #### og:video setup
 
 Run once per environment before the og:video code first deploys there, whether by a staging dispatch of a branch or by
-the merge, because the site Worker's deploy fails without its `og-rendered` queue:
+the merge, because the deploy of the site Worker fails without its `og-rendered` queue:
 
 ```bash
 scripts/og/setup.sh staging
