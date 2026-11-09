@@ -174,11 +174,14 @@ describe('writeCacheBestEffort — happy path', () => {
   test('a source clone writes no install identity', async () => {
     const { env, writes } = makeR2Stub();
     const clone: InstallSpec = { pm: 'git-clone', owner: 'o', repo: 'r', branch: 'feature', binary: 'r' };
-    await writeCacheBestEffort(env, clone, {
-      scorecard: { tool: { name: 'r' } },
-      anc_version: ANC_VERSION,
-      source_sha: 'abc1234',
-    });
+    await writeCacheBestEffort(
+      env,
+      clone,
+      { scorecard: { tool: { name: 'r' } }, anc_version: ANC_VERSION, source_sha: 'abc1234' },
+      undefined,
+      undefined,
+      async () => null,
+    );
     expect(writes).toHaveLength(1);
     expect(Object.keys(JSON.parse(writes[0].value))).not.toContain('install');
   });

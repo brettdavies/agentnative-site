@@ -260,7 +260,7 @@ describe('cache records per family', () => {
     const { env, store } = memoryEnv();
     const key = keyFor('ouch', SPEC_VERSION);
     const install = { pm: 'cargo-binstall', package: 'ouch' };
-    await put(env, key, { tool: { name: 'ouch' } }, '0.9.0', '0.5.0', SPEC_VERSION, undefined, install);
+    await put(env, key, { tool: { name: 'ouch' } }, '0.9.0', '0.5.0', SPEC_VERSION, undefined, undefined, install);
     expect(JSON.parse(store.get(key) ?? '{}').install).toEqual(install);
     expect((await get(env, key))?.install).toEqual(install);
   });
