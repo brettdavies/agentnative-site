@@ -266,6 +266,7 @@ describe('packagePageUrl', () => {
     ['uv', 'ruff', 'https://pypi.org/project/ruff/'],
     ['brew', 'ripgrep', 'https://formulae.brew.sh/formula/ripgrep'],
     ['brew', 'python@3.12', 'https://formulae.brew.sh/formula/python@3.12'],
+    ['brew', 'libsigc++', 'https://formulae.brew.sh/formula/libsigc%2B%2B'],
     ['go', 'github.com/charmbracelet/glow', 'https://pkg.go.dev/github.com/charmbracelet/glow'],
     ['go', 'golang.org/x/tools/cmd/goimports', 'https://pkg.go.dev/golang.org/x/tools/cmd/goimports'],
   ];
