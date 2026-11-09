@@ -528,6 +528,12 @@ describe('on-demand website indexing', () => {
     });
   }
 
+  test('a score.relative stored as a numeric string is not a number, so the HTML stays noindex', async () => {
+    const res = await route(`/score/${HOST}`, await onDemandEnv({ score: { relative: '95', global: 30 } }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-robots-tag')).toBe('noindex');
+  });
+
   test('at 95 the .md twin and the JSON stay noindex on the pinned and the negotiated paths', async () => {
     const env = await onDemandEnv({ score: { relative: 95, global: 90 }, score_pct: 90 });
     expect((await route(`/score/${HOST}`, env)).headers.get('x-robots-tag')).toBeNull();

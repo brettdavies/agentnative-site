@@ -328,7 +328,7 @@ function webPageNoindex(seeded: boolean, scorecard: unknown): boolean {
   if (seeded) return false;
   const headline =
     typeof scorecard === 'object' && scorecard !== null ? scoresOf(scorecard as WebScorecardShape).relative : 0;
-  return !(headline >= WEB_INDEXABLE_MIN_SCORE_PCT);
+  return !(typeof headline === 'number' && headline >= WEB_INDEXABLE_MIN_SCORE_PCT);
 }
 
 async function serveBranch(ctx: RenderContext, target: string): Promise<Response> {
