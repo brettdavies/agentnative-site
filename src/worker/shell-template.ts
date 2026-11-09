@@ -70,20 +70,22 @@ export function substituteShell(template: string, fields: ShellFields): string {
   // renderings come from one trail here, the same way a built page's do.
   const trail = breadcrumbTrail(fields.canonicalPath, fields.breadcrumb);
   const crumbNode = breadcrumbJsonLd(trail, CANONICAL_SITE_URL);
+  // A replacement function keeps `$&`, `$'`, `` $` `` and `$$` in these values
+  // literal; a replacement string would expand them.
   return (
     template
-      .replaceAll('{{BREADCRUMB_NAV}}', renderBreadcrumbNav(trail))
+      .replaceAll('{{BREADCRUMB_NAV}}', () => renderBreadcrumbNav(trail))
       // Quoted token and its separating comma: removing both leaves the graph
       // well-formed when a path has no trail to state.
-      .replaceAll(`,"${BREADCRUMB_JSONLD_TOKEN}"`, crumbNode ? `,${JSON.stringify(crumbNode)}` : '')
-      .replaceAll('{{TITLE}}', escHtml(fields.title))
-      .replaceAll('{{DESCRIPTION}}', escHtml(fields.description))
-      .replaceAll('{{CANONICAL_PATH}}', escHtml(fields.canonicalPath))
-      .replaceAll('{{MARKDOWN_TWIN_PATH}}', escHtml(twin))
-      .replaceAll('{{ALTERNATES}}', alternates)
-      .replaceAll('{{OG_IMAGE}}', escHtml(ogImage))
-      .replaceAll('{{OG_IMAGE_ALT}}', escHtml(ogImageAlt))
-      .replaceAll('{{OG_VIDEO}}', fields.ogVideoHtml ?? '')
-      .replaceAll('{{BODY}}', fields.body)
+      .replaceAll(`,"${BREADCRUMB_JSONLD_TOKEN}"`, () => (crumbNode ? `,${JSON.stringify(crumbNode)}` : ''))
+      .replaceAll('{{TITLE}}', () => escHtml(fields.title))
+      .replaceAll('{{DESCRIPTION}}', () => escHtml(fields.description))
+      .replaceAll('{{CANONICAL_PATH}}', () => escHtml(fields.canonicalPath))
+      .replaceAll('{{MARKDOWN_TWIN_PATH}}', () => escHtml(twin))
+      .replaceAll('{{ALTERNATES}}', () => alternates)
+      .replaceAll('{{OG_IMAGE}}', () => escHtml(ogImage))
+      .replaceAll('{{OG_IMAGE_ALT}}', () => escHtml(ogImageAlt))
+      .replaceAll('{{OG_VIDEO}}', () => fields.ogVideoHtml ?? '')
+      .replaceAll('{{BODY}}', () => fields.body)
   );
 }
