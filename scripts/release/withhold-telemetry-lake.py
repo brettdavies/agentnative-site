@@ -384,7 +384,7 @@ def _survivors(post: dict[str, str] | None = None, skip: Iterable[str] = ()) -> 
         text=True,
         check=False,
     )
-    if found.returncode > 1:  # 1 is no match, which is the good case
+    if found.returncode not in (0, 1):  # 1 is no match, which is the good case; a signal death is negative
         raise ScanError(f"rg exited {found.returncode}: {found.stderr.strip()}")
     guarded = subprocess.run(
         [str(REPO / "scripts/release/guarded-paths.sh")],

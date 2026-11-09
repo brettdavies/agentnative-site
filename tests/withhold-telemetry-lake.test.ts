@@ -1,6 +1,7 @@
 // scripts/release/withhold-telemetry-lake.py ends with a residue check that fails the cut when any marker the lake
 // owns survives in the release tree. Each case builds a throwaway tree holding the script, guarded-paths.sh and the
-// guard workflow, and none of the files the script edits, so every removal is a no-op and only the scan runs.
+// guard workflow. Most cases plant no file the script edits, so every removal is a no-op and only the scan runs; the
+// pending-removal cases plant files it edits or deletes.
 //
 // The ubuntu runner image ships no ripgrep, so the scan's `rg -l -e <pattern>` resolves to a stand-in that lists the
 // matching files, hidden ones skipped as rg does. Like rg, it searches a piped or redirected stdin instead of the tree
@@ -162,19 +163,19 @@ describe('withhold-telemetry-lake.py --check', () => {
     expect(status).toBe(0);
   });
 
-  test('reports DRIFT for a marker in code', () => {
-    plant('src/worker/index.ts', EVERY_MARKER);
+  test.each(['src/worker/planted.ts', 'src/worker/index.ts'])('reports DRIFT for a marker in %s', (path) => {
+    plant(path, EVERY_MARKER);
     const { status, stderr } = withhold(['--check']);
     expect(stderr).toContain('telemetry-lake references survive in:');
-    expect(stderr).toContain('  src/worker/index.ts\n');
+    expect(stderr).toContain(`  ${path}\n`);
     expect(status).toBe(1);
   });
 
   test('lists the code path and not the scorecard when both carry a marker', () => {
     plant('scorecards/cf-v1.0.0.json', EVERY_MARKER);
-    plant('src/worker/index.ts', EVERY_MARKER);
+    plant('src/worker/planted.ts', EVERY_MARKER);
     const { status, stderr } = withhold(['--check']);
-    expect(stderr).toContain('  src/worker/index.ts\n');
+    expect(stderr).toContain('  src/worker/planted.ts\n');
     expect(stderr).not.toContain('scorecards/cf-v1.0.0.json');
     expect(status).toBe(1);
   });
@@ -206,16 +207,27 @@ describe('withhold-telemetry-lake.py --check', () => {
 
 describe('withhold-telemetry-lake.py residue scan trust', () => {
   test.each([[[]], [['--check']]])('scans the tree when stdin is a pipe (%j)', (args) => {
-    plant('src/worker/index.ts', EVERY_MARKER);
+    plant('src/worker/planted.ts', EVERY_MARKER);
     const { status, stderr } = withhold(args, 'x');
-    expect(stderr).toContain('  src/worker/index.ts\n');
+    expect(stderr).toContain('  src/worker/planted.ts\n');
     expect(status).toBe(1);
   });
 
-  test.each([[[]], [['--check']]])('fails, not clean, when rg exits 2 (%j)', (args) => {
-    standIn('rg', 'echo "rg: simulated scan failure" >&2\nexit 2\n');
-    const { status, stdout, stderr } = withhold(args);
-    expect(stderr).toContain('the residue scan could not run: rg exited 2: rg: simulated scan failure');
+  const RG_FAILURES: [string, string, string][] = [
+    ['exits 2', 'echo "rg: simulated scan failure" >&2\nexit 2\n', 'rg exited 2: rg: simulated scan failure'],
+    ['is killed by a signal', 'kill -9 $$\n', 'rg exited -9'],
+  ];
+
+  test.each(
+    RG_FAILURES.flatMap(([failure, body, message]) => [
+      [failure, [], body, message] as const,
+      [failure, ['--check'], body, message] as const,
+    ]),
+  )('fails, not clean, when rg %s (%j)', (_failure, args, body, message) => {
+    plant('src/worker/planted.ts', EVERY_MARKER);
+    standIn('rg', body);
+    const { status, stdout, stderr } = withhold([...args]);
+    expect(stderr).toContain(`the residue scan could not run: ${message}`);
     expect(stdout).not.toContain('already withheld');
     expect(status).toBe(1);
   });
