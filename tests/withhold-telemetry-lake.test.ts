@@ -1,0 +1,136 @@
+// scripts/release/withhold-telemetry-lake.py ends with a residue check that fails the cut when any marker the lake
+// owns survives in the release tree. Each case builds a throwaway tree holding the script, guarded-paths.sh and the
+// guard workflow, and none of the files the script edits, so every removal is a no-op and only the scan runs.
+//
+// The ubuntu runner image ships no ripgrep, so the scan's `rg -l -e <pattern>` resolves to a grep stand-in that
+// lists the matching files, hidden ones skipped as rg does. The cases pin how the script filters that listing.
+
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { REPO_ROOT } from './helpers/workflows';
+
+const SCRIPT = 'scripts/release/withhold-telemetry-lake.py';
+const COPIED = [SCRIPT, 'scripts/release/guarded-paths.sh', '.github/workflows/guard-main-docs.yml'];
+
+const RG_STAND_IN = `#!/usr/bin/env bash
+pattern=
+while (($#)); do
+  case "$1" in
+    -e) pattern="$2"; shift 2 ;;
+    --glob) shift 2 ;;
+    *) shift ;;
+  esac
+done
+grep -rlE --exclude-dir='.?*' --exclude='.?*' -e "$pattern" . | sed 's|^\\./||'
+`;
+
+function residueMarkers(): string[] {
+  const source = readFileSync(join(REPO_ROOT, SCRIPT), 'utf8');
+  const block = /^RESIDUE = \(\n([\s\S]*?)^\)/m.exec(source)?.[1] ?? '';
+  return [...block.matchAll(/"([^"]+)"/g)].map((match) => match[1] as string);
+}
+
+const MARKERS = residueMarkers();
+const EVERY_MARKER = MARKERS.join('\n');
+
+function cleanEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && !key.startsWith('GIT_')) env[key] = value;
+  }
+  return env;
+}
+
+let tree = '';
+let bin = '';
+
+function plant(path: string, body: string): void {
+  mkdirSync(dirname(join(tree, path)), { recursive: true });
+  writeFileSync(join(tree, path), body);
+}
+
+function withhold(): { status: number; stdout: string; stderr: string } {
+  const proc = Bun.spawnSync(['python3', '-B', join(tree, SCRIPT)], {
+    cwd: tree,
+    env: { ...cleanEnv(), PATH: `${bin}:${process.env.PATH}` },
+  });
+  return { status: proc.exitCode, stdout: proc.stdout.toString(), stderr: proc.stderr.toString() };
+}
+
+beforeEach(() => {
+  tree = mkdtempSync(join(tmpdir(), 'withhold-lake-'));
+  bin = mkdtempSync(join(tmpdir(), 'withhold-lake-bin-'));
+  for (const path of COPIED) {
+    mkdirSync(dirname(join(tree, path)), { recursive: true });
+    copyFileSync(join(REPO_ROOT, path), join(tree, path));
+  }
+  writeFileSync(join(bin, 'rg'), RG_STAND_IN);
+  chmodSync(join(bin, 'rg'), 0o755);
+});
+
+afterEach(() => {
+  rmSync(tree, { recursive: true, force: true });
+  rmSync(bin, { recursive: true, force: true });
+});
+
+describe('withhold-telemetry-lake.py residue check', () => {
+  test('reads the markers it is meant to scan for', () => {
+    expect(MARKERS).toContain('logpush');
+    expect(MARKERS).toContain('/privacy');
+  });
+
+  test('passes on a tree that carries no marker', () => {
+    plant('src/worker/index.ts', 'export {};\n');
+    const { status, stdout } = withhold();
+    expect(stdout).toContain('already withheld');
+    expect(status).toBe(0);
+  });
+
+  test('passes when top-level scorecard JSON names a marker', () => {
+    plant('scorecards/cf-v1.0.0.json', JSON.stringify({ evidence: `subcommands: access, logpush\n${EVERY_MARKER}` }));
+    const { status, stdout, stderr } = withhold();
+    expect(stderr).toBe('');
+    expect(stdout).toContain('already withheld');
+    expect(status).toBe(0);
+  });
+
+  test.each([
+    'src/worker/index.ts',
+    'wrangler.jsonc',
+    'tests/wrangler-config.test.ts',
+    'content/about.md',
+    'package.json',
+    'scripts/release/preflight.sh',
+    'docs/runbooks/mcp-operator.md',
+  ])('fails on a marker in %s', (path) => {
+    plant(path, EVERY_MARKER);
+    const { status, stderr } = withhold();
+    expect(stderr).toContain('telemetry-lake references survive in:');
+    expect(stderr).toContain(`  ${path}\n`);
+    expect(status).toBe(1);
+  });
+
+  test.each([
+    'src/worker/scorecards/cf-v1.0.0.json',
+    'scorecards/nested/cf-v1.0.0.json',
+    'scorecards/cf-v1.0.0.ts',
+    'scorecards/README.md',
+    'scorecards/cf-v1.0.0.json.bak',
+  ])('fails on a marker in %s, which is not top-level scorecard JSON', (path) => {
+    plant(path, EVERY_MARKER);
+    const { status, stderr } = withhold();
+    expect(stderr).toContain(`  ${path}\n`);
+    expect(status).toBe(1);
+  });
+
+  test('lists the code path and not the scorecard when both carry a marker', () => {
+    plant('scorecards/cf-v1.0.0.json', EVERY_MARKER);
+    plant('src/worker/index.ts', EVERY_MARKER);
+    const { status, stderr } = withhold();
+    expect(stderr).toContain('  src/worker/index.ts\n');
+    expect(stderr).not.toContain('scorecards/cf-v1.0.0.json');
+    expect(status).toBe(1);
+  });
+});
