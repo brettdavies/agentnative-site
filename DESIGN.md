@@ -244,8 +244,8 @@ Rollback is `wrangler rollback`.
   twin and the `/json` representation carry `noindex` at every score, as does the in-flight 202.
 
 **Cache strategy (P4).** Three classes, written only by `applyHeaders` (`src/worker/headers.ts`). A route that knows
-more than the path does passes the class it served (the result route: a curated slug and a live binary share a path
-shape); a 4xx/5xx or an always-MISS path is MISS regardless.
+more than the path can tell passes the class it served (the result route: a curated slug and a live binary share a
+path shape); a 4xx/5xx or an always-MISS path is MISS regardless.
 
 - **HIT-1d** — bake-at-build HTML/markdown (`/about`, `/p1`–`/p8`, bare `/audit`, curated `/score/<slug>` and its `/md`
   twin, `/mcp-skill`, `/mcp-docs`, other spec/docs pages without a live board). Browser:
