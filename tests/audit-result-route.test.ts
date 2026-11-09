@@ -382,7 +382,6 @@ describe('live and branch records', () => {
     const env = await seededEnv();
     const html = await route('/score/ouch', env);
     expect(html.status).toBe(200);
-    expect(html.headers.get('x-robots-tag')).toBe('noindex');
     const page = await html.text();
     expect(page).toContain('ouch');
     // The trail comes from the shell, not the spine, so it is absent from this
@@ -416,6 +415,42 @@ describe('live and branch records', () => {
         'tool_version',
       ].sort(),
     );
+  });
+
+  test('an on-demand CLI scorecard that earned the badge is indexable as HTML; its twin and JSON stay noindex', async () => {
+    const env = await seededEnv({
+      cache: { [cliKeyFor('ouch', SPEC_VERSION)]: CLI_RECORD, [cliKeyFor('o/r', SPEC_VERSION)]: CLI_RECORD },
+    });
+    for (const target of ['ouch', 'o/r']) {
+      const html = await route(`/score/${target}`, env);
+      expect(html.status).toBe(200);
+      expect(html.headers.get('x-robots-tag')).toBeNull();
+      const negotiated = await route(`/score/${target}`, env, { accept: 'text/markdown' });
+      expect(negotiated.headers.get('x-robots-tag')).toBe('noindex');
+      for (const pinned of ['md', 'json']) {
+        expect((await route(`/score/${target}/${pinned}`, env)).headers.get('x-robots-tag')).toBe('noindex');
+      }
+    }
+  });
+
+  test('an on-demand CLI scorecard below the badge floor stays noindex in every representation', async () => {
+    const badge = { score_pct: 69, eligible: false };
+    const env = await seededEnv({
+      cache: { [cliKeyFor('ouch', SPEC_VERSION)]: { ...CLI_RECORD, scorecard: { ...CLI_RECORD.scorecard, badge } } },
+    });
+    for (const path of ['/score/ouch', '/score/ouch/md', '/score/ouch/json']) {
+      const res = await route(path, env);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('x-robots-tag')).toBe('noindex');
+    }
+  });
+
+  test('an on-demand CLI record with no badge serves its JSON noindex', async () => {
+    const { badge: _badge, ...scorecard } = CLI_RECORD.scorecard;
+    const env = await seededEnv({ cache: { [cliKeyFor('ouch', SPEC_VERSION)]: { ...CLI_RECORD, scorecard } } });
+    const res = await route('/score/ouch/json', env);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-robots-tag')).toBe('noindex');
   });
 
   test('/score/o/r@feature renders HTML, the twin, and JSON, all noindex; /score/o/r with no record is the 404 pointer', async () => {

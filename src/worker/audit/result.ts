@@ -192,7 +192,7 @@ type Rendered = {
   /** Server-rendered HTML body and markdown twin for the envelope. */
   html: () => Promise<string>;
   markdown: () => Promise<string>;
-  /** The page's `<meta name="robots">` equivalent: branch pages are unlisted. */
+  /** The page's `<meta name="robots">` equivalent. */
   noindex: boolean;
 };
 
@@ -334,7 +334,10 @@ async function serveBranch(ctx: RenderContext, target: string): Promise<Response
   const sha = envelope.source_sha ? envelope.source_sha.slice(0, 7) : null;
   const scored = sha ? `Scored at <code>${escHtml(sha)}</code>` : 'Scored';
   const freshness = `${scored}${date ? ` on ${escHtml(date)}` : ''}. Re-audit runs a fresh audit.`;
-  return respondCli(ctx, envelope, record, {
+  // Only a repo's default branch should be indexable, and neither the stored
+  // record nor the request says which branch that is.
+  const noindex = true;
+  return respondCli(ctx, envelope, record, noindex, {
     target,
     lane: 'cli',
     tier: 'cache',
@@ -367,7 +370,10 @@ async function serveCli(ctx: RenderContext, target: string): Promise<Response> {
   const date = shortDate(cliScoredAt(record));
   const version = record.tool_version ? `v${escHtml(record.tool_version)}` : '';
   const freshness = `Scored${version ? ` ${version}` : ''}${date ? ` on ${escHtml(date)}` : ''}. Re-audit runs a fresh audit.`;
-  return respondCli(ctx, envelope, record, {
+  // Indexable only once it earns the badge, the same field that decides
+  // whether the page offers the embed.
+  const noindex = (record.scorecard as { badge?: { eligible?: boolean } }).badge?.eligible !== true;
+  return respondCli(ctx, envelope, record, noindex, {
     target,
     lane: 'cli',
     tier: 'cache',
@@ -473,11 +479,11 @@ function unavailable(ctx: RenderContext): Response {
 // Rendering
 // ---------------------------------------------------------------------------
 
-// A live or branch result is on-demand, so its page is unlisted.
 async function respondCli(
   ctx: RenderContext,
   envelope: AuditEnvelope,
   record: { tool_version: string; anc_version: string; spec_version: string; scorecard: unknown },
+  noindex: boolean,
   spine: SpineInput,
 ): Promise<Response> {
   const scorecard = record.scorecard as Parameters<typeof buildScorecardBody>[1];
@@ -490,7 +496,7 @@ async function respondCli(
     envelope,
     tier: 'cache',
     spine,
-    noindex: true,
+    noindex,
     html: async () =>
       buildScorecardBody(tool, scorecard, { version: record.tool_version, spine, showBadgePreview: false }),
     markdown: async () =>
