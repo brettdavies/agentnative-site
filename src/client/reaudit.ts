@@ -21,7 +21,7 @@
 // result.
 //
 // The progress page forwards here with ?v=<scored_at> to step past a stale
-// edge copy; the query is dropped on load so the address bar matches the
+// edge copy; dropScoreQuery clears it on load so the address bar matches the
 // canonical URL and the twin links.
 
 import type { Lane } from '../shared/audit-routes';
