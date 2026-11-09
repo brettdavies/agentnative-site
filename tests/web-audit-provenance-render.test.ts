@@ -555,6 +555,16 @@ describe('the score note and closing note', () => {
   });
 });
 
+describe('the Website link in the score note', () => {
+  test('carries the no-referrer-when-downgrade policy so the audited site sees which scorecard sent the visitor', async () => {
+    const scorecard = stripeShaped();
+    const note = (await parseHtml(page(scorecard))).querySelector('.result-score__note');
+    const link = note?.querySelector(`a[href="${scorecard.target_url}"]`);
+    expect(link).not.toBeNull();
+    expect(link?.getAttribute('referrerpolicy')).toBe('no-referrer-when-downgrade');
+  });
+});
+
 describe('rows the audit could not run', () => {
   test('a category counts them beside its pass rollup; optional rows that are absent are not among them', () => {
     const html = page(stripeShaped());

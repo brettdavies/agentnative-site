@@ -20,6 +20,7 @@ import {
   statusLabel,
 } from '../src/shared/scorecard-format.mjs';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { parseHtml } from './helpers/html-elements';
 
 describe('escHtml', () => {
   test('escapes & < > " \'', () => {
@@ -200,5 +201,17 @@ describe('buildScorecardBody escapes the audit profile in the reproduce command'
     );
     expect(html).not.toContain('<img src=x');
     expect(html).toContain('--audit-profile x&quot;&gt;&lt;img');
+  });
+});
+
+describe('buildScorecardBody sends the audited tool the scorecard URL', () => {
+  test("the tool's homepage link carries the no-referrer-when-downgrade policy", async () => {
+    const html = buildScorecardBody(
+      { name: 'curl', binary: 'curl', url: 'https://curl.se' },
+      { spec_version: SPEC_VERSION, badge: { score_pct: 10, eligible: false }, results: [] },
+    );
+    const link = (await parseHtml(html)).querySelector('a[href="https://curl.se"]');
+    expect(link).not.toBeNull();
+    expect(link?.getAttribute('referrerpolicy')).toBe('no-referrer-when-downgrade');
   });
 });
