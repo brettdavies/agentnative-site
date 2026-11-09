@@ -31,7 +31,7 @@
 //      worst-case overshoot is a handful of audits per hour, not orders
 //      of magnitude.
 //   7. orchestrate.runFreshOnly. resolveSpec → post-discovery cache →
-//      DO dispatch via getRandom(env.SCORE, MAX_INSTANCES). The DO
+//      dispatch to the target's own DO. The DO
 //      writes the cache itself via writeCacheBestEffort; the MCP layer
 //      never touches R2 directly.
 //   8. Map the discriminated kind to the typed-state response.

@@ -128,7 +128,9 @@ export type ScoreErrorCode =
   | 'anc_version_unreadable' // anc --version returned no parseable version.
   | 'anc_audit_failed' // no parseable JSON envelope, or one that is not a scorecard.
   // Wall-clock.
-  | 'timeout';
+  | 'timeout'
+  // No container instance could be started for the run.
+  | 'sandbox_busy';
 
 // Marker tokens the direct-install command emits so the orchestrator can
 // classify shell-subshell failures into specific error details (Fix 3 —

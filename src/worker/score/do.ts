@@ -39,6 +39,7 @@ import { type OgVideoEnv, requestRender } from '../og/render-request';
 import { SPEC_VERSION } from '../spec-version.gen';
 import { emitLog } from '../telemetry/log';
 import * as cache from './cache';
+import { ContainerRuns } from './container-runs';
 import type { InstallSpec } from './discover-binary';
 import { fetchDefaultBranch } from './github-accessibility';
 import { score as runSandboxScore, type SandboxPhase, type ScoreResult } from './sandbox-exec';
@@ -122,6 +123,12 @@ export const handlers = { allowedInstall, noHttp };
 // DO class
 // ---------------------------------------------------------------------------
 
+// A run that cannot get an instance within this limit reports the sandbox as
+// busy, so a caller at the cap is told to retry sooner than the SDK's own
+// start limits would.
+const CONTAINER_INSTANCE_TIMEOUT_MS = 15_000;
+const CONTAINER_READY_TIMEOUT_MS = 30_000;
+
 export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
   // DIAGNOSTIC: HTTPS interception OFF to isolate whether the SDK's
   // Worker-fetch passthrough is the cause of the upstream-403 regressions
@@ -130,6 +137,18 @@ export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
   // hits upstream from the CF Container IP rather than the Worker fetch
   // IP. Phase 2 lockdown is lost while this flag is false.
   override interceptHttps = false;
+
+  private readonly runs = new ContainerRuns({
+    isRunning: () => this.ctx.container?.running === true,
+    start: () =>
+      this.startAndWaitForPorts({
+        cancellationOptions: {
+          instanceGetTimeoutMS: CONTAINER_INSTANCE_TIMEOUT_MS,
+          portReadyTimeoutMS: CONTAINER_READY_TIMEOUT_MS,
+        },
+      }),
+    destroy: () => this.destroy(),
+  });
 
   // Override BaseSandbox.fetch (which normally proxies to the container's
   // HTTP listener) to dispatch the score endpoint instead. Our container
@@ -150,21 +169,16 @@ export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
       return json({ error: 'invalid_do_body' }, 400);
     }
 
+    const claim = this.runs.claim();
     const { body, done } = streamScore(parsed.spec, {
       env: this.env,
-      run: (spec, onPhase) => this.score(spec, onPhase),
+      run: (spec, onPhase) => claim.run(() => runSandboxScore(this, spec, { onPhase })),
       purge: async (tags) => {
         await invokeCachedPurge(this.ctx, tags);
       },
     });
-    this.ctx.waitUntil(done);
+    this.ctx.waitUntil(claim.settle(done));
     return new Response(body, { status: 200, headers: { 'content-type': 'application/x-ndjson; charset=utf-8' } });
-  }
-
-  // RPC entry point: the score flow without a Request round-trip, for a
-  // server-side caller such as a batch-scoring cron Worker.
-  async score(spec: InstallSpec, onPhase?: (phase: SandboxPhase) => void): Promise<ScoreResult> {
-    return runSandboxScore(this, spec, { onPhase });
   }
 }
 
