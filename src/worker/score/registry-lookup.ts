@@ -33,6 +33,8 @@ export type RegistryEntry = {
   install: string;
   audit_profile?: string;
   repo?: string;
+  /** Project homepage (https only). The scorecard card fetches a logo from it. */
+  url?: string;
   // Present when the tool has a committed scorecard. The Worker uses
   // these to build the spec_version + anc_version + auditor_url triad
   // and route to /score/<slug> without fetching the scorecard JSON.

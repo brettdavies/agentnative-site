@@ -47,6 +47,7 @@ import {
   wireProbesTo,
 } from './helpers/follow-fixtures';
 import { captureLogs } from './helpers/log-capture';
+import { fakeRender } from './helpers/og-site-fakes';
 
 function seedEntry(domain: string) {
   return { domain, url: `https://${domain}/`, name: domain, description: `about ${domain}` };
@@ -390,6 +391,25 @@ describe('runWebRescore', () => {
     expect(result.audited).toEqual(['a.dev', 'c.dev']);
     expect(result.skipped).toEqual(['bad.dev']);
     expect(result.cycles).toBe(3); // a, bad, c — then empty; bad never re-fills
+  });
+
+  test('a saved audit asks the render Worker for its clip in a step of its own; a deferred one asks for none', async () => {
+    const { env } = makeEnv([seedEntry('saved.example'), seedEntry('held.example')]);
+    const render = fakeRender();
+    Object.assign(env, { RENDER: render, OG_VIDEO_ENABLED: 'true' });
+    const { step, names } = makeStep();
+    const saving = stubAudit({ 'saved.example': 70 });
+    await runWebRescore(env, step, {
+      audit: async (auditEnv, targetUrl): Promise<RescoreAuditOutcome> =>
+        new URL(targetUrl).host === 'held.example'
+          ? { kind: 'deferred', cause: 'domain-budget' }
+          : saving(auditEnv, targetUrl),
+      rebuild: async () => {},
+      eligibleAfterMs: 0,
+    });
+    expect(render.calls).toEqual([{ method: 'request', inputs: expect.objectContaining({ target: 'saved.example' }) }]);
+    expect(names).toContain('render:saved.example');
+    expect(names).not.toContain('render:held.example');
   });
 
   test('an injected rebuild receives the env and spec version', async () => {

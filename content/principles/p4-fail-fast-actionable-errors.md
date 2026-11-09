@@ -43,8 +43,9 @@ errors at the exit-code layer; this standard adopts `sysexits.h` numbering so ag
 
 - Error types use a structured enum (via `thiserror` in Rust) with variant-to-kind mapping for JSON serialization.
   Agents match on error kinds programmatically rather than parsing message text.
-- Locally-verifiable config and auth invariants (file presence, token format, required keys) are checked before any
-  network call. Remote validation is the network call's responsibility and SHOULD use distinct exit codes.
+- *(Applies when: CLI makes network calls.)* Config and auth validation happen before any network call, failing at the
+  earliest possible point. The three-tier structure (meta-commands, local-only commands, network commands) is defined in
+  [P6](/p6); this requirement covers the network-call ordering it implies.
 - Error output respects `--output json`: JSON-formatted errors go to stderr when JSON output is selected, consistent
   with [P2](/p2)'s stream discipline (stdout for data, stderr for diagnostics).
 - *(Applies when: rejecting input against an enum or a fixed-allowed-values set.)* The error message includes the valid
@@ -63,11 +64,11 @@ errors at the exit-code layer; this standard adopts `sysexits.h` numbering so ag
 ## Anti-Patterns
 
 - `Cli::parse()` anywhere in the codebase, because it silently prevents JSON error output.
-- `process::exit()` in library code or command handlers. Only `main()` (and signal/panic handlers it installs) may call
-  it, after all error handling.
+- `process::exit()` in library code or command handlers. Only `main()` MAY call it, after all error handling.
 - A single catch-all error variant that maps everything to exit code 1.
 - Error messages that state the symptom without the cause or fix ("Error: request failed").
 - Panics (`unwrap()`, `expect()`) on recoverable errors in production code paths.
 
-Measured by audit IDs `p4-bad-args`, `p4-process-exit`, `p4-unwrap`, `p4-exit-codes`. Run `anc audit --principle 4 .`
-against the CLI under test to see each.
+Measured by audit IDs `p4-try-parse`, `p4-bad-args`, `p4-exit-codes`, `p4-actionable-errors`, `p4-error-module`,
+`p4-error-types`, `p4-json-error-output`, `p4-enumerate-valid-set`, `p4-process-exit`, `p4-sys-exit`, `code-unwrap`,
+`code-bare-except`. Run `anc audit --principle 4 .` against the CLI under test to see each.

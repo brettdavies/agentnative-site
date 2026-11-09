@@ -103,11 +103,9 @@ readonly MCP_BINARY_ALLOWLIST=(figlet prettier tsx nodemon npm-check-updates)
 # this list if additional production surfaces are added.
 readonly MCP_PROD_HOSTS=(anc.dev www.anc.dev)
 
-# Bounded by the comment block's own structure, so growing the header cannot
-# silently truncate the help text.
 usage() {
-  awk 'NR > 1 { if (!/^#/) exit; sub(/^# ?/, ""); print }' "$0"
-  exit 2
+  print_usage_header
+  exit "${1:-2}"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -128,7 +126,7 @@ while [[ $# -gt 0 ]]; do
       RESULT_FILE="$2"
       shift 2
       ;;
-    -h | --help) usage ;;
+    -h | --help) usage 0 ;;
     -*)
       echo "unknown flag: $1" >&2
       usage

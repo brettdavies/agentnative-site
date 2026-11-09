@@ -1,3 +1,4 @@
+<!-- canonical: version-scheme site -->
 # Releasing agentnative-site
 
 Operational runbook. Rationale lives in [`RELEASES-RATIONALE.md`](./RELEASES-RATIONALE.md).
@@ -68,8 +69,9 @@ Every PR uses `.github/pull_request_template.md` verbatim. Six sections, no inve
 - **Zero verification artifacts in the body.** No triple-diff stats, leak-check output ("`guard-main-docs` runs clean"),
   patch-id cherry-check counts, pre-push gate results, CI status, or prose-scrub findings. Anomalies get fixed before
   push, not audit-trailed.
-- **Changelog** subsections (`### Added` / `### Changed` / `### Fixed` / `### Documentation`): 1-5 bullets each, delete
-  empty subsections, each bullet starts with a verb.
+- **Changelog** subsections (`### Breaking changes` / `### Added` / `### Changed` / `### Deprecated` / `### Fixed` /
+  `### Documentation`, the six headings of [§ Versioning](#versioning)): 1-5 bullets each, delete empty subsections,
+  each bullet starts with a verb.
 - **Type of Change**: one checkbox. Prefer `feat`/`fix` over `chore` for any user-observable change.
 - **Related Issues/Stories**: four labels (`Story:` / `Issue:` / `Architecture:` / `Related PRs:`). All four required
   even when empty (`- None.` / `n/a`).
@@ -79,6 +81,36 @@ Every PR uses `.github/pull_request_template.md` verbatim. Six sections, no inve
 - **No hard line wraps**: one logical line per paragraph or bullet.
 
 → Rationale: [`RELEASES-RATIONALE.md` § PR body conventions](./RELEASES-RATIONALE.md#pr-body-conventions).
+
+## Versioning
+
+The marked lines below are github-repo-setup's site section of `references/versioning.md`, which the drift check
+compares, and line 1 declares the scheme.
+
+<!-- canonical:begin versioning-site -->
+
+This site's version is a deploy stamp, `<base>.<epoch>-g<sha7>`, tagged `v<version>`. Each release carries it in its
+tag, its GitHub Release, its `CHANGELOG.md` section, and the backport to `dev`.
+
+- `<base>` is `SITE_VERSION_BASE` in `scripts/release/release.env`, the site's major.minor. The maintainer raises it by
+  hand, and it never goes down.
+- `<epoch>` is the committer time, in Unix seconds, of the `dev` commit the release is cut from.
+- `<sha7>` is the first seven characters of that commit's sha.
+
+`scripts/release/site-version.sh` computes it, and every caller runs the helper rather than rebuilding the format: the
+cut names its branch and changelog section from it, and preflight checks the changelog heading with
+`site-version.sh --verify`. The site's release workflow must have `origin/dev`, through an explicit
+`git fetch origin dev` or a checkout with `fetch-depth: 0`, and must run `scripts/release/site-version.sh --verify` on
+the tag it releases before it publishes. `cliff.toml`'s `tag_pattern` region names the stamp too,
+`^v[0-9]+\.[0-9]+\.[0-9]+(-g[0-9a-f]{7})?$`, so git-cliff reads each stamp tag as a release. The same commit always
+gives the same version, and the helper refuses one that does not sort above the newest tag. The changelog keeps its six
+headings (`Breaking changes`, `Added`, `Changed`, `Deprecated`, `Fixed`, `Documentation`) for the notes; they set no
+version.
+
+<!-- canonical:end versioning-site -->
+
+The stamp names a release; no page displays it. The footer and `/changelog` show the vendored spec's version (see
+[`AGENTS.md` § Authoritative scope](./AGENTS.md#authoritative-scope)).
 
 ## Releasing dev to main
 
@@ -97,17 +129,23 @@ end-state directly:
 # 0. Nothing on main that dev never received (security PRs, hotfixes, config). Exits 1 while drift exists.
 scripts/release/drift.sh
 
-# 1. Branch from main, NOT dev.
+# 1. Name the release after the dev commit it ships, then branch from main, NOT dev.
+#    <dev-sha> is that commit; steps 2 and 5 read it rather than origin/dev, which a
+#    later fetch can move. site-version.sh prints <version>, its deploy stamp
+#    (§ Versioning), and refuses a commit already released and a version that does
+#    not sort above the newest tag.
 git fetch origin
-git checkout -B release/<YYYY-MM-DD>-<slug> origin/main
+git rev-parse origin/dev                                        # <dev-sha>
+scripts/release/site-version.sh --commit <dev-sha>              # <version>
+git checkout -B release/v<version> origin/main
 
 # 2. Overlay dev's entire tracked tree onto the main base. `checkout -- .` writes dev's
 #    paths but does not delete files that exist on main and are absent on dev, so remove
 #    those next (the 'D' rows are main-only files dev deleted or moved). `--no-renames`
 #    lists a moved file as a deletion; rename detection would report it as an R row,
 #    and the stale copy left behind would ship to main.
-git checkout origin/dev -- .
-git diff --no-renames --name-status origin/main origin/dev | grep '^D'
+git checkout <dev-sha> -- .
+git diff --no-renames --name-status origin/main <dev-sha> | grep '^D'
 trash <each main-only file listed above>
 
 # 3. Withhold any feature `dev` carries that this release must not ship. Each one
@@ -126,19 +164,20 @@ GUARDED="$(scripts/release/guarded-paths.sh)"
 git ls-files | grep -E "$GUARDED" | xargs -r trash
 git add -A                                                      # stages adds, mods, AND deletions
 
-# 4. Bump "version" in package.json (this repo's version carrier) to <version>, then build
-#    the changelog from the PRs merged into dev since the previous release. The overlay
-#    commit carries no per-PR history, so the section is built from dev's PRs, not from
-#    this branch's commits. The branch name carries no version, so pass the tag.
-scripts/generate-changelog.py --from-dev-prs --tag v<version>
+# 4. Build this release's CHANGELOG.md section from the PRs merged into dev since the
+#    previous release synced back. The overlay commit carries no per-PR history, so the
+#    section is built from dev's PRs, not from this branch's commits. The generator reads
+#    v<version> off the branch name. package.json carries no version: the tag is the
+#    version (§ Versioning).
+scripts/generate-changelog.py --from-dev-prs
 git add -A
 
 # 5. Verify before committing.
-#    A: staged tree equals dev's minus the version file, the changelog, the stripped
-#       guarded paths, and whatever step 3b withheld. Anything else printed here is
-#       a mistake; the withheld paths are expected and listed in § Withheld features.
-git diff --cached --name-only origin/dev | grep -Ev "$GUARDED" \
-  | grep -Ev '^(package\.json|CHANGELOG\.md)$' \
+#    A: staged tree equals dev's minus the changelog, the stripped guarded paths, and
+#       whatever step 3b withheld. Anything else printed here is a mistake; the
+#       withheld paths are expected and listed in § Withheld features.
+git diff --cached --name-only <dev-sha> | grep -Ev "$GUARDED" \
+  | grep -Ev '^CHANGELOG\.md$' \
   && echo "unexpected delta above; investigate" || echo "(clean: only intended deltas)"
 #    B: no guarded path in the release tree.
 git diff --cached --name-only origin/main | grep -E "$GUARDED" \
@@ -164,18 +203,18 @@ git commit
 #    Wait for the deploy AND for the container rollout before any live gate:
 #    instances drain asynchronously, so a gate that races the rollout hits a warm
 #    OLD-image instance.
-git push -u origin release/<YYYY-MM-DD>-<slug>
-gh workflow run deploy.yml --ref release/<YYYY-MM-DD>-<slug> -f environment=staging
+git push -u origin release/v<version>
+gh workflow run deploy.yml --ref release/v<version> -f environment=staging
 gh run watch <run-id> --exit-status
 bun x wrangler containers list                                  # STATE = ready
 
 # 8. Run every gate against the deployed release build. `all` includes `e2e`,
-#    the four live Playwright projects; nothing else exercises a browser or the
-#    edge cache classes.
+#    the four live Playwright projects plus the og-cards smoke; nothing else
+#    exercises a browser, the edge cache classes, or a drawn social card.
 scripts/release/preflight.sh all
 
 # 9. Open the PR. Scrub body in /tmp/ first.
-gh pr create --base main --head release/<YYYY-MM-DD>-<slug> \
+gh pr create --base main --head release/v<version> \
   --title "release: <summary>" --body-file /tmp/body.md
 ```
 
@@ -186,12 +225,13 @@ what makes step 8's gates describe the release. If the release is abandoned, pus
 The result is a single commit whose diff against `main` is the release, with `main` as an ancestor, so the PR merges
 with zero conflicts.
 
-**Branch naming** (mandatory): `release/<YYYY-MM-DD>-<slug>` (e.g. `release/2026-05-01-content-neg-fix`). Slug
-kebab-case, 3-6 words.
+**Branch naming** (mandatory): `release/v<version>`, the stamp step 1 prints (e.g.
+`release/v0.0.1793577356-gc876821`). The stamp's middle number is the dev commit's committer time, so release branches
+sort in cut order, and the postflight backport gate reads the tag off the merged branch's name.
 
 When the PR merges, `deploy.yml` publishes to **production**: its `production` job gates on
 `github.ref == 'refs/heads/main'`, and the `staging` job gates on `refs/heads/dev`, so a merge here goes live on
-anc.dev. Auto-delete removes `release/<slug>` from the remote on merge. `dev` is untouched.
+anc.dev. Auto-delete removes `release/v<version>` from the remote on merge. `dev` is untouched.
 
 → Rationale (why overlay, not merge; why cut from `main`):
 [`RELEASES-RATIONALE.md` § Branching model](./RELEASES-RATIONALE.md#branching-model). CHANGELOG mechanics:
@@ -229,7 +269,9 @@ guarded set: that gate is how a withholding stays visible rather than becoming i
 
 The overlay is the release construction for this repo. Cherry-picking the dev squash-commits onto the `origin/main` base
 is the exception, kept only for a release with a stated reason it cannot overlay; the per-PR changelog is not such a
-reason, since `--from-dev-prs` builds it from `dev` either way. When cherry-picking, run the triple-diff verification:
+reason, since `--from-dev-prs` builds it from `dev` either way. A cherry-pick release ships no single `dev` commit's
+tree, so step 1 names it after the newest commit it picks (`site-version.sh --commit <newest picked sha>`), and
+preflight's diff-B then lists the `dev` changes it leaves out. When cherry-picking, run the triple-diff verification:
 
 ```bash
 # 2. List the dev commits not yet on main.
@@ -270,29 +312,31 @@ deploy of the release commit.
 
 ### After merge: tag, then sync `dev` with the release
 
-The deploy fires on the push to `main`; the tag is release bookkeeping, the anchor that `drift.sh`, the changelog
-compare link, and the backport script resolve against. Tag the merge commit and publish the GitHub Release from the
-changelog section:
+The deploy fires on the push to `main`. The tag names the release, and `drift.sh`, the changelog compare link, and the
+backport script resolve against it. Check that the checkout is the release's merge commit and that the stamp matches the
+dev commit it names, tag that commit, and publish the GitHub Release from the changelog section:
 
 ```bash
 git checkout main && git pull
+grep -q '^## \[<version>\]' CHANGELOG.md && echo "HEAD is the release" || echo "HEAD is not v<version>: pull again"
+scripts/release/site-version.sh --verify v<version>
 git tag -a -m "Release v<version>" v<version>
 git push origin v<version>
 awk -v v='<version>' '/^## \[/ { p = index($0, "[" v "]") > 0 } p' CHANGELOG.md > /tmp/notes-v<version>.md
 gh release create v<version> --title "v<version>" --notes-file /tmp/notes-v<version>.md
 ```
 
-Then bring the release bookkeeping (`package.json` version, `CHANGELOG.md`) and every other release-only edit back to
-`dev` so the integration branch starts from the released baseline:
+Then bring `CHANGELOG.md` and every other release-only edit back to `dev`, so the integration branch starts from the
+released baseline and the next release's overlay keeps the changelog:
 
 ```bash
 scripts/sync-dev-after-release.sh v<version> --dry-run   # preview: creates no branch, leaves the tree clean
 scripts/sync-dev-after-release.sh v<version>
 ```
 
-The script checks that the tag is reachable from `origin/main` and that the GitHub Release is published. It writes the
-released version into `package.json` in place and copies `CHANGELOG.md` verbatim from `origin/main` when `main` carries
-one. It then classifies every other path `main` and `dev` disagree about, guarded paths excepted, against the previous
+The script checks that the tag is reachable from `origin/main` and that the GitHub Release is published. It copies
+`CHANGELOG.md` verbatim from `origin/main`, and with `SITE_VERSION_BASE` set it writes no version into `package.json`.
+It then classifies every other path `main` and `dev` disagree about, guarded paths excepted, against the previous
 `v*` tag:
 
 - **release-prep**: `dev`'s copy still matches the previous tag, so only the release changed it. Adopted.
@@ -300,8 +344,8 @@ one. It then classifies every other path `main` and `dev` disagree about, guarde
   every contested path.
 
 `--only PATH` (repeatable) adopts exactly the discovered paths it names, release-prep or contested, and no other
-discovered path; the script syncs `package.json` and `CHANGELOG.md` either way. Resolve anything left out by hand.
-Discovery needs a previous `v*` tag, so the first tagged release syncs `package.json` and `CHANGELOG.md` only.
+discovered path; the script syncs `CHANGELOG.md` either way. Resolve anything left out by hand. Discovery needs a
+previous `v*` tag, so the first tagged release syncs `CHANGELOG.md` only.
 
 After committing, when the sync carried `CHANGELOG.md` and `git-cliff` is on `PATH`, the script runs
 `scripts/generate-changelog.py --dry-run --tag v<version>` and warns with the generator's own reason if the regenerated
@@ -498,7 +542,17 @@ Configure once per bucket (idempotent on the rule name):
 ```bash
 bun x wrangler r2 bucket lifecycle add anc-score-cache scores-7day-ttl scores/ --expire-days 7 -y
 bun x wrangler r2 bucket lifecycle add anc-score-cache-staging scores-7day-ttl scores/ --expire-days 7 -y
+bun x wrangler r2 bucket lifecycle add anc-score-cache og-30day-ttl og/ --expire-days 30 -y
+bun x wrangler r2 bucket lifecycle add anc-score-cache-staging og-30day-ttl og/ --expire-days 30 -y
 ```
+
+`og/` holds the scorecard social cards and clips the render Worker draws (`og/score/`, `og/clip/`) and the brand logos
+it found for them (`og/logo/`, including stored misses). Storing a card or a clip deletes the target's older ones, so
+the 30-day rule only bounds the objects whose target stopped being requested: an expired card is drawn again on its next
+request, and an expired clip is rendered again by the target's next audit, or by the curated pass for a curated target,
+which renders a clip again once it is 21 days old. The brand-logo fallback reads `CONTEXT_DEV_API_KEY`, a
+`wrangler secret put` value on the render Worker in each environment (1Password item `Context.dev API Key`, field
+`credential`), set by `scripts/og/setup.sh`; unset, cards skip that lookup and use the homepage's icon or the wordmark.
 
 Verify:
 
@@ -509,6 +563,32 @@ bun x wrangler r2 bucket lifecycle list anc-score-cache-staging
 
 Both buckets were configured on 2026-05-19. The `tests/wrangler-config.test.ts` drift-guard pins the exact literal
 command above.
+
+#### og:video setup
+
+Run once per environment before the og:video code first deploys there, whether by a staging dispatch of a branch or by
+the merge, because the site Worker's deploy fails without its `og-rendered` queue:
+
+```bash
+scripts/og/setup.sh staging
+scripts/og/setup.sh production
+```
+
+The script creates the environment's queue (`og-rendered-staging`, `og-rendered`) when it is missing, sets
+`CONTEXT_DEV_API_KEY` on the render Worker (`anc-og-render-staging`, `anc-og-render`) from 1Password without echoing it,
+deletes the key from the site Worker, and reports the `OG_VIDEO_ENABLED` switch. Before the render Worker's first
+deploy, its secret steps report `render-worker-missing` and the script exits non-zero: deploy, then rerun it. In
+production that order spans a release: the preflight's release mechanics run the first pass before the merge, and the
+postflight runs the rest after the deploy, turns the switch on, and asks for the curated pass. Every step is idempotent.
+`--check` verifies without changing anything, `--json` prints one result object, and the reason codes are in
+[`RELEASES-PREFLIGHT.md`](./RELEASES-PREFLIGHT.md#ogvideo-reason-codes). The release preflight runs
+`scripts/og/setup.sh staging --check` before the og-cards smoke. `deploy.yml` deploys the render Worker before the site
+Worker in both jobs, and calls `POST /api/og-curated-pass` after the rescore trigger.
+
+A burst of clips, such as the first curated pass or the one after a template bump, outruns the Workers Cache purge rate
+of 5 a minute. The `og-rendered` consumer batches each burst into a few purge calls and retries a refused one for about
+15 minutes. An `og_rendered_gave_up` record in the site Worker's `hit-min-purge` logs names a page that will name its
+clip only when its cached copy expires.
 
 ## Live-scoring (v3) release procedure
 
@@ -654,6 +734,10 @@ in the live-scoring monitoring runbook:
 The queryable counterpart with canonical Analytics Engine SQL lives in the analytics runbook:
 
 - [`docs/runbooks/live-scoring-analytics.md`](docs/runbooks/live-scoring-analytics.md).
+
+og:video render volume is the count of `og.render` records with outcome `rendered` in the render Worker's Workers Logs
+(`anc-og-render`, `anc-og-render-staging`). Each is one clip from the Media Transformations binding, about $0.002 at
+$0.50 per 1,000 output seconds once the binding's beta ends.
 
 ### Cost guardrails
 
@@ -809,6 +893,15 @@ top-level config with no `env.production` block. Propagation is bounded by the s
 fresh isolate; warm isolates pick up the new value when the underlying env mapping refreshes. Recovery from a
 surface-level emergency uses `MCP_ENABLED`; recovery from a cost-level emergency uses `MCP_LIVE_SCORING_ENABLED` and
 keeps the read tier serving cached scorecards.
+
+`OG_VIDEO_ENABLED` stops every og:video render request (audit hooks and the curated pass) without a deploy; pages keep
+naming the clips that exist. It is a secret on the site Worker in both environments, read as `=== 'true'`, so unset is
+off:
+
+```bash
+printf true | bunx wrangler secret put OG_VIDEO_ENABLED --name agentnative-site-staging   # staging on
+printf false | bunx wrangler secret put OG_VIDEO_ENABLED --name agentnative-site          # production off
+```
 
 `MCP_LEGACY_ENABLED` is a var, so `wrangler secret put` on that name fails with Cloudflare API 10053. Flip it by editing
 the committed `"true"` to `"false"` in the target environment's `wrangler.jsonc` block and shipping that through a PR;

@@ -36,6 +36,7 @@ import {
   siteDeclaring,
 } from './helpers/follow-fixtures';
 import { captureLogs } from './helpers/log-capture';
+import { fakeRender } from './helpers/og-site-fakes';
 
 // A context whose purge RPC records every tag batch the run queued.
 function purgeCtx(): ReturnType<typeof makeCtx> & { purged: string[][] } {
@@ -1010,6 +1011,26 @@ describe("POST /api/score: a run a declared domain's spent hourly budget limited
         { scorecard_url: null, endpoint: ROOM, puts: [], kept: true },
       );
     });
+  });
+
+  test('a completed run asks the render Worker for one clip; a held run asks for none', async () => {
+    const render = fakeRender();
+    const saved = Object.assign(await declaringEnv(), { RENDER: render, OG_VIDEO_ENABLED: 'true' });
+    expect((await audit(saved)).scorecard_url).toBe('https://anc.dev/score/example.com');
+    expect(render.calls).toEqual([
+      {
+        method: 'request',
+        inputs: expect.objectContaining({ target: 'example.com', pages: ['https://example.com/'] }),
+      },
+    ]);
+
+    const heldRender = fakeRender();
+    const held = Object.assign(await declaringEnv({ prior: prior(), kvSeed: await spentBudget() }), {
+      RENDER: heldRender,
+      OG_VIDEO_ENABLED: 'true',
+    });
+    expect((await audit(held)).scorecard_url).toBeNull();
+    expect(heldRender.calls).toEqual([]);
   });
 
   test('a saved scorecard stands for a day: one 23 hours old is kept, one 25 hours old is replaced', async () => {

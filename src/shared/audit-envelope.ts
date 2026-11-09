@@ -18,6 +18,9 @@
 //   a binary the route refuses ... no URL, summary_html instead (a reserved
 //                                   name, or a dotted name the classifier
 //                                   would read as a website host)
+//   an errored live run .......... no URL and no refresh_after, summary_html
+//                                   instead: the run is never saved,
+//                                   branch-scoped or not
 //   anything else ................ live: /score/<binary>
 //
 // A website result has a page unless it was never saved (a run that did not
@@ -28,6 +31,7 @@
 // registry entry owns no page, so its slug is neither a hit nor a shadow.
 
 import { isResultTarget, type Lane, laneOf, scoreJsonPath, scoreMarkdownPath, scorePath } from './audit-routes';
+import { hasErroredAudits } from './errored-audit';
 import { buildScorecardBody, escHtml } from './scorecard-format.mjs';
 
 export type AuditTier = 'registry' | 'cache' | 'live';
@@ -92,6 +96,13 @@ export type CliRecordLike = {
   scored_at?: string;
 };
 
+/** When a CLI scorecard was taken: the record's stamp, else the scorecard's own run start, else null. */
+export function cliScoredAt(record: { scored_at?: unknown; scorecard: unknown }): string | null {
+  if (typeof record.scored_at === 'string') return record.scored_at;
+  const started = (record.scorecard as { run?: { started_at?: unknown } } | null)?.run?.started_at;
+  return typeof started === 'string' ? started : null;
+}
+
 export type WebRecordLike = {
   spec_version: string;
   target_url: string;
@@ -121,7 +132,8 @@ function asCliScorecard(scorecard: unknown): CliScorecardLike {
   return typeof scorecard === 'object' && scorecard !== null ? (scorecard as CliScorecardLike) : {};
 }
 
-function scorePctOf(scorecard: unknown): number | undefined {
+/** The headline percent the page prints: the badge score, else the flat `score_pct`. */
+export function scorePctOf(scorecard: unknown): number | undefined {
   const pct = (scorecard as { badge?: { score_pct?: unknown }; score_pct?: unknown } | null)?.badge?.score_pct;
   if (typeof pct === 'number') return pct;
   const flat = (scorecard as { score_pct?: unknown } | null)?.score_pct;
@@ -208,14 +220,13 @@ export type CliEnvelopeInput = {
 export function buildCliEnvelope(input: CliEnvelopeInput): AuditEnvelope {
   const { record, origin, target } = input;
   const liveEnvelope = (urls: ResultUrls): AuditEnvelope => {
-    const scorecard = asCliScorecard(record.scorecard);
     const cached = input.cached ?? input.tier === 'cache';
     const envelope: AuditEnvelope = {
       kind: 'cli',
       tier: input.tier,
       target,
       ...urls,
-      freshness: freshnessFor('cli', cached, record.scored_at ?? scorecard.run?.started_at ?? null),
+      freshness: freshnessFor('cli', cached, cliScoredAt(record)),
       spec_version: record.spec_version,
       scorecard: record.scorecard,
       anc_version: record.anc_version,
@@ -226,8 +237,18 @@ export function buildCliEnvelope(input: CliEnvelopeInput): AuditEnvelope {
     return envelope;
   };
 
+  // A record that was never written has no refresh window to advertise.
+  const unsavedEnvelope = (): AuditEnvelope => {
+    const envelope = liveEnvelope(NO_URLS);
+    return {
+      ...envelope,
+      freshness: { ...envelope.freshness, refresh_after: null },
+      summary_html: inlineSummaryHtml(target, record),
+    };
+  };
+  const unsaved = input.tier === 'live' && hasErroredAudits(record.scorecard);
   if (target.includes('@')) {
-    const envelope = liveEnvelope(urlsFor(origin, target));
+    const envelope = unsaved ? unsavedEnvelope() : liveEnvelope(urlsFor(origin, target));
     if (input.sourceSha !== undefined) envelope.source_sha = input.sourceSha;
     return envelope;
   }
@@ -242,8 +263,9 @@ export function buildCliEnvelope(input: CliEnvelopeInput): AuditEnvelope {
     });
     return { ...registryEnvelope, anc_version: record.anc_version, tool_version: record.tool_version };
   }
+  if (unsaved) return unsavedEnvelope();
   if (curated.kind === 'shadow' || !isRoutableBinary(target)) {
-    return { ...liveEnvelope(NO_URLS), summary_html: collisionSummaryHtml(target, record) };
+    return { ...liveEnvelope(NO_URLS), summary_html: inlineSummaryHtml(target, record) };
   }
   return liveEnvelope(urlsFor(origin, target));
 }
@@ -251,14 +273,15 @@ export function buildCliEnvelope(input: CliEnvelopeInput): AuditEnvelope {
 // The result body a result with no page of its own renders inline on the
 // progress page: the shared scorecard body without its crumb and badge
 // call-to-action, so nothing in it links to a page that would serve a
-// different tool or that the route would refuse.
-function collisionSummaryHtml(binary: string, record: CliRecordLike): string {
+// different tool, that the route would refuse, or that was never saved.
+function inlineSummaryHtml(target: string, record: CliRecordLike): string {
   const scorecard = asCliScorecard(record.scorecard);
-  const tool = { name: scorecard.tool?.name ?? binary, binary: scorecard.tool?.binary ?? binary };
-  const freshnessHtml = `Binary <code>${escHtml(binary)}</code> · scored by anc ${escHtml(record.anc_version)} · spec ${escHtml(record.spec_version)}`;
+  const tool = { name: scorecard.tool?.name ?? target, binary: scorecard.tool?.binary ?? target };
+  const label = target.includes('@') ? 'Source' : 'Binary';
+  const freshnessHtml = `${label} <code>${escHtml(target)}</code> · scored by anc ${escHtml(record.anc_version)} · spec ${escHtml(record.spec_version)}`;
   return buildScorecardBody(tool, scorecard, {
     version: record.tool_version,
-    spine: { target: binary, lane: 'cli', tier: 'live', freshnessHtml, linked: false, control: null },
+    spine: { target, lane: 'cli', tier: 'live', freshnessHtml, linked: false, control: null },
     hideBadgeEmbed: true,
     showBadgePreview: false,
   });

@@ -39,8 +39,8 @@
       "label": "Structured output support",
       "group": "P2",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "--output/--format flag detected but could not validate JSON via safe probes (--help/--version override output flags in most CLIs)",
+      "status": "skip",
+      "evidence": "`--format` is declared in --help, but no safe probe printed JSON (--help and --version override output flags in most CLIs)",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p2-json-output"
@@ -62,7 +62,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "warn",
-      "evidence": "no --quiet/-q flag detected in --help output",
+      "evidence": "no option definition in --help declares --quiet or -q; a flag named only in a usage line does not count.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p7-quiet"
@@ -116,8 +116,8 @@
       "label": "Pager-using CLI ships --no-pager escape hatch",
       "group": "P6",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "pager referenced in --help but no --no-pager escape hatch advertised",
+      "status": "skip",
+      "evidence": "no pager signal ($PAGER, --pager, pager, or less/more named as a program) in --help",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p6-no-pager-behavioral"
@@ -149,8 +149,8 @@
       "label": "Structured-output CLI exposes its schema at runtime",
       "group": "P2",
       "layer": "behavioral",
-      "status": "fail",
-      "evidence": "CLI emits structured output but exposes no `schema` subcommand or `--schema` flag at top level or nested one level deep. Agents need a runtime-discoverable schema to pin against shape changes.",
+      "status": "skip",
+      "evidence": "antecedent `p2-json-output` could not be measured: `--format` is declared in --help, but no safe probe printed JSON (--help and --version override output flags in most CLIs)",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p2-schema-print"
@@ -205,7 +205,7 @@
       "layer": "behavioral",
       "status": "pass",
       "evidence": null,
-      "confidence": "high",
+      "confidence": "medium",
       "tier": "must",
       "audit_id": "p8-bundle-install"
     },
@@ -214,8 +214,8 @@
       "label": "`skill install --all` for multi-runtime install",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "warn",
+      "evidence": "no option definition in `skill install --help` declares `--all`; a flag named only in a usage line does not count. MAY-tier — a single `skill install --all` invocation across detected runtimes is convenient for multi-agent setups.",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p8-install-all"
@@ -225,8 +225,8 @@
       "label": "`skill update` / `skill upgrade` for bundle refresh",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "warn",
+      "evidence": "no `update` or `upgrade` subcommand under `skill`. MAY-tier — a `skill update` lets agents stay current with the bundle's evolving surface without a full reinstall.",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p8-bundle-update"
@@ -292,7 +292,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "pass",
-      "evidence": null,
+      "evidence": "every list-style subcommand advertises a limit flag: query (-n), search (-n).",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p7-limit"
@@ -303,7 +303,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "warn",
-      "evidence": "list-style subcommand present but no cursor/page flag advertised (looked for --after, --before, --cursor, --page, --offset). MAY-tier — cursor pagination lets agents traverse large result sets without re-scanning earlier pages.",
+      "evidence": "no list-style subcommand advertises a cursor/page flag in its --help: query, search (looked for --after, --before, --cursor, --page, --offset). MAY-tier: cursor pagination lets agents traverse large result sets without re-scanning earlier pages.",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p7-cursor-pagination"
@@ -401,8 +401,8 @@
       "label": "Errors emit JSON envelope with discriminant + type id + message roles under `--output json`",
       "group": "P2",
       "layer": "behavioral",
-      "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; MUST applies only to CLIs that opt into the JSON contract.",
+      "status": "fail",
+      "evidence": "bad invocation under `--format json` produced no parseable JSON on stderr or stdout. JSON mode must emit a JSON error envelope, not plain text.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p2-json-errors"
@@ -412,8 +412,8 @@
       "label": "`--output json` produces JSON-formatted errors",
       "group": "P4",
       "layer": "behavioral",
-      "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; SHOULD applies only to CLIs that opt into the JSON contract.",
+      "status": "warn",
+      "evidence": "errors under `--format json` are not JSON-formatted. Consumers parsing stdout-as-JSON cannot recover the failure without a separate text-parsing path; switch the error writer to honor the active output mode.",
       "confidence": "high",
       "tier": "should",
       "audit_id": "p4-json-error-output"
@@ -424,14 +424,14 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; envelope-consistency only applies to CLIs that opt into the JSON contract.",
+      "evidence": "success-mode probe (`--help --format json`) produced no parseable JSON; cannot compare envelope shapes.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p2-consistent-envelope"
     },
     {
       "id": "p3-must-subcommand-examples",
-      "label": "Each subcommand's `--help` ships at least one invocation example",
+      "label": "Each subcommand that takes arguments ships an invocation example in its `--help`",
       "group": "P3",
       "layer": "behavioral",
       "status": "fail",
@@ -509,12 +509,12 @@
   ],
   "summary": {
     "total": 44,
-    "pass": 16,
-    "warn": 18,
+    "pass": 14,
+    "warn": 19,
     "fail": 3,
     "opt_out": 0,
     "n_a": 0,
-    "skip": 7,
+    "skip": 8,
     "error": 0
   },
   "coverage_summary": {
@@ -531,21 +531,21 @@
       "verified": 10
     }
   },
-  "audience": "mixed",
+  "audience": "agent-optimized",
   "audit_profile": null,
-  "spec_version": "0.5.0",
+  "spec_version": "0.6.0",
   "tool": {
     "name": "qmd",
     "binary": "qmd",
     "version": "qmd 2.8.3 (facd35e)"
   },
   "anc": {
-    "version": "0.6.0"
+    "version": "0.7.0"
   },
   "run": {
     "invocation": "anc audit --command qmd --output json",
-    "started_at": "2026-10-05T18:45:31.314156028Z",
-    "duration_ms": 1771,
+    "started_at": "2026-10-28T15:55:51.851419151Z",
+    "duration_ms": 1931,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -558,7 +558,7 @@
   },
   "badge": {
     "eligible": false,
-    "score_pct": 68,
+    "score_pct": 65,
     "embed_markdown": null,
     "scorecard_url": "https://anc.dev/score/qmd",
     "badge_url": "https://anc.dev/badge/qmd.svg",

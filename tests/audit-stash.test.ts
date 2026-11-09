@@ -89,6 +89,13 @@ describe('stash and take', () => {
     expect(takeInlineResult('ouch')).toBeNull();
   });
 
+  test('an inline result keeps the subline that says why it has no page; a record without one returns without it', () => {
+    stashInlineResult('fd', { html: '<article>errored</article>', follow: true, subline: 'not saved' });
+    expect(takeInlineResult('fd')).toEqual({ html: '<article>errored</article>', follow: true, subline: 'not saved' });
+    sessionStorage.setItem('audit-inline:ouch', JSON.stringify({ html: '<article>body</article>', follow: true }));
+    expect(takeInlineResult('ouch')).toEqual({ html: '<article>body</article>', follow: true });
+  });
+
   test('an inline result keeps the follow choice that produced it, so Run again repeats it after a refresh', () => {
     stashInlineResult('stripe.dev', { html: '<article>not saved</article>', follow: false });
     expect(takeInlineResult('stripe.dev')).toEqual({ html: '<article>not saved</article>', follow: false });
@@ -202,6 +209,16 @@ function deferred<T>() {
 }
 
 describe('startAudit', () => {
+  test('a GitHub repo URL navigates to the progress page for its owner/repo and stashes the token there', async () => {
+    const navigations: string[] = [];
+    await startAudit(
+      { target: 'https://github.com/sindresorhus/gh-home', lane: 'cli', listing: null },
+      { acquire: async () => 'tok', navigate: (path: string) => navigations.push(path) },
+    );
+    expect(navigations).toEqual(['/scoring?target=sindresorhus/gh-home']);
+    expect(take('sindresorhus/gh-home')).toMatchObject({ token: 'tok' });
+  });
+
   test('two submits before the first resolves issue one acquire and one navigation', async () => {
     const gate = deferred<string>();
     let acquires = 0;

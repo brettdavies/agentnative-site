@@ -21,6 +21,7 @@ type RegistryIndexEntry = {
   anc_version?: string;
   scorecard_url?: string;
   score_pct?: number;
+  url?: string;
 };
 
 type RegistryIndex = {
@@ -91,6 +92,16 @@ describe('buildRegistryIndex', () => {
     const { index } = buildRegistryIndex(reg) as { index: RegistryIndex; warnings: string[] };
     expect(index.by_slug.rg.audit_profile).toBe('file-traversal');
     expect(index.by_owner_repo['BurntSushi/ripgrep'].audit_profile).toBe('file-traversal');
+  });
+
+  test('an https homepage is projected; an http homepage is not', () => {
+    const reg = [
+      { name: 'curl', binary: 'curl', install: 'brew install curl', repo: 'curl/curl', url: 'https://curl.se' },
+      { name: 'old', binary: 'old', install: 'brew install old', repo: 'old/old', url: 'http://old.example' },
+    ];
+    const { index } = buildRegistryIndex(reg) as { index: RegistryIndex; warnings: string[] };
+    expect(index.by_slug.curl.url).toBe('https://curl.se');
+    expect(index.by_slug.old.url).toBeUndefined();
   });
 
   test('tool with url-only (no repo) is keyed by parsed owner/repo from url', () => {

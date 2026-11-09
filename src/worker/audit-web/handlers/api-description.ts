@@ -48,7 +48,7 @@ function assessDescription(url: string, response: ProbeResponse, w: HttpWith, ba
   return { ok: true, item: { ...unmarked.item, why: [...unmarked.item.why, READ_IN_PART_WHY] } };
 }
 
-async function describe(
+async function probeOne(
   target: ApiDescriptionTarget,
   w: HttpWith,
   ctx: HandlerContext,
@@ -92,7 +92,7 @@ export async function runApiDescription(check: WebCheck, ctx: HandlerContext): P
   }
   const w = check.with as HttpWith;
   const timeoutMs = timeoutMsFor(w.timeout, ctx.defaultTimeoutMs);
-  return aggregateTargets(await Promise.all(targets.descriptions.map((target) => describe(target, w, ctx, timeoutMs))));
+  return aggregateTargets(await Promise.all(targets.descriptions.map((target) => probeOne(target, w, ctx, timeoutMs))));
 }
 
 /** The descriptions the OpenAPI row retained, by the URL the catalog declared each at. */

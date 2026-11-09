@@ -68,13 +68,14 @@ function jsonResponse(body: unknown, status: number): Response {
 }
 
 /**
- * Shared gate for the secret-authed rescore endpoints: POST-only, a
- * fail-fast 500 when the Worker-side secret is unset (a silent 401 would
- * hide the misconfiguration from the deploy pass), and a constant-time
- * secret compare. Resolves the rejection response, or null when the
- * request is authorized.
+ * Shared gate for the secret-authed deploy-hook endpoints (rescore,
+ * backfill, og curated pass): POST-only, a fail-fast 500 when the
+ * Worker-side secret is unset (a silent 401 would hide the
+ * misconfiguration from the deploy pass), and a constant-time secret
+ * compare. Resolves the rejection response, or null when the request is
+ * authorized.
  */
-async function requireRescoreAuth(request: Request, secret: string | undefined): Promise<Response | null> {
+export async function requireRescoreAuth(request: Request, secret: string | undefined): Promise<Response | null> {
   if (request.method !== 'POST') {
     return new Response('method not allowed\n', {
       status: 405,

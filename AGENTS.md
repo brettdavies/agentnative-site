@@ -144,14 +144,14 @@ a fresh audit on an already-cached binary. `get_scorecard` is the cheap signal; 
 tools compose the same `/api/score` orchestration core, so cache semantics never drift between MCP and the human form on
 `/`.
 
-**Five kill switches, surgical.** `MCP_ENABLED` and `MCP_LIVE_SCORING_ENABLED` are secrets in both environments, flipped
-with `wrangler secret put` and no deploy; an unset secret reads as off, so absence fails closed. `MCP_LEGACY_ENABLED` is
-a committed var, `"true"` in the top-level and `env.staging` `vars` blocks; its sunset flip is a committed edit through
-a PR, with `wrangler deploy --var` as the transient drill override. `WEB_AUDIT_ENABLED` and `WEB_AUDIT_FOLLOW_ENABLED`
-are `vars` bindings on staging and `wrangler secret put` values on production, where an unset value reads as off. A
-binding name is a var or a secret, never both: `wrangler secret put` against a declared var name is rejected with
-Cloudflare API 10053. Production commands carry no `--env` flag, because production is the top-level config and there is
-no `env.production` block. Per-flag shapes, flip verbs, and the `--var` hazards: the
+**Six kill switches, surgical.** `MCP_ENABLED`, `MCP_LIVE_SCORING_ENABLED` and `OG_VIDEO_ENABLED` are secrets in both
+environments, flipped with `wrangler secret put` and no deploy; an unset secret reads as off, so absence fails closed.
+`MCP_LEGACY_ENABLED` is a committed var, `"true"` in the top-level and `env.staging` `vars` blocks; its sunset flip is a
+committed edit through a PR, with `wrangler deploy --var` as the transient drill override. `WEB_AUDIT_ENABLED` and
+`WEB_AUDIT_FOLLOW_ENABLED` are `vars` bindings on staging and `wrangler secret put` values on production, where an unset
+value reads as off. A binding name is a var or a secret, never both: `wrangler secret put` against a declared var name
+is rejected with Cloudflare API 10053. Production commands carry no `--env` flag, because production is the top-level
+config and there is no `env.production` block. Per-flag shapes, flip verbs, and the `--var` hazards: the
 [operator runbook](docs/runbooks/mcp-operator.md).
 
 - `MCP_ENABLED`: gates the whole `/mcp` branch. Falsy returns `503 Service Unavailable` with `Retry-After: 3600` and a
@@ -166,6 +166,9 @@ no `env.production` block. Per-flag shapes, flip verbs, and the `--var` hazards:
   audit: the endpoint's web lane, `audit_website`, and the rescore. Falsy keeps audits running on the site's own origin;
   the stored scorecard records `follow_declarations: false` and rows that need a declared host read `n_a` with reason
   `follow-disabled`.
+- `OG_VIDEO_ENABLED`: gates every og:video render request: the audit hooks, the rescore step, the live CLI write, and
+  the curated pass. Falsy asks for nothing; pages keep naming the clips that exist, and a scorecard page without one
+  reads `x-anc-clip: off`.
 
 **Errors carry on two layers.** Tool-level failures return `CallToolResult` with `isError: true` plus a textual message;
 the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error envelopes at HTTP 200
@@ -198,6 +201,53 @@ is open, the inventory is published.
 carry the same `2026-07-28` literal. Legacy clients may still send `2025-06-18` in `initialize`; the server answers per
 SDK dual-stack behavior. `tests/worker-mcp.test.ts` and `tests/e2e/discoverability.e2e.ts` assert each occurrence so a
 single-source bump breaks the build.
+
+## og:video
+
+A scorecard link shared in iMessage or Discord plays a ~3.5 s clip that drains the score to zero, climbs back, and ends
+on the same card every other platform shows as the still `og:image`. This section is the agent-onboarding summary;
+design and the bump rule are in `DESIGN.md` §4.13, setup and cost in `RELEASES.md`, reason codes in
+`RELEASES-PREFLIGHT.md`.
+
+**Two Workers.** `anc-og-render` (staging `anc-og-render-staging`, config `src/og-render/wrangler.jsonc`) owns all
+drawing: the PNG card, the logo lookup with its `CONTEXT_DEV_API_KEY`, the clip frames, the GIF encode, and the Media
+Transformations binding. It serves no public route; the site reaches it only through its `RENDER` service binding, with
+four RPC calls: `request`, `requestMany`, `status`, `drawCard`. The site Worker keeps data loading, card keys, the
+public routes (`/og/score/<target>/<key>.png`, `/og/clip/<target>/<key>.mp4`), page tags, render requests, and the
+`og-rendered` consumer. Nothing under `src/worker/` imports from `src/og-render/` (`tests/og-render-boundary.test.ts`),
+and the shared contract lives in `src/shared/og-render.ts`. The render Worker deploys first in each `deploy.yml` job.
+
+**One job per card.** A `RenderJob` Durable Object, named `<target>:<key>`, claims each card's render once however many
+triggers ask, and runs it on its own alarm: draw and store the PNG, encode the clip, store it, send `og-rendered`. A
+failed attempt rethrows and Cloudflare retries the alarm; the last retry marks the job `failed` for 24 hours. Renders
+start from finished audits (the web audit core, the rescore Workflow, the live CLI Durable Object) and from the curated
+pass (`POST /api/og-curated-pass` after each deploy, and the weekly cron), never from a page view or a crawler fetch.
+Each environment has its own `og-rendered` queue (`og-rendered-staging`, `og-rendered`). The site consumes it in batches
+of up to 100 messages, at most 5 s after a clip lands, and purges each batch's page tags in one call, because Workers
+Cache purges run at 5 a minute with a burst of 25, shared with every other purge on the account. A refused purge retries
+its messages after 60 s, then 120 s, up to 300 s; the sixth refusal acknowledges them with an `og_rendered_gave_up`
+`hit-min-purge` record, and the page names its clip once its cached copy expires.
+
+**Diagnostic headers.** Every card PNG response carries `x-anc-card` (`drawn`, `stored`, or `fallback` when the render
+Worker could not draw and the site-wide card was served) and, for a drawn or stored card, `x-anc-card-logo` (`homepage`,
+`brand`, `stored`, `tile`). A scorecard page carries `x-anc-clip`: `present`, `off`, the job's state (`queued`,
+`rendering`, `failed`), `none` when no job holds the card, or `unknown` when the job did not answer within 250 ms; a live
+or failed job adds `x-anc-clip-run`, the run id its `og.render` log records carry. Read both from a `?v=` fetch, which
+is served uncached.
+
+**Commands.**
+
+```bash
+scripts/og/setup.sh staging [--check] [--json]   # one-time setup per environment, idempotent
+scripts/og/status.sh <base-url> <target> [--json] # one line per scorecard: card, clip, run id, next command
+scripts/og/smoke.sh <base-url>                    # live card and clip smoke on fresh fixture hosts
+```
+
+Both og scripts print prose by default and, with `--json`, one object
+`{reason, exit_code, message, value, next_step: {action, command, docs}}` whose reason comes from the closed set in
+`RELEASES-PREFLIGHT.md`. `status.sh` reads the environment from the base URL (`anc.dev` is production, anything else
+staging) and needs `ANC_STAGING_ACCESS_CLIENT_ID` and `ANC_STAGING_ACCESS_CLIENT_SECRET` exported to read staging
+through Cloudflare Access.
 
 ## Voice
 
@@ -282,14 +332,16 @@ Until then, the agent-side browser-verify rule above is the working gate.
 
 ## Local dev
 
-`bun run dev` (which runs `bun run build && wrangler dev --env staging --local --port 8787`) on `http://localhost:8787`
-is the only valid local preview. The Worker entrypoint at `src/worker/index.ts` is the source of content negotiation,
-the `applyHeaders` policy (`Link: rel=alternate`, `X-Llms-Txt`, staging `X-Robots-Tag: noindex`, `Cache-Control`), the
-`/mcp` transport, the `POST /api/score` transact endpoint with the `/scoring` progress page and the `/score/<target>`
-result route it forwards to, the retired-path redirects, the `/_internal/*` 404 guard, and the entry pages'
-`{{TURNSTILE_SITEKEY}}` substitution. Without the Worker, none of those contracts are visible. Static-file servers
-(`python -m http.server`, `serve`, `npx http-server`, etc.) bypass the Worker entirely and produce a false preview.
-Never use them to verify any of those surfaces or the `.md`-twin contract.
+`bun run dev` (which runs
+`bun run build && wrangler dev -c wrangler.jsonc -c src/og-render/wrangler.jsonc --env staging --local --port 8787`) on
+`http://localhost:8787` is the only valid local preview. The second config runs the render Worker in the same session,
+so the site's `RENDER` service binding resolves locally. The Worker entrypoint at `src/worker/index.ts` is the source of
+content negotiation, the `applyHeaders` policy (`Link: rel=alternate`, `X-Llms-Txt`, staging `X-Robots-Tag: noindex`,
+`Cache-Control`), the `/mcp` transport, the `POST /api/score` transact endpoint with the `/scoring` progress page and
+the `/score/<target>` result route it forwards to, the retired-path redirects, the `/_internal/*` 404 guard, and the
+entry pages' `{{TURNSTILE_SITEKEY}}` substitution. Without the Worker, none of those contracts are visible. Static-file
+servers (`python -m http.server`, `serve`, `npx http-server`, etc.) bypass the Worker entirely and produce a false
+preview. Never use them to verify any of those surfaces or the `.md`-twin contract.
 
 ```bash
 bun run dev    # http://localhost:8787, staging bindings, local Worker
@@ -307,6 +359,14 @@ staging Worker and bypass the local build.
 `.dev.vars.staging`, the per-environment local-secret file `wrangler dev --env staging` reads. `.dev.vars*` is
 gitignored, so the file is yours alone and never reaches a deploy. Same shape for `MCP_LIVE_SCORING_ENABLED` when
 exercising `score_cli`.
+
+**The video binding has no local simulation.** `--local` turns remote bindings off, so a local render cannot call the
+Media binding. Set `OG_VIDEO_ENABLED="true"` in the site's `.dev.vars.staging` and `LOCAL_MEDIA_STANDIN="true"` in the
+render Worker's `src/og-render/.dev.vars.staging`, and each render stores the committed sample clip
+(`src/og-render/fixtures/standin.mp4`) where the binding's output would go; `RenderJob`, its alarm, R2, the
+`og-rendered` queue, the purge, the page tags and `x-anc-clip` all run as deployed. The local `CONTEXT_DEV_API_KEY` for
+the brand-logo fallback lives in that same render Worker file. Real encoding is checked on staging by the og-cards
+smoke. `LOCAL_MEDIA_STANDIN` never appears in a `vars` block (`tests/wrangler-config.test.ts`).
 
 Production-mode preview (rare, only when verifying the production block of `wrangler.jsonc`):
 

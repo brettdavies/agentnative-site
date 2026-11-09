@@ -89,8 +89,8 @@ RUN set -eux; \
 
 RUN set -eux; \
     curl -fsSL -o /tmp/anc.tgz \
-        https://github.com/brettdavies/agentnative-cli/releases/download/v0.6.0/agentnative-x86_64-unknown-linux-gnu.tar.gz; \
-    echo '76c12e80b25a4da15ffad8bda086ae7b88703dd25d09754549d97a7229de2831  /tmp/anc.tgz' | sha256sum -c -; \
+        https://github.com/brettdavies/agentnative-cli/releases/download/v0.7.0/agentnative-x86_64-unknown-linux-gnu.tar.gz; \
+    echo '37d44d4ef1f577f37bc31a0dcaf49d0cdd73b5598199a1ea9031c18e63ce6a73  /tmp/anc.tgz' | sha256sum -c -; \
     tar xzf /tmp/anc.tgz -C /tmp/; \
     install -m 0755 /tmp/agentnative-x86_64-unknown-linux-gnu/anc /usr/local/bin/anc; \
     rm -rf /tmp/anc.tgz /tmp/agentnative-x86_64-unknown-linux-gnu; \

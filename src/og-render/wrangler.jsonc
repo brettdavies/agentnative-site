@@ -1,0 +1,51 @@
+// anc-og-render: draws every scorecard card and clip for the site Worker,
+// which reaches it only through its RENDER service binding. No public route,
+// no workers.dev URL. Deploy this Worker before the site Worker in each
+// environment: a service binding to a Worker that does not exist fails the
+// site's deploy. scripts/og/setup.sh creates the og-rendered queue first.
+//
+// Each environment block declares every binding itself and sets routes and
+// crons explicitly, because those keys inherit from the top level. The
+// migrations list is append-only in both blocks.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "anc-og-render",
+  "main": "index.ts",
+  "compatibility_date": "2026-04-01",
+  // nodejs_compat: the log emitter's request context imports node:async_hooks.
+  // global_fetch_strictly_public: the logo lookup fetches arbitrary homepages.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "send_metrics": false,
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true, "head_sampling_rate": 1.0 },
+  // A render measured 4.2 to 5.3 s of CPU warm and 3 to 4 s more on a cold
+  // isolate; the alarm default of 30 s leaves no room for a slow logo.
+  "limits": { "cpu_ms": 60000 },
+  "rules": [{ "type": "Data", "globs": ["**/*.ttf", "**/*.otf", "**/*.mp4"], "fallthrough": true }],
+  "routes": [],
+  "triggers": { "crons": [] },
+  "media": { "binding": "MEDIA" },
+  "durable_objects": { "bindings": [{ "class_name": "RenderJob", "name": "RENDER_JOB" }] },
+  "migrations": [{ "tag": "v1-render-job", "new_sqlite_classes": ["RenderJob"] }],
+  "r2_buckets": [{ "binding": "SCORE_CACHE", "bucket_name": "anc-score-cache" }],
+  "queues": { "producers": [{ "binding": "OG_RENDERED", "queue": "og-rendered" }] },
+  // CONTEXT_DEV_API_KEY is a `wrangler secret put` value, set by
+  // scripts/og/setup.sh. LOCAL_MEDIA_STANDIN lives only in the local
+  // src/og-render/.dev.vars.staging and never in a vars block.
+  "env": {
+    "staging": {
+      "name": "anc-og-render-staging",
+      "workers_dev": false,
+      "preview_urls": false,
+      "limits": { "cpu_ms": 60000 },
+      "routes": [],
+      "triggers": { "crons": [] },
+      "media": { "binding": "MEDIA" },
+      "durable_objects": { "bindings": [{ "class_name": "RenderJob", "name": "RENDER_JOB" }] },
+      "migrations": [{ "tag": "v1-render-job", "new_sqlite_classes": ["RenderJob"] }],
+      "r2_buckets": [{ "binding": "SCORE_CACHE", "bucket_name": "anc-score-cache-staging" }],
+      "queues": { "producers": [{ "binding": "OG_RENDERED", "queue": "og-rendered-staging" }] }
+    }
+  }
+}

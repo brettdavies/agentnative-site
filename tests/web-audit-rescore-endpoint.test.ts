@@ -4,7 +4,10 @@
 
 import { describe, expect, test } from 'bun:test';
 import { handleWebRescore, startWebRescore, type WebRescoreTriggerEnv } from '../src/worker/audit-web/rescore-trigger';
+import { resetWebSeedCacheForTests } from '../src/worker/audit-web/seed';
 import worker, { type Env } from '../src/worker/index';
+import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
+import { fakeRender, siteEnv } from './helpers/og-site-fakes';
 
 type StubOpts = {
   runningInstance?: string;
@@ -156,5 +159,28 @@ describe('scheduled()', () => {
       {} as ExecutionContext,
     );
     expect(createdIds).toHaveLength(1);
+  });
+
+  test('the weekly tick also runs the og curated pass, even when the Workflow will not start', async () => {
+    for (const createFails of [false, true]) {
+      _resetRegistryIndexCache();
+      resetWebSeedCacheForTests();
+      const render = fakeRender();
+      const rescore = makeEnv({ createdIds: [] });
+      if (createFails) {
+        rescore.WEB_RESCORE_WORKFLOW.create = async () => {
+          throw new Error('workflow create failed');
+        };
+      }
+      const env = { ...siteEnv({ render, ogVideo: 'true' }), ...rescore } as unknown as Env;
+      const tick = worker.scheduled?.(
+        { scheduledTime: Date.now(), cron: '0 9 * * SUN', noRetry: () => {} } as ScheduledController,
+        env,
+        {} as ExecutionContext,
+      );
+      if (createFails) await expect(tick).rejects.toThrow('workflow create failed');
+      else await tick;
+      expect(render.calls.filter((call) => call.method === 'requestMany')).toHaveLength(1);
+    }
   });
 });

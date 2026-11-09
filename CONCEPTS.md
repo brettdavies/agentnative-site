@@ -62,10 +62,15 @@ not skip this Worker.
 
 ### HIT-1d / HIT-min / MISS
 
-Three edge classes for this site. HIT-1d is bake-at-build (about a day of freshness, empty cache on a new Worker
-version). HIT-min is live-board HTML and markdown (`max-age=300`, purge by Cache-Tag when R2 is rewritten). MISS is
-every-request `no-store` (`/web/scoring*`, POST `/mcp`, `/api/score`, `/api/audit-web`). Homepage HTML and homepage
-markdown share HIT-min because they are one object that includes the live web pane.
+The three classes the format-class edge cache sorts a negotiated page into. HIT-1d holds bake-at-build pages, curated
+scorecard pages included, for about a day and starts empty on a new Worker version. HIT-min holds live pages (the
+homepage, the leaderboard, live and website scorecards) for minutes, and browsers revalidate on every view. MISS is
+never stored: error responses, the progress page, and a fetch made to bypass the cache.
+
+A stored page can carry a Cache-Tag naming what it shows, and a purge by that tag evicts it early: a HIT-min page when
+the data behind it is rewritten, a curated HIT-1d scorecard page when its social clip lands. Every purge draws on one
+small account-wide purge budget, so purges are batched. Homepage HTML and homepage markdown share HIT-min because they
+are one object that includes the live web pane.
 
 ## Audit funnel
 
@@ -311,6 +316,15 @@ An entry in the standards manifest: an external specification artifact the regis
 source type, pinned value, and canonicalization rule. The scheduled spec-drift poll compares each watched source against
 its pin and opens one issue per drifted source.
 
+## Social cards
+
+### Curated pass
+
+The batch that asks for a scorecard clip for every curated CLI card and every seeded website card whose clip is missing
+or stale. It runs after each deploy and on the weekly schedule, because curated cards change with a deploy or age out
+without an audit to ask for them; live audits ask for their own clips as they finish. While the og:video switch is off
+the pass asks for nothing and still reports success, so turning the switch on is followed by running the pass by hand.
+
 ## Agent discovery
 
 ### MCP endpoint
@@ -406,3 +420,22 @@ The permanent, open-format store of the site's raw telemetry events: Workers tra
 export chain into Apache Iceberg tables on the site's own R2 bucket, queried through the R2 SQL editor. It is the only
 layer that can answer months-horizon questions; the live Workers Logs window and the coarse zone rollups sit in front of
 it with platform-capped retention.
+
+## Releases
+
+### Release overlay
+
+How the site ships: a release branch is cut from main, takes dev's whole tree at one dev commit, drops the paths that
+never ship and any feature held back from that release, and merges to main as one squash commit. Main and dev share no
+recent history, so the overlay asserts the end state instead of merging. A file that exists only on main is deleted by
+the next overlay unless it was synced back to dev after its release, which is why the changelog has to reach dev.
+
+### Deploy stamp
+
+The site's release version, `<base>.<epoch>-g<sha7>`: a major.minor base that only a maintainer raises, the committer
+time of the dev commit the release overlay ships, and that commit's short hash. The same commit always yields the same
+stamp, and a stamp that would not sort above every earlier release is refused. Each release carries it in its tag,
+branch name, GitHub Release, and changelog heading; no page displays it, and the footer keeps showing the spec version.
+
+A stamp names a commit, so it holds only when the release's tree is that commit's: every step of the cut reads the one
+recorded commit, never dev's current tip.

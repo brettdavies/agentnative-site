@@ -16,6 +16,7 @@ import {
   isAuditPath,
   isFixPath,
   isHitMinPath,
+  isResultTarget,
   isScorePath,
   leaderboardPath,
   normalizeTarget,
@@ -31,6 +32,7 @@ import {
 } from '../src/shared/audit-routes';
 import { keyFor } from '../src/worker/score/cache';
 import type { InstallSpec } from '../src/worker/score/discover-binary';
+import { validateInput } from '../src/worker/score/validate';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 function ok(raw: string) {
@@ -55,14 +57,10 @@ describe('classifyTarget: the classification table', () => {
     expect(ok('  pip install some.pkg ')).toMatchObject({ lane: 'cli', target: 'pip install some.pkg' });
   });
 
-  test('owner/repo and GitHub repo URLs are CLI, kept as entered and trimmed', () => {
+  test('owner/repo and GitHub repo URLs are CLI, a URL normalized to its owner/repo', () => {
     expect(ok('cli/cli')).toMatchObject({ lane: 'cli', kind: 'cli', target: 'cli/cli' });
-    expect(ok(' https://github.com/cli/cli ')).toMatchObject({
-      lane: 'cli',
-      kind: 'cli',
-      target: 'https://github.com/cli/cli',
-    });
-    expect(ok('github.com/cli/cli')).toMatchObject({ lane: 'cli', kind: 'cli', target: 'github.com/cli/cli' });
+    expect(ok(' https://github.com/cli/cli ')).toMatchObject({ lane: 'cli', kind: 'cli', target: 'cli/cli' });
+    expect(ok('github.com/cli/cli')).toMatchObject({ lane: 'cli', kind: 'cli', target: 'cli/cli' });
   });
 
   test('a /tree/<branch> URL and the owner/repo@branch form are branch-scoped CLI', () => {
@@ -339,16 +337,38 @@ describe('targetOfSpec', () => {
   });
 });
 
+describe('every spelling of a GitHub repo reaches the score pipeline as the repo', () => {
+  // The progress page builds a result path from the classified target, and the
+  // CLI lane validates that same target, so each spelling the classifier
+  // accepts has to come out as one both of them read.
+  const EMPTY_REGISTRY = { by_slug: {}, by_owner_repo: {} };
+
+  test.each([
+    'https://github.com/sindresorhus/gh-home',
+    'http://github.com/sindresorhus/gh-home',
+    'https://www.github.com/sindresorhus/gh-home',
+    'https://github.com/sindresorhus/gh-home.git',
+    'https://github.com/sindresorhus/gh-home/',
+    'https://github.com/sindresorhus/gh-home?tab=readme-ov-file',
+    'github.com/sindresorhus/gh-home',
+    'www.github.com/sindresorhus/gh-home',
+    'sindresorhus/gh-home',
+  ])('%s', (raw) => {
+    const { target } = ok(raw);
+    expect(target).toBe('sindresorhus/gh-home');
+    expect(isResultTarget(target)).toBe(true);
+    expect(validateInput(target, EMPTY_REGISTRY)).toEqual({
+      kind: 'github-url',
+      owner: 'sindresorhus',
+      repo: 'gh-home',
+    });
+  });
+});
+
 describe('review fixtures: classification edges', () => {
   test('a GitHub URL keeps its repo target when a query or fragment is attached', () => {
-    expect(ok('https://github.com/cli/cli?tab=readme-ov-file')).toMatchObject({
-      kind: 'cli',
-      target: 'https://github.com/cli/cli',
-    });
-    expect(ok('https://github.com/cli/cli#readme')).toMatchObject({
-      kind: 'cli',
-      target: 'https://github.com/cli/cli',
-    });
+    expect(ok('https://github.com/cli/cli?tab=readme-ov-file')).toMatchObject({ kind: 'cli', target: 'cli/cli' });
+    expect(ok('https://github.com/cli/cli#readme')).toMatchObject({ kind: 'cli', target: 'cli/cli' });
     expect(ok('https://github.com/o/r/tree/main?x=1')).toMatchObject({ kind: 'cli-branch', target: 'o/r@main' });
   });
 
