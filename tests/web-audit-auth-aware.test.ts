@@ -632,7 +632,7 @@ const PRESENT_ROWS_DRAWING_401 = [
 
 /**
  * A protected server whose modern handshake fails transiently: the
- * discovery POSTs draw the 401, wave 1's initialize reads the 401 discovery
+ * discovery POSTs draw the 401, the initialize wire probe reads the 401 discovery
  * already drew rather than asking again, and server/discover, which
  * discovery never sends, gets `transient` instead.
  */

@@ -63,6 +63,14 @@ export function retryShapedWhy(status: number | null): string | null {
   return answer === null ? null : `the target answered ${answer}; not scored`;
 }
 
+/** The request's own timeout ended it, rather than any answer from the target. */
+export function timedOut(resp: Pick<ProbeResponse, 'error'>): boolean {
+  return resp.error?.startsWith('TimeoutError') === true;
+}
+
+/** Why a nested probe has no answer: the check's own deadline came first. */
+export const NESTED_BUDGET_EXHAUSTED_WHY = 'nested-probe budget exhausted';
+
 /** Join a path to the base, or pass an absolute URL through unchanged. */
 export function resolveUrl(base: string, pathOrUrl: string): string {
   if (pathOrUrl.length === 0) return '';

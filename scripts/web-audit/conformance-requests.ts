@@ -1,8 +1,9 @@
 // Each scenario's request set: what the engine sent, in the order and the shape
 // `requests.json` commits. The CLI's port reproduces this set, so the two
 // generation failures here are contract failures. A request sent twice breaks
-// the memo's promise to a target, and a set that moves with the schedule is one
-// no second engine, running its checks on its own threads, could match.
+// the memo's promise to a target, and a set that moves with the schedule, or with
+// the order its answers arrive in, is one no second engine, running its work on
+// its own threads, could match.
 
 import { type HopRequest, normalizedHeaders, requestIdentityKey } from '../../src/worker/audit-web/request-hop';
 
@@ -32,23 +33,28 @@ export function requestsJson(requests: readonly HopRequest[]): string {
 
 /**
  * The concurrent run's requests in identity-key order. Throws naming the scenario
- * when either run sent one request twice, or when its scorecard or request set at
- * concurrency 1 differs from the default run.
+ * when either run sent one request twice, or when its scorecard or request set
+ * under `schedule` differs from the default run.
  */
-export function scheduleIndependentRequests(name: string, concurrent: ScheduledRun, serial: ScheduledRun): HopRequest[] {
+export function scheduleIndependentRequests(
+  name: string,
+  schedule: string,
+  concurrent: ScheduledRun,
+  other: ScheduledRun,
+): HopRequest[] {
   const requests = sortedRequests(name, concurrent.requests);
-  const serialRequests = sortedRequests(name, serial.requests);
-  if (serial.output !== concurrent.output) {
-    throw new Error(`scenario ${name}: the scorecard at concurrency 1 differs from the default run`);
+  const otherRequests = sortedRequests(name, other.requests);
+  if (other.output !== concurrent.output) {
+    throw new Error(`scenario ${name}: the scorecard ${schedule} differs from the default run`);
   }
   const concurrentKeys = new Set(requests.map(requestIdentityKey));
-  const serialKeys = new Set(serialRequests.map(requestIdentityKey));
-  const onlySerial = [...serialKeys].filter((key) => !concurrentKeys.has(key));
-  const onlyConcurrent = [...concurrentKeys].filter((key) => !serialKeys.has(key));
-  if (onlySerial.length > 0 || onlyConcurrent.length > 0) {
+  const otherKeys = new Set(otherRequests.map(requestIdentityKey));
+  const onlyOther = [...otherKeys].filter((key) => !concurrentKeys.has(key));
+  const onlyConcurrent = [...concurrentKeys].filter((key) => !otherKeys.has(key));
+  if (onlyOther.length > 0 || onlyConcurrent.length > 0) {
     throw new Error(
-      `scenario ${name}: the request set at concurrency 1 differs from the default run; ` +
-        `only at concurrency 1: ${onlySerial.join(', ') || '(none)'}; only at the default: ${onlyConcurrent.join(', ') || '(none)'}`,
+      `scenario ${name}: the request set ${schedule} differs from the default run; ` +
+        `only ${schedule}: ${onlyOther.join(', ') || '(none)'}; only at the default: ${onlyConcurrent.join(', ') || '(none)'}`,
     );
   }
   return requests;

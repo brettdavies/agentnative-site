@@ -38,6 +38,14 @@ const failure = (error: string): ExchangeResponse => ({ error });
 const TIMEOUT = failure('TimeoutError: deadline exceeded');
 const REFUSED = failure('TypeError: connection refused');
 
+// What discovery asks before the root has answered: the SEP-1649 cards, the AI catalog and the API catalog.
+const FIRST_DOCUMENT_READS = [
+  '/.well-known/mcp.json',
+  '/.well-known/mcp/server-card.json',
+  '/.well-known/ai-catalog.json',
+  '/.well-known/api-catalog',
+];
+
 const NOT_FOUND = html('<html><body><h1>Not found</h1><p>No such page.</p></body></html>', {}, 404);
 const SERVER_ERROR = html('<html><body><h1>Internal error</h1></body></html>', {}, 500);
 
@@ -425,6 +433,7 @@ function scenario(
     unmatched?: ExchangeResponse;
     allow_unmatched?: boolean;
     follow_declarations?: boolean;
+    failing_handlers?: string[];
   } = {},
 ): Scenario {
   return {
@@ -434,6 +443,7 @@ function scenario(
     site_type: opts.site_type ?? null,
     spec_version: SPEC_VERSION,
     ...(opts.follow_declarations !== undefined ? { follow_declarations: opts.follow_declarations } : {}),
+    ...(opts.failing_handlers !== undefined ? { failing_handlers: opts.failing_handlers } : {}),
     unmatched: opts.unmatched ?? NOT_FOUND,
     allow_unmatched: opts.allow_unmatched ?? true,
     exchanges,
@@ -669,10 +679,53 @@ export const SCENARIOS: Record<string, Scenario> = {
     ],
   ),
   'run-root-redirects-to-http': scenario(
-    'every https request, the root included, redirects to the http root, which would answer: the run ends unreachable after the root request alone, and nothing is requested over http',
+    'every https request, the root included, redirects to the http root, which would answer: the run ends unreachable on the root answer, the first document reads having gone out beside it, and nothing is requested over http',
     ['agent-ua-reachable', 'content-without-js'],
-    [get('/', redirect('http://example.com/')), get('http://example.com/', html(rootHtml()))],
+    [
+      get('/', redirect('http://example.com/')),
+      ...FIRST_DOCUMENT_READS.map((path) => get(path, redirect('http://example.com/'))),
+      get('http://example.com/', html(rootHtml())),
+    ],
     { allow_unmatched: false },
+  ),
+  'run-root-redirects-to-http-catalog-card': scenario(
+    'the root redirects to http while the AI catalog names a same-origin card: the run ends unreachable on the root answer, and the card is never requested, whichever of the two answers first',
+    ['agent-ua-reachable', 'mcp-server-card'],
+    [
+      get('/', redirect('http://example.com/')),
+      get(
+        '/.well-known/ai-catalog.json',
+        json({ entries: [{ type: MCP_CARD_TYPE, url: '/cards/mcp.json' }] }),
+      ),
+      get('/cards/mcp.json', json({ remotes: [] })),
+      ...FIRST_DOCUMENT_READS.filter((path) => path !== '/.well-known/ai-catalog.json').map((path) =>
+        get(path, NOT_FOUND),
+      ),
+    ],
+    { allow_unmatched: false },
+  ),
+  'run-root-redirects-to-http-document-redirect': scenario(
+    'the root redirects to http while a first-pass document redirects to another https path: the run ends unreachable on the root answer, and the document hop is never requested, whichever of the two answers first',
+    ['agent-ua-reachable', 'mcp-server-card'],
+    [
+      get('/', redirect('http://example.com/')),
+      get('/.well-known/mcp.json', redirect('/moved-card.json')),
+      get('/moved-card.json', json(SERVER_CARD)),
+      ...FIRST_DOCUMENT_READS.filter((path) => path !== '/.well-known/mcp.json').map((path) => get(path, NOT_FOUND)),
+    ],
+    { allow_unmatched: false },
+  ),
+  'run-source-handlers-fail': scenario(
+    'three source checks whose antecedents would not hold throw in their handlers: each keeps its own error row rather than reading not applicable, sends no request, and the checks gated on it read as on any failed antecedent',
+    ['openapi', 'llms-full-txt', 'oauth-discovery', 'llms-full-txt-scoped', 'json-schemas', 'auth-md'],
+    [...baseline()],
+    { failing_handlers: ['openapi', 'llms-full-txt', 'oauth-discovery'] },
+  ),
+  'run-mcp-wire-probe-handler-fails': scenario(
+    'the initialize wire probe throws in its handler on a server that answers everything else: its row stays an error, the session never starts, and the modern lane still scores',
+    ['mcp-initialize', 'mcp-server-discover', 'mcp-modern-tools-list'],
+    [...baseline(), ...cardSurface(), ...dualStackMcp({ cors: 'full' })],
+    { failing_handlers: ['mcp-initialize'] },
   ),
   'run-body-over-cap': scenario(
     'bodies past the 64 KiB probe cap are truncated: a huge tools/list no longer parses and a huge JSON error body reads as non-JSON',
@@ -1624,6 +1677,16 @@ export const SCENARIOS: Record<string, Scenario> = {
     get('/llms.txt', text(LLMS_TXT_FULL)),
     get('/docs/guide.md', md(GUIDE_MD)),
   ]),
+  'llms-quality-link-budget-exhausted': scenario(
+    "a link still unanswered at the check's deadline reads as the budget running out on that link's own row, which decides the links row as an operational error, and every other link is still asked",
+    ['llms-txt-links'],
+    [
+      ...baseline(),
+      get('/llms.txt', text(LLMS_TXT_FULL)),
+      get('/docs/guide.md', TIMEOUT),
+      get('/docs/api.md', md(GUIDE_MD)),
+    ],
+  ),
   'llms-quality-dead-and-http-link': scenario(
     'an llms.txt that lists a dead link and an http link: the http link is never requested, though it would answer with a server error that would read broken, and the dead link decides the links row, which reads absent',
     ['llms-txt-links'],

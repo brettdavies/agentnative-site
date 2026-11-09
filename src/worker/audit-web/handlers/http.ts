@@ -4,7 +4,7 @@
 // Every fetch flows through the SSRF guard.
 
 import type { RetainedDocumentKey } from '../../../shared/web-audit-documents';
-import { assertHttp, classifyAliasProbe, type ExpectBlock, type ProbeResponse } from '../assert';
+import { assertHttp, classifyAliasProbe, type ExpectBlock, expectReadsBody, type ProbeResponse } from '../assert';
 import type { WebCheck } from '../registry';
 import { guardedFetch, STATUS_ONLY_BODY_BYTES } from '../ssrf';
 import {
@@ -15,6 +15,7 @@ import {
   retryShapedWhy,
   sameOriginRecoveryLink,
   substituteEndpoint,
+  timedOut,
   timeoutMsFor,
 } from './shared';
 import type { EvidenceItem, HandlerContext, ProbeOutcome, ProbeStatus } from './types';
@@ -50,7 +51,7 @@ export function classifyMiss(
 ): Exclude<ProbeStatus, 'pass' | 'na'> {
   if (redirectsToHttp(resp)) return 'absent';
   if (resp.error !== null) {
-    return resp.error.startsWith('TimeoutError') && hasExplicitTimeout ? 'broken' : 'error';
+    return timedOut(resp) && hasExplicitTimeout ? 'broken' : 'error';
   }
   if (resp.status === 404 || resp.status === 410) return 'absent';
   const hasStatusExpectation = expect.status !== undefined || expect.status_below !== undefined;
@@ -90,6 +91,17 @@ export function assessResponse(
   };
 }
 
+/**
+ * A row reads no body when nothing it asserts or keeps is in one, so a 70 MB
+ * llms-full.txt costs its headers; the memo keeps reading the start of the body
+ * for a later row that needs it. `with.timeout` opts a row into hang detection,
+ * whose failure is a body held open after a clean status (mcp-get-fast-fail), so
+ * that row reads through.
+ */
+function readsStatusOnly(w: HttpWith): boolean {
+  return w.retain_body !== true && w.timeout === undefined && !expectReadsBody(w.expect ?? {});
+}
+
 export async function runHttp(check: WebCheck, ctx: HandlerContext): Promise<ProbeOutcome> {
   const w = check.with as HttpWith;
   const paths = w.path_any ?? (w.path !== undefined ? [w.path] : []);
@@ -109,7 +121,12 @@ export async function runHttp(check: WebCheck, ctx: HandlerContext): Promise<Pro
       : await guardedFetch(
           url,
           { method, headers },
-          { ...ctx.fetchOptions, timeoutMs, ...endpointRedirects(rawPath, ctx.mcpEndpointFollowed, method) },
+          {
+            ...ctx.fetchOptions,
+            timeoutMs,
+            ...(readsStatusOnly(w) ? { maxBodyBytes: STATUS_ONLY_BODY_BYTES } : {}),
+            ...endpointRedirects(rawPath, ctx.mcpEndpointFollowed, method),
+          },
         );
     // Settled ahead of the assertion, as on every other probe of the MCP
     // endpoint: an expectation like `status_below: 500` would read a busy

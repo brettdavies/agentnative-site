@@ -14,7 +14,7 @@ import { type McpDeclaration, sameOrigin } from './discovery-documents';
 import { legacyInitializeBody, legacyProbeHeaders, modernProbeBody, modernProbeHeaders } from './handlers/mcp';
 import type { EvidenceItem } from './handlers/types';
 import type { ChallengedPath } from './mcp-auth';
-import { type AuditFetchOptions, type GuardedFetchInit, guardedFetch, REDIRECT_STATUSES } from './ssrf';
+import { type DiscoveryFetchOptions, type GuardedFetchInit, guardedFetch, REDIRECT_STATUSES } from './ssrf';
 
 /** Where a POST answer redirected off the audited origin, as the URL a hop would request, or null. */
 function offOriginRedirect(url: string, resp: ProbeResponse): string | null {
@@ -57,7 +57,7 @@ export async function probeCommonPaths(
   candidates: ReadonlyArray<{ path: string; url: string }>,
   protocolVersion: string,
   timeoutMs: number,
-  fetchOptions: AuditFetchOptions | undefined,
+  fetchOptions: DiscoveryFetchOptions | undefined,
 ): Promise<PostProbing> {
   const send = (init: GuardedFetchInit) =>
     Promise.all(
