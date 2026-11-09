@@ -1,10 +1,18 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { RELAY_DEADLINE_SECONDS } from '../src/worker/audit/inflight';
 import { type ContainerControl, ContainerRuns } from '../src/worker/score/container-runs';
 import { doError } from '../src/worker/score/core';
 import type { InstallSpec } from '../src/worker/score/discover-binary';
-import { Sandbox, type ScoreSandboxEnv, streamScore } from '../src/worker/score/do';
+import {
+  CONTAINER_INSTANCE_TIMEOUT_MS,
+  CONTAINER_READY_TIMEOUT_MS,
+  PURGE_TIMEOUT_MS,
+  Sandbox,
+  type ScoreSandboxEnv,
+  streamScore,
+} from '../src/worker/score/do';
 import { statusForError, toAuditError } from '../src/worker/score/response-shape';
-import type { ScoreResult } from '../src/worker/score/sandbox-exec';
+import { type ScoreResult, TOTAL_TIMEOUT_MS } from '../src/worker/score/sandbox-exec';
 import { captureLogs, type LogCapture } from './helpers/log-capture';
 
 const RESULT: ScoreResult = { ok: false, error: 'timeout' };
@@ -171,6 +179,31 @@ describe('ContainerRuns: one container for one run', () => {
   });
 });
 
+describe('ContainerRuns: a run ends at its teardown', () => {
+  test('a run that outlives its teardown can send nothing more', async () => {
+    const { container } = fakeContainer();
+    const claim = new ContainerRuns(container).claim();
+    const calls: string[] = [];
+    const scoped = claim.scoped({
+      setOutboundHandler: async (name: string) => {
+        calls.push(name);
+      },
+      exec: async (command: string) => {
+        calls.push(command);
+        return { success: true, stdout: '', stderr: '' };
+      },
+    });
+
+    await scoped.exec('during');
+    await scoped.setOutboundHandler('during-handler');
+    await claim.settle(Promise.resolve());
+
+    await expect(scoped.exec('after')).rejects.toThrow('run is over');
+    await expect(scoped.setOutboundHandler('after-handler')).rejects.toThrow('run is over');
+    expect(calls).toEqual(['during', 'during-handler']);
+  });
+});
+
 describe('ContainerRuns: teardown never costs a run its result', () => {
   test('a teardown that throws keeps the result and logs once, and the next run refuses the container still up', async () => {
     const { container } = fakeContainer({
@@ -218,14 +251,16 @@ describe('ContainerRuns: teardown never costs a run its result', () => {
 });
 
 describe('ContainerRuns: the instance cap', () => {
-  const capMessages = [
-    'there is no container instance that can be provided to this durable object',
-    'There is no container instance available at this time',
-    'Maximum number of running container instances exceeded',
-  ];
+  const NO_INSTANCE = 'there is no container instance that can be provided to this durable object';
+  const CAP = 'Maximum number of running container instances exceeded';
+  const refusals = [
+    [NO_INSTANCE, 'no_container_instance'],
+    ['There is no container instance available at this time', 'no_container_instance'],
+    [CAP, 'at_instance_cap'],
+  ] as const;
 
-  for (const message of capMessages) {
-    test(`"${message}" answers sandbox_busy, scores nothing, and logs the field`, async () => {
+  for (const [message, field] of refusals) {
+    test(`"${message}" answers sandbox_busy, scores nothing, and logs ${field}`, async () => {
       const { container, events } = fakeContainer({
         start: async () => {
           throw new Error(message);
@@ -239,14 +274,30 @@ describe('ContainerRuns: the instance cap', () => {
 
       expect(result).toEqual({ ok: false, error: 'sandbox_busy' });
       expect(events).toEqual([]);
-      expect(sandboxRecords().filter((r) => r.at_instance_cap === true)).toHaveLength(1);
+      const records = sandboxRecords();
+      expect(records.filter((r) => r[field] === true)).toHaveLength(1);
+      const other = field === 'at_instance_cap' ? 'no_container_instance' : 'at_instance_cap';
+      expect(records.filter((r) => other in r)).toEqual([]);
     });
   }
+
+  test('the platform cap text under the SDK no-instance error logs at_instance_cap', async () => {
+    const { container } = fakeContainer({
+      start: async () => {
+        throw new Error(NO_INSTANCE, { cause: new Error(CAP) });
+      },
+    });
+
+    await new ContainerRuns(container).claim().run(async () => RESULT);
+
+    expect(sandboxRecords().filter((r) => r.at_instance_cap === true)).toHaveLength(1);
+    expect(sandboxRecords().filter((r) => 'no_container_instance' in r)).toEqual([]);
+  });
 
   test('the cap is recognized through a wrapped cause', async () => {
     const { container } = fakeContainer({
       start: async () => {
-        throw new Error('start failed', { cause: new Error('rpc failed', { cause: new Error(capMessages[0]) }) });
+        throw new Error('start failed', { cause: new Error('rpc failed', { cause: new Error(NO_INSTANCE) }) });
       },
     });
 
@@ -271,7 +322,7 @@ describe('ContainerRuns: the instance cap', () => {
     ).rejects.toThrow('image pull failed');
 
     expect(events).toEqual([]);
-    expect(sandboxRecords().filter((r) => 'at_instance_cap' in r)).toEqual([]);
+    expect(sandboxRecords().filter((r) => 'at_instance_cap' in r || 'no_container_instance' in r)).toEqual([]);
   });
 
   test('sandbox_busy keeps its code through doError and maps to 503 with the retry text', () => {
@@ -283,6 +334,11 @@ describe('ContainerRuns: the instance cap', () => {
       message: 'The scoring sandbox is busy. Try again in a minute.',
     });
   });
+});
+
+test('the relay deadline covers a container start, the run budget, and the purge', () => {
+  const needed = CONTAINER_INSTANCE_TIMEOUT_MS + CONTAINER_READY_TIMEOUT_MS + TOTAL_TIMEOUT_MS + PURGE_TIMEOUT_MS;
+  expect(RELAY_DEADLINE_SECONDS * 1000).toBeGreaterThan(needed);
 });
 
 describe('Sandbox: every audit goes through a claim', () => {
@@ -301,9 +357,17 @@ describe('Sandbox: every audit goes through a claim', () => {
     const harness: Harness = {
       runs: {
         claim: () => ({
-          run: async () => {
+          run: async (score: () => Promise<ScoreResult>) => {
             events.push('run');
+            await score().catch(() => {});
             return { ok: false, error: 'sandbox_busy' };
+          },
+          scoped: () => {
+            events.push('scoped');
+            return {
+              setOutboundHandler: async () => {},
+              exec: async () => ({ success: true, stdout: '', stderr: '' }),
+            };
           },
           settle: (done: Promise<void>) => done.then(() => void events.push('settle')),
         }),
@@ -316,8 +380,8 @@ describe('Sandbox: every audit goes through a claim', () => {
     const text = await res.text();
     await Promise.all(waited);
 
-    expect(JSON.parse(text.trim())).toEqual({ error: 'sandbox_busy' });
-    expect(events).toEqual(['run', 'settle']);
+    expect(JSON.parse(text.trim().split('\n').at(-1) ?? '')).toEqual({ error: 'sandbox_busy' });
+    expect(events).toEqual(['run', 'scoped', 'settle']);
   });
 
   test('the Durable Object exposes no audit entry point outside fetch', () => {

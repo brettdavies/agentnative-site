@@ -4,15 +4,15 @@
 
 import { withinMs } from '../../shared/within-ms';
 import { emitLog } from '../telemetry/log';
-import type { ScoreResult } from './sandbox-exec';
+import type { ContainerLike, ScoreResult } from './sandbox-exec';
 
 // destroy() can hang on a container that is already wedged.
 const DESTROY_TIMEOUT_MS = 15_000;
 
-const INSTANCE_CAP_MESSAGES = [
-  'there is no container instance',
-  'maximum number of running container instances exceeded',
-];
+const INSTANCE_CAP_MESSAGE = 'maximum number of running container instances exceeded';
+const NO_INSTANCE_MESSAGE = 'there is no container instance';
+
+type StartRefusal = 'at_instance_cap' | 'no_container_instance';
 
 export type ContainerControl = {
   isRunning(): boolean;
@@ -23,20 +23,26 @@ export type ContainerControl = {
 export type RunClaim = {
   /** Runs `score` in a new container once every earlier claim has settled. */
   run(score: () => Promise<ScoreResult>): Promise<ScoreResult>;
+  /** `sandbox`, refusing every call once this claim's teardown has begun. */
+  scoped(sandbox: ContainerLike): ContainerLike;
   /** Destroys that container after `done`, then lets the next claim start. */
   settle(done: Promise<void>): Promise<void>;
 };
 
 // The SDK wraps the platform's message in a cause chain, and the error can
-// cross a realm, so this reads messages rather than testing `instanceof`.
-function atInstanceCap(error: unknown): boolean {
+// cross a realm, so this reads messages rather than testing `instanceof`. The
+// SDK's no-instance message also covers a VM still provisioning, so only the
+// platform's own text, anywhere in the chain, names the cap.
+function startRefusal(error: unknown): StartRefusal | null {
+  let refusal: StartRefusal | null = null;
   let current: unknown = error;
   for (let depth = 0; depth < 8 && current != null; depth += 1) {
     const message = String((current as { message?: unknown }).message ?? current).toLowerCase();
-    if (INSTANCE_CAP_MESSAGES.some((signature) => message.includes(signature))) return true;
+    if (message.includes(INSTANCE_CAP_MESSAGE)) return 'at_instance_cap';
+    if (message.includes(NO_INSTANCE_MESSAGE)) refusal = 'no_container_instance';
     current = (current as { cause?: unknown }).cause;
   }
-  return false;
+  return refusal;
 }
 
 export class ContainerRuns {
@@ -53,12 +59,31 @@ export class ContainerRuns {
     this.last = new Promise<void>((resolve) => {
       release = resolve;
     });
+    // The run's time limit abandons its promise without stopping it, and the
+    // SDK starts a container for any call that finds none running.
+    let over = false;
+    const assertOpen = (): void => {
+      if (over) throw new Error('run is over');
+    };
     return {
       run: (score) => previous.then(() => this.startFresh(score)),
+      scoped: (sandbox) => ({
+        setOutboundHandler: async <P>(name: string, params?: P) => {
+          assertOpen();
+          await sandbox.setOutboundHandler(name, params);
+        },
+        exec: async (command, options) => {
+          assertOpen();
+          return sandbox.exec(command, options);
+        },
+      }),
       settle: (done) =>
         done
           .catch(() => {})
-          .then(() => this.tearDown())
+          .then(() => {
+            over = true;
+            return this.tearDown();
+          })
           .finally(release),
     };
   }
@@ -71,8 +96,9 @@ export class ContainerRuns {
     try {
       await this.container.start();
     } catch (error) {
-      if (!atInstanceCap(error)) throw error;
-      emitLog({ scope: 'score.sandbox' }, { at_instance_cap: true });
+      const refusal = startRefusal(error);
+      if (!refusal) throw error;
+      emitLog({ scope: 'score.sandbox' }, { [refusal]: true });
       return { ok: false, error: 'sandbox_busy' };
     }
     return score();

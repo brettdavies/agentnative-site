@@ -126,8 +126,8 @@ export const handlers = { allowedInstall, noHttp };
 // A run that cannot get an instance within this limit reports the sandbox as
 // busy, so a caller at the cap is told to retry sooner than the SDK's own
 // start limits would.
-const CONTAINER_INSTANCE_TIMEOUT_MS = 15_000;
-const CONTAINER_READY_TIMEOUT_MS = 30_000;
+export const CONTAINER_INSTANCE_TIMEOUT_MS = 15_000;
+export const CONTAINER_READY_TIMEOUT_MS = 30_000;
 
 export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
   // DIAGNOSTIC: HTTPS interception OFF to isolate whether the SDK's
@@ -172,7 +172,7 @@ export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
     const claim = this.runs.claim();
     const { body, done } = streamScore(parsed.spec, {
       env: this.env,
-      run: (spec, onPhase) => claim.run(() => runSandboxScore(this, spec, { onPhase })),
+      run: (spec, onPhase) => claim.run(() => runSandboxScore(claim.scoped(this), spec, { onPhase })),
       purge: async (tags) => {
         await invokeCachedPurge(this.ctx, tags);
       },
@@ -246,7 +246,7 @@ export type ScoredValue = { scorecard: unknown; anc_version: string; source_sha?
 
 // The purge sits between the R2 write and the result line; a stalled RPC
 // must not hold the client's result.
-const PURGE_TIMEOUT_MS = 5_000;
+export const PURGE_TIMEOUT_MS = 5_000;
 
 // Best-effort R2 write after a successful score, under the key the result
 // route reads: `scores/<binary>/...` for an installed binary and

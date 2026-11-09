@@ -177,7 +177,7 @@ type _ContainerLikeShapeCheck = Sandbox extends ContainerLike ? true : never;
 const _shapeCheck: _ContainerLikeShapeCheck = true;
 void _shapeCheck;
 
-const TOTAL_TIMEOUT_MS = 60_000; // R7 — install + score combined.
+export const TOTAL_TIMEOUT_MS = 60_000; // R7 — install + score combined.
 const SHORT_EXEC_TIMEOUT_MS = 5_000; // `which`, `anc --version`.
 
 // Per-PM install-host allowlists. Only these hosts are reachable during
