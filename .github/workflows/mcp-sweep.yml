@@ -6,7 +6,8 @@
 # both deployments every day regardless of repo activity: the core MCP
 # checks (scripts/release/mcp-smoke.sh --core-only) plus one homepage
 # HTML probe per leg, and on production a stdlib User-Agent probe
-# (scripts/release/ua-ban-probe.sh). Heavy suites (Playwright,
+# (scripts/release/ua-ban-probe.sh) and the web-audit version signal
+# (scripts/smoke-web-audit-version.sh). Heavy suites (Playwright,
 # Lighthouse, the metered audit gates) stay commit-gated in deep-check
 # and the release scripts.
 #
@@ -165,3 +166,12 @@ jobs:
       # leg only: BIC on *.workers.dev cannot be turned off.
       - name: Probe stdlib User-Agents
         run: scripts/release/ua-ban-probe.sh "$SWEEP_BASE_URL"
+
+      # A client treats any failure of this signal as no signal, so nothing
+      # else reports a broken one. No retries, because no deploy is propagating
+      # here. It still runs when an earlier probe in this leg fails.
+      - name: Smoke web-audit version signal
+        if: ${{ !cancelled() }}
+        env:
+          SMOKE_RETRIES: '0'
+        run: scripts/smoke-web-audit-version.sh "$SWEEP_BASE_URL"

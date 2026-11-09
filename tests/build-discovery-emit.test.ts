@@ -276,6 +276,14 @@ describe('llms.txt Programmatic access section', () => {
     expect(section).toContain('Full recipes');
   });
 
+  // The web audit reads any /api/ path in llms.txt as the site declaring a REST
+  // API (src/worker/audit-web/antecedents/api.ts), which turns on its OpenAPI,
+  // error-format, and rate-limit checks for this site's own public score.
+  test('names no /api/ path, so a listing cannot change what the audit asks of this site', async () => {
+    const llms = await readFile(join(DIST_DIR, 'llms.txt'), 'utf8');
+    expect(llms.split('\n').filter((line) => /\/api\//i.test(line))).toEqual([]);
+  });
+
   test('only one Programmatic access section exists in llms.txt', async () => {
     const llms = await readFile(join(DIST_DIR, 'llms.txt'), 'utf8');
     const matches = llms.match(/## Programmatic access/g) ?? [];

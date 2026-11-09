@@ -38,7 +38,7 @@ import { homeTag, resultTag } from './audit-web/hit-min-tags';
 //
 //   HIT-1d (bake-at-build HTML/markdown,  Cache-Control: public, max-age=300,
 //   curated /score/<slug> pages, bare     stale-while-revalidate=60
-//   /audit)                               (no s-maxage — that re-arms the
+//   /audit, the web-audit version signal) (no s-maxage — that re-arms the
 //                                         custom-domain zone HIT that stripped
 //                                         Vary)
 //                                         Cloudflare-CDN-Cache-Control:
