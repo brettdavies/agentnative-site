@@ -9,6 +9,10 @@ describe('sandbox image permissions', () => {
     expect(dockerfile).toMatch(/install -m 0111 \S+\/anc \/usr\/local\/bin\/anc/);
   });
 
+  test('nothing changes the auditor once it is installed', () => {
+    expect(dockerfile).not.toMatch(/(chmod|chown)\b[^\n]*\/usr\/local\/bin\/anc\b/);
+  });
+
   test('the audit user has a fixed UID and its own install directory', () => {
     expect(dockerfile).toMatch(/useradd --uid 1000 .*anc-audit/);
     expect(dockerfile).toMatch(/install -d -o anc-audit -g anc-audit .*\/home\/anc-audit\/\.local\/bin/);
@@ -19,6 +23,6 @@ describe('sandbox image permissions', () => {
   });
 
   test('the image declares no USER, so the control server stays root', () => {
-    expect(dockerfile).not.toMatch(/^\s*USER\s/m);
+    expect(dockerfile).not.toMatch(/^\s*USER\s/im);
   });
 });
