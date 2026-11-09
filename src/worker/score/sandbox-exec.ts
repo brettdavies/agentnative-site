@@ -96,6 +96,10 @@ export type ScoreErrorCode =
 const GATE_PREFIX = 'GATE:';
 const DETAILS_PREFIX = 'DETAILS:';
 const DETECTED_BINARY_PREFIX = 'DETECTED_BINARY=';
+
+// A direct install may not take this name, so `--command anc` can only ever
+// mean the auditor.
+const AUDITOR_BINARY = 'anc';
 const SOURCE_SHA_PREFIX = 'SOURCE_SHA=';
 
 // ---------------------------------------------------------------------------
@@ -237,6 +241,9 @@ async function runScore(
   // installed. The detected name is the basename, character-validated
   // by the install command's filter before it lands here.
   const detected = extractDetectedBinary(installResult.stdout);
+  if (detected === AUDITOR_BINARY) {
+    return { ok: false, error: 'chain_resolved_no_binary_produced', details: `binary=${detected}` };
+  }
   if (detected) {
     binary = detected;
   }

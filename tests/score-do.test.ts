@@ -923,6 +923,30 @@ describe('sandbox-exec.score() — direct-install auto-detect (Fix 1)', () => {
   // tests stub the container, return a canned auto-detect result, and
   // assert the `which` + `anc audit` calls reference the detected name.
 
+  test('a direct install detecting the auditor name is refused before any audit', async () => {
+    const responder: ExecResponder = (cmd) =>
+      cmd.startsWith('(') && cmd.includes('GATE:download')
+        ? { success: true, stdout: 'DETECTED_BINARY=anc\n', stderr: '' }
+        : defaultResponder(cmd);
+    const { stub, calls } = makeStub(responder);
+    const result = await score(stub, {
+      pm: 'direct',
+      url: 'https://example.com/tool-linux-amd64.tar.gz',
+      binary: 'tool',
+    });
+    expect(result).toEqual({ ok: false, error: 'chain_resolved_no_binary_produced', details: 'binary=anc' });
+    const later = calls.filter(
+      (c) => c.kind === 'exec' && (c.command.startsWith('which ') || c.command.startsWith('anc audit ')),
+    );
+    expect(later).toEqual([]);
+  });
+
+  test('a package-manager install may declare the auditor name', async () => {
+    const { stub } = makeStub(defaultResponder);
+    const result = await score(stub, { pm: 'cargo-binstall', package: 'agentnative', binary: 'anc' });
+    expect(result.ok).toBe(true);
+  });
+
   test('archive auto-detect picks gog when repo=gogcli (the gogcli/openclaw fix)', async () => {
     // gogcli/openclaw case: GitHub Releases ships a `gog` binary, but
     // the repo is `gogcli`. Pre-fix Step 2 hardcoded binary=ctx.repo,
