@@ -29,6 +29,7 @@ import {
   score,
 } from '../src/worker/score/sandbox-exec';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { validScorecard } from './helpers/scorecard-fixture';
 
 // ---------------------------------------------------------------------------
 // Stub — mirrors the shape in score-do.test.ts so tests run offline.
@@ -40,12 +41,9 @@ type Call =
 
 type ExecResponder = (command: string) => ExecLike;
 
-const ANC_CHECK_OK = JSON.stringify({
-  spec_version: SPEC_VERSION,
-  anc_version: ANC_VERSION,
-  tool: { name: 'qmd', version: '0.1.0' },
-  score: { value: 70 },
-});
+const ANC_CHECK_OK = JSON.stringify(
+  validScorecard({ spec_version: SPEC_VERSION, tool: { name: 'qmd', binary: 'qmd', version: '0.1.0' } }),
+);
 
 function defaultResponder(command: string): ExecLike {
   // git clone — synthesize success without touching the network.

@@ -23,6 +23,7 @@
 import type { Sandbox } from '@cloudflare/sandbox';
 import type { CliPhase } from '../../shared/audit-events';
 import type { GitCloneInstall, InstallSpec } from './discover-binary';
+import { scorecardShapeIssue } from './scorecard-shape';
 import { SDIST_TRUSTED_NAMES } from './sdist-allowlist';
 import { validBranchName } from './validate';
 
@@ -80,7 +81,7 @@ export type ScoreErrorCode =
   | 'chain_resolved_no_binary_produced' // install succeeded but `which <binary>` missed.
   // Exec failure classes.
   | 'anc_version_unreadable' // anc --version returned no parseable version.
-  | 'anc_audit_failed' // anc audit returned non-zero AND no parseable JSON envelope.
+  | 'anc_audit_failed' // no parseable JSON envelope, or one that is not a scorecard.
   // Wall-clock.
   | 'timeout';
 
@@ -314,6 +315,11 @@ async function runScore(
       };
     }
     return { ok: false, error: 'anc_audit_failed', details: 'anc returned non-JSON stdout' };
+  }
+
+  const shapeIssue = scorecardShapeIssue(scorecard);
+  if (shapeIssue !== null) {
+    return { ok: false, error: 'anc_audit_failed', details: `scorecard shape: ${shapeIssue}` };
   }
 
   return {
