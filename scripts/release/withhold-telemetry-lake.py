@@ -29,9 +29,9 @@ Drift is a hard error, never a skip. A file that exists but no longer contains
 the expected text means the feature changed shape on `dev`; silently skipping
 it would ship the lake. The residue check at the end is the real guard: it
 fails on any surviving reference regardless of which edit missed. It does not
-scan what `rg` skips by default (hidden and gitignored files), `bun.lock`,
-`node_modules`, `dist`, this script, the guarded paths, which never reach
-`main`, or top-level `scorecards/*.json`, which is audit data.
+scan what `rg` skips by default (hidden, gitignored and binary files),
+`bun.lock`, `node_modules`, `dist`, this script, the guarded paths, which never
+reach `main`, or top-level `scorecards/*.json`, which is audit data.
 """
 
 from __future__ import annotations

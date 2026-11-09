@@ -252,8 +252,8 @@ script that removes files `main` does not have would be dead weight there. Runni
 from deleting a tool that has not run yet. The script is the record of what is held back, so the removal is applied
 rather than re-derived by hand at each cut, and it is deliberately brittle: an exact match that no longer matches is a
 hard error, because a silently skipped edit ships the feature. After applying, it greps the tree for every marker the
-feature owns and fails on any survivor, which catches a miss whichever edit caused it. The grep skips hidden and
-gitignored files, `bun.lock`, `node_modules`, `dist`, the script itself, the guarded paths, and top-level
+feature owns and fails on any survivor, which catches a miss whichever edit caused it. The grep skips hidden,
+gitignored and binary files, `bun.lock`, `node_modules`, `dist`, the script itself, the guarded paths, and top-level
 `scorecards/*.json`: a scorecard is audit data about a third-party CLI, so its evidence strings can name a marker
 without carrying any of the feature. The script also fails when a removal takes a `describe` or `test` the feature does
 not own, so an edit that matches too much cannot strip unrelated tests from `main`. `--check` runs the same removals in
