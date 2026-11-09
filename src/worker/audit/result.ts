@@ -192,7 +192,7 @@ type Rendered = {
   /** Server-rendered HTML body and markdown twin for the envelope. */
   html: () => Promise<string>;
   markdown: () => Promise<string>;
-  /** The page's `<meta name="robots">` equivalent: branch pages are unlisted. */
+  /** The page's `<meta name="robots">` equivalent. */
   noindex: boolean;
 };
 
@@ -473,7 +473,8 @@ function unavailable(ctx: RenderContext): Response {
 // Rendering
 // ---------------------------------------------------------------------------
 
-// A live or branch result is on-demand, so its page is unlisted.
+// An on-demand result is indexable only once it earns the badge, the same
+// field that decides whether the page offers the embed.
 async function respondCli(
   ctx: RenderContext,
   envelope: AuditEnvelope,
@@ -490,7 +491,7 @@ async function respondCli(
     envelope,
     tier: 'cache',
     spine,
-    noindex: true,
+    noindex: (scorecard as { badge?: { eligible?: boolean } }).badge?.eligible !== true,
     html: async () =>
       buildScorecardBody(tool, scorecard, { version: record.tool_version, spine, showBadgePreview: false }),
     markdown: async () =>
