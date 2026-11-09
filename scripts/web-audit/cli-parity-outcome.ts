@@ -1,0 +1,211 @@
+// Classifies what a CLI-parity run collected: a report, a stated "report unavailable"
+// the contract can explain, or a broken run the workflow itself must fix. A missing
+// or mangled divergence dump never classifies as zero divergences.
+
+export interface ParityInput {
+  marker: string;
+  siteSha: string;
+  cliRef: string;
+  cliSha: string;
+  cliPin: string | null;
+  runUrl: string;
+  syncExit: number | null;
+  syncLog: string;
+  testExit: number | null;
+  testLog: string;
+  dump: string | null;
+  ledger: string | null;
+  unported: string | null;
+  siteFingerprint: string | null;
+  vendoredFingerprint: string | null;
+  siteHasPath: (path: string) => boolean;
+}
+
+export interface Row {
+  scenario: string;
+  element: string;
+  status: 'new' | 'ledgered' | 'closed';
+  owner?: string;
+}
+
+export type Outcome =
+  | { kind: 'report'; rows: Row[]; failedTests: string[]; suiteCount: number; buildFailure: string | null }
+  | { kind: 'unavailable' | 'broken'; reason: string; detail: string };
+
+interface LedgerEntry {
+  scenario: string;
+  element: string;
+  owner: string;
+}
+
+// The sync's messages that blame the commit's contract. It exits 1 for its other
+// failures too, such as a commit missing from the checkout, and those are wiring. It
+// also says "has no" for any archive or tar failure, so a path the commit does hold
+// is wiring too.
+const CONTRACT_REFUSED = /^error: commit \S+ (?:has no (\S+)|vendors a symlink)/m;
+// The CLI's own crate only: a dependency's build failure says nothing about the contract.
+const CLI_BUILD_FAILED = /failed to run custom build command for `agentnative |could not compile `agentnative`/;
+const DUMP_TEST_PANIC = /^thread 'dump_corpus_divergences'.* panicked at /;
+// The dump test's own message for a failed write to the path this workflow passes.
+const DUMP_WRITE_PANIC = /^write \S+: /m;
+// A killed rustc or test binary explains nothing about the contract, whatever else failed.
+const PROCESS_KILLED = /process didn't exit successfully: .*\(signal: /;
+// The bump suites' first output. Without it a named failure cannot excuse the second run.
+const BUMP_SUITES_RAN = /^\s*Running unittests /m;
+
+export const DETAIL_CHAR_CAP = 2000;
+
+const rowKey = (scenario: string, element: string): string => `${scenario}\0${element}`;
+// From the end: the tail of a log is where its failure is named.
+const lastLines = (text: string, count: number): string =>
+  text.trimEnd().split('\n').slice(-count).join('\n').slice(-DETAIL_CHAR_CAP);
+
+function parseDump(text: string): [string, string][] | null {
+  try {
+    const value: unknown = JSON.parse(text);
+    const isPairs =
+      Array.isArray(value) &&
+      value.every((p) => Array.isArray(p) && p.length === 2 && p.every((s) => typeof s === 'string'));
+    return isPairs ? (value as [string, string][]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function isLedgerEntry(value: unknown): value is LedgerEntry {
+  if (typeof value !== 'object' || value === null) return false;
+  const { scenario, element, owner } = value as Partial<Record<keyof LedgerEntry, unknown>>;
+  return typeof scenario === 'string' && typeof element === 'string' && typeof owner === 'string';
+}
+
+// As strict as the CLI's own read of the file: a renamed table would otherwise parse
+// as an empty ledger and turn every ledgered divergence into a new one.
+function parseLedger(text: string): Map<string, LedgerEntry> | null {
+  try {
+    const file = Bun.TOML.parse(text) as Record<string, unknown>;
+    if (Object.keys(file).some((key) => key !== 'site_sha' && key !== 'divergence')) return null;
+    const entries = file.divergence ?? [];
+    if (!Array.isArray(entries) || !entries.every(isLedgerEntry)) return null;
+    return new Map(entries.map((entry) => [rowKey(entry.scenario, entry.element), entry]));
+  } catch {
+    return null;
+  }
+}
+
+/** Failing tests as `<suite>::<test>` and the suites that ran, from libtest's text output. The dump's suite runs twice. */
+function parseTestLog(log: string): { failedTests: string[]; suiteCount: number } {
+  let suite = '';
+  let quotingOutput = false;
+  const suites = new Set<string>();
+  const failedTests = new Set<string>();
+  for (const line of log.split('\n')) {
+    // From `failures:` to `test result:` libtest replays captured output, and a test of
+    // the CLI's bump script can quote a whole suite's lines there.
+    if (line === 'failures:') quotingOutput = true;
+    if (line.startsWith('test result: ')) quotingOutput = false;
+    if (quotingOutput) continue;
+    const running = /^\s*Running (?:unittests )?(?:tests\/)?(\S+)\.rs /.exec(line);
+    if (running) {
+      suite = running[1] ?? '';
+      suites.add(suite);
+    }
+    const test = /^test (\S+)(?: - should panic)? \.\.\. FAILED$/.exec(line);
+    if (test) failedTests.add(`${suite}::${test[1]}`);
+  }
+  return { failedTests: [...failedTests], suiteCount: suites.size };
+}
+
+/** The lines from the first match of `pattern`, the part of a log that names a failure. */
+function excerptFrom(log: string, pattern: RegExp, count: number): string | null {
+  const lines = log.split('\n');
+  const start = lines.findIndex((line) => pattern.test(line));
+  return start === -1 ? null : lines.slice(start, start + count).join('\n');
+}
+
+function classifyMissingDump(input: ParityInput): Outcome {
+  const log = input.testLog;
+  if (CLI_BUILD_FAILED.test(log) && !PROCESS_KILLED.test(log)) {
+    return {
+      kind: 'unavailable',
+      reason: 'the CLI did not build against this contract',
+      detail: excerptFrom(log, /panicked at/, 8) ?? excerptFrom(log, /^error/, 12) ?? lastLines(log, 15),
+    };
+  }
+  const dumpPanic = excerptFrom(log, DUMP_TEST_PANIC, 8);
+  if (dumpPanic !== null && !DUMP_WRITE_PANIC.test(dumpPanic)) {
+    return { kind: 'unavailable', reason: 'the CLI could not replay this contract', detail: dumpPanic };
+  }
+  return {
+    kind: 'broken',
+    reason: `the CLI tests ended with exit code ${input.testExit} and wrote no divergence dump`,
+    detail: dumpPanic ?? lastLines(log, 15),
+  };
+}
+
+function classifySync(input: ParityInput): Outcome | null {
+  if (input.syncExit === 0) return null;
+  const refused = CONTRACT_REFUSED.exec(input.syncLog);
+  if (input.syncExit === 1 && refused && !(refused[1] && input.siteHasPath(refused[1]))) {
+    return { kind: 'unavailable', reason: 'the CLI could not read this contract', detail: lastLines(input.syncLog, 5) };
+  }
+  return {
+    kind: 'broken',
+    reason: input.syncExit === null ? 'the CLI sync did not run' : `the CLI sync ended with exit code ${input.syncExit}`,
+    detail: lastLines(input.syncLog, 15),
+  };
+}
+
+export function classify(input: ParityInput): Outcome {
+  const refused = classifySync(input);
+  if (refused !== null) return refused;
+  // A sync that ignores the override falls back to the CLI's pin and exits 0, and the
+  // report would then read clean about a contract this PR did not write.
+  const site = input.siteFingerprint?.trim();
+  const vendored = input.vendoredFingerprint?.trim();
+  if (site === undefined || site !== vendored) {
+    return {
+      kind: 'broken',
+      reason: 'the CLI did not vendor this contract',
+      detail: `contract fingerprint ${site ?? 'missing'}, vendored fingerprint ${vendored ?? 'missing'}`,
+    };
+  }
+  if (input.testExit === null) {
+    return { kind: 'broken', reason: 'the CLI tests did not run', detail: lastLines(input.testLog, 15) };
+  }
+  if (input.dump === null) return classifyMissingDump(input);
+  const pairs = parseDump(input.dump);
+  if (pairs === null) {
+    return { kind: 'broken', reason: 'the divergence dump is not a list of pairs', detail: input.dump };
+  }
+  const ledger = input.ledger === null ? null : parseLedger(input.ledger);
+  if (ledger === null) {
+    return { kind: 'broken', reason: 'the CLI divergence ledger is missing or unreadable', detail: '' };
+  }
+  const observed = new Set(pairs.map(([scenario, element]) => rowKey(scenario, element)));
+  const seen: Row[] = pairs.map(([scenario, element]) => {
+    const owner = ledger.get(rowKey(scenario, element))?.owner;
+    return owner === undefined
+      ? { scenario, element, status: 'new' }
+      : { scenario, element, status: 'ledgered', owner };
+  });
+  const closed: Row[] = [...ledger]
+    .filter(([key]) => !observed.has(key))
+    .map(([, { scenario, element, owner }]) => ({ scenario, element, status: 'closed', owner }));
+  const tests = parseTestLog(input.testLog);
+  const buildFailed = CLI_BUILD_FAILED.test(input.testLog);
+  const failureNamed = buildFailed || (tests.failedTests.length > 0 && BUMP_SUITES_RAN.test(input.testLog));
+  if (input.testExit !== 0 && (!failureNamed || PROCESS_KILLED.test(input.testLog))) {
+    return {
+      kind: 'broken',
+      reason: `the CLI tests ended with exit code ${input.testExit} and named no failure that accounts for it`,
+      detail: lastLines(input.testLog, 15),
+    };
+  }
+  const order: Row['status'][] = ['new', 'ledgered', 'closed'];
+  return {
+    kind: 'report',
+    rows: order.flatMap((status) => [...seen, ...closed].filter((row) => row.status === status)),
+    ...tests,
+    buildFailure: buildFailed ? (excerptFrom(input.testLog, /^error/, 12) ?? lastLines(input.testLog, 15)) : null,
+  };
+}
