@@ -485,6 +485,89 @@ describe('live and branch records', () => {
   });
 });
 
+describe('on-demand website indexing', () => {
+  const HOST = 'ondemand.dev';
+
+  async function onDemandEnv(scorecard: Record<string, unknown>, host = HOST, overrides: Overrides = {}) {
+    return makeEnv({
+      cache: {
+        [await webKeyFor(`https://${host}/`, SPEC_VERSION)]: {
+          ...WEB_RECORD,
+          target_url: `https://${host}/`,
+          scorecard: { target_url: `https://${host}/`, results: WEB_RECORD.scorecard.results, ...scorecard },
+        },
+      },
+      ...overrides,
+    });
+  }
+
+  const HEADLINES = [
+    {
+      name: 'score.relative 70 over a lower score_pct',
+      scorecard: { score: { relative: 70, global: 30 }, score_pct: 40 },
+      headline: 70,
+      indexable: true,
+    },
+    {
+      name: 'score.relative 69 under a higher score_pct',
+      scorecard: { score: { relative: 69, global: 30 }, score_pct: 95 },
+      headline: 69,
+      indexable: false,
+    },
+    { name: 'score_pct 70 with no score object', scorecard: { score_pct: 70 }, headline: 70, indexable: true },
+    { name: 'score_pct 69 with no score object', scorecard: { score_pct: 69 }, headline: 69, indexable: false },
+    { name: 'neither score field', scorecard: {}, headline: 0, indexable: false },
+  ];
+
+  for (const { name, scorecard, headline, indexable } of HEADLINES) {
+    test(`${name}: the page headline reads ${headline} and the HTML is ${indexable ? 'indexable' : 'noindex'}`, async () => {
+      const res = await route(`/score/${HOST}`, await onDemandEnv(scorecard));
+      expect(res.status).toBe(200);
+      expect(await res.text()).toContain(`data-site-score="${headline}"`);
+      expect(res.headers.get('x-robots-tag')).toBe(indexable ? null : 'noindex');
+    });
+  }
+
+  test('a score.relative stored as a numeric string is not a number, so the HTML stays noindex', async () => {
+    const res = await route(`/score/${HOST}`, await onDemandEnv({ score: { relative: '95', global: 30 } }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-robots-tag')).toBe('noindex');
+  });
+
+  test('at 95 the .md twin and the JSON stay noindex on the pinned and the negotiated paths', async () => {
+    const env = await onDemandEnv({ score: { relative: 95, global: 90 }, score_pct: 90 });
+    expect((await route(`/score/${HOST}`, env)).headers.get('x-robots-tag')).toBeNull();
+    const twins: Array<[string, Record<string, string>]> = [
+      [`/score/${HOST}/md`, {}],
+      [`/score/${HOST}/json`, {}],
+      [`/score/${HOST}`, { accept: 'text/markdown' }],
+      [`/score/${HOST}`, { accept: 'application/json' }],
+    ];
+    for (const [path, headers] of twins) {
+      const res = await route(path, env, headers);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).not.toContain('text/html');
+      expect(res.headers.get('x-robots-tag')).toBe('noindex');
+    }
+  });
+
+  test('the in-flight 202 stays noindex for a host whose stored score clears the floor', async () => {
+    const env = await onDemandEnv({ score: { relative: 95, global: 90 } }, HOST, {
+      kvSeed: { [`inflight:web:${HOST}`]: JSON.stringify({ started_at: '2026-09-10T20:00:00.000Z' }) },
+    });
+    const res = await route(`/score/${HOST}/json`, env);
+    expect(res.status).toBe(202);
+    expect(res.headers.get('x-robots-tag')).toBe('noindex');
+  });
+
+  test('a seeded host stays indexable below the floor', async () => {
+    const env = await onDemandEnv({ score: { relative: 10, global: 5 } }, 'seeded.dev');
+    const res = await route('/score/seeded.dev', env);
+    expect(await res.text()).toContain('data-site-score="10"');
+    expect(res.headers.get('x-robots-tag')).toBeNull();
+  });
+});
+
 describe('website records', () => {
   test('/score/anc.dev/json equals the website envelope for the same record; an unseeded host is noindex and a seeded one is not', async () => {
     const env = await seededEnv();

@@ -239,10 +239,13 @@ Rollback is `wrangler rollback`.
   `</score/<target>/md>; rel="alternate"; type="text/markdown"` and
   `</score/<target>/json>; rel="alternate"; type="application/json"`, byte-equal to the page's `<head>` alternates. The
   `/json` representation carries no `Link` and no `Vary`.
+- **Website result pages** (`/score/<host>`, HTML) are indexable when the host is seeded or its headline score
+  (`score.relative`, else `score_pct`, else 0) is 70 or more, and carry `X-Robots-Tag: noindex` below that. The `/md`
+  twin and the `/json` representation carry `noindex` at every score, as does the in-flight 202.
 
 **Cache strategy (P4).** Three classes, written only by `applyHeaders` (`src/worker/headers.ts`). A route that knows
-more than the path does passes the class it served (the result route: a curated slug and a live binary share a path
-shape); a 4xx/5xx or an always-MISS path is MISS regardless.
+more than the path can tell passes the class it served (the result route: a curated slug and a live binary share a
+path shape); a 4xx/5xx or an always-MISS path is MISS regardless.
 
 - **HIT-1d** — bake-at-build HTML/markdown (`/about`, `/p1`–`/p8`, bare `/audit`, curated `/score/<slug>` and its `/md`
   twin, `/mcp-skill`, `/mcp-docs`, other spec/docs pages without a live board). Browser:

@@ -78,6 +78,7 @@ import { loadWebSeed, type WebSeedEntry } from '../audit-web/seed';
 import { freshnessHtml, freshnessState } from '../audit-web/summary-freshness';
 import type { WebSummaryInput } from '../audit-web/summary-input';
 import { buildWebSummaryMarkdown } from '../audit-web/summary-markdown';
+import { scoresOf, type WebScorecardShape } from '../audit-web/summary-model';
 import { buildWebSummaryBody } from '../audit-web/summary-render';
 import { applyHeaders, type CacheClassSpec, resultCacheClass } from '../headers';
 import { curatedCardOf, pageClip, withOgVideo } from '../og/page-clip';
@@ -273,8 +274,8 @@ async function serveWeb(ctx: RenderContext, host: string): Promise<Response> {
     linked: true,
     control,
   };
-  // Listing follows provenance: a seeded host is indexable, an on-demand
-  // one is not; the same seed entry names the page.
+  // A seeded host's page is indexable; an on-demand host's page is once its
+  // headline score reaches the floor. The same seed entry names the page.
   const seedEntry = await seedEntryFor(ctx.env, host);
   const summaryInput = async (): Promise<WebSummaryInput> => {
     const [remediationLoad, registryLoad] = await Promise.allSettled([
@@ -309,10 +310,25 @@ async function serveWeb(ctx: RenderContext, host: string): Promise<Response> {
     envelope,
     tier: 'cache',
     spine,
-    noindex: seedEntry === undefined,
+    noindex: webPageNoindex(seedEntry !== undefined, record.scorecard),
     html: async () => buildWebSummaryBody(await summaryInput()),
     markdown: async () => buildWebSummaryMarkdown(await summaryInput()),
   });
+}
+
+// Lowest headline score at which an on-demand website scorecard is offered to search engines.
+const WEB_INDEXABLE_MIN_SCORE_PCT = 70;
+
+/**
+ * Reads the headline through the function the page prints it with, so a page
+ * showing 70 is indexable and one showing 69 is not. A score that is not a
+ * number fails closed.
+ */
+function webPageNoindex(seeded: boolean, scorecard: unknown): boolean {
+  if (seeded) return false;
+  const headline =
+    typeof scorecard === 'object' && scorecard !== null ? scoresOf(scorecard as WebScorecardShape).relative : 0;
+  return !(typeof headline === 'number' && headline >= WEB_INDEXABLE_MIN_SCORE_PCT);
 }
 
 async function serveBranch(ctx: RenderContext, target: string): Promise<Response> {
