@@ -109,14 +109,7 @@ export function bindReaudit(control: ReauditControl, deps: ReauditDeps = product
   });
 }
 
-/** Replace a ?v=<scored_at> forwarding URL with the bare path the page canonicalizes to. */
-export function dropVersionQuery(): void {
-  if (!new URLSearchParams(location.search).has('v')) return;
-  history.replaceState(null, '', location.pathname);
-}
-
 export function initReaudit(): void {
-  dropVersionQuery();
   for (const control of document.querySelectorAll<HTMLButtonElement>('[data-reaudit]')) bindReaudit(control);
 }
 
