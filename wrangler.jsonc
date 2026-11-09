@@ -389,7 +389,7 @@
           // `containers` is non-inheritable per-env, so this duplicate
           // URI is required. Bump procedure: RELEASES.md § Image bump
           // (feat PR to dev).
-          "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:93e0bb5",
+          "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:70b62b4",
           "instance_type": "standard-2",
           "max_instances": 10
         }
