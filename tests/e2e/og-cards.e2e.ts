@@ -16,13 +16,6 @@ const CLIP_WAIT_MS = 60_000;
 
 test.skip(!BASE || HOSTS.length === 0, 'Run through scripts/og/smoke.sh, which deploys the fixture hosts.');
 
-const ACCESS_HEADERS: Record<string, string> = {};
-if (process.env.ANC_STAGING_ACCESS_CLIENT_ID && process.env.ANC_STAGING_ACCESS_CLIENT_SECRET) {
-  ACCESS_HEADERS['CF-Access-Client-Id'] = process.env.ANC_STAGING_ACCESS_CLIENT_ID;
-  ACCESS_HEADERS['CF-Access-Client-Secret'] = process.env.ANC_STAGING_ACCESS_CLIENT_SECRET;
-}
-test.use({ baseURL: BASE, extraHTTPHeaders: ACCESS_HEADERS });
-
 const MCP_HEADERS = { 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
 const HTML = { accept: 'text/html' };
 

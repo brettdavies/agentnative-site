@@ -47,24 +47,22 @@ done
 # the Access login wall, so the engine's self-fetches need service-token
 # headers. Resolve them from 1Password (never inline the values). Public
 # targets (e.g. anc.dev after a release) need no token.
-case "$TARGET" in
-  *agentnative-site-staging*)
-    OP_READ="${OP_READ:-$HOME/.claude/skills/1password/scripts/read_field.sh}"
-    # CF Service Token - Staging CLI (agentnative-site)
-    OP_ITEM="iuutxdlnh3ujmylvzmuflraeia"
-    if [ ! -x "$OP_READ" ]; then
-      echo "FATAL: 1Password helper not found at $OP_READ (install the 1password skill or export OP_READ)." >&2
-      exit 2
-    fi
-    CF_ACCESS_CLIENT_ID="$("$OP_READ" "$OP_ITEM" client_id 2>/dev/null || true)"
-    CF_ACCESS_CLIENT_SECRET="$("$OP_READ" "$OP_ITEM" client_secret 2>/dev/null || true)"
-    if [ -z "$CF_ACCESS_CLIENT_ID" ] || [ -z "$CF_ACCESS_CLIENT_SECRET" ]; then
-      echo "FATAL: could not read CF Access token from 1Password item '$OP_ITEM'." >&2
-      exit 2
-    fi
-    export CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET
-    ;;
-esac
+if bun "$REPO_ROOT/scripts/web-audit/staging-host.ts" "$TARGET"; then
+  OP_READ="${OP_READ:-$HOME/.claude/skills/1password/scripts/read_field.sh}"
+  # CF Service Token - Staging CLI (agentnative-site)
+  OP_ITEM="iuutxdlnh3ujmylvzmuflraeia"
+  if [ ! -x "$OP_READ" ]; then
+    echo "FATAL: 1Password helper not found at $OP_READ (install the 1password skill or export OP_READ)." >&2
+    exit 2
+  fi
+  CF_ACCESS_CLIENT_ID="$("$OP_READ" "$OP_ITEM" client_id 2>/dev/null || true)"
+  CF_ACCESS_CLIENT_SECRET="$("$OP_READ" "$OP_ITEM" client_secret 2>/dev/null || true)"
+  if [ -z "$CF_ACCESS_CLIENT_ID" ] || [ -z "$CF_ACCESS_CLIENT_SECRET" ]; then
+    echo "FATAL: could not read CF Access token from 1Password item '$OP_ITEM'." >&2
+    exit 2
+  fi
+  export CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET
+fi
 
 if [ "$BUILD" = true ]; then
   (cd "$REPO_ROOT" && bun run build >/dev/null)

@@ -10,10 +10,8 @@
 //   ANC_STAGING_BASE_URL=https://agentnative-site-staging.brettdavies.workers.dev \
 //     bun x playwright test --project=staging-mcp
 //
-// The staging Worker is gated by Cloudflare Access. Set
-// ANC_STAGING_ACCESS_CLIENT_ID + ANC_STAGING_ACCESS_CLIENT_SECRET to a
-// service-token pair if running headless (CI / cron); interactive auth
-// works in a real browser via the Access challenge.
+// The staging Worker is gated by Cloudflare Access: tests/e2e/access-session.ts
+// authenticates the run once from the service token in the environment.
 //
 // SDK round-trip is intentionally NOT exercised here. The MCP SDK's
 // StreamableHTTPClientTransport is a workerd-runtime-sensitive surface;
@@ -39,16 +37,9 @@ test.skip(
   'ANC_STAGING_BASE_URL not set — opt-in staging MCP suite. Set it to the staging Worker URL to run.',
 );
 
-const ACCESS_HEADERS: Record<string, string> = {};
-if (process.env.ANC_STAGING_ACCESS_CLIENT_ID && process.env.ANC_STAGING_ACCESS_CLIENT_SECRET) {
-  ACCESS_HEADERS['CF-Access-Client-Id'] = process.env.ANC_STAGING_ACCESS_CLIENT_ID;
-  ACCESS_HEADERS['CF-Access-Client-Secret'] = process.env.ANC_STAGING_ACCESS_CLIENT_SECRET;
-}
-
 const MCP_HEADERS = {
   'content-type': 'application/json',
   accept: 'application/json, text/event-stream',
-  ...ACCESS_HEADERS,
 };
 
 type JsonRpcBody = {
@@ -281,7 +272,7 @@ test.describe('staging /mcp — registry surface', () => {
     const text = mcpBody.result?.content?.[0]?.text ?? '[]';
     const rows = JSON.parse(text) as Array<{ slug: string }>;
 
-    const indexRes = await request.get(`${STAGING_BASE}/registry-index.json`, { headers: ACCESS_HEADERS });
+    const indexRes = await request.get(`${STAGING_BASE}/registry-index.json`);
     const indexBody = (await indexRes.json()) as { by_slug: Record<string, unknown> };
     expect(rows.length).toBe(Object.keys(indexBody.by_slug).length);
   });
@@ -406,7 +397,6 @@ test.describe('staging /mcp — gate posture', () => {
       headers: {
         'content-type': 'application/json',
         accept: 'text/csv',
-        ...ACCESS_HEADERS,
       },
       data: JSON.stringify({
         jsonrpc: '2.0',
@@ -425,7 +415,7 @@ test.describe('staging /mcp — gate posture', () => {
   for (const accept of ['text/event-stream', 'text/html', 'text/markdown', 'application/json', '*/*']) {
     test(`GET /mcp Accept ${accept} returns 405 Allow POST`, async ({ request }) => {
       const res = await request.get(`${STAGING_BASE}/mcp`, {
-        headers: { ...ACCESS_HEADERS, accept },
+        headers: { accept },
         maxRedirects: 0,
       });
       expect(res.status()).toBe(405);
@@ -439,7 +429,7 @@ test.describe('staging /mcp — gate posture', () => {
 
   test('GET /mcp-docs serves the endpoint description', async ({ request }) => {
     const res = await request.get(`${STAGING_BASE}/mcp-docs`, {
-      headers: { ...ACCESS_HEADERS, accept: 'text/html' },
+      headers: { accept: 'text/html' },
     });
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type'] ?? '').toContain('text/html');

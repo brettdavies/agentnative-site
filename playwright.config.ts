@@ -19,6 +19,9 @@
 // (dotfiles-provisioned on this host; never run `playwright install`), plus
 // the matching `--with-deps` line in .github/workflows/ci.yml on CI runners.
 
+import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 
 const PORT = 8787;
@@ -29,6 +32,14 @@ const PORT = 8787;
 // touch it. Local-targeting projects leave it unset and get the local server.
 const REMOTE_BASE = process.env.ANC_STAGING_BASE_URL;
 const BASE_URL = REMOTE_BASE ?? `http://localhost:${PORT}`;
+// Workers evaluate this module again, so the path of the state global setup
+// writes travels in the environment the runner hands them.
+if (REMOTE_BASE) process.env.ANC_E2E_ACCESS_STATE ??= join(tmpdir(), `anc-e2e-access-${randomUUID()}.json`);
+const ACCESS_STATE = process.env.ANC_E2E_ACCESS_STATE;
+// Playwright writes a request's headers, the Access cookie included, into its
+// traces and its HTML and JSON reports, and a CI failure uploads those from a
+// public repository. A local debug run can still pass --trace on.
+const HOLDS_ACCESS_TOKEN = Boolean(REMOTE_BASE && process.env.ANC_STAGING_ACCESS_CLIENT_ID);
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -54,17 +65,23 @@ export default defineConfig({
   // connection refusals means the dev server died mid-suite, and the probe
   // counts those refusals to grant the crash-retry rerun (see
   // .github/actions/wrangler-crash-probe/probe.sh).
-  reporter: process.env.CI
-    ? [
-        ['github'],
-        ['list'],
-        ['html', { outputFolder: 'playwright-report', open: 'never' }],
-        ['json', { outputFile: 'playwright-summary.json' }],
-      ]
-    : 'list',
+  reporter: !process.env.CI
+    ? 'list'
+    : HOLDS_ACCESS_TOKEN
+      ? [['github'], ['list']]
+      : [
+          ['github'],
+          ['list'],
+          ['html', { outputFolder: 'playwright-report', open: 'never' }],
+          ['json', { outputFile: 'playwright-summary.json' }],
+        ],
+  // A run against a deployed Worker authenticates once, here, and every context
+  // starts from the host-scoped cookie it mints.
+  globalSetup: REMOTE_BASE ? './tests/e2e/access-session.ts' : undefined,
   use: {
     baseURL: BASE_URL,
-    trace: 'retain-on-failure',
+    storageState: ACCESS_STATE,
+    trace: HOLDS_ACCESS_TOKEN ? 'off' : 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
   // PW-managed browser downloads stall on some dev machines. Setting

@@ -22,12 +22,6 @@ test.skip(
   'ANC_STAGING_BASE_URL not set — opt-in staging discoverability suite. Set it to the staging Worker URL to run.',
 );
 
-const ACCESS_HEADERS: Record<string, string> = {};
-if (process.env.ANC_STAGING_ACCESS_CLIENT_ID && process.env.ANC_STAGING_ACCESS_CLIENT_SECRET) {
-  ACCESS_HEADERS['CF-Access-Client-Id'] = process.env.ANC_STAGING_ACCESS_CLIENT_ID;
-  ACCESS_HEADERS['CF-Access-Client-Secret'] = process.env.ANC_STAGING_ACCESS_CLIENT_SECRET;
-}
-
 // Source of truth: MCP_DESCRIPTOR_ALIAS_PATHS in src/worker/mcp/descriptor-paths.ts.
 // Kept as a literal here because the worker module is not importable in
 // Playwright's node env; a new alias must be added in both places.
@@ -37,7 +31,6 @@ test.describe('staging MCP descriptor aliases', () => {
   test('every pointer alias 301s to the canonical server-card path (R9)', async ({ request }) => {
     for (const path of MCP_DESCRIPTOR_ALIASES) {
       const res = await request.get(`${STAGING_BASE}${path}`, {
-        headers: ACCESS_HEADERS,
         maxRedirects: 0,
       });
       expect(res.status()).toBe(301);
@@ -46,7 +39,7 @@ test.describe('staging MCP descriptor aliases', () => {
   });
 
   test('the alias redirect chain resolves to the canonical card body', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/mcp.json`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/mcp.json`);
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('application/json');
     const body = (await res.json()) as { mcp_endpoint?: string };
@@ -55,7 +48,7 @@ test.describe('staging MCP descriptor aliases', () => {
 
   test('GET /mcp with a JSON Accept returns 405, not the card', async ({ request }) => {
     const res = await request.get(`${STAGING_BASE}/mcp`, {
-      headers: { ...ACCESS_HEADERS, accept: 'application/json' },
+      headers: { accept: 'application/json' },
       maxRedirects: 0,
     });
     expect(res.status()).toBe(405);
@@ -64,7 +57,7 @@ test.describe('staging MCP descriptor aliases', () => {
   });
 
   test('canonical server-card.json carries mcp_endpoint, version, transport, documentation', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/.well-known/mcp/server-card.json`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/.well-known/mcp/server-card.json`);
     expect(res.status()).toBe(200);
     const body = (await res.json()) as {
       mcp_endpoint: string;
@@ -84,7 +77,7 @@ test.describe('staging MCP descriptor aliases', () => {
 
   test('Accept: text/markdown on canonical path still returns application/json', async ({ request }) => {
     const res = await request.get(`${STAGING_BASE}/.well-known/mcp/server-card.json`, {
-      headers: { ...ACCESS_HEADERS, accept: 'text/markdown' },
+      headers: { accept: 'text/markdown' },
     });
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('application/json');
@@ -98,7 +91,7 @@ test.describe('staging MCP descriptor aliases', () => {
 test.describe('staging SEP-2127 server card and AI catalog', () => {
   test('/mcp/server-card names its remote on the staging origin', async ({ request }) => {
     const res = await request.get(`${STAGING_BASE}/mcp/server-card`, {
-      headers: { ...ACCESS_HEADERS, accept: 'application/mcp-server-card+json' },
+      headers: { accept: 'application/mcp-server-card+json' },
     });
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('application/mcp-server-card+json');
@@ -108,7 +101,7 @@ test.describe('staging SEP-2127 server card and AI catalog', () => {
   });
 
   test('/.well-known/ai-catalog.json points its card entry at the staging origin', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/.well-known/ai-catalog.json`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/.well-known/ai-catalog.json`);
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('application/ai-catalog+json');
     const catalog = (await res.json()) as { entries: Array<{ type: string; url: string }> };
@@ -120,7 +113,7 @@ test.describe('staging SEP-2127 server card and AI catalog', () => {
 
 test.describe('staging /.well-known/security.txt', () => {
   test('carries Contact 97-boss-beetle@icloud.com and a valid Expires field', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/.well-known/security.txt`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/.well-known/security.txt`);
     expect(res.status()).toBe(200);
     const text = await res.text();
     expect(text).toContain('Contact: mailto:97-boss-beetle@icloud.com');
@@ -132,7 +125,7 @@ test.describe('staging /.well-known/security.txt', () => {
 
 test.describe('staging /.well-known/ai.txt', () => {
   test('carries Programmatic-API at the MCP endpoint and the canonical contact', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/.well-known/ai.txt`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/.well-known/ai.txt`);
     expect(res.status()).toBe(200);
     const text = await res.text();
     // Navigational: the endpoint declaration names the deployment serving
@@ -148,7 +141,7 @@ test.describe('staging /llms.txt', () => {
   test('contains the Programmatic access section with the endpoint, discovery documents, and skill', async ({
     request,
   }) => {
-    const res = await request.get(`${STAGING_BASE}/llms.txt`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/llms.txt`);
     expect(res.status()).toBe(200);
     const text = await res.text();
     expect(text).toContain('## Programmatic access');
@@ -172,7 +165,7 @@ test.describe('staging /llms.txt', () => {
 
 test.describe('staging discovery pointers', () => {
   test('/ Link header names every discovery document with its relation and type', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/`, { headers: { ...ACCESS_HEADERS, accept: 'text/html' } });
+    const res = await request.get(`${STAGING_BASE}/`, { headers: { accept: 'text/html' } });
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('text/html');
     const entries = (res.headers().link ?? '').split(', ');
@@ -185,7 +178,7 @@ test.describe('staging discovery pointers', () => {
 
   for (const page of ['/', '/mcp-docs', '/mcp-skill/']) {
     test(`${page} HTML head links every discovery document`, async ({ request }) => {
-      const res = await request.get(`${STAGING_BASE}${page}`, { headers: { ...ACCESS_HEADERS, accept: 'text/html' } });
+      const res = await request.get(`${STAGING_BASE}${page}`, { headers: { accept: 'text/html' } });
       expect(res.status()).toBe(200);
       const html = await res.text();
       // The build minifies entry pages and drops the void element's
@@ -199,7 +192,7 @@ test.describe('staging discovery pointers', () => {
 
   test('the /mcp-docs markdown twin lists every discovery document, SEP-1649 card first', async ({ request }) => {
     const res = await request.get(`${STAGING_BASE}/mcp-docs`, {
-      headers: { ...ACCESS_HEADERS, accept: 'text/markdown' },
+      headers: { accept: 'text/markdown' },
     });
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('text/markdown');
@@ -212,7 +205,7 @@ test.describe('staging discovery pointers', () => {
 
 test.describe('staging agent-readiness well-known surfaces', () => {
   test('/.well-known/api-catalog returns application/linkset+json with MCP anchor', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/.well-known/api-catalog`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/.well-known/api-catalog`);
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('application/linkset+json');
     const body = (await res.json()) as {
@@ -223,7 +216,7 @@ test.describe('staging agent-readiness well-known surfaces', () => {
   });
 
   test('/.well-known/api-catalog links every discovery document under its relation', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/.well-known/api-catalog`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/.well-known/api-catalog`);
     expect(res.status()).toBe(200);
     const body = (await res.json()) as { linkset: Array<Record<string, Array<{ href: string; type?: string }>>> };
     for (const rel of new Set(MCP_DISCOVERY_DOCUMENTS.map((d) => d.rel))) {
@@ -237,7 +230,7 @@ test.describe('staging agent-readiness well-known surfaces', () => {
   });
 
   test('/.well-known/oauth-protected-resource declares the MCP resource', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/.well-known/oauth-protected-resource`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/.well-known/oauth-protected-resource`);
     expect(res.status()).toBe(200);
     const body = (await res.json()) as { resource: string; authorization_servers: string[] };
     expect(body.resource).toBe(`${STAGING_BASE}/mcp`);
@@ -245,9 +238,7 @@ test.describe('staging agent-readiness well-known surfaces', () => {
   });
 
   test('/.well-known/oauth-authorization-server carries agent_auth anonymous block', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/.well-known/oauth-authorization-server`, {
-      headers: ACCESS_HEADERS,
-    });
+    const res = await request.get(`${STAGING_BASE}/.well-known/oauth-authorization-server`);
     expect(res.status()).toBe(200);
     const body = (await res.json()) as {
       issuer: string;
@@ -260,7 +251,7 @@ test.describe('staging agent-readiness well-known surfaces', () => {
   });
 
   test('/.well-known/jwks.json is a valid JWKS document', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/.well-known/jwks.json`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/.well-known/jwks.json`);
     expect(res.status()).toBe(200);
     const body = (await res.json()) as { keys: unknown[] };
     expect(Array.isArray(body.keys)).toBe(true);
@@ -269,7 +260,7 @@ test.describe('staging agent-readiness well-known surfaces', () => {
   test('/.well-known/agent-skills/index.json lists every web-audit fix skill with resolvable targets', async ({
     request,
   }) => {
-    const res = await request.get(`${STAGING_BASE}/.well-known/agent-skills/index.json`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/.well-known/agent-skills/index.json`);
     expect(res.status()).toBe(200);
     const body = (await res.json()) as { skills: Array<{ name: string; url: string; digest: string }> };
     const fixSkills = body.skills.filter((skill) => skill.name.startsWith('web-audit-fix-'));
@@ -278,13 +269,13 @@ test.describe('staging agent-readiness well-known surfaces', () => {
     const openapi = fixSkills.find((skill) => skill.name === 'web-audit-fix-openapi');
     expect(openapi?.digest).toMatch(/^sha256:[0-9a-f]{64}$/);
     const target = new URL(openapi?.url ?? '');
-    const resolved = await request.get(`${STAGING_BASE}${target.pathname}`, { headers: ACCESS_HEADERS });
+    const resolved = await request.get(`${STAGING_BASE}${target.pathname}`);
     expect(resolved.status()).toBe(200);
     expect(resolved.headers()['content-type']).toContain('text/markdown');
   });
 
   test('/.well-known/agent-skills/index.md renders the human-readable twin', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/.well-known/agent-skills/index.md`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/.well-known/agent-skills/index.md`);
     expect(res.status()).toBe(200);
     const text = await res.text();
     expect(text).toContain('# Agent skills on anc.dev');
@@ -293,7 +284,7 @@ test.describe('staging agent-readiness well-known surfaces', () => {
   });
 
   test('/.well-known/agent-skills/index.json lists the MCP skill with a digest', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/.well-known/agent-skills/index.json`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/.well-known/agent-skills/index.json`);
     expect(res.status()).toBe(200);
     const body = (await res.json()) as { skills: Array<{ url: string; digest: string }> };
     expect(body.skills.length).toBeGreaterThanOrEqual(1);
@@ -302,7 +293,7 @@ test.describe('staging agent-readiness well-known surfaces', () => {
   });
 
   test('/auth.md declares the no-auth posture', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/auth.md`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/auth.md`);
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('text/markdown');
     const text = await res.text();
@@ -315,7 +306,7 @@ test.describe('staging agent-readiness well-known surfaces', () => {
   });
 
   test('/robots.txt carries Content-Signal directives', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/robots.txt`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/robots.txt`);
     expect(res.status()).toBe(200);
     const text = await res.text();
     expect(text).toMatch(/^Content-Signal:.*ai-train=/m);
@@ -325,7 +316,7 @@ test.describe('staging agent-readiness well-known surfaces', () => {
 
   test('POST /oauth2/token returns public_catalog error', async ({ request }) => {
     const res = await request.post(`${STAGING_BASE}/oauth2/token`, {
-      headers: { ...ACCESS_HEADERS, 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json' },
       data: {},
     });
     expect(res.status()).toBe(400);
@@ -334,18 +325,18 @@ test.describe('staging agent-readiness well-known surfaces', () => {
   });
 
   test('GET /oauth2/token is not a token endpoint (404)', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/oauth2/token`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/oauth2/token`);
     expect(res.status()).toBe(404);
   });
 
   test('/_internal/mcp-server-card.json is not publicly reachable', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/_internal/mcp-server-card.json`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/_internal/mcp-server-card.json`);
     expect(res.status()).toBe(404);
   });
 
   test('Accept: text/markdown on api-catalog still returns linkset+json', async ({ request }) => {
     const res = await request.get(`${STAGING_BASE}/.well-known/api-catalog`, {
-      headers: { ...ACCESS_HEADERS, accept: 'text/markdown' },
+      headers: { accept: 'text/markdown' },
     });
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('application/linkset+json');
@@ -354,14 +345,14 @@ test.describe('staging agent-readiness well-known surfaces', () => {
 
 test.describe('staging /mcp-skill surfaces', () => {
   test('/mcp-skill/ returns the HTML page', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/mcp-skill/`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/mcp-skill/`);
     expect(res.status()).toBe(200);
     const ct = res.headers()['content-type'] ?? '';
     expect(ct).toContain('text/html');
   });
 
   test('/mcp-skill.md returns the markdown twin', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/mcp-skill.md`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/mcp-skill.md`);
     expect(res.status()).toBe(200);
     const ct = res.headers()['content-type'] ?? '';
     expect(ct).toContain('text/markdown');
@@ -370,7 +361,7 @@ test.describe('staging /mcp-skill surfaces', () => {
   test('mcp-skill.md text equality on every tool name + the template URIs (drift gate per KTD-8)', async ({
     request,
   }) => {
-    const res = await request.get(`${STAGING_BASE}/mcp-skill.md`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/mcp-skill.md`);
     const md = await res.text();
     for (const toolName of EXPECTED_TOOL_NAMES) {
       expect(md).toContain(toolName);
@@ -395,7 +386,7 @@ test.describe('staging published web-audit contracts', () => {
   const FRESHNESS_FIELDS = ['cached', 'scored_at', 'refresh_after'];
 
   async function twin(request: import('@playwright/test').APIRequestContext, path: string): Promise<string> {
-    const res = await request.get(`${STAGING_BASE}${path}`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}${path}`);
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('text/markdown');
     return res.text();

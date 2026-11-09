@@ -10,11 +10,9 @@
 //   ANC_STAGING_BASE_URL=https://agentnative-site-staging.brettdavies.workers.dev \
 //     bun x playwright test --project=edge-hit
 //
-// The staging Worker is gated by Cloudflare Access. Set
-// ANC_STAGING_ACCESS_CLIENT_ID + ANC_STAGING_ACCESS_CLIENT_SECRET to a
-// service-token pair if running headless (CI / cron); interactive auth
-// works in a real browser via the Access challenge. Access service-token
-// headers must not bypass Workers Caching.
+// The staging Worker is gated by Cloudflare Access: tests/e2e/access-session.ts
+// authenticates the run once from the service token in the environment.
+// Its session cookie must not bypass Workers Caching.
 //
 // Board-write miss-then-HIT (`/` and `/web` after an aggregate rewrite,
 // `/about.md` stays) is a post-deploy operator check. There is no
@@ -28,12 +26,6 @@ test.skip(
   !STAGING_BASE,
   'ANC_STAGING_BASE_URL not set — opt-in staging HIT canary. Set it to the staging Worker URL to run.',
 );
-
-const ACCESS_HEADERS: Record<string, string> = {};
-if (process.env.ANC_STAGING_ACCESS_CLIENT_ID && process.env.ANC_STAGING_ACCESS_CLIENT_SECRET) {
-  ACCESS_HEADERS['CF-Access-Client-Id'] = process.env.ANC_STAGING_ACCESS_CLIENT_ID;
-  ACCESS_HEADERS['CF-Access-Client-Secret'] = process.env.ANC_STAGING_ACCESS_CLIENT_SECRET;
-}
 
 const CURL = { 'user-agent': 'curl/8.7.1', accept: '*/*' } as const;
 const BROWSER = { accept: 'text/html', 'user-agent': 'Mozilla/5.0 Chrome/120.0 Safari/537.36' } as const;
@@ -57,9 +49,8 @@ async function warmThenGet(
   path: string,
   extra: Record<string, string>,
 ) {
-  const headers = { ...ACCESS_HEADERS, ...extra };
-  await request.get(`${STAGING_BASE}${path}`, { headers });
-  return request.get(`${STAGING_BASE}${path}`, { headers });
+  await request.get(`${STAGING_BASE}${path}`, { headers: extra });
+  return request.get(`${STAGING_BASE}${path}`, { headers: extra });
 }
 
 test.describe('skip-Worker HIT — staging Workers Caching', () => {
@@ -135,12 +126,12 @@ test.describe('skip-Worker HIT — staging Workers Caching', () => {
     // The website record is written by the web-audit suite; without it the
     // route answers the no-store 404 and there is no class to prove.
     const first = await request.get(`${STAGING_BASE}/score/anc.dev/json`, {
-      headers: { ...ACCESS_HEADERS, accept: 'application/json' },
+      headers: { accept: 'application/json' },
     });
     test.skip(first.status() === 404, 'no website record for anc.dev on this staging deploy');
     expect(first.status()).toBe(200);
     const second = await request.get(`${STAGING_BASE}/score/anc.dev/json`, {
-      headers: { ...ACCESS_HEADERS, accept: 'application/json' },
+      headers: { accept: 'application/json' },
     });
     expect(second.headers()['vary'] ?? '').toBe('');
     expect(isSkipWorkerHit(second.headers())).toBe(true);
@@ -159,7 +150,7 @@ test.describe('skip-Worker HIT — staging Workers Caching', () => {
 
   test('GET /scoring is not a skip-Worker HIT', async ({ request }) => {
     for (const path of ['/scoring', '/scoring?target=ripgrep', '/scoring.md']) {
-      const res = await request.get(`${STAGING_BASE}${path}`, { headers: { ...ACCESS_HEADERS, ...BROWSER } });
+      const res = await request.get(`${STAGING_BASE}${path}`, { headers: BROWSER });
       expect(res.headers()['cf-cache-status']?.toUpperCase()).not.toBe('HIT');
       expect(res.headers()['cache-control'] ?? '').toContain('no-store');
     }
@@ -178,7 +169,7 @@ test.describe('skip-Worker HIT — staging Workers Caching', () => {
 
   test('a never-audited host 404 is not a skip-Worker HIT', async ({ request }) => {
     const res = await request.get(`${STAGING_BASE}/score/never-audited.dev`, {
-      headers: { ...ACCESS_HEADERS, ...BROWSER },
+      headers: BROWSER,
     });
     expect(res.status()).toBe(404);
     expect(res.headers()['cf-cache-status']?.toUpperCase()).not.toBe('HIT');
