@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { BREADCRUMB_JSONLD_TOKEN } from '../src/shared/breadcrumb';
 import { substituteShell } from '../src/worker/shell-template';
 
 const TEMPLATE = [
@@ -28,6 +29,22 @@ function render(overrides: Partial<Parameters<typeof substituteShell>[1]>): stri
 }
 
 describe('substituteShell keeps replacement text literal', () => {
+  test('a path and breadcrumb holding a dollar sequence render as written in the link, twin, nav, and JSON-LD slots', () => {
+    const html = substituteShell(`${TEMPLATE}\n[{},"${BREADCRUMB_JSONLD_TOKEN}"]`, {
+      title: 'title',
+      description: 'description',
+      canonicalPath: '/score/a$&b',
+      markdownTwinPath: '/score/twin$&c',
+      breadcrumb: 'crumb$&d',
+      body: 'body',
+    });
+    expect(html).toContain('<link href="/score/a$&amp;b">');
+    expect(html).toContain('<link href="/score/twin$&amp;c">');
+    expect(html).toContain('crumb$&amp;d');
+    expect(html).toContain('"name":"crumb$&d"');
+    expect(html).not.toContain('{{');
+  });
+
   test.each(PATTERNS)('a body containing %s', (pattern) => {
     const html = render({ body: `<p>cost ${pattern} here</p>` });
     expect(html).toContain(`<main><p>cost ${pattern} here</p></main>`);
