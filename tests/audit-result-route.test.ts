@@ -418,8 +418,10 @@ describe('live and branch records', () => {
   });
 
   test('an on-demand CLI scorecard that earned the badge is indexable as HTML; its twin and JSON stay noindex', async () => {
-    const env = await seededEnv();
-    for (const target of ['ouch', 'o/r@feature']) {
+    const env = await seededEnv({
+      cache: { [cliKeyFor('ouch', SPEC_VERSION)]: CLI_RECORD, [cliKeyFor('o/r', SPEC_VERSION)]: CLI_RECORD },
+    });
+    for (const target of ['ouch', 'o/r']) {
       const html = await route(`/score/${target}`, env);
       expect(html.status).toBe(200);
       expect(html.headers.get('x-robots-tag')).toBeNull();
@@ -434,15 +436,9 @@ describe('live and branch records', () => {
   test('an on-demand CLI scorecard below the badge floor stays noindex in every representation', async () => {
     const badge = { score_pct: 69, eligible: false };
     const env = await seededEnv({
-      cache: {
-        [cliKeyFor('ouch', SPEC_VERSION)]: { ...CLI_RECORD, scorecard: { ...CLI_RECORD.scorecard, badge } },
-        [cliKeyFor('o/r@feature', SPEC_VERSION)]: {
-          ...BRANCH_RECORD,
-          scorecard: { ...BRANCH_RECORD.scorecard, badge },
-        },
-      },
+      cache: { [cliKeyFor('ouch', SPEC_VERSION)]: { ...CLI_RECORD, scorecard: { ...CLI_RECORD.scorecard, badge } } },
     });
-    for (const path of ['/score/ouch', '/score/ouch/md', '/score/ouch/json', '/score/o/r@feature']) {
+    for (const path of ['/score/ouch', '/score/ouch/md', '/score/ouch/json']) {
       const res = await route(path, env);
       expect(res.status).toBe(200);
       expect(res.headers.get('x-robots-tag')).toBe('noindex');
@@ -457,10 +453,12 @@ describe('live and branch records', () => {
     expect(res.headers.get('x-robots-tag')).toBe('noindex');
   });
 
-  test('/score/o/r@feature renders HTML, the twin, and JSON; /score/o/r with no record is the 404 pointer', async () => {
+  test('/score/o/r@feature renders HTML, the twin, and JSON, all noindex; /score/o/r with no record is the 404 pointer', async () => {
     const env = await seededEnv();
     for (const path of ['/score/o/r@feature', '/score/o/r@feature/md', '/score/o/r@feature/json']) {
-      expect((await route(path, env)).status).toBe(200);
+      const res = await route(path, env);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('x-robots-tag')).toBe('noindex');
     }
     const json = (await (await route('/score/o/r@feature/json', env)).json()) as Record<string, unknown>;
     expect(json).toMatchObject({
