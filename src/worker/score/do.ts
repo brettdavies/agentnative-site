@@ -30,9 +30,12 @@
 import type { OutboundHandler } from '@cloudflare/containers';
 import { Sandbox as BaseSandbox } from '@cloudflare/sandbox';
 import { isResultTarget, targetOfSpec } from '../../shared/audit-routes';
+import { hasErroredAudits } from '../../shared/errored-audit';
 import { ndjsonLineWriter } from '../../shared/ndjson';
+import { withinMs } from '../../shared/within-ms';
 import { invokeCachedPurge } from '../audit-web/hit-min-purge';
 import { cliTargetTag } from '../audit-web/hit-min-tags';
+import { type OgVideoEnv, requestRender } from '../og/render-request';
 import { SPEC_VERSION } from '../spec-version.gen';
 import { emitLog } from '../telemetry/log';
 import * as cache from './cache';
@@ -52,8 +55,7 @@ import { score as runSandboxScore, type SandboxPhase, type ScoreResult } from '.
 //
 // ASSETS stays in the env shape because @cloudflare/sandbox + the
 // Worker binding plumbing inject it regardless; the DO does not read it.
-export type ScoreSandboxEnv = {
-  ASSETS: Fetcher;
+export type ScoreSandboxEnv = Pick<OgVideoEnv, 'ASSETS' | 'SCORE_KV' | 'RENDER' | 'OG_VIDEO_ENABLED'> & {
   SCORE_CACHE?: R2Bucket;
 };
 
@@ -150,7 +152,9 @@ export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
     const { body, done } = streamScore(parsed.spec, {
       env: this.env,
       run: (spec, onPhase) => this.score(spec, onPhase),
-      purge: (tags) => invokeCachedPurge(this.ctx, tags),
+      purge: async (tags) => {
+        await invokeCachedPurge(this.ctx, tags);
+      },
     });
     this.ctx.waitUntil(done);
     return new Response(body, { status: 200, headers: { 'content-type': 'application/x-ndjson; charset=utf-8' } });
@@ -235,9 +239,14 @@ const PURGE_TIMEOUT_MS = 5_000;
 // precondition is checked here so cache.put's refusal never throws at
 // runtime: a binary record needs the scorecard's tool version, a branch
 // record needs the SHA the clone printed (a source run may report no
-// tool version). Skipped with a log when SCORE_CACHE isn't bound. Once
+// tool version). A scorecard that reports an errored audit measured only
+// part of the tool, so it is not written: the next request scores fresh
+// instead of serving the partial result for the bucket's lifecycle window,
+// and `buildCliEnvelope` gives the run no page URL to match. Skipped with a
+// log when SCORE_CACHE isn't bound. Once
 // R2 accepts the record, `cli:<target>` is purged through the RPC the
-// caller passes; a failed purge is logged and never thrown.
+// caller passes, and the render Worker is asked for the new card's clip;
+// a failed purge or render request is logged and never thrown.
 export async function writeCacheBestEffort(
   env: ScoreSandboxEnv,
   spec: InstallSpec,
@@ -245,13 +254,18 @@ export async function writeCacheBestEffort(
   purge?: (tags: string[]) => Promise<void>,
   purgeTimeoutMs: number = PURGE_TIMEOUT_MS,
 ): Promise<void> {
-  if (!env.SCORE_CACHE) {
+  const bucket = env.SCORE_CACHE;
+  if (!bucket) {
     emitLog({ scope: 'cache.write' }, { skipped: 'no_binding' });
     return;
   }
   const target = targetOfSpec(spec);
   if (!isResultTarget(target)) {
     emitLog({ scope: 'cache.write' }, { skipped: 'unroutable_target', target });
+    return;
+  }
+  if (hasErroredAudits(value.scorecard)) {
+    emitLog({ scope: 'cache.write' }, { skipped: 'errored_audit', target });
     return;
   }
   const toolVersion = extractToolVersion(value.scorecard) ?? '';
@@ -272,7 +286,7 @@ export async function writeCacheBestEffort(
   let wrote = false;
   try {
     wrote = await cache.put(
-      { SCORE_CACHE: env.SCORE_CACHE },
+      { SCORE_CACHE: bucket },
       key,
       value.scorecard,
       value.anc_version,
@@ -286,19 +300,16 @@ export async function writeCacheBestEffort(
     // that bypasses those guards still doesn't surface to the user.
     emitLog({ scope: 'cache.write' }, { error: err instanceof Error ? err.message : String(err) });
   }
-  if (!wrote || !purge) return;
-  const tags = [cliTargetTag(target)];
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error('purge_timeout')), purgeTimeoutMs);
-  });
+  if (!wrote) return;
+  if (purge) await purgeWithin(purge, [cliTargetTag(target)], purgeTimeoutMs);
+  await requestRender({ ...env, SCORE_CACHE: bucket }, target);
+}
+
+async function purgeWithin(purge: (tags: string[]) => Promise<void>, tags: string[], ms: number): Promise<void> {
   try {
-    await Promise.race([purge(tags), timeout]);
+    await withinMs(purge(tags), ms, 'purge_timeout');
   } catch (err) {
     emitLog({ scope: 'hit-min-purge' }, { error: err instanceof Error ? err.message : String(err), tags });
-  } finally {
-    if (timer) clearTimeout(timer);
-    timeout.catch(() => {});
   }
 }
 

@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { discoveryLine, LANE_EXPECTATION, rowHostPhrase, webReadingLine } from '../src/shared/scoring-copy';
+import {
+  discoveryLine,
+  inlineSubline,
+  LANE_EXPECTATION,
+  rowHostPhrase,
+  webReadingLine,
+} from '../src/shared/scoring-copy';
 import { handleScoringPage, type ScoringPageEnv } from '../src/worker/audit/scoring-page';
 import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
 import { _resetShellTemplateCache } from '../src/worker/shell-template';
@@ -88,6 +94,14 @@ describe('GET /scoring?target=', () => {
     expect(html).not.toContain('/js/scoring.js');
   });
 
+  test('a GitHub repo URL renders the page for its owner/repo, the way the audit form sends it', async () => {
+    const { res, html } = await page('/scoring?target=https://github.com/sindresorhus/gh-home');
+    expect(res.status).toBe(200);
+    expect(html).toContain('data-lane="cli"');
+    expect(html).toContain('data-target="sindresorhus/gh-home"');
+    expect(html).toContain('src="/js/scoring.js"');
+  });
+
   test('a target the classifier accepts but no result page can express is the pointer, not a throw', async () => {
     // An owner/repo shorthand classifies fine, yet the result-path builder
     // refuses it. An unauthenticated GET must not reach that RangeError.
@@ -162,6 +176,23 @@ describe('GET /scoring: the pointer and the representations', () => {
       env(),
     );
     expect(res.status).toBe(405);
+  });
+});
+
+describe('the progress page says why a result renders in place', () => {
+  test('a live run with an errored audit says it was not saved; any other inline result keeps its lane line', () => {
+    const errored = { tier: 'live' as const, scorecard: { summary: { error: 1 } } };
+    expect(inlineSubline('cli', errored)).toBe(
+      'An audit errored, so this result was not saved; running it again scores it fresh.',
+    );
+    expect(inlineSubline('cli', { tier: 'live', scorecard: { summary: { error: 0 } } })).toBe(
+      'This name belongs to a curated tool; this result has no URL.',
+    );
+    expect(inlineSubline('cli', { ...errored, tier: 'cache' })).toBe(
+      'This name belongs to a curated tool; this result has no URL.',
+    );
+    expect(inlineSubline('web')).toBe('This result was not saved.');
+    expect(inlineSubline('web', errored)).toBe('This result was not saved.');
   });
 });
 

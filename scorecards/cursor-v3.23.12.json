@@ -39,8 +39,8 @@
       "label": "Structured output support",
       "group": "P2",
       "layer": "behavioral",
-      "status": "opt_out",
-      "evidence": "no --output/--format flag detected — tool does not ship structured output. Schema-discovery requirements (p2-must-schema-print, p2-should-schema-file) collapse to n/a via antecedent propagation.",
+      "status": "skip",
+      "evidence": "`--output-format` is declared in `agent --help`, but no safe probe printed JSON (--help and --version override output flags in most CLIs)",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p2-json-output"
@@ -62,7 +62,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "warn",
-      "evidence": "no --quiet/-q flag detected in --help output",
+      "evidence": "no option definition in --help declares --quiet or -q; a flag named only in a usage line does not count.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p7-quiet"
@@ -106,7 +106,7 @@
       "group": "P1",
       "layer": "behavioral",
       "status": "warn",
-      "evidence": "44 flag(s) found in --help but no `[env: NAME]` bindings advertised",
+      "evidence": "42 flag(s) found in --help but no `[env: NAME]` bindings advertised",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p1-env-hints"
@@ -116,8 +116,8 @@
       "label": "Pager-using CLI ships --no-pager escape hatch",
       "group": "P6",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "pager referenced in --help but no --no-pager escape hatch advertised",
+      "status": "skip",
+      "evidence": "no pager signal ($PAGER, --pager, pager, or less/more named as a program) in --help",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p6-no-pager-behavioral"
@@ -149,8 +149,8 @@
       "label": "Structured-output CLI exposes its schema at runtime",
       "group": "P2",
       "layer": "behavioral",
-      "status": "n_a",
-      "evidence": "antecedent `p2-json-output` is opt_out: no --output/--format flag detected — tool does not ship structured output. Schema-discovery requirements (p2-must-schema-print, p2-should-schema-file) collapse to n/a via antecedent propagation.",
+      "status": "skip",
+      "evidence": "antecedent `p2-json-output` could not be measured: `--output-format` is declared in `agent --help`, but no safe probe printed JSON (--help and --version override output flags in most CLIs)",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p2-schema-print"
@@ -171,19 +171,36 @@
       "label": "Subcommand verbs follow community-standard names",
       "group": "P6",
       "layer": "behavioral",
-      "status": "skip",
-      "evidence": "no command block found in --help output, so no subcommands were parsed",
+      "status": "warn",
+      "evidence": "0/2 subcommand(s) follow standard verb names. Non-standard: tunnel, agent. MAY-tier — community-standard verbs (get/list/create/update/delete) help agents predict subcommand behavior across CLIs.",
       "confidence": "low",
       "tier": "may",
-      "audit_id": "p6-standard-names"
+      "audit_id": "p6-standard-names",
+      "config_hint": {
+        "files": [
+          {
+            "file": ".anc.toml",
+            "scope": "tool-repository"
+          },
+          {
+            "file": "~/.anc.toml",
+            "scope": "user"
+          }
+        ],
+        "domain_verbs": [
+          "tunnel",
+          "agent"
+        ],
+        "docs": "https://github.com/brettdavies/agentnative-cli#configuration-anctoml"
+      }
     },
     {
       "id": "p8-must-bundle-install",
       "label": "Skill bundle has install path (`tool skill install [<host>]`)",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p8-bundle-install"
@@ -193,8 +210,8 @@
       "label": "`skill install --all` for multi-runtime install",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p8-install-all"
@@ -204,8 +221,8 @@
       "label": "`skill update` / `skill upgrade` for bundle refresh",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p8-bundle-update"
@@ -271,7 +288,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "no list-style subcommand detected (list/ls/search/query/find/show/get); vacuous skip for the list-only SHOULD.",
+      "evidence": "no list-style subcommand detected (list/ls/search/query/find, or a show/get whose summary describes several results); vacuous skip for the list-only SHOULD.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p7-limit"
@@ -282,7 +299,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "no list-style subcommand detected; vacuous skip for the list-only MAY.",
+      "evidence": "no list-style subcommand detected (list/ls/search/query/find, or a show/get whose summary describes several results); vacuous skip for the list-only MAY.",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p7-cursor-pagination"
@@ -336,8 +353,8 @@
       "label": "Subcommand naming follows a consistent verb/noun convention",
       "group": "P6",
       "layer": "behavioral",
-      "status": "skip",
-      "evidence": "fewer than 2 user-defined subcommands; vacuous skip for the conditional SHOULD.",
+      "status": "warn",
+      "evidence": "subcommand naming is inconsistent: 2 non-verb subcommand(s) (tunnel, agent) mix verb and non-verb children at the second level, so an agent cannot predict where the action lives. SHOULD-tier: pick a consistent shape (all verb-first, all noun-verb hierarchy, or any combination where each non-verb group's children are uniformly verbs). The verb list is a heuristic; inspect `--help` to confirm.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p6-consistent-naming"
@@ -381,7 +398,7 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; MUST applies only to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); MUST applies only to CLIs that opt into the JSON contract.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p2-json-errors"
@@ -392,7 +409,7 @@
       "group": "P4",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; SHOULD applies only to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); SHOULD applies only to CLIs that opt into the JSON contract.",
       "confidence": "high",
       "tier": "should",
       "audit_id": "p4-json-error-output"
@@ -403,18 +420,18 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; envelope-consistency only applies to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); envelope-consistency only applies to CLIs that opt into the JSON contract.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p2-consistent-envelope"
     },
     {
       "id": "p3-must-subcommand-examples",
-      "label": "Each subcommand's `--help` ships at least one invocation example",
+      "label": "Each subcommand that takes arguments ships an invocation example in its `--help`",
       "group": "P3",
       "layer": "behavioral",
-      "status": "skip",
-      "evidence": "no command block found in --help output, so no subcommands were parsed; the MUST applies conditionally to CLIs that use subcommands.",
+      "status": "fail",
+      "evidence": "subcommands missing example invocations in their `--help`: tunnel, agent. Examples teach agents the call shape faster than option tables; use clap's `after_help` or a dedicated `Examples:` block.",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p3-subcommand-examples"
@@ -435,8 +452,8 @@
       "label": "Command-list entries name the command without repeating the binary name",
       "group": "P3",
       "layer": "behavioral",
-      "status": "n_a",
-      "evidence": "no command block found in --help output, so no subcommands were parsed; the SHOULD applies to CLIs that list subcommands.",
+      "status": "pass",
+      "evidence": null,
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p3-unprefixed-command-list"
@@ -447,7 +464,7 @@
       "group": "P6",
       "layer": "behavioral",
       "status": "warn",
-      "evidence": "top-level verb-shaped flag(s) found: --remove. Operations belong under the `Commands:` block (`tool search \"q\"`), not on the flag namespace where they fight the `--help` filtering agents rely on.",
+      "evidence": "top-level verb-shaped flag(s) found: --add, --remove. Operations belong under the `Commands:` block (`tool search \"q\"`), not on the flag namespace where they fight the `--help` filtering agents rely on.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p6-subcommand-operations"
@@ -488,11 +505,11 @@
   ],
   "summary": {
     "total": 44,
-    "pass": 11,
-    "warn": 13,
-    "fail": 3,
-    "opt_out": 1,
-    "n_a": 2,
+    "pass": 9,
+    "warn": 14,
+    "fail": 4,
+    "opt_out": 0,
+    "n_a": 3,
     "skip": 14,
     "error": 0
   },
@@ -512,19 +529,19 @@
   },
   "audience": "agent-optimized",
   "audit_profile": null,
-  "spec_version": "0.5.0",
+  "spec_version": "0.6.0",
   "tool": {
     "name": "cursor",
     "binary": "cursor",
     "version": "3.23.12"
   },
   "anc": {
-    "version": "0.6.0"
+    "version": "0.7.0"
   },
   "run": {
     "invocation": "anc audit --command cursor --output json",
-    "started_at": "2026-10-05T18:54:01.100976431Z",
-    "duration_ms": 6982,
+    "started_at": "2026-10-28T15:40:21.777992019Z",
+    "duration_ms": 11052,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -537,7 +554,7 @@
   },
   "badge": {
     "eligible": false,
-    "score_pct": 63,
+    "score_pct": 59,
     "embed_markdown": null,
     "scorecard_url": "https://anc.dev/score/cursor",
     "badge_url": "https://anc.dev/badge/cursor.svg",

@@ -44,16 +44,16 @@ land on `main` first, and both constructions take `dev`'s content for the files 
 that `dev` never received is reverted by the release. `scripts/release/drift.sh` lists that set and the cut waits until
 it is empty.
 
-### CalVer release branches
+### Release branches carry the stamp
 
-Branch naming `release/<YYYY-MM-DD>-<slug>` (mandatory) makes release branches sortable and unambiguous when multiple
-cuts are in flight. The date prefix is the planned merge date, not the cut date; re-naming on slip is allowed but not
-required. Slug is kebab-case, short, descriptive (3-6 words). Bare `release/<slug>` (no date prefix) is no longer
-permitted.
+Branch naming `release/v<version>` (mandatory) names each release branch after the deploy stamp of the `dev` commit it
+ships ([`RELEASES.md` § Versioning](./RELEASES.md#versioning)). The stamp's middle number is that commit's committer
+time, so release branches sort in cut order, and two cuts in flight have different names whenever they ship different
+commits. `generate-changelog.py` reads the version off the branch name, and the postflight backport gate reads it off
+the merged branch.
 
-The `guard-release-branch.yml` workflow currently enforces the `release/` prefix on PRs targeting `main`; the CalVer
-date prefix is convention-enforced via review and the runbook. Tightening the workflow regex to require
-`^release/\d{4}-\d{2}-\d{2}-` is a tracked follow-up.
+The `guard-release-branch.yml` workflow enforces the `release/` prefix on PRs targeting `main`; the `v<version>` form is
+convention-enforced via review and the runbook.
 
 ## PR body conventions
 
@@ -165,10 +165,9 @@ prior squash, it's a false positive: no action. Otherwise cherry-pick the commit
 `scripts/generate-changelog.py` (vendored from the `github-repo-setup` skill, with the repo-local `cliff.toml`) is the
 only sanctioned way to update `CHANGELOG.md`. On the overlay-built release branch it runs as `--from-dev-prs`: the PRs
 merged into `dev` since the previous release are the entries, and each PR's body supplies its
-`## Changelog → ### Breaking changes / Added / Changed / Fixed / Documentation` subsections (with author and PR-link
-attribution). On a cherry-picked branch it runs `git-cliff` first to prepend a versioned entry from the branch's
-commits, then expands the same way. This repo's release branches carry no version in their name
-(`release/<YYYY-MM-DD>-<slug>`), so the tag is passed explicitly (`--tag v<version>`).
+`## Changelog → ### Breaking changes / Added / Changed / Deprecated / Fixed / Documentation` subsections (with author
+and PR-link attribution). On a cherry-picked branch it runs `git-cliff` first to prepend a versioned entry from the
+branch's commits, then expands the same way. Either way the version comes from the branch name, `release/v<version>`.
 
 If a PR's body has no `## Changelog` section at all, its title becomes a `Changed` bullet, except for `chore`, `ci`,
 `build`, `style`, and `test` PRs, which stay out unless they carry a `## Changelog` of their own. A PR that leaves its
@@ -178,14 +177,15 @@ edit `CHANGELOG.md` directly.
 
 ### Why backport `main` → `dev` after publish
 
-Once the release has merged and the tag and GitHub Release exist, the release-bookkeeping files on `main` (the
-`package.json` version, `CHANGELOG.md`) need to reach `dev` so the next dev work starts from the released baseline and
-the next release's preflight diff-B stays quiet.
+Once the release has merged and the tag and GitHub Release exist, `CHANGELOG.md` on `main` needs to reach `dev`, so the
+next dev work starts from the released baseline and the next release's preflight diff-B stays quiet. The overlay also
+depends on it: step 2 removes every file only `main` has, so a changelog `dev` never received would be deleted by the
+next release.
 
 The backport is a PR opened by `scripts/sync-dev-after-release.sh`, never a merge of `main` into `dev` and never a
 direct push. The squash-merged branches share no recent history, so a merge conflicts on every file both sides touched,
-and a direct push to `dev` bypasses its required status checks. The script writes the released version into
-`package.json`, copies `CHANGELOG.md` from `main`, and opens the PR; the postflight backport gate treats that merged PR
+and a direct push to `dev` bypasses its required status checks. The script copies `CHANGELOG.md` from `main`, writes no
+`package.json` version (the tag is the version), and opens the PR; the postflight backport gate treats that merged PR
 as the durable signal that the backport ran.
 
 The script discovers other release-only edits rather than listing them. Release branches take edits for reasons nobody

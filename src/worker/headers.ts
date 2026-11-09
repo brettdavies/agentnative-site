@@ -43,6 +43,8 @@ import { homeTag, resultTag } from './audit-web/hit-min-tags';
 //                                         Vary)
 //                                         Cloudflare-CDN-Cache-Control:
 //                                         public, max-age=86400
+//                                         Cache-Tag: cli:{slug} on a curated
+//                                         result page and its twin
 //
 //   HIT-min (live boards and results)     Cache-Control: public, max-age=0,
 //                                         must-revalidate
@@ -193,14 +195,15 @@ export type ServedResult = {
 
 /**
  * The cache class a result carries. Curated pages are bake-at-build
- * (HIT-1d; their JSON is path-keyed like every `.json`), so a new Worker
- * version is their only refresh. Live CLI, branch, and website results are
+ * (HIT-1d; their JSON is path-keyed like every `.json`), refreshed by a new
+ * Worker version or, for the HTML and markdown, by a purge of `cli:<slug>`
+ * when the page's clip lands. Live CLI, branch, and website results are
  * HIT-min under the tag their writer purges, all three representations
  * alike, so `/json` never sits in a day-long class.
  */
 export function resultCacheClass(result: ServedResult): CacheClassSpec {
-  if (result.curated) return { klass: result.representation === 'json' ? 'short' : 'hit-1d' };
-  return { klass: 'hit-min', tag: resultTag(result.lane, result.target) };
+  if (result.curated && result.representation === 'json') return { klass: 'short' };
+  return { klass: result.curated ? 'hit-1d' : 'hit-min', tag: resultTag(result.lane, result.target) };
 }
 
 /** `true` when the Host header ends with `.workers.dev` — the staging origin. */
@@ -308,6 +311,7 @@ function applyCacheClass(headers: Headers, klass: CacheClass, tag?: string): voi
     case 'hit-1d':
       headers.set('Cache-Control', HIT_1D_BROWSER);
       headers.set('Cloudflare-CDN-Cache-Control', HIT_1D_CDN);
+      if (tag) headers.set('Cache-Tag', tag);
       break;
     case 'short':
       headers.delete('Cloudflare-CDN-Cache-Control');

@@ -1,6 +1,6 @@
 # PR gate — fast, always-on. Runs on every pull request to `main` or
 # `dev` and must stay green for merge. Single job, ~30s warm:
-#   install → lint → build → unit/regression tests → wrangler dry-run
+#   install → lint → concurrency check → build → unit/regression tests → wrangler dry-run
 #
 # Heavier browser + lighthouse coverage lives in deep-check.yml on a
 # schedule + workflow_dispatch — keeps this gate fast while still catching
@@ -67,6 +67,11 @@ jobs:
 
       - name: Lint (Biome + markdownlint)
         run: bun run lint
+
+      # actionlint checks workflow syntax, not concurrency semantics: a group
+      # keyed only on context puts a reusable and its caller in one group.
+      - name: Workflow concurrency namespacing
+        run: bash scripts/check-workflow-concurrency.sh
 
       - name: Typecheck (client + worker)
         run: bun run typecheck

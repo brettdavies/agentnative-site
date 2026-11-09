@@ -495,6 +495,25 @@ describe('emitShell — OG image alt text', () => {
     );
   });
 
+  test('a scorecard image replaces the site card; every other page keeps it', () => {
+    const custom = emitShell({
+      title: 'ripgrep — Agent-Native Scorecard',
+      description: 'Agent-readiness scorecard for ripgrep.',
+      canonicalPath: '/score/ripgrep',
+      breadcrumb: 'ripgrep',
+      bodyHtml: '<article>body</article>',
+      themeInitJs: '/* theme init */',
+      ogImage: '/og/score/ripgrep/s92-v0.6.0-t15.2.0-r1.png',
+      ogImageAlt: 'ripgrep scored 92%. agent-native CLI scorecard on anc.dev.',
+    });
+    expect(custom).toContain('content="https://anc.dev/og/score/ripgrep/s92-v0.6.0-t15.2.0-r1.png"');
+    expect(custom).toContain('ripgrep scored 92%');
+    expect(custom).not.toContain('/og-image.png');
+    const plain = shell();
+    expect(plain).toContain('https://anc.dev/og-image.png');
+    expect(plain).not.toContain('/og/score/');
+  });
+
   test('emits twitter:image:alt with the same description', () => {
     const html = shell();
     expect(html).toContain('name="twitter:image:alt"');
@@ -645,7 +664,14 @@ describe('emitShellTemplate — placeholders', () => {
   test('the head alternates are one placeholder and no {{CANONICAL_PATH}}.md link remains', () => {
     expect(html).toContain('{{ALTERNATES}}');
     expect(html).not.toContain('{{CANONICAL_PATH}}.md');
-    for (const placeholder of ['{{TITLE}}', '{{DESCRIPTION}}', '{{CANONICAL_PATH}}', '{{BODY}}']) {
+    for (const placeholder of [
+      '{{TITLE}}',
+      '{{DESCRIPTION}}',
+      '{{CANONICAL_PATH}}',
+      '{{BODY}}',
+      '{{OG_IMAGE}}',
+      '{{OG_IMAGE_ALT}}',
+    ]) {
       expect(html).toContain(placeholder);
     }
   });
@@ -653,6 +679,22 @@ describe('emitShellTemplate — placeholders', () => {
   test('the footer twin is a placeholder the Worker substitutes per page', () => {
     expect(html).toContain('<a href="{{MARKDOWN_TWIN_PATH}}">This page as markdown</a>');
     expect(html).not.toContain('{{CANONICAL_PATH}}.md');
+  });
+
+  test('the og:video block is one placeholder after the card tags, and og:type stays article', () => {
+    const head = html.slice(0, html.indexOf('</head>'));
+    expect(head.indexOf('{{OG_VIDEO}}')).toBeGreaterThan(head.indexOf('og:image:alt'));
+    expect(head).toContain('<meta property="og:type" content="article" />');
+    const page = emitShell({
+      title: 'p',
+      description: 'd',
+      canonicalPath: '/about',
+      breadcrumb: 'About',
+      bodyHtml: '',
+      themeInitJs: '',
+    });
+    expect(page).not.toContain('OG_VIDEO');
+    expect(page).not.toContain('og:video');
   });
 });
 

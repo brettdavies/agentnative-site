@@ -25,15 +25,14 @@ deadlock.
   quiet: bool,
   ```
 
-- When `--no-interactive` is set, or when stdin is not a TTY, the tool does not enter any blocking-interactive surface.
-  It uses defaults, reads from stdin, or exits with an actionable error. "Blocking-interactive surface" includes prompt
-  library calls AND TUI session initialization.
-- *(Applies when: CLI uses interactive OAuth.)* A headless authentication path. The canonical flag is `--no-browser`,
-  which SHOULD trigger the OAuth 2.0 Device Authorization Grant ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628))
-  when the identity provider supports it: the CLI prints a URL and a code; the user authorizes on another device. Agents
-  cannot open browsers. Non-canonical alternatives (`--device-code`, `--remote`, `--headless`) are acceptable but should
-  migrate toward `--no-browser`. CLIs that authenticate via static API key, PAT, or pre-issued token satisfy this
-  requirement through the env-var-settable flags MUST above (no browser to begin with).
+- When stdin is not a TTY, or when `--no-interactive` is set, every blocking-input surface (prompt libraries, read-line
+  calls, TUI session initialization) resolves from defaults, reads from stdin, or exits non-zero with an actionable
+  error. The tool MUST NOT block waiting for input that cannot arrive.
+- *(Applies when: CLI authenticates against a remote service.)* A headless authentication path. The canonical flag is
+  `--no-browser`, which triggers the OAuth 2.0 Device Authorization Grant
+  ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)): the CLI prints a URL and a code; the user authorizes on another
+  device. Agents cannot open browsers. Non-canonical alternatives (`--device-code`, `--remote`, `--headless`) are
+  acceptable but SHOULD migrate toward `--no-browser`.
 - *(Applies when: CLI accepts secret material as input.)* At least one input path that does not leak the secret into
   process listings, shell history, or the parent environment. The two leak-resistant paths are stdin and a `--*-file`
   flag pointing at a credential file. Flag-value forms (`--token <value>`) and environment variables (`TOOL_TOKEN`) MAY
@@ -43,9 +42,9 @@ deadlock.
 
 **SHOULD:**
 
-- Auto-detect non-interactive context via TTY detection (`std::io::IsTerminal` in Rust 1.70+, `process.stdin.isTTY` in
-  Node, `sys.stdin.isatty()` in Python) and suppress prompts when stdin is not a terminal, even without an explicit
-  `--no-interactive` flag.
+- Auto-detect non-interactive context via TTY detection on stdin (and stderr, where prompts target it) and suppress
+  prompts when no terminal is present, even without an explicit `--no-interactive` flag. Language-specific entry points:
+  `std::io::IsTerminal` in Rust 1.70+, `process.stdin.isTTY` in Node, `sys.stdin.isatty()` in Python.
 - Document default values for prompted inputs in `--help` output so agents can pass them explicitly instead of accepting
   whatever default ships.
 
@@ -83,5 +82,6 @@ verdicts for TTY-driving-agent scenarios are probable-but-not-verified; see [/co
 - A `--password <value>` flag with no stdin or file alternative — every invocation leaks the secret into process
   listings.
 
-Measured by audit IDs `p1-non-interactive` (behavioral) and `p1-non-interactive-source` (source) today. Run `anc audit
---principle 1 .` against the CLI under test to see each.
+Measured by audit IDs `p1-env-hints`, `p1-env-flags-source`, `p1-non-interactive`, `p1-flag-existence`,
+`p1-non-interactive-source`, `p1-headless-auth`, `p1-secret-non-leaky-path`, `p1-tty-detection-source`,
+`p1-defaults-in-help`, `p1-rich-tui`. Run `anc audit --principle 1 .` against the CLI under test to see each.

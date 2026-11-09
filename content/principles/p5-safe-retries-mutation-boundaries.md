@@ -20,8 +20,10 @@ does not modify state" is a better sentence to put in `--help` than to assume.
 **MUST:**
 
 - *(Applies when: CLI has destructive operations.)* Destructive operations (delete, overwrite, bulk modify) require an
-  explicit `--force` or `--yes` flag. Without it, the tool refuses the operation or enters dry-run mode. It MUST NOT
-  mutate silently.
+  explicit confirmation flag. `--yes` and `--force` are the recommended names; a flag under another name satisfies the
+  requirement when the command's `--help` documents it as the flag that confirms the operation without a prompt
+  (`terraform destroy -auto-approve`). Without the flag, the tool refuses the operation or enters dry-run mode. It MUST
+  NOT mutate silently.
 - *(Applies when: CLI has both read and write operations.)* The distinction between read and write commands is clear
   from the command name and help text alone. An agent reading `--help` immediately knows whether a command mutates
   state.
@@ -37,7 +39,8 @@ does not modify state" is a better sentence to put in `--help` than to assume.
 ## Evidence
 
 - `--dry-run` flag on commands that create, update, or delete resources.
-- `--force` or `--yes` flag on destructive commands.
+- A confirmation flag on destructive commands: `--yes` or `--force`, or a documented equivalent such as `-auto-approve`
+  on `terraform destroy`.
 - Command names that signal intent: `add`, `remove`, `delete`, `create` for writes; `list`, `show`, `get`, `search` for
   reads.
 - Dry-run output that shows what *would* change without executing.
@@ -49,5 +52,5 @@ does not modify state" is a better sentence to put in `--help` than to assume.
 - No `--dry-run` option on bulk operations, where a preview prevents costly mistakes.
 - Operations that fail on retry because the first attempt partially succeeded: non-idempotent writes without rollback.
 
-Measured by audit IDs `p5-dry-run`, `p5-destructive-guard`. Run `anc audit --principle 5 .` against the CLI under test
-to see each.
+Measured by audit IDs `p5-force-yes`, `p5-read-write-distinction`, `p5-dry-run`. Run `anc audit --principle 5 .` against
+the CLI under test to see each.

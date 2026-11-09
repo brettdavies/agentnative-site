@@ -117,7 +117,7 @@
       "group": "P6",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "no pager signal (less/more/$PAGER/--pager) in --help",
+      "evidence": "no pager signal ($PAGER, --pager, pager, or less/more named as a program) in --help",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p6-no-pager-behavioral"
@@ -214,7 +214,7 @@
       "layer": "behavioral",
       "status": "pass",
       "evidence": null,
-      "confidence": "high",
+      "confidence": "medium",
       "tier": "must",
       "audit_id": "p8-bundle-install"
     },
@@ -301,7 +301,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "pass",
-      "evidence": null,
+      "evidence": "every list-style subcommand advertises a limit flag: get (--limit), search (--max-results).",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p7-limit"
@@ -312,7 +312,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "pass",
-      "evidence": null,
+      "evidence": "list-style subcommand(s) with a cursor/page flag: get (--cursor), search (--cursor).",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p7-cursor-pagination"
@@ -378,7 +378,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "pass",
-      "evidence": null,
+      "evidence": "long-running subcommand(s) with a timeout flag: follow (--timeout).",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p7-timeout-behavioral"
@@ -440,7 +440,7 @@
     },
     {
       "id": "p3-must-subcommand-examples",
-      "label": "Each subcommand's `--help` ships at least one invocation example",
+      "label": "Each subcommand that takes arguments ships an invocation example in its `--help`",
       "group": "P3",
       "layer": "behavioral",
       "status": "pass",
@@ -542,19 +542,19 @@
   },
   "audience": "agent-optimized",
   "audit_profile": null,
-  "spec_version": "0.5.0",
+  "spec_version": "0.6.0",
   "tool": {
     "name": "bird",
     "binary": "bird",
     "version": "bird 0.2.0"
   },
   "anc": {
-    "version": "0.6.0"
+    "version": "0.7.0"
   },
   "run": {
     "invocation": "anc audit --command bird --output json",
-    "started_at": "2026-10-05T18:44:47.860062904Z",
-    "duration_ms": 391,
+    "started_at": "2026-10-28T15:55:08.425762603Z",
+    "duration_ms": 409,
     "platform": {
       "os": "linux",
       "arch": "x86_64"

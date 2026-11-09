@@ -567,10 +567,10 @@ tools:
     creator: Cloudflare
     install: bun add -g cf
     description: Cloudflare's beta unified CLI (Technical Preview); rebuilt for agent-first ergonomics
-    # `cf --version` opens with an ASCII-art logo, then a banner line like
-    # `        Cloudflare CLI  v0.0.5`. Strip the leading `v` from the first
-    # SemVer-shaped token after the banner.
-    version_extract: "cf --version 2>&1 | grep -oE 'v[0-9]+\\.[0-9]+\\.[0-9]+' | head -1 | tr -d v"
+    # `cf --version` prints either a banner (`🍊☁️  cf · v1.0.0-beta.12`) or
+    # the bare version (`1.0.0-beta.24`), depending on the release. Take the
+    # first SemVer core, with or without its leading `v`.
+    version_extract: "cf --version 2>&1 | grep -oE 'v?[0-9]+\\.[0-9]+\\.[0-9]+' | head -1 | tr -d v"
 
   - name: aws-cli
     repo: aws/aws-cli

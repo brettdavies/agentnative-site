@@ -39,8 +39,8 @@
       "label": "Structured output support",
       "group": "P2",
       "layer": "behavioral",
-      "status": "opt_out",
-      "evidence": "no --output/--format flag detected — tool does not ship structured output. Schema-discovery requirements (p2-must-schema-print, p2-should-schema-file) collapse to n/a via antecedent propagation.",
+      "status": "skip",
+      "evidence": "`-format` is declared in --help, but no safe probe printed JSON (--help and --version override output flags in most CLIs)",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p2-json-output"
@@ -62,7 +62,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "warn",
-      "evidence": "no --quiet/-q flag detected in --help output",
+      "evidence": "no option definition in --help declares --quiet or -q; a flag named only in a usage line does not count.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p7-quiet"
@@ -116,8 +116,8 @@
       "label": "Pager-using CLI ships --no-pager escape hatch",
       "group": "P6",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "pager referenced in --help but no --no-pager escape hatch advertised",
+      "status": "skip",
+      "evidence": "no pager signal ($PAGER, --pager, pager, or less/more named as a program) in --help",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p6-no-pager-behavioral"
@@ -149,8 +149,8 @@
       "label": "Structured-output CLI exposes its schema at runtime",
       "group": "P2",
       "layer": "behavioral",
-      "status": "n_a",
-      "evidence": "antecedent `p2-json-output` is opt_out: no --output/--format flag detected — tool does not ship structured output. Schema-discovery requirements (p2-must-schema-print, p2-should-schema-file) collapse to n/a via antecedent propagation.",
+      "status": "skip",
+      "evidence": "antecedent `p2-json-output` could not be measured: `-format` is declared in --help, but no safe probe printed JSON (--help and --version override output flags in most CLIs)",
       "confidence": "medium",
       "tier": "must",
       "audit_id": "p2-schema-print"
@@ -182,8 +182,8 @@
       "label": "Skill bundle has install path (`tool skill install [<host>]`)",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p8-bundle-install"
@@ -193,8 +193,8 @@
       "label": "`skill install --all` for multi-runtime install",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p8-install-all"
@@ -204,8 +204,8 @@
       "label": "`skill update` / `skill upgrade` for bundle refresh",
       "group": "P8",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "n_a",
+      "evidence": "no skill bundle (AGENTS.md or SKILL.md) found and --help declares no `skill` subcommand",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p8-bundle-update"
@@ -226,8 +226,8 @@
       "label": "`--output` advertises additional formats beyond text/json",
       "group": "P2",
       "layer": "behavioral",
-      "status": "skip",
-      "evidence": "no `--output` or `--format` flag advertised; vacuous skip for MAY-tier extra formats.",
+      "status": "pass",
+      "evidence": null,
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p2-more-formats"
@@ -248,8 +248,8 @@
       "label": "`--color` flag for explicit color control",
       "group": "P6",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "no `--color` flag advertised. MAY-tier — `auto|always|never` lets agents and pipelines override the TTY-based default.",
+      "status": "pass",
+      "evidence": null,
       "confidence": "high",
       "tier": "may",
       "audit_id": "p6-color-flag"
@@ -271,7 +271,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "no list-style subcommand detected (list/ls/search/query/find/show/get); vacuous skip for the list-only SHOULD.",
+      "evidence": "no list-style subcommand detected (list/ls/search/query/find, or a show/get whose summary describes several results); vacuous skip for the list-only SHOULD.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p7-limit"
@@ -282,7 +282,7 @@
       "group": "P7",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "no list-style subcommand detected; vacuous skip for the list-only MAY.",
+      "evidence": "no list-style subcommand detected (list/ls/search/query/find, or a show/get whose summary describes several results); vacuous skip for the list-only MAY.",
       "confidence": "medium",
       "tier": "may",
       "audit_id": "p7-cursor-pagination"
@@ -381,7 +381,7 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; MUST applies only to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); MUST applies only to CLIs that opt into the JSON contract.",
       "confidence": "high",
       "tier": "must",
       "audit_id": "p2-json-errors"
@@ -392,7 +392,7 @@
       "group": "P4",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; SHOULD applies only to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); SHOULD applies only to CLIs that opt into the JSON contract.",
       "confidence": "high",
       "tier": "should",
       "audit_id": "p4-json-error-output"
@@ -403,14 +403,14 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "binary does not advertise `--output json` in --help; envelope-consistency only applies to CLIs that opt into the JSON contract.",
+      "evidence": "no option definition in --help declares a JSON mode (an output flag whose definition names json, or a --json or --jsonl alias); envelope-consistency only applies to CLIs that opt into the JSON contract.",
       "confidence": "medium",
       "tier": "should",
       "audit_id": "p2-consistent-envelope"
     },
     {
       "id": "p3-must-subcommand-examples",
-      "label": "Each subcommand's `--help` ships at least one invocation example",
+      "label": "Each subcommand that takes arguments ships an invocation example in its `--help`",
       "group": "P3",
       "layer": "behavioral",
       "status": "skip",
@@ -488,12 +488,12 @@
   ],
   "summary": {
     "total": 44,
-    "pass": 15,
-    "warn": 11,
+    "pass": 14,
+    "warn": 9,
     "fail": 0,
-    "opt_out": 1,
-    "n_a": 2,
-    "skip": 15,
+    "opt_out": 0,
+    "n_a": 4,
+    "skip": 17,
     "error": 0
   },
   "coverage_summary": {
@@ -512,19 +512,19 @@
   },
   "audience": "agent-optimized",
   "audit_profile": null,
-  "spec_version": "0.5.0",
+  "spec_version": "0.6.0",
   "tool": {
     "name": "actionlint",
     "binary": "actionlint",
     "version": "1.7.12"
   },
   "anc": {
-    "version": "0.6.0"
+    "version": "0.7.0"
   },
   "run": {
     "invocation": "anc audit --command actionlint --output json",
-    "started_at": "2026-10-05T18:43:30.700072465Z",
-    "duration_ms": 95,
+    "started_at": "2026-10-28T15:53:57.814985722Z",
+    "duration_ms": 136,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -537,7 +537,7 @@
   },
   "badge": {
     "eligible": true,
-    "score_pct": 76,
+    "score_pct": 80,
     "embed_markdown": "[![agent-native](https://anc.dev/badge/actionlint.svg)](https://anc.dev/score/actionlint)",
     "scorecard_url": "https://anc.dev/score/actionlint",
     "badge_url": "https://anc.dev/badge/actionlint.svg",

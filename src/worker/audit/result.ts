@@ -37,6 +37,7 @@
 import {
   type AuditEnvelope,
   buildCliEnvelope,
+  cliScoredAt,
   curatedEntryForBinary,
   hasScorecard,
   type RegistryEntryLike,
@@ -58,7 +59,9 @@ import {
 import { escHtml } from '../../shared/esc-html';
 import { resultAlternateLinks } from '../../shared/result-head';
 import { type ReauditControl, type ResultTier, type SpineInput, shortDate } from '../../shared/result-spine';
+import { brandName, cliOgIdentity, scoreOgAlt, scoreOgEdition, scoreOgKey, scoreOgUrl } from '../../shared/score-og';
 import { buildScorecardBody, buildScorecardMarkdown } from '../../shared/scorecard-format.mjs';
+import { CANONICAL_SITE_URL } from '../../shared/site-url';
 import { detectResultPreference } from '../accept';
 import {
   canonicalTargetOf,
@@ -77,6 +80,8 @@ import type { WebSummaryInput } from '../audit-web/summary-input';
 import { buildWebSummaryMarkdown } from '../audit-web/summary-markdown';
 import { buildWebSummaryBody } from '../audit-web/summary-render';
 import { applyHeaders, type CacheClassSpec, resultCacheClass } from '../headers';
+import { curatedCardOf, pageClip, withOgVideo } from '../og/page-clip';
+import type { OgVideoEnv } from '../og/render-request';
 import { get as cliCacheGet, keyFor as cliKeyFor } from '../score/cache';
 import { readCuratedEnvelope } from '../score/core';
 import { loadRegistryIndex, type RegistryIndex } from '../score/registry-lookup';
@@ -86,10 +91,7 @@ import { emitLog } from '../telemetry/log';
 import { envelopeJsonBody } from './api';
 import { readInFlight } from './inflight';
 
-export type ResultEnv = {
-  ASSETS: Fetcher;
-  SCORE_CACHE: R2Bucket;
-  SCORE_KV?: KVNamespace;
+export type ResultEnv = OgVideoEnv & {
   TURNSTILE_SITEKEY?: string;
 };
 
@@ -417,12 +419,6 @@ async function registryOrNull(env: ResultEnv): Promise<RegistryIndex | null> {
   }
 }
 
-function cliScoredAt(record: { scored_at?: unknown; scorecard: unknown }): string | null {
-  if (typeof record.scored_at === 'string') return record.scored_at;
-  const started = (record.scorecard as { run?: { started_at?: unknown } } | null)?.run?.started_at;
-  return typeof started === 'string' ? started : null;
-}
-
 /** A curated slug serves the build-emitted asset; anything but a 200 is not a hit. */
 async function serveCurated(ctx: RenderContext, entry: RegistryEntryLike): Promise<Response | null> {
   // The binding's html_handling serves `<slug>.html` at the extensionless
@@ -435,10 +431,16 @@ async function serveCurated(ctx: RenderContext, entry: RegistryEntryLike): Promi
   const suffix = ctx.representation === 'md' ? '.md' : '';
   const asset = await ctx.env.ASSETS.fetch(new Request(`https://assets.internal${scorePath(entry.name)}${suffix}`));
   if (asset.status !== 200) return null;
-  const body = await asset.text();
-  const headers: Record<string, string> =
-    ctx.representation === 'md' ? {} : { 'content-type': 'text/html; charset=utf-8' };
-  return finish(ctx, new Response(body, { status: 200, headers }), ctx.representation, { curated: true });
+  const built = await asset.text();
+  if (ctx.representation === 'md') {
+    return finish(ctx, new Response(built, { status: 200 }), 'md', { curated: true });
+  }
+  const card = curatedCardOf(built);
+  const clip = card ? await pageClip(ctx.env, card.target, card.key) : { metaHtml: '', headers: {} };
+  const headers = { 'content-type': 'text/html; charset=utf-8', ...clip.headers };
+  return finish(ctx, new Response(withOgVideo(built, clip.metaHtml), { status: 200, headers }), 'html', {
+    curated: true,
+  });
 }
 
 async function inFlightResponse(ctx: RenderContext, lane: Lane, target: string): Promise<Response | null> {
@@ -529,6 +531,18 @@ async function respond(ctx: RenderContext, rendered: Rendered): Promise<Response
       ? `${target} scored ${pct ?? 0}% for agent-readiness against the agentnative web audit (spec ${rendered.envelope.spec_version}).`
       : `${target} scored ${pct ?? 0}% against the agent-native CLI standard (spec ${rendered.envelope.spec_version}).`;
   const body = `${await rendered.html()}${controlAssets(ctx, rendered.spine)}`;
+  const scorePct = typeof pct === 'number' ? pct : null;
+  const friendly = lane === 'web' ? ((await seedEntryFor(ctx.env, target))?.name ?? null) : null;
+  const tool = (rendered.envelope.scorecard as { tool?: { name?: string; binary?: string } } | null)?.tool;
+  const identity = lane === 'web' ? brandName(target, friendly) : cliOgIdentity(target, tool);
+  const edition = scoreOgEdition({
+    lane,
+    scoredAt: rendered.envelope.freshness.scored_at,
+    toolVersion: rendered.envelope.tool_version,
+    sourceSha: rendered.envelope.source_sha,
+  });
+  const ogKey = scoreOgKey({ scorePct, specVersion: rendered.envelope.spec_version, edition });
+  const clip = await pageClip(ctx.env, target, ogKey);
   const html = substituteShell(template, {
     title,
     description,
@@ -537,10 +551,13 @@ async function respond(ctx: RenderContext, rendered: Rendered): Promise<Response
     markdownTwinPath: scoreMarkdownPath(target),
     body,
     alternatesHtml: resultAlternateLinks(target),
+    ogImage: scoreOgUrl(CANONICAL_SITE_URL, target, ogKey),
+    ogImageAlt: scoreOgAlt({ name: identity.name, lane, scorePct, specVersion: rendered.envelope.spec_version }),
+    ogVideoHtml: clip.metaHtml,
   });
   return finish(
     ctx,
-    new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } }),
+    new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8', ...clip.headers } }),
     'html',
     {
       noindex,
