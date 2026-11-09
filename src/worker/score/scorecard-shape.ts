@@ -9,7 +9,8 @@ const nullableText = z.string().nullable();
 const levelCounts = z.looseObject({ total: count, verified: count });
 
 // Objects stay loose and enum-like strings other than `status` stay plain
-// strings, so an additive anc release cannot stop live scoring.
+// strings, so added fields and labels pass. `status` follows anc's closed
+// published enum, and the image bump checks that set against each new anc.
 const scorecardShape = z.looseObject({
   schema_version: text,
   results: z.array(
