@@ -383,7 +383,7 @@ describe('sandbox-exec.score() — install table per PM', () => {
       `} END { print best }'); ` +
       `detected=$(basename "$best"); ` +
       `if [ "$detected" = anc ]; then ` +
-      `echo "DETAILS:Archive contains no binary named ${preferred}. The name anc is reserved." >&2; ` +
+      `echo "DETAILS:Archive contains no binary named ${preferred} that can be audited. The name anc is reserved." >&2; ` +
       `exit 11; ` +
       `fi; ` +
       `echo 'GATE:install_binary' >&2; ` +
@@ -941,7 +941,7 @@ describe('sandbox-exec.score() — direct-install auto-detect (Fix 1)', () => {
     expect(result).toEqual({
       ok: false,
       error: 'chain_resolved_no_binary_produced',
-      details: 'Archive contains no binary named anc. The name anc is reserved.',
+      details: 'Archive contains no binary named anc that can be audited. The name anc is reserved.',
     });
     const later = calls.filter(
       (c) => c.kind === 'exec' && (c.command.startsWith('which ') || c.command.startsWith('anc audit ')),

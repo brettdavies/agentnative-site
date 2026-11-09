@@ -249,7 +249,7 @@ async function runScore(
     return {
       ok: false,
       error: 'chain_resolved_no_binary_produced',
-      details: `Archive contains no binary named ${binary}. ${RESERVED_NAME_NOTE}`,
+      details: `Archive contains no binary named ${binary} that can be audited. ${RESERVED_NAME_NOTE}`,
     };
   }
 
@@ -599,7 +599,7 @@ function directInstallCommand(url: string, preferredBinary: string): string {
     `} END { print best }'); ` +
     `detected=$(basename "$best"); ` +
     `if [ "$detected" = ${AUDITOR_BINARY} ]; then ` +
-    `echo "${DETAILS_PREFIX}Archive contains no binary named ${preferredBinary}. ${RESERVED_NAME_NOTE}" >&2; ` +
+    `echo "${DETAILS_PREFIX}Archive contains no binary named ${preferredBinary} that can be audited. ${RESERVED_NAME_NOTE}" >&2; ` +
     `exit 11; ` +
     `fi; ` +
     `echo '${GATE_PREFIX}install_binary' >&2; ` +
