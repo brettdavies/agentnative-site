@@ -7,8 +7,15 @@
 
 import type { AuditError } from '../shared/audit-events';
 import { escHtml } from '../shared/esc-html';
+import { localTargetNextHtml } from '../shared/scoring-copy';
 
-export type BouncePanel = { headline: string; bodyHtml: string; details?: string };
+export type BouncePanel = {
+  headline: string;
+  bodyHtml: string;
+  details?: string;
+  /** Running the same target again cannot change the answer, so the page offers no Run again. */
+  final?: boolean;
+};
 
 const INSTALL_LOCALLY = '<a href="/install">Install anc locally</a>';
 
@@ -72,6 +79,13 @@ function installUnsupported(pm: string | undefined): BouncePanel {
 
 /** The panel for an error object from a JSON error body or a `bounce` or `error` event. */
 export function bouncePanel(error: AuditError): BouncePanel {
+  if (error.reason === 'local-target' && error.next_step) {
+    return {
+      headline: error.message,
+      bodyHtml: localTargetNextHtml(error.next_step.command),
+      final: true,
+    };
+  }
   switch (error.code) {
     case 'chain_resolved_install_failed':
       if (isPackageNotFound(error.details)) {

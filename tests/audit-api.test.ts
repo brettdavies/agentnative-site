@@ -165,6 +165,47 @@ describe('POST /api/score: unmetered tiers', () => {
     }
   });
 
+  test('a local, private, or internal target is refused by naming the command that audits it', async () => {
+    for (const [target, value, command, details] of [
+      ['localhost:3000', 'localhost:3000', 'anc web localhost:3000', 'blocked: localhost is not a public host'],
+      ['http://10.0.0.1', '10.0.0.1', 'anc web 10.0.0.1', 'blocked: ipv4 10.0.0.1 is in blocked range 10.0.0.0/8'],
+      ['[::1]:3000', '[::1]:3000', "anc web '[::1]:3000'", 'blocked: ipv6 loopback (::1)'],
+      [
+        'build.internal',
+        'build.internal',
+        'anc web build.internal',
+        'blocked: internal hostnames are not public hosts',
+      ],
+    ]) {
+      const tracker = newTracker();
+      const { res } = await call(post({ target }), makeEnv({ tracker }));
+      expect(res.status).toBe(400);
+      expect(await errorOf(res)).toEqual({
+        code: 'invalid_target',
+        message: `anc's public audit never contacts ${value}, a local, private, or internal host.`,
+        cta: `Run ${command} to audit it from your own network; it sends HTTPS only, so the site must serve TLS.`,
+        details,
+        reason: 'local-target',
+        value,
+        next_step: { action: 'run', command, docs: 'https://anc.dev/install#audit-a-local-site' },
+      } as Awaited<ReturnType<typeof errorOf>>);
+      expect(tracker.r2Gets).toEqual([]);
+      expect(tracker.probeCalls).toEqual([]);
+    }
+  });
+
+  test('a metadata endpoint keeps the generic refusal, since anc web refuses it too', async () => {
+    for (const target of ['169.254.169.254', 'metadata.google.internal']) {
+      const { res } = await call(post({ target }), makeEnv());
+      const body = (await res.json()) as { error: Record<string, unknown> };
+      expect(res.status).toBe(400);
+      expect(body.error.code).toBe('invalid_target');
+      expect(body.error.message).toBe('That does not look like a CLI tool, a GitHub repository, or a website.');
+      expect(body.error).not.toHaveProperty('next_step');
+      expect(body.error).not.toHaveProperty('reason');
+    }
+  });
+
   test('?fromCache=false skips both cache tiers and still consults the registry', async () => {
     const tracker = newTracker();
     const env = makeEnv({ tracker, cacheContent: { [cliKeyFor('ouch', SPEC_VERSION)]: CLI_RECORD } });

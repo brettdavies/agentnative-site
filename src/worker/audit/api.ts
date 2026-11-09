@@ -84,6 +84,7 @@ import {
   webEnvelope,
 } from '../audit-web/core';
 import { flushHitMinPurge, runWithHitMinPurge } from '../audit-web/hit-min-purge';
+import { localTargetRefusal } from '../audit-web/local-target';
 import type { WebSiteType } from '../audit-web/registry';
 import {
   type CliCoreEnv,
@@ -451,7 +452,11 @@ async function handleWeb(
   const prepared = prepareWebTarget(classified.target);
   if (!prepared.ok) {
     row.outcome = 'error_invalid_target';
-    return errorResponse(400, auditErrorFor('invalid_target', { cta: CTA_INPUT, details: prepared.reason }));
+    return errorResponse(
+      400,
+      localTargetRefusal(prepared, origin) ??
+        auditErrorFor('invalid_target', { cta: CTA_INPUT, details: prepared.reason }),
+    );
   }
   const target = prepared.target;
   if (!parsed.followDeclarations) return handleTransientWeb(common, classified.target, target);

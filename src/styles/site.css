@@ -21,6 +21,7 @@
 }
 
 html {
+  --site-header-h: 62px;
   font-family: var(--font-sans, "Uncut Sans", system-ui, sans-serif);
   font-size: var(--text-base, 1.0625rem);
   color: var(--fg-body, #1a2026);
@@ -35,6 +36,14 @@ body {
   flex-direction: column;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+/* The sticky header covers the top of the viewport, so a fragment jump or a focused control in the page has to stop
+ * below it. On the root scroller this would also scroll the page whenever focus reached the header itself. */
+main,
+main :is([id], a, button, input, select, textarea, summary, [tabindex]),
+.site-footer :is(a, button) {
+  scroll-margin-top: calc(var(--site-header-h) + var(--space-4));
 }
 
 h1,
@@ -365,7 +374,7 @@ main .anchor-icon {
   display: flex;
   align-items: center;
   gap: var(--space-6);
-  height: 62px;
+  height: var(--site-header-h);
   min-width: 0;
   container-type: inline-size;
   container-name: site-header;
@@ -607,7 +616,7 @@ main .anchor-icon {
   .site-nav {
     display: none;
     position: absolute;
-    inset: 62px 0 auto;
+    inset: var(--site-header-h) 0 auto;
     flex-direction: column;
     gap: 0;
     margin: 0;
@@ -3590,4 +3599,14 @@ main .code-wrap > pre {
   background: var(--bg-code);
   padding: 0 0.3em;
   border-radius: 3px;
+}
+
+.live-score__status--bounce .live-score__bounce-body a,
+.result-missing.result-refused p a {
+  color: var(--accent);
+}
+
+.result-missing .btn code {
+  background: transparent;
+  color: inherit;
 }

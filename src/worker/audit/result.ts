@@ -72,6 +72,7 @@ import {
 } from '../audit-web/cache';
 import { webEnvelope } from '../audit-web/core';
 import { normalizeScorecardCategories } from '../audit-web/display';
+import { refusalForHost } from '../audit-web/local-target';
 import { loadWebAuditRegistry } from '../audit-web/registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from '../audit-web/remediation';
 import { loadWebSeed, type WebSeedEntry } from '../audit-web/seed';
@@ -90,6 +91,7 @@ import { SPEC_VERSION } from '../spec-version.gen';
 import { emitLog } from '../telemetry/log';
 import { envelopeJsonBody } from './api';
 import { readInFlight } from './inflight';
+import { missingPage, refusedTarget } from './result-missing';
 
 export type ResultEnv = OgVideoEnv & {
   TURNSTILE_SITEKEY?: string;
@@ -244,6 +246,14 @@ type RenderContext = {
 };
 
 async function serveWeb(ctx: RenderContext, host: string): Promise<Response> {
+  const refusal = refusalForHost(host, ctx.origin);
+  if (refusal) {
+    const { request, env, representation, served } = ctx;
+    return refusedTarget(
+      { request, env, pathname: ctx.url.pathname, representation, legacy: served.legacy },
+      refusal.error,
+    );
+  }
   const inFlight = await inFlightResponse(ctx, 'web', host);
   if (inFlight) return inFlight;
   const canonical = canonicalTargetOf(new URL(`https://${host}/`));
@@ -729,26 +739,11 @@ async function notFound(request: Request, env: ResultEnv, deps: ResultDeps, inpu
 <header class="result-spine"><h1 class="result-spine__title">No audit exists for <code>${escHtml(input.target)}</code> yet.</h1>
 <p class="live-score-summary__meta"><a class="btn btn--primary" href="${escHtml(audit)}">Audit <code>${escHtml(input.target)}</code></a></p></header>${did}
 </article>`;
-  let template: string;
-  try {
-    template = await loadShellTemplate(env);
-  } catch (err) {
-    return new Response(`shell template unavailable: ${err instanceof Error ? err.message : String(err)}`, {
-      status: 500,
-      headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
-    });
-  }
-  const html = substituteShell(template, {
+  return missingPage(env, opts, {
     title: 'Not audited yet — anc.dev',
     description: message,
-    canonicalPath: pathname,
     breadcrumb: input.target,
     markdownTwinPath: input.legacy ? undefined : `${pathname}/md`,
     body,
-    alternatesHtml: '',
   });
-  return applyHeaders(
-    new Response(html, { status: 404, headers: { 'content-type': 'text/html; charset=utf-8' } }),
-    opts,
-  );
 }

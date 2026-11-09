@@ -656,7 +656,7 @@ describe('rows the audit could not run', () => {
     const html = page(stripeShaped());
     const group = html.slice(html.indexOf('web-check--group'), html.indexOf('<div class="web-check__group">'));
     expect(textOf(group)).toContain("anc's public audit holds no sign-in for mcp.stripe.com.");
-    expect(group).not.toContain('anc web');
+    expect(textOf(group)).toContain('Run anc web');
     const nested = html.slice(
       html.indexOf('<div class="web-check__group">'),
       html.indexOf('</div>', html.indexOf('<div class="web-check__group">')),
@@ -675,7 +675,8 @@ describe('rows the audit could not run', () => {
   });
 
   test('the score note says global keeps those rows in its maximum, on the page and the twin', () => {
-    const sentence = 'Global keeps the 18 checks this audit could not run in its maximum.';
+    const sentence =
+      'Global keeps the 18 checks this audit could not run in its maximum; the ones that need sign-in name their own command.';
     expect(textOf(page(stripeShaped()))).toContain(sentence);
     expect(twin(stripeShaped())).toContain(`\n${sentence}\n`);
     const single = scorecardOf('example.com', [row('llms-txt', 'pass', at('example.com'))]);

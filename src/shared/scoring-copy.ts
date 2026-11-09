@@ -17,6 +17,25 @@ export const LANE_EXPECTATION: Readonly<Record<Lane, string>> = {
   web: 'Usually under 30 seconds; longer when the site declares other hosts.',
 };
 
+/** The section of the install page that covers `anc web`. */
+export const ANC_WEB_DOCS_PATH = '/install#audit-a-local-site';
+
+/** The refusal's call to action. `command` is plain text in JSON and escaped markup in the panel. */
+export function localTargetCta(command: string): string {
+  return `Run ${command} to audit it from your own network; it sends HTTPS only, so the site must serve TLS.`;
+}
+
+/** The words of the link beside that call to action, on every surface that shows it. */
+export const LOCAL_TARGET_DOCS_LINK = 'See how to install and run it';
+
+/** A link can name any host, and the command runs from the reader's own network. */
+export const LOCAL_TARGET_CAUTION = 'Run it only for a host you chose: this page names whatever host its link names.';
+
+/** That call to action, its caution, and its link, as markup. */
+export function localTargetNextHtml(command: string): string {
+  return `${localTargetCta(`<code>${escHtml(command)}</code>`)} ${LOCAL_TARGET_CAUTION} <a href="${ANC_WEB_DOCS_PATH}">${LOCAL_TARGET_DOCS_LINK}</a>.`;
+}
+
 /** The website lane's status line once the run starts, until its first event arrives. */
 export function webReadingLine(target: string, follow: boolean): string {
   return follow ? `Reading ${target} and any hosts it declares…` : `Reading ${target}…`;

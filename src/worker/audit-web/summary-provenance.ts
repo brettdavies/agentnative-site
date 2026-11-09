@@ -52,8 +52,6 @@ export function openapiHosts(rows: readonly WebScorecardRow[], entryHost: string
 
 /** The score note's sentence when the public audit could not run some rows, or null when it ran them all. */
 export function notRunNote(rows: readonly SummaryRow[], domain: string): Rich | null {
-  const notRun = rows.filter((row) => row.notRun !== null);
-  if (notRun.length === 0) return null;
-  const signIn = notRun.some((row) => row.notRun?.reason === 'auth-required');
-  return notRunScoreNote(notRun.length, domain, signIn);
+  const notRun = rows.flatMap((row) => (row.notRun === null ? [] : [row.notRun]));
+  return notRun.length === 0 ? null : notRunScoreNote(notRun, domain);
 }
