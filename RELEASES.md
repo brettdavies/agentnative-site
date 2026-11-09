@@ -256,8 +256,10 @@ feature owns and fails on any survivor, which catches a miss whichever edit caus
 gitignored and binary files, `bun.lock`, `node_modules`, `dist`, the script itself, the guarded paths, and top-level
 `scorecards/*.json`: a scorecard is audit data about a third-party CLI, so its evidence strings can name a marker
 without carrying any of the feature. The script also fails when a removal takes a `describe` or `test` the feature does
-not own, so an edit that matches too much cannot strip unrelated tests from `main`. `--check` runs the same removals in
-memory, reports without writing, and exits non-zero while anything is still pending.
+not own, so an edit that matches too much cannot strip unrelated tests from `main`. A grep that cannot run is a hard
+error, never a clean tree. `--check` runs the same removals in memory and the same grep on the tree they would leave,
+reports without writing, exits 1 on a survivor or a grep that could not run, and exits 2 while anything is still
+pending, so a clean `--check` predicts a clean cut.
 
 | Feature        | Script                                       | Held back because                                                                                                                                                                      |
 | -------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

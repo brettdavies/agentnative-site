@@ -2,8 +2,9 @@
 // owns survives in the release tree. Each case builds a throwaway tree holding the script, guarded-paths.sh and the
 // guard workflow, and none of the files the script edits, so every removal is a no-op and only the scan runs.
 //
-// The ubuntu runner image ships no ripgrep, so the scan's `rg -l -e <pattern>` resolves to a grep stand-in that
-// lists the matching files, hidden ones skipped as rg does. The cases pin how the script filters that listing.
+// The ubuntu runner image ships no ripgrep, so the scan's `rg -l -e <pattern>` resolves to a stand-in that lists the
+// matching files, hidden ones skipped as rg does. Like rg, it searches a piped or redirected stdin instead of the tree
+// when it is given no path. The cases pin how the script filters and trusts that listing.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -23,6 +24,10 @@ while (($#)); do
     *) shift ;;
   esac
 done
+if [ -p /dev/stdin ] || [ -f /dev/stdin ]; then
+  grep -qE -e "$pattern" && echo '<stdin>'
+  exit 0
+fi
 grep -rlE --exclude-dir='.?*' --exclude='.?*' -e "$pattern" . | sed 's|^\\./||'
 `;
 
@@ -51,10 +56,16 @@ function plant(path: string, body: string): void {
   writeFileSync(join(tree, path), body);
 }
 
-function withhold(): { status: number; stdout: string; stderr: string } {
-  const proc = Bun.spawnSync(['python3', '-B', join(tree, SCRIPT)], {
+function standIn(name: string, body: string): void {
+  writeFileSync(join(bin, name), `#!/usr/bin/env bash\n${body}`);
+  chmodSync(join(bin, name), 0o755);
+}
+
+function withhold(args: string[] = [], stdin?: string): { status: number; stdout: string; stderr: string } {
+  const proc = Bun.spawnSync(['python3', '-B', join(tree, SCRIPT), ...args], {
     cwd: tree,
     env: { ...cleanEnv(), PATH: `${bin}:${process.env.PATH}` },
+    stdin: stdin === undefined ? undefined : Buffer.from(stdin),
   });
   return { status: proc.exitCode, stdout: proc.stdout.toString(), stderr: proc.stderr.toString() };
 }
@@ -66,8 +77,8 @@ beforeEach(() => {
     mkdirSync(dirname(join(tree, path)), { recursive: true });
     copyFileSync(join(REPO_ROOT, path), join(tree, path));
   }
-  writeFileSync(join(bin, 'rg'), RG_STAND_IN);
-  chmodSync(join(bin, 'rg'), 0o755);
+  standIn('rg', RG_STAND_IN.replace('#!/usr/bin/env bash\n', ''));
+  standIn('bun', 'exit 0\n');
 });
 
 afterEach(() => {
@@ -131,6 +142,81 @@ describe('withhold-telemetry-lake.py residue check', () => {
     const { status, stderr } = withhold();
     expect(stderr).toContain('  src/worker/index.ts\n');
     expect(stderr).not.toContain('scorecards/cf-v1.0.0.json');
+    expect(status).toBe(1);
+  });
+});
+
+const SITEMAP_PENDING = "[\n    '/privacy',\n]\n";
+
+describe('withhold-telemetry-lake.py --check', () => {
+  test('passes on a tree that carries no marker', () => {
+    const { status, stdout } = withhold(['--check']);
+    expect(stdout).toContain('already withheld');
+    expect(status).toBe(0);
+  });
+
+  test('passes when top-level scorecard JSON names a marker', () => {
+    plant('scorecards/cf-v1.0.0.json', EVERY_MARKER);
+    const { status, stderr } = withhold(['--check']);
+    expect(stderr).toBe('');
+    expect(status).toBe(0);
+  });
+
+  test('reports DRIFT for a marker in code', () => {
+    plant('src/worker/index.ts', EVERY_MARKER);
+    const { status, stderr } = withhold(['--check']);
+    expect(stderr).toContain('telemetry-lake references survive in:');
+    expect(stderr).toContain('  src/worker/index.ts\n');
+    expect(status).toBe(1);
+  });
+
+  test('lists the code path and not the scorecard when both carry a marker', () => {
+    plant('scorecards/cf-v1.0.0.json', EVERY_MARKER);
+    plant('src/worker/index.ts', EVERY_MARKER);
+    const { status, stderr } = withhold(['--check']);
+    expect(stderr).toContain('  src/worker/index.ts\n');
+    expect(stderr).not.toContain('scorecards/cf-v1.0.0.json');
+    expect(status).toBe(1);
+  });
+
+  test('reports pending removals, not residue, for markers a removal takes away', () => {
+    plant('content/privacy.md', EVERY_MARKER);
+    plant('src/build/10-sitemap.mjs', SITEMAP_PENDING);
+    const { status, stdout, stderr } = withhold(['--check']);
+    expect(stderr).toBe('');
+    expect(stdout).toContain('would withhold the telemetry lake (2 change(s))');
+    expect(status).toBe(2);
+  });
+
+  test.each([
+    ['takes away every marker', SITEMAP_PENDING, 0],
+    ['leaves a marker behind', `${SITEMAP_PENDING}    '/privacy-policy',\n`, 1],
+  ])('agrees with the cut when a pending removal %s', (_name, sitemap, expected) => {
+    plant('src/build/10-sitemap.mjs', sitemap);
+    const check = withhold(['--check']);
+    expect(check.status).toBe(expected === 0 ? 2 : 1);
+    const cut = withhold();
+    expect(cut.status).toBe(expected);
+    if (expected === 1) {
+      expect(check.stderr).toContain('  src/build/10-sitemap.mjs\n');
+      expect(cut.stderr).toBe(check.stderr);
+    }
+  });
+});
+
+describe('withhold-telemetry-lake.py residue scan trust', () => {
+  test.each([[[]], [['--check']]])('scans the tree when stdin is a pipe (%j)', (args) => {
+    plant('src/worker/index.ts', EVERY_MARKER);
+    const { status, stderr } = withhold(args, 'x');
+    expect(stderr).toContain('  src/worker/index.ts\n');
+    expect(status).toBe(1);
+  });
+
+  test.each([[[]], [['--check']]])('fails, not clean, when rg exits 2 (%j)', (args) => {
+    standIn('rg', 'echo "rg: simulated scan failure" >&2\nexit 2\n');
+    const { status, stdout, stderr } = withhold(args);
+    expect(stderr).toContain('the residue scan could not run: rg exited 2: rg: simulated scan failure');
+    expect(stdout).not.toContain('already withheld');
     expect(status).toBe(1);
   });
 });

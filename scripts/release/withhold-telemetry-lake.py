@@ -8,9 +8,10 @@ returns `unprovisioned` while no `EMAIL` binding exists. Shipping that puts a
 page making a promise, and an alert that cannot keep it, in front of
 production.
 
-Run this against a `release/*` branch after the overlay and the guarded-path
-strip, before the release commit. `dev` keeps every line, so the feature ships
-whole once the alert path is provisioned and this script is deleted.
+Run this against a `release/*` branch after the overlay and before the
+guarded-path strip, which removes this script. `dev` keeps every line, so the
+feature ships whole once the alert path is provisioned and this script is
+deleted.
 
 The structured-log emitter stays. It has no user-facing surface and every
 Worker log site routes through it.
@@ -19,11 +20,13 @@ Usage:
     scripts/release/withhold-telemetry-lake.py [--check]
 
     --check   Report what would change and exit non-zero if anything would,
-              without writing. Use it to tell an already-withheld tree from
-              one that still carries the lake.
+              without writing. It runs the residue scan on the tree the
+              removals would leave, so a clean --check predicts a clean cut.
+              Use it to tell an already-withheld tree from one that still
+              carries the lake.
 
-Exit codes: 0 applied (or already clean); 1 drift, see stderr; 2 --check found
-pending changes.
+Exit codes: 0 applied (or already clean); 1 drift or a residue scan that could
+not run, see stderr; 2 --check found pending changes and no residue.
 
 Drift is a hard error, never a skip. A file that exists but no longer contains
 the expected text means the feature changed shape on `dev`; silently skipping
@@ -42,6 +45,7 @@ import re
 import subprocess
 import sys
 from collections import Counter
+from collections.abc import Iterable
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 
@@ -357,6 +361,62 @@ RESIDUE = (
 # also matches, and the lake's own wiring never lives in a data file.
 AUDIT_DATA = re.compile(r"^scorecards/[^/]+\.json$")
 
+SELF = "scripts/release/withhold-telemetry-lake.py"
+
+
+class ScanError(Exception):
+    pass
+
+
+def _survivors(post: dict[str, str] | None = None, skip: Iterable[str] = ()) -> list[str]:
+    """Lists the paths that still carry a marker.
+
+    `post` holds the text that pending removals would leave in files not yet
+    written, and `skip` the paths whose text on disk is replaced by it or by a
+    pending deletion.
+    """
+    pattern = "|".join(RESIDUE)
+    found = subprocess.run(
+        ["rg", "-l", "--glob", "!bun.lock", "--glob", "!node_modules", "--glob", "!dist", "-e", pattern],
+        cwd=REPO,
+        stdin=subprocess.DEVNULL,  # rg searches a piped or redirected stdin instead of the tree
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if found.returncode > 1:  # 1 is no match, which is the good case
+        raise ScanError(f"rg exited {found.returncode}: {found.stderr.strip()}")
+    guarded = subprocess.run(
+        [str(REPO / "scripts/release/guarded-paths.sh")],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    guarded_re = re.compile(guarded) if guarded else None
+    replaced = set(skip)
+    hits = [ln for ln in found.stdout.splitlines() if ln not in replaced]
+    hits += [rel for rel, text in (post or {}).items() if re.search(pattern, text)]
+    return [
+        ln
+        for ln in hits
+        if ln.strip() and ln != SELF and not AUDIT_DATA.match(ln) and not (guarded_re and guarded_re.search(ln))
+    ]
+
+
+def _residue_exit(post: dict[str, str] | None = None, skip: Iterable[str] = ()) -> int | None:
+    """Prints what the scan found and returns the exit code, or None when the tree is clean."""
+    try:
+        residue = _survivors(post, skip)
+    except ScanError as e:
+        print(f"ERROR: the residue scan could not run: {e}", file=sys.stderr)
+        return 1
+    if not residue:
+        return None
+    print("DRIFT: telemetry-lake references survive in:", file=sys.stderr)
+    for r in residue:
+        print(f"  {r}", file=sys.stderr)
+    return 1
+
 
 def _drop_block(text: str, opening: str) -> str | None:
     """Removes a brace-balanced block starting at `opening`, plus trailing blanks."""
@@ -414,6 +474,7 @@ def main() -> int:
     args = ap.parse_args()
 
     changed: list[str] = []
+    deleted: list[str] = []
     errors: list[str] = []
     # Every edit reads and writes these in-memory copies, so --check runs the
     # same chain of removals the real cut does and the ownership guard sees
@@ -438,6 +499,7 @@ def main() -> int:
         if not p.exists():
             continue
         changed.append(f"delete {rel}")
+        deleted.append(rel)
         if not args.check:
             subprocess.run(["trash", str(p)], check=True)
 
@@ -503,6 +565,8 @@ def main() -> int:
                 (REPO / rel).write_text(text)
 
     if args.check:
+        if (code := _residue_exit(texts, [*deleted, *texts])) is not None:
+            return code
         if changed:
             print(f"would withhold the telemetry lake ({len(changed)} change(s)):")
             for c in changed:
@@ -528,34 +592,8 @@ def main() -> int:
         )
 
     # The real guard: whichever edit missed, a surviving reference fails here.
-    found = subprocess.run(
-        ["rg", "-l", "--glob", "!bun.lock", "--glob", "!node_modules", "--glob", "!dist", "-e", "|".join(RESIDUE)],
-        cwd=REPO,
-        capture_output=True,
-        text=True,
-        check=False,  # no matches exits 1, which is the good case
-    )
-    guarded = subprocess.run(
-        [str(REPO / "scripts/release/guarded-paths.sh")],
-        capture_output=True,
-        text=True,
-        check=False,
-    ).stdout.strip()
-    guarded_re = re.compile(guarded) if guarded else None
-    self_rel = "scripts/release/withhold-telemetry-lake.py"
-    residue = [
-        ln
-        for ln in found.stdout.splitlines()
-        if ln.strip()
-        and ln != self_rel
-        and not AUDIT_DATA.match(ln)
-        and not (guarded_re and guarded_re.search(ln))
-    ]
-    if residue:
-        print("DRIFT: telemetry-lake references survive in:", file=sys.stderr)
-        for r in residue:
-            print(f"  {r}", file=sys.stderr)
-        return 1
+    if (code := _residue_exit()) is not None:
+        return code
 
     if not changed:
         print("telemetry lake already withheld from this tree")
