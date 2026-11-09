@@ -382,6 +382,10 @@ describe('sandbox-exec.score() — install table per PM', () => {
       `if (score > best_score || best == "") { best_score=score; best=$0 } ` +
       `} END { print best }'); ` +
       `detected=$(basename "$best"); ` +
+      `if [ "$detected" = anc ]; then ` +
+      `echo "DETAILS:Archive contains no binary named ${preferred}. The name anc is reserved." >&2; ` +
+      `exit 11; ` +
+      `fi; ` +
       `echo 'GATE:install_binary' >&2; ` +
       `install -m 0755 "$tmp/x/$best" "/usr/local/bin/$detected" 2>"$tmp/inst_err" || ` +
       `{ echo "DETAILS:Install staging failed: $(cat "$tmp/inst_err" | head -c 200)" >&2; exit 13; }; ` +
@@ -934,11 +938,36 @@ describe('sandbox-exec.score() — direct-install auto-detect (Fix 1)', () => {
       url: 'https://example.com/tool-linux-amd64.tar.gz',
       binary: 'tool',
     });
-    expect(result).toEqual({ ok: false, error: 'chain_resolved_no_binary_produced', details: 'binary=anc' });
+    expect(result).toEqual({
+      ok: false,
+      error: 'chain_resolved_no_binary_produced',
+      details: 'Archive contains no binary named anc. The name anc is reserved.',
+    });
     const later = calls.filter(
       (c) => c.kind === 'exec' && (c.command.startsWith('which ') || c.command.startsWith('anc audit ')),
     );
     expect(later).toEqual([]);
+  });
+
+  test('a direct install refuses the reserved name before the install step writes', async () => {
+    const { stub, calls } = makeStub(defaultResponder);
+    await score(stub, { pm: 'direct', url: 'https://example.com/tool-linux-amd64.tar.gz', binary: 'tool' });
+    const install = calls.find((c) => c.kind === 'exec' && c.command.includes('GATE:download'));
+    const command = install?.kind === 'exec' ? install.command : '';
+    const refusal = command.indexOf('if [ "$detected" = anc ]');
+    expect(refusal).toBeGreaterThan(-1);
+    expect(refusal).toBeLessThan(command.indexOf('install -m 0755'));
+  });
+
+  test('a direct install declared under the reserved name is refused when the archive names nothing', async () => {
+    const { stub, calls } = makeStub(defaultResponder);
+    const result = await score(stub, {
+      pm: 'direct',
+      url: 'https://example.com/anc-linux-amd64.tar.gz',
+      binary: 'anc',
+    });
+    expect(result).toMatchObject({ ok: false, error: 'chain_resolved_no_binary_produced' });
+    expect(calls.filter((c) => c.kind === 'exec' && c.command.startsWith('which '))).toEqual([]);
   });
 
   test('a package-manager install may declare the auditor name', async () => {

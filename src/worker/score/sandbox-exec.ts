@@ -97,9 +97,10 @@ const GATE_PREFIX = 'GATE:';
 const DETAILS_PREFIX = 'DETAILS:';
 const DETECTED_BINARY_PREFIX = 'DETECTED_BINARY=';
 
-// A direct install may not take this name, so `--command anc` can only ever
-// mean the auditor.
+// A direct install may not take this name, so an archive's own `anc` never
+// lands on the auditor's path.
 const AUDITOR_BINARY = 'anc';
+const RESERVED_NAME_NOTE = `The name ${AUDITOR_BINARY} is reserved.`;
 const SOURCE_SHA_PREFIX = 'SOURCE_SHA=';
 
 // ---------------------------------------------------------------------------
@@ -241,11 +242,15 @@ async function runScore(
   // installed. The detected name is the basename, character-validated
   // by the install command's filter before it lands here.
   const detected = extractDetectedBinary(installResult.stdout);
-  if (detected === AUDITOR_BINARY) {
-    return { ok: false, error: 'chain_resolved_no_binary_produced', details: `binary=${detected}` };
-  }
   if (detected) {
     binary = detected;
+  }
+  if (spec.pm === 'direct' && binary === AUDITOR_BINARY) {
+    return {
+      ok: false,
+      error: 'chain_resolved_no_binary_produced',
+      details: `Archive contains no binary named ${binary}. ${RESERVED_NAME_NOTE}`,
+    };
   }
 
   // Git-clone source-scoped path: no binary on PATH to verify — `anc
@@ -593,6 +598,10 @@ function directInstallCommand(url: string, preferredBinary: string): string {
     `if (score > best_score || best == "") { best_score=score; best=$0 } ` +
     `} END { print best }'); ` +
     `detected=$(basename "$best"); ` +
+    `if [ "$detected" = ${AUDITOR_BINARY} ]; then ` +
+    `echo "${DETAILS_PREFIX}Archive contains no binary named ${preferredBinary}. ${RESERVED_NAME_NOTE}" >&2; ` +
+    `exit 11; ` +
+    `fi; ` +
     `echo '${GATE_PREFIX}install_binary' >&2; ` +
     `install -m 0755 "$tmp/x/$best" "/usr/local/bin/$detected" 2>"$tmp/inst_err" || ` +
     `{ echo "${DETAILS_PREFIX}Install staging failed: $(cat "$tmp/inst_err" | head -c 200)" >&2; exit 13; }; ` +
