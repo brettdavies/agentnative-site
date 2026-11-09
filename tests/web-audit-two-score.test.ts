@@ -8,6 +8,7 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { REPO_ROOT, SCORE_PARITY_PATH } from '../src/build/web-audit-contract-paths.mjs';
 import { NA_REASONS } from '../src/shared/web-audit-findings';
 import {
   categoryRollups,
@@ -20,8 +21,6 @@ import {
 } from '../src/worker/audit-web/score';
 import { buildWebScorecard, type EngineResult, WEB_SCHEMA_VERSION } from '../src/worker/audit-web/scorecard';
 
-const REPO_ROOT = new URL('..', import.meta.url).pathname;
-const FIXTURE_PATH = join(REPO_ROOT, 'tests', 'fixtures', 'web-audit-score-parity.json');
 const PY_TOOL = join(REPO_ROOT, 'scripts', 'scoring', 'score_model.py');
 
 type TierOutcome = [keyof ScoreWeights, 'pass' | 'noncompliant' | 'broken' | 'absent' | 'n_a'];
@@ -158,7 +157,7 @@ describe('scoreWebAudit', () => {
 });
 
 describe('score_model.py parity (shared fixture)', () => {
-  const fixture = JSON.parse(readFileSync(FIXTURE_PATH, 'utf8')) as ParityFixture;
+  const fixture = JSON.parse(readFileSync(SCORE_PARITY_PATH, 'utf8')) as ParityFixture;
   const config = {
     weights: fixture.weights,
     brokenFactor: fixture.broken_factor,
@@ -208,7 +207,7 @@ describe('score_model.py parity (shared fixture)', () => {
   // `expected` above is the always-on invariant.
   test('the Python tool reproduces the committed expected scores', () => {
     if (!existsSync(PY_TOOL)) return;
-    const proc = Bun.spawnSync(['python3', '-B', PY_TOOL, '--fixture', FIXTURE_PATH]);
+    const proc = Bun.spawnSync(['python3', '-B', PY_TOOL, '--fixture', SCORE_PARITY_PATH]);
     expect(proc.exitCode).toBe(0);
     const out = JSON.parse(proc.stdout.toString()) as Record<string, { relative: number; global: number }>;
     const scores = Object.fromEntries(

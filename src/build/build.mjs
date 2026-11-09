@@ -50,13 +50,14 @@ import { buildSitemap } from './10-sitemap.mjs';
 import { emitMcpCatalog } from './11-mcp-catalog.mjs';
 import { emitAgentReadiness, emitDiscovery } from './11a-discovery-emit.mjs';
 import { minifyDist } from './12-minify-dist.mjs';
-import { emitWebAuditRegistry, emitWebRemediation } from './13-web-audit-registry.mjs';
+import { emitWebAuditContractFingerprint, emitWebAuditRegistry, emitWebRemediation } from './13-web-audit-registry.mjs';
 import { emitWebSeedProjection, loadWebSeed } from './14-web-scorecards-emit.mjs';
 import { emitWebAuditSkillPages } from './15-web-audit-skills.mjs';
 import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, emitShellTemplate } from './shell.mjs';
 import { composeTwin, escHtml, parseFilename, sortedGlob } from './util.mjs';
+import { WEB_AUDIT_REGISTRY_PATH, WEB_AUDIT_REMEDIATION_PATH } from './web-audit-contract-paths.mjs';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const CONTENT_DIR = join(REPO_ROOT, 'content');
@@ -354,8 +355,8 @@ export async function build() {
   // the agent-skills discovery index lists these pages with digests.
   const webAuditSkillStats = await emitWebAuditSkillPages({
     distDir: DIST_DIR,
-    registryPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml'),
-    remediationPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'remediation.yaml'),
+    registryPath: WEB_AUDIT_REGISTRY_PATH,
+    remediationPath: WEB_AUDIT_REMEDIATION_PATH,
     themeInit,
   });
 
@@ -372,8 +373,7 @@ export async function build() {
   // env.ASSETS.fetch. Same /_internal/ privacy posture as the MCP catalog.
   // The server card check's required fields come from the vendored schema.
   const webAuditRegistryStats = await emitWebAuditRegistry({
-    registryPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml'),
-    cardSchemaPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'server-card.schema.json'),
+    registryPath: WEB_AUDIT_REGISTRY_PATH,
     distDir: DIST_DIR,
   });
 
@@ -381,10 +381,13 @@ export async function build() {
   // validated 1:1 against the registry check ids, read per-isolate by the
   // get_web_remediation MCP tool.
   const webRemediationStats = await emitWebRemediation({
-    remediationPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'remediation.yaml'),
-    registryPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml'),
+    remediationPath: WEB_AUDIT_REMEDIATION_PATH,
+    registryPath: WEB_AUDIT_REGISTRY_PATH,
     distDir: DIST_DIR,
   });
+
+  // 11c-ter. The vendoring contract's fingerprint, which the version signal serves.
+  await emitWebAuditContractFingerprint({ distDir: DIST_DIR });
 
   // 11d. Web-seed projection. Consumes the seed loaded at stage 6a and
   // emits the runtime domain list the Worker's rescore Workflow and

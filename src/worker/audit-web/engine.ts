@@ -65,15 +65,15 @@ import { closeRequestMemo, createRequestMemo, type MemoStats, type RequestMemo }
 import { buildWebScorecard, type EngineResult, type ScorecardStatus, type WebScorecard } from './scorecard';
 import { type AuditFetchOptions, type GuardedFetchOptions, guardedFetch, isEdgeErrorStatus } from './ssrf';
 
-const DEFAULT_CONCURRENCY = 6;
-const DEFAULT_PER_CHECK_TIMEOUT_MS = 8_000;
-const DEFAULT_PER_AUDIT_DEADLINE_MS = 25_000;
+export const DEFAULT_CONCURRENCY = 6;
+export const DEFAULT_PER_CHECK_TIMEOUT_MS = 8_000;
+export const DEFAULT_PER_AUDIT_DEADLINE_MS = 25_000;
 // Per-probe timeout once the root fetch has already failed at the network
 // level. A target that tarpits automated clients (accepts the connection,
 // never answers) makes every probe wait out its full timeout; shrinking the
 // slice keeps the whole audit inside the deadline with a genuine attempt
 // per check instead of a half-run of skips.
-const DEGRADED_PER_CHECK_TIMEOUT_MS = 2_000;
+export const DEGRADED_PER_CHECK_TIMEOUT_MS = 2_000;
 
 export interface RunWebAuditInput {
   url: string;

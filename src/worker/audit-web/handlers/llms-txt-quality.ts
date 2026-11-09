@@ -17,7 +17,7 @@ import {
 } from './shared';
 import type { EvidenceItem, HandlerContext, ProbeOutcome, ProbeStatus } from './types';
 
-const DEFAULT_MAX_LINKS = 8;
+export const DEFAULT_MAX_LINKS = 8;
 const WHEN_TO_USE_HEADING = /^#{1,3}\s+.*(when\s+to\s+use|programmatic access|when to (?:connect|call) (?:the )?mcp)/im;
 
 type QualityOp = 'format' | 'links' | 'when-to-use';

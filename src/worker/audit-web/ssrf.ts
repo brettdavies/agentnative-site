@@ -84,8 +84,8 @@ export type GuardedFetchOptions = {
 /** The fetch options an audit hands every probe: the caller's transport plus the audit's request memo. */
 export type AuditFetchOptions = Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects' | 'memo'>;
 
-const DEFAULT_TIMEOUT_MS = 8_000;
-const DEFAULT_MAX_REDIRECTS = 4;
+export const DEFAULT_TIMEOUT_MS = 8_000;
+export const DEFAULT_MAX_REDIRECTS = 4;
 
 // AUDIT_USER_AGENT is sent on every probe that does not set its own
 // User-Agent. A request with no UA at all is the strongest bot-block signal

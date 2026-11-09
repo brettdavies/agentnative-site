@@ -87,4 +87,4 @@ cp "$tmp" "$DEST"
 
 echo "wrote $DEST"
 echo
-echo "next: review \`git diff\`, then run \`bun test tests/standards-drift.test.ts\`; re-pin the manifest if it fails."
+echo "next: review \`git diff\`, then run \`bun test tests/standards-drift.test.ts\` and regenerate the vendoring contract with \`bun scripts/web-audit/gen-fixtures.ts\`; re-pin the manifest if it fails."

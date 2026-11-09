@@ -28,7 +28,7 @@ import {
 import { declarationKey, type Settled, type TrailEntry, trailEntry } from './follow-trail';
 import { isEdgeErrorStatus, OPENAPI_MAX_BODY_BYTES, REDIRECT_STATUSES } from './ssrf';
 
-const DESCRIPTION_TIMEOUT_MS = 3_000;
+export const DESCRIPTION_TIMEOUT_MS = 3_000;
 
 const DESCRIPTION_READ: ReadOptions = { maxBodyBytes: OPENAPI_MAX_BODY_BYTES, timeoutCapMs: DESCRIPTION_TIMEOUT_MS };
 

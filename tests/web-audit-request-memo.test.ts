@@ -17,7 +17,9 @@ import {
   createRequestMemo,
   failedHop,
   type HopContext,
+  type HopRequest,
   type MemoStats,
+  requestIdentityKey,
   takeHop,
 } from '../src/worker/audit-web/request-hop';
 import { guardedFetch } from '../src/worker/audit-web/ssrf';
@@ -446,16 +448,29 @@ describe('guardedFetch with an audit request memo', () => {
   });
 });
 
-/** Method, URL, headers and body of one outgoing request: what the target sees. */
-function requestOf(input: RequestInfo | URL, init: RequestInit | undefined): string {
-  const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-  const headers: string[] = [];
-  new Headers(init?.headers).forEach((value, name) => {
-    headers.push(`${name}: ${value}`);
+describe('the identity of a request', () => {
+  const base: HopRequest = {
+    method: 'GET',
+    url: URL_A,
+    headers: { Accept: 'text/plain', 'User-Agent': 'x' },
+    body: undefined,
+  };
+
+  test('ignores method case, header name case and header order', () => {
+    const same: HopRequest = { ...base, method: 'get', headers: { 'user-agent': 'x', accept: 'text/plain' } };
+    expect(requestIdentityKey(same)).toBe(requestIdentityKey(base));
   });
-  const body = init?.body === undefined || init.body === null ? '' : String(init.body);
-  return JSON.stringify([(init?.method ?? 'GET').toUpperCase(), url, headers.sort(), body]);
-}
+
+  test.each([
+    ['method', { method: 'HEAD' }],
+    ['URL', { url: `${URL_A}?a=1` }],
+    ['a header value', { headers: { Accept: 'text/html', 'User-Agent': 'x' } }],
+    ['the header set', { headers: { Accept: 'text/plain' } }],
+    ['the body', { body: 'x' }],
+  ])('tells two requests apart by %s', (_field, change) => {
+    expect(requestIdentityKey({ ...base, ...change })).not.toBe(requestIdentityKey(base));
+  });
+});
 
 describe('an audit sends each distinct request once', () => {
   const registry = loadRegistry();
@@ -463,13 +478,7 @@ describe('an audit sends each distinct request once', () => {
   test('no conformance scenario sends a request it already sent', async () => {
     const repeated: Record<string, string[]> = {};
     for (const [name, scenario] of Object.entries(SCENARIOS)) {
-      const stub = stubFetchFor(scenario, { unmatched: [] });
-      const sent = new Map<string, number>();
-      const fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) => {
-        const request = requestOf(input, init);
-        sent.set(request, (sent.get(request) ?? 0) + 1);
-        return stub(input, init);
-      }) as typeof fetch;
+      const log = { unmatched: [], sent: [] as HopRequest[] };
       for await (const _event of runWebAudit({
         url: scenario.target,
         registry,
@@ -477,10 +486,15 @@ describe('an audit sends each distinct request once', () => {
         specVersion: scenario.spec_version,
         followDeclarations: scenario.follow_declarations ?? true,
         domainBudget: ALWAYS_ADMIT_BUDGET,
-        fetchOptions: { fetchImpl },
+        fetchOptions: { fetchImpl: stubFetchFor(scenario, log) },
         now: () => 0,
       })) {
         // drain the audit
+      }
+      const sent = new Map<string, number>();
+      for (const request of log.sent) {
+        const key = requestIdentityKey(request);
+        sent.set(key, (sent.get(key) ?? 0) + 1);
       }
       const again = [...sent].filter(([, count]) => count > 1).map(([request, count]) => `x${count} ${request}`);
       if (again.length > 0) repeated[name] = again;

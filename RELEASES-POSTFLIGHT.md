@@ -139,7 +139,7 @@ manual recipe below skips the headers; for prod the recipe runs unauthenticated.
     | jq '.kind, .tier, .anc_version, .spec_version'
   # expect: "cli", "registry", <anc_version>, <spec_version>
   scripts/smoke-web-audit-version.sh "$ENV_URL"
-  # expect: PASS and the signal's three fields
+  # expect: PASS and the signal's four fields
   ```
 
   All four must succeed. The registry-hit `/api/score` POST confirms the read tier composes `lookupOnly`'s curated

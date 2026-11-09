@@ -15,8 +15,10 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { PROBE_UA_TOKENS } from '../shared/user-agents.ts';
+import { CONTRACT_FINGERPRINT_ASSET_PATH, isFingerprintPrefix } from '../shared/web-audit-contract.ts';
 import { RETAINED_DOCUMENT_KEYS } from '../shared/web-audit-documents.ts';
 import { cardRequirements, readCardSchema, VENDORED_CARD_SCHEMA_PATH } from './web-audit-card-schema.mjs';
+import { CONTRACT_FINGERPRINT_PATH, REGENERATE_COMMAND } from './web-audit-contract-paths.mjs';
 
 export const KEYWORD_BY_TIER = Object.freeze({
   required: 'must',
@@ -464,6 +466,18 @@ function normalizeAlternatives(groups, checks) {
 }
 
 /**
+ * The bytes of a projection: what this stage writes to dist/_internal, before
+ * minifyDist compacts it, and what the CLI vendoring contract commits under
+ * build/. A test holds the registry and fix catalog equal in both.
+ *
+ * @param {unknown} projection
+ * @returns {string}
+ */
+export function projectionBytes(projection) {
+  return `${JSON.stringify(projection, null, 2)}\n`;
+}
+
+/**
  * Load, normalize, and emit the web-audit registry projection.
  *
  * @param {{ registryPath: string, distDir: string, cardSchemaPath?: string }} opts
@@ -472,7 +486,7 @@ function normalizeAlternatives(groups, checks) {
 export async function emitWebAuditRegistry({ registryPath, distDir, cardSchemaPath = VENDORED_CARD_SCHEMA_PATH }) {
   const raw = await readFile(registryPath, 'utf8');
   const normalized = normalizeWebAuditRegistry(yaml.load(raw), readCardSchema(cardSchemaPath));
-  await writeFile(join(distDir, '_internal', 'web-audit-registry.json'), `${JSON.stringify(normalized, null, 2)}\n`);
+  await writeFile(join(distDir, '_internal', 'web-audit-registry.json'), projectionBytes(normalized));
   return { checks: normalized.checks.length };
 }
 
@@ -536,6 +550,21 @@ export function normalizeWebRemediation(doc, checkIds, retiredIds = []) {
 }
 
 /**
+ * The remediation catalog's projection against a normalized registry.
+ *
+ * @param {string} remediationYaml
+ * @param {{ checks: Array<{ id: string }>, retired?: object }} registry
+ * @returns {ReturnType<typeof normalizeWebRemediation>}
+ */
+export function projectWebRemediation(remediationYaml, registry) {
+  return normalizeWebRemediation(
+    yaml.load(remediationYaml),
+    registry.checks.map((c) => c.id),
+    Object.keys(registry.retired ?? {}),
+  );
+}
+
+/**
  * Load + validate the remediation catalog and emit its JSON projection.
  *
  * @param {{ remediationPath: string, registryPath: string, distDir: string }} opts
@@ -543,12 +572,24 @@ export function normalizeWebRemediation(doc, checkIds, retiredIds = []) {
  */
 export async function emitWebRemediation({ remediationPath, registryPath, distDir }) {
   const registry = normalizeWebAuditRegistry(yaml.load(await readFile(registryPath, 'utf8')));
-  const doc = yaml.load(await readFile(remediationPath, 'utf8'));
-  const normalized = normalizeWebRemediation(
-    doc,
-    registry.checks.map((c) => c.id),
-    Object.keys(registry.retired ?? {}),
-  );
-  await writeFile(join(distDir, '_internal', 'web-remediation.json'), `${JSON.stringify(normalized, null, 2)}\n`);
+  const normalized = projectWebRemediation(await readFile(remediationPath, 'utf8'), registry);
+  await writeFile(join(distDir, '_internal', 'web-remediation.json'), projectionBytes(normalized));
   return { entries: Object.keys(normalized).length };
+}
+
+/**
+ * Leave the committed contract fingerprint where the Worker reads it. Malformed
+ * bytes abort the build, because the version signal would otherwise answer 503
+ * on every request after the deploy.
+ *
+ * @param {{ distDir: string, fingerprintPath?: string }} opts
+ */
+export async function emitWebAuditContractFingerprint({ distDir, fingerprintPath = CONTRACT_FINGERPRINT_PATH }) {
+  const fingerprint = await readFile(fingerprintPath, 'utf8');
+  if (!fingerprint.endsWith('\n') || !isFingerprintPrefix(fingerprint.slice(0, -1))) {
+    throw new Error(
+      `web-audit contract: ${fingerprintPath} is not one line holding a 12-character fingerprint; run ${REGENERATE_COMMAND}`,
+    );
+  }
+  await writeFile(join(distDir, CONTRACT_FINGERPRINT_ASSET_PATH), fingerprint);
 }

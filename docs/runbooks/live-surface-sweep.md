@@ -52,7 +52,8 @@ activity:
 - A red smoke blocks the release process regardless of the run conclusion: do not cut or refresh a `release/*` branch
   from a commit whose deploy run shows a red `production-smoke` job.
 - Fix forward on `dev` and ship through the normal release flow, which redeploys production and re-runs the smoke. Never
-  blind re-run the job hoping for green without a diagnosis; the one sanctioned re-run is the mid-deploy case below.
+  blind re-run the job hoping for green without a diagnosis; the sanctioned re-runs are the mid-deploy case and the
+  stale edge copy below.
 
 ### Canned diagnoses
 
@@ -69,6 +70,11 @@ Start from these signatures before treating a red run as a broken deploy:
 - **`Probe stdlib User-Agents` red with error 1010 on `sweep-production`**: Browser Integrity Check is on for the
   `anc.dev` zone. Turn it off in the dashboard (Security > Settings, **DDoS attacks** filter, **Browser integrity
   check**) or with `PATCH /zones/<zone-id>/settings/browser_check` and `{"value":"off"}`, then re-run the sweep.
+- **`serves contract_fingerprint X (expected contract_fingerprint Y)` from the version-signal smoke**: the endpoint still
+  answered another value when the retries ran out. Read it past the plain URL's edge copy with a new query string
+  (`curl -s "https://anc.dev/api/web-audit/version?fresh=$(date +%s)"`). If that shows `Y`, the deploy landed and the edge
+  copy is stale, which clears within a day; re-run the job once the plain URL shows `Y`. If it shows `X`, the deployment
+  is not serving this tree, so check the deploy job and any `wrangler rollback`.
 - Anything else: the smoke scripts print per-check failures and their response-capture directory; read the job log
   before touching infrastructure.
 

@@ -18,8 +18,8 @@ export const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 30
 // in an isolate other audits share. A body past either cap still reaches
 // the caller that read it; a later caller that needs it asks again. A body
 // read for the memo alone stops at MEMO_BODY_MAX_BYTES.
-const MEMO_BODY_MAX_BYTES = 1024 * 1024;
-const MEMO_TOTAL_MAX_BYTES = 8 * 1024 * 1024;
+export const MEMO_BODY_MAX_BYTES = 1024 * 1024;
+export const MEMO_TOTAL_MAX_BYTES = 8 * 1024 * 1024;
 
 const DECODER = new TextDecoder();
 
@@ -246,11 +246,25 @@ function retained(record: HopRecord, stats: MemoStats): HopRecord {
   return { ...record, bytes: new Uint8Array(0), bodyCap: 0, truncated: false };
 }
 
-function keyOf(request: HopRequest): string {
-  const headers = Object.entries(request.headers)
+/**
+ * What makes two requests one request to the target: method, URL, headers with
+ * lowercased names sorted by name, and body. The memo keys on it, and the
+ * conformance corpus records and sorts each scenario's requests by it.
+ */
+export function requestIdentityKey(request: HopRequest): string {
+  return JSON.stringify([
+    request.method.toUpperCase(),
+    request.url,
+    normalizedHeaders(request.headers),
+    request.body ?? null,
+  ]);
+}
+
+/** Lowercase names sorted by name: the form a request's headers compare and commit in. */
+export function normalizedHeaders(headers: Readonly<Record<string, string>>): [string, string][] {
+  return Object.entries(headers)
     .map(([name, value]): [string, string] => [name.toLowerCase(), value])
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return JSON.stringify([request.method.toUpperCase(), request.url, headers, request.body ?? null]);
 }
 
 const DEADLINE_PASSED = Symbol('deadline passed');
@@ -306,7 +320,7 @@ export async function takeHop(
     const hop = await send(ctx);
     return hop.readsBody ? hop.full : hop.head;
   }
-  const key = keyOf(request);
+  const key = requestIdentityKey(request);
   const prior = memo.entries.get(key);
   let priorRecord: HopRecord | undefined;
   if (prior !== undefined) {

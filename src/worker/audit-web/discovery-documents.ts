@@ -12,7 +12,7 @@ import type { EvidenceItem } from './handlers/types';
 export { MCP_SERVER_CARD_TYPE };
 
 // Bounds the card reads one catalog can cause, whatever it lists.
-const MAX_CATALOG_CARDS = 4;
+export const MAX_CATALOG_CARDS = 4;
 
 // The extension schema's remote URL template variable: `{name}`.
 const URL_TEMPLATE_VARIABLE = /\{[A-Za-z_][A-Za-z0-9_]*\}/;

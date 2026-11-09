@@ -29,6 +29,7 @@ flowchart LR
 
     subgraph Out ["Outbound"]
         cliFixture[brettdavies/agentnative-cli<br/>src/skill_install/skill.json<br/><i>(SoT lives here, fixture lives there)</i>]
+        cliContract[brettdavies/agentnative-cli<br/>src/web_audit/vendored/contract/<br/>tests/fixtures/web-audit-contract/<br/><i>(generated here, pinned copy lives there)</i>]
         cf[Cloudflare Workers<br/>anc.dev]
         agentHosts[External agents,<br/>scorecard consumers,<br/>badge embedders]
     end
@@ -39,6 +40,7 @@ flowchart LR
     dockerImage -- "docker/score/build.sh --run<br/>(anc audit JSON inside container)" --> site
 
     site -- "git pull from CLI's<br/>sync-skill-fixture.sh" --> cliFixture
+    site -- "CLI's sync-web-audit.sh<br/>at a pinned site commit" --> cliContract
     site -- "wrangler deploy<br/>via deploy.yml" --> cf
     cf -- "anc.dev endpoints<br/>(serves the rendered site)" --> agentHosts
 ```
@@ -126,12 +128,13 @@ site-own version (`package.json` is `"0.0.0"` deliberately: the spec version IS 
 | Consumer                                                     | Mechanism                                                                                | What's exported               | Trigger / cadence                                                                                                | Drift check                                                                                                                                                                                                                                                                  |
 | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `brettdavies/agentnative-cli` `src/skill_install/skill.json` | CLI's `scripts/sync-skill-fixture.sh` pulls from this repo's `src/data/skill/skill.json` | Skill bundle metadata fixture | When this repo bumps `src/data/skill/skill.json` (skill release manifest bump per RELEASES.md §"Skill releases") | CLI's `skill-fixture-drift` GitHub Actions workflow runs the fixture's `--check` equivalent on every PR; CLI side fails if its vendored copy lags this repo. Effectively the inverse of the coverage-matrix arrangement: source-of-truth lives here, drift gate lives there. |
+| `brettdavies/agentnative-cli` `src/web_audit/vendored/contract/` + `tests/fixtures/web-audit-contract/` | CLI's `scripts/sync-web-audit.sh` maps this repo's `src/data/web-audit/contract/build/` and `test/` whole, at the site commit its `SITE_SHA` pins | The web-audit vendoring contract: the normalized registry and fix catalog, the engine settings and user agents, the server card schema, the conformance corpus with each scenario's request set, the score-parity cases, and `build/FINGERPRINT`, a hash over them (layout and consumers in `src/data/web-audit/contract/README.md`) | A site PR that changes the registry, the fix catalog, the vendored schema, a conformance scenario, an engine setting, or the requests the engine sends regenerates the contract in that PR with `bun scripts/web-audit/gen-fixtures.ts`. The CLI picks it up when it moves its pin. | `tests/web-audit-contract.test.ts` fails the site PR on a stale file or an unpinned entry, naming the file and the command; `tests/regression.test.ts` holds `build/`, compacted by the build's JSON minify step, equal to the `dist/_internal/` projections. CLI's `web-audit-drift` workflow holds its copy to the pin. |
 
 ### Runtime reads by other repos
 
 | Consumer                                         | Mechanism                                                                                          | What's read                                                  | Trigger / cadence                  | Drift detection                                                                                                                                                                                                                     |
 | ------------------------------------------------ | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `brettdavies/agentnative-cli` staleness note     | `GET /api/web-audit/version`, compared with the CLI's vendored web-audit contract                   | `spec_version`, `registry_fingerprint`, `web_schema_version` | Each public-target `anc web` run, in a CLI release carrying the note | `tests/web-audit-version-signal.test.ts` pins the route and body here; `scripts/smoke-web-audit-version.sh` checks each deployed environment. A client treats any failure as no signal, so a broken endpoint surfaces only in those gates. |
+| `brettdavies/agentnative-cli` staleness note     | `GET /api/web-audit/version`, compared with the CLI's vendored web-audit contract                   | `spec_version`, `registry_fingerprint`, `contract_fingerprint`, `web_schema_version` | Each public-target `anc web` run, in a CLI release carrying the note | `tests/web-audit-version-signal.test.ts` pins the route and body here; `scripts/smoke-web-audit-version.sh` checks each deployed environment. A client treats any failure as no signal, so a broken endpoint surfaces only in those gates. |
 
 ### Deploy-time emission to Cloudflare Workers
 

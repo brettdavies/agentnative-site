@@ -14,7 +14,7 @@ import { guardedFetch, validatePublicUrl } from '../ssrf';
 import { markdownHrefs, redirectsToHttp, redirectsToHttpItem, timeoutMsFor } from './shared';
 import type { HandlerContext, ProbeOutcome, ProbeStatus } from './types';
 
-const DEFAULT_MAX_CANDIDATES = 8;
+export const DEFAULT_MAX_CANDIDATES = 8;
 const SITEMAP_LOC_RE = /<loc>\s*([^<\s]+)\s*<\/loc>/gi;
 
 function topLevelDir(href: string, base: string): string | null {

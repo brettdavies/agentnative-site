@@ -170,6 +170,8 @@ done
 #   5. `docker/score/out/` — scorer output (gitignored): compare.sh reports
 #      and the CLI worktree it builds from. Full-scan only; a gitignored path
 #      never reaches the changed-only list.
+#   6. `src/data/web-audit/contract/{build,test}/` — generated files compared
+#      byte for byte; a finding there is fixed in the generator's template.
 # These edits are restored after each `bash scripts/sync-prose-tooling.sh` run
 # until upstream lands the `--exclude PATTERN` flag tracked at
 # `agentnative-spec/.context/compound-engineering/todos/010-pending-p0-prose-check-consumer-exclusion-config.md`.
@@ -178,7 +180,7 @@ done
 if ((CHANGED_ONLY)); then
   mapfile -t MD_FILES < <(
     git diff --name-only --diff-filter=ACM "$PROSE_CHECK_BASE"...HEAD -- '*.md' \
-      | grep -v -E '^(docs/(brainstorms|plans|research|solutions)/|styles/(proselint|write-good|\.vale-config)/|scripts/__fixtures__/|src/data/spec/|content/principles/|dist/|\.claude/)|(^|/)(AGENTS|CHANGELOG)\.md$|(^|/)node_modules/' \
+      | grep -v -E '^(docs/(brainstorms|plans|research|solutions)/|styles/(proselint|write-good|\.vale-config)/|scripts/__fixtures__/|src/data/spec/|src/data/web-audit/contract/(build|test)/|content/principles/|dist/|\.claude/)|(^|/)(AGENTS|CHANGELOG)\.md$|(^|/)node_modules/' \
       | sort -u
   )
 else
@@ -196,6 +198,8 @@ else
       -not -path './docs/research/*' \
       -not -path './docs/solutions/*' \
       -not -path './src/data/spec/*' \
+      -not -path './src/data/web-audit/contract/build/*' \
+      -not -path './src/data/web-audit/contract/test/*' \
       -not -path './content/principles/*' \
       -not -path './styles/proselint/*' \
       -not -path './styles/write-good/*' \
