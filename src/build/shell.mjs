@@ -476,7 +476,7 @@ ${bodyHtml}
           <div class="ai-summary__icons">
 ${AI_PROVIDERS.map(
   (p) =>
-    `            <a href="${p.url(encodeURIComponent(AI_SUMMARY_PROMPT))}" target="_blank" rel="noopener noreferrer" class="ai-summary__link" aria-label="Ask ${p.name}">${p.svg}</a>`,
+    `            <a href="${p.url(encodeURIComponent(AI_SUMMARY_PROMPT))}" target="_blank" rel="noopener" class="ai-summary__link" aria-label="Ask ${p.name}">${p.svg}</a>`,
 ).join('\n')}
           </div>
         </div>
@@ -485,7 +485,7 @@ ${AI_PROVIDERS.map(
           <span class="site-footer__source-label">Source</span>
 ${SOURCE_REPOS.map(
   (r, i) =>
-    `          ${i > 0 ? '<span class="site-footer__sep" aria-hidden="true">·</span>\n          ' : ''}<a href="${r.url}" rel="noopener noreferrer">${r.name}</a>`,
+    `          ${i > 0 ? '<span class="site-footer__sep" aria-hidden="true">·</span>\n          ' : ''}<a href="${r.url}" rel="noopener">${r.name}</a>`,
 ).join('\n')}
         </p>
         <p class="site-footer__meta">
