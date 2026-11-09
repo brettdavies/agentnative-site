@@ -516,6 +516,78 @@ describe('live and branch records', () => {
   });
 });
 
+describe('on-demand CLI package page link', () => {
+  const NPM_PAGE = 'https://www.npmjs.com/package/ouch';
+  const withInstall = (install: unknown) => ({ ...CLI_RECORD, install });
+  const seed = (record: unknown) => seededEnv({ cache: { [cliKeyFor('ouch', SPEC_VERSION)]: record } });
+  const HTML = { accept: 'text/html,application/xhtml+xml' };
+
+  test('a record with an install identity links the package page in the page and the twin', async () => {
+    const env = await seed(withInstall({ pm: 'npm', package: 'ouch' }));
+    const page = await (await route('/score/ouch', env, HTML)).text();
+    const meta = (await parseHtml(page)).querySelector('.result-brief__meta');
+    const link = meta?.querySelector(`a[href="${NPM_PAGE}"]`);
+    expect(link?.textContent).toBe(NPM_PAGE);
+    expect(link?.getAttribute('referrerpolicy')).toBeNull();
+    expect(page).not.toContain('[object Object]');
+    expect(page).not.toContain('<dt>Install</dt>');
+    for (const twin of [
+      await route('/score/ouch/md', env),
+      await route('/score/ouch', env, { accept: 'text/markdown' }),
+    ]) {
+      const md = await twin.text();
+      expect(md).toContain(`**Package:** [${NPM_PAGE}](${NPM_PAGE})`);
+      expect(md).not.toContain('**Install:**');
+    }
+  });
+
+  test('each supported manager links its own registry', async () => {
+    const cases: Array<[unknown, string]> = [
+      [{ pm: 'cargo-binstall', package: 'ouch' }, 'https://crates.io/crates/ouch'],
+      [{ pm: 'pip', package: 'ouch' }, 'https://pypi.org/project/ouch/'],
+      [{ pm: 'brew', package: 'ouch' }, 'https://formulae.brew.sh/formula/ouch'],
+      [{ pm: 'go', package: 'github.com/o/ouch' }, 'https://pkg.go.dev/github.com/o/ouch'],
+    ];
+    for (const [install, url] of cases) {
+      const page = await (await route('/score/ouch', await seed(withInstall(install)), HTML)).text();
+      expect(page).toContain(`<a href="${url}">${url}</a>`);
+    }
+  });
+
+  test('a record without an install identity renders no meta line', async () => {
+    const env = await seed(CLI_RECORD);
+    const page = await (await route('/score/ouch', env, HTML)).text();
+    expect(page).toContain('class="result-brief"');
+    expect(page).not.toContain('result-brief__meta');
+    expect(page).not.toContain('npmjs.com');
+    expect(await (await route('/score/ouch/md', env)).text()).not.toContain('**Package:**');
+  });
+
+  test('an identity that names no linkable package renders no link and still serves the page', async () => {
+    const identities: unknown[] = [
+      { pm: 'npm', package: 'ouch@1.0.0' },
+      { pm: 'direct', package: 'ouch' },
+      { pm: 'npm' },
+      'npm i ouch',
+      null,
+    ];
+    for (const install of identities) {
+      const res = await route('/score/ouch', await seed(withInstall(install)), HTML);
+      expect(res.status).toBe(200);
+      const page = await res.text();
+      expect(page).not.toContain('result-brief__meta');
+      expect(page).not.toContain('<dt>Install</dt>');
+    }
+  });
+
+  test('the JSON twin does not carry the install identity', async () => {
+    const env = await seed(withInstall({ pm: 'npm', package: 'ouch' }));
+    const body = (await (await route('/score/ouch/json', env)).json()) as Record<string, unknown>;
+    expect(Object.keys(body)).not.toContain('install');
+    expect(JSON.stringify(body)).not.toContain('npmjs.com');
+  });
+});
+
 describe('on-demand website indexing', () => {
   const HOST = 'ondemand.dev';
 

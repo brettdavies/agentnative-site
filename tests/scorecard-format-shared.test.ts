@@ -10,6 +10,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   BONUS_GROUPS,
   buildScorecardBody,
+  buildScorecardMarkdown,
   escHtml,
   extractTopIssues,
   formatAuditRowMarkdown,
@@ -17,6 +18,7 @@ import {
   groupToPrincipleNum,
   PRINCIPLE_GROUPS,
   PRINCIPLE_NAMES,
+  packagePageUrl,
   statusLabel,
 } from '../src/shared/scorecard-format.mjs';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
@@ -250,5 +252,109 @@ describe('buildScorecardBody escapes every scorecard field it renders', () => {
     expect(html).toContain('This score (74%)');
     expect(html).toContain('MUST 3 / 4');
     expect(html).toContain('SHOULD 5 / 5');
+  });
+});
+
+describe('packagePageUrl', () => {
+  const linked: Array<[string, string, string]> = [
+    ['cargo-binstall', 'ouch', 'https://crates.io/crates/ouch'],
+    ['cargo-binstall', 'cargo-deny', 'https://crates.io/crates/cargo-deny'],
+    ['npm', 'cowsay', 'https://www.npmjs.com/package/cowsay'],
+    ['npm', '@anthropic-ai/claude-code', 'https://www.npmjs.com/package/@anthropic-ai/claude-code'],
+    ['bun', 'cowsay', 'https://www.npmjs.com/package/cowsay'],
+    ['pip', 'httpie', 'https://pypi.org/project/httpie/'],
+    ['uv', 'ruff', 'https://pypi.org/project/ruff/'],
+    ['brew', 'ripgrep', 'https://formulae.brew.sh/formula/ripgrep'],
+    ['brew', 'python@3.12', 'https://formulae.brew.sh/formula/python@3.12'],
+    ['go', 'github.com/charmbracelet/glow', 'https://pkg.go.dev/github.com/charmbracelet/glow'],
+    ['go', 'golang.org/x/tools/cmd/goimports', 'https://pkg.go.dev/golang.org/x/tools/cmd/goimports'],
+  ];
+  for (const [pm, pkg, url] of linked) {
+    test(`${pm} ${pkg} links ${url}`, () => {
+      expect(packagePageUrl({ pm, package: pkg })).toBe(url);
+    });
+  }
+
+  const unlinked: Array<[string, unknown, string]> = [
+    ['direct', 'cowsay', 'a manager with no registry page'],
+    ['git-clone', 'cowsay', 'a manager with no registry page'],
+    ['gem', 'cowsay', 'an unknown manager'],
+    ['__proto__', 'cowsay', 'an inherited key, not a manager'],
+    ['constructor', 'cowsay', 'an inherited key, not a manager'],
+    ['npm', 'cowsay@1.5.0', 'a version pin'],
+    ['npm', '@scope/pkg@2', 'a version pin on a scoped name'],
+    ['npm', '--global', 'a flag'],
+    ['npm', '../etc', 'a path traversal'],
+    ['pip', 'httpie==3.2', 'a version pin'],
+    ['pip', 'httpie[extras]', 'extras'],
+    ['uv', 'ruff>=0.5', 'a version range'],
+    ['cargo-binstall', 'ouch --locked', 'a flag in the name'],
+    ['cargo-binstall', '1pkg', 'a name that starts with a digit'],
+    ['brew', '--cask', 'a flag'],
+    ['brew', 'user/tap/formula', 'a tap-qualified name'],
+    ['go', 'ouch', 'a module path with no host'],
+    ['go', 'github.com/a/../b', 'a dot-dot segment'],
+    ['go', 'github.com', 'a bare host'],
+    ['npm', '', 'an empty name'],
+    ['npm', 'a?b#c', 'URL metacharacters'],
+    ['npm', 42, 'a non-string name'],
+  ];
+  for (const [pm, pkg, why] of unlinked) {
+    test(`${pm} ${JSON.stringify(pkg)} links nothing: ${why}`, () => {
+      expect(packagePageUrl({ pm, package: pkg })).toBeNull();
+    });
+  }
+
+  test('a missing or non-object identity links nothing', () => {
+    expect(packagePageUrl(undefined)).toBeNull();
+    expect(packagePageUrl(null)).toBeNull();
+    expect(packagePageUrl({ pm: 'npm' })).toBeNull();
+    expect(packagePageUrl('npm i cowsay' as unknown as { pm: string })).toBeNull();
+  });
+});
+
+describe('the meta line links the repo, then the homepage, then the package page', () => {
+  const scorecard = { spec_version: SPEC_VERSION, badge: { score_pct: 10, eligible: false }, results: [] };
+  const packageRef = { pm: 'npm', package: 'cowsay' };
+  const PKG = 'https://www.npmjs.com/package/cowsay';
+  const base = { name: 'cowsay', binary: 'cowsay', packageRef };
+
+  test('a repo wins over a homepage and a package page', () => {
+    const tool = { ...base, repo: 'o/r', url: 'https://cow.example' };
+    const html = buildScorecardBody(tool, scorecard);
+    expect(html).toContain('href="https://github.com/o/r"');
+    expect(html).not.toContain(PKG);
+    expect(buildScorecardMarkdown(tool, scorecard)).not.toContain(PKG);
+  });
+
+  test('a homepage wins over a package page', () => {
+    const tool = { ...base, url: 'https://cow.example' };
+    const html = buildScorecardBody(tool, scorecard);
+    expect(html).toContain('href="https://cow.example"');
+    expect(html).not.toContain(PKG);
+    expect(buildScorecardMarkdown(tool, scorecard)).not.toContain(PKG);
+  });
+
+  test('with neither, the package page is linked in the page and the twin, without a referrer policy', async () => {
+    const doc = await parseHtml(buildScorecardBody(base, scorecard));
+    const link = doc.querySelector(`a[href="${PKG}"]`);
+    expect(link?.textContent).toBe(PKG);
+    expect(link?.getAttribute('referrerpolicy')).toBeNull();
+    expect(buildScorecardMarkdown(base, scorecard)).toContain(`**Package:** [${PKG}](${PKG})`);
+  });
+
+  test('the package reference never reaches the Install detail row, which holds an install command', () => {
+    const html = buildScorecardBody(base, scorecard);
+    const md = buildScorecardMarkdown(base, scorecard);
+    expect(html).not.toContain('[object Object]');
+    expect(html).not.toContain('<dt>Install</dt>');
+    expect(md).not.toContain('[object Object]');
+    expect(md).not.toContain('**Install:**');
+  });
+
+  test('an identity that fails the name shape leaves the meta line out', () => {
+    const tool = { name: 'cowsay', binary: 'cowsay', packageRef: { pm: 'npm', package: 'cowsay@1.5.0' } };
+    expect(buildScorecardBody(tool, scorecard)).not.toContain('result-brief__meta');
+    expect(buildScorecardMarkdown(tool, scorecard)).not.toContain('**Package:**');
   });
 });

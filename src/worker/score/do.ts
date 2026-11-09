@@ -301,6 +301,7 @@ export async function writeCacheBestEffort(
   const key = cache.keyFor(target, SPEC_VERSION);
   // Asked of GitHub here so indexing never depends on what the audit reports.
   const defaultBranch = spec.pm === 'git-clone' ? await lookupDefaultBranch(spec.owner, spec.repo) : null;
+  const install = installOf(spec);
   let wrote = false;
   try {
     wrote = await cache.put(
@@ -312,6 +313,7 @@ export async function writeCacheBestEffort(
       SPEC_VERSION,
       sourceSha,
       defaultBranch,
+      install,
     );
   } catch (err) {
     // cache.put only throws on refusal-to-cache-half-state, which the
@@ -322,6 +324,13 @@ export async function writeCacheBestEffort(
   if (!wrote) return;
   if (purge) await purgeWithin(purge, [cliTargetTag(target)], purgeTimeoutMs);
   await requestRender({ ...env, SCORE_CACHE: bucket }, target);
+}
+
+// The identity a page links to. Named fields rather than the spec itself,
+// because a spec can carry request-side extras that must not reach the record.
+function installOf(spec: InstallSpec): cache.CachedInstall | undefined {
+  if (spec.pm === 'direct' || spec.pm === 'git-clone') return undefined;
+  return { pm: spec.pm, package: spec.package };
 }
 
 async function purgeWithin(purge: (tags: string[]) => Promise<void>, tags: string[], ms: number): Promise<void> {

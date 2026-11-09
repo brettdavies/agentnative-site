@@ -148,6 +148,41 @@ describe('writeCacheBestEffort — happy path', () => {
     expect(parsed.scorecard.tool.name).toBe('cowsay');
   });
 
+  test('the record keeps the package identity the run installed from', async () => {
+    const { env, writes } = makeR2Stub();
+    await writeCacheBestEffort(env, SPEC, { scorecard: SCORECARD_WITH_VERSION, anc_version: ANC_VERSION });
+    const parsed = JSON.parse(writes[0].value) as { install?: unknown };
+    expect(parsed.install).toEqual({ pm: 'npm', package: 'cowsay' });
+  });
+
+  test('the install identity is the manager and package only, not the rest of the spec', async () => {
+    const { env, writes } = makeR2Stub();
+    const spec = { ...SPEC, audit_profile: 'cli-tool' } as InstallSpec;
+    await writeCacheBestEffort(env, spec, { scorecard: SCORECARD_WITH_VERSION, anc_version: ANC_VERSION });
+    const parsed = JSON.parse(writes[0].value) as { install?: unknown };
+    expect(parsed.install).toEqual({ pm: 'npm', package: 'cowsay' });
+  });
+
+  test('a direct download writes no install identity', async () => {
+    const { env, writes } = makeR2Stub();
+    const direct: InstallSpec = { pm: 'direct', url: 'https://x.example/cowsay.tar.gz', binary: 'cowsay' };
+    await writeCacheBestEffort(env, direct, { scorecard: SCORECARD_WITH_VERSION, anc_version: ANC_VERSION });
+    expect(writes).toHaveLength(1);
+    expect(Object.keys(JSON.parse(writes[0].value))).not.toContain('install');
+  });
+
+  test('a source clone writes no install identity', async () => {
+    const { env, writes } = makeR2Stub();
+    const clone: InstallSpec = { pm: 'git-clone', owner: 'o', repo: 'r', branch: 'feature', binary: 'r' };
+    await writeCacheBestEffort(env, clone, {
+      scorecard: { tool: { name: 'r' } },
+      anc_version: ANC_VERSION,
+      source_sha: 'abc1234',
+    });
+    expect(writes).toHaveLength(1);
+    expect(Object.keys(JSON.parse(writes[0].value))).not.toContain('install');
+  });
+
   test('different binaries write to different cache keys (no aliasing)', async () => {
     const { env, writes } = makeR2Stub();
     await writeCacheBestEffort(env, SPEC, { scorecard: SCORECARD_WITH_VERSION, anc_version: ANC_VERSION });

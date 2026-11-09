@@ -84,7 +84,7 @@ import { buildWebSummaryBody } from '../audit-web/summary-render';
 import { applyHeaders, type CacheClassSpec, resultCacheClass } from '../headers';
 import { curatedCardOf, pageClip, withOgVideo } from '../og/page-clip';
 import type { OgVideoEnv } from '../og/render-request';
-import { get as cliCacheGet, keyFor as cliKeyFor } from '../score/cache';
+import { type CachedInstall, get as cliCacheGet, keyFor as cliKeyFor } from '../score/cache';
 import { readCuratedEnvelope } from '../score/core';
 import { loadRegistryIndex, type RegistryIndex } from '../score/registry-lookup';
 import { loadShellTemplate, substituteShell } from '../shell-template';
@@ -502,7 +502,13 @@ function unavailable(ctx: RenderContext): Response {
 async function respondCli(
   ctx: RenderContext,
   envelope: AuditEnvelope,
-  record: { tool_version: string; anc_version: string; spec_version: string; scorecard: unknown },
+  record: {
+    tool_version: string;
+    anc_version: string;
+    spec_version: string;
+    install?: CachedInstall;
+    scorecard: unknown;
+  },
   noindex: boolean,
   spine: SpineInput,
 ): Promise<Response> {
@@ -510,6 +516,7 @@ async function respondCli(
   const tool = {
     name: (scorecard as { tool?: { name?: string } }).tool?.name ?? spine.target,
     binary: (scorecard as { tool?: { binary?: string } }).tool?.binary ?? spine.target,
+    ...(record.install ? { packageRef: record.install } : {}),
   };
   const links = { scorecard: envelope.scorecard_url, markdown: envelope.markdown_url, json: envelope.json_url };
   return respond(ctx, {
