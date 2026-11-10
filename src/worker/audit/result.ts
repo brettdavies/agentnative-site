@@ -729,7 +729,7 @@ async function notFound(request: Request, env: ResultEnv, deps: ResultDeps, inpu
   }
   if (input.rep === 'md') {
     const code = richMarkdown([{ code: input.target }]);
-    const lines = [`# No audit exists for ${code} yet.`, '', `[Audit ${code}](${origin}${audit})`, ''];
+    const lines = [`# No audit exists for ${code} yet.`, '', `Start one: [Audit ${code}](${origin}${audit})`, ''];
     if (suggestions.length > 0) {
       lines.push('## Did you mean?', '', ...suggestions.map((s) => `- [${s}](${origin}${scorePath(s)})`), '');
     }

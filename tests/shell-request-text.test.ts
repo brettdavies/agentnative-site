@@ -1,4 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
+import remarkParse from 'remark-parse';
+import { unified } from 'unified';
 import { emitShellTemplate } from '../src/build/shell.mjs';
 import { _resetResultCaches, handleResultRoute, type ResultEnv } from '../src/worker/audit/result';
 import { handleScoringPage, type ScoringPageEnv } from '../src/worker/audit/scoring-page';
@@ -109,6 +111,18 @@ describe('the /score/ 404 markdown twin', () => {
     ]);
     expect(lines.filter((line) => line.startsWith('```'))).toEqual([]);
     expect(lines.filter((line) => line.startsWith('- '))).toEqual([]);
+  });
+
+  test('a target spelling a reference label leaves the link and its code span in place', async () => {
+    const res = await handleResultRoute(request('/score/a%5D:%20b/md', 'text/markdown'), env());
+    expect(res.status).toBe(404);
+    const tree = unified()
+      .use(remarkParse)
+      .parse(await res.text());
+    const link = tree.children
+      .flatMap((node) => (node.type === 'paragraph' ? node.children : []))
+      .find((node) => node.type === 'link');
+    expect(link?.children).toContainEqual(expect.objectContaining({ type: 'inlineCode', value: 'a]: b' }));
   });
 
   test('a backtick in the target cannot close the code span', async () => {
