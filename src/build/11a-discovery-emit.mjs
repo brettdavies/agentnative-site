@@ -198,7 +198,8 @@ export async function emitDiscovery({ distDir, baseUrl }) {
   return { mcpServerCardSeedPath, aiCatalogPath, mcpDescriptorSeedPath, securityPath, aiPath };
 }
 
-// Agent-readiness discovery surfaces (api-catalog, agent-skills, auth.md). MCP server card seed: emitDiscovery() → _internal/mcp-server-card.json.
+// Agent-readiness discovery surfaces (api-catalog, agent-skills, auth.md).
+// MCP server card seed: emitDiscovery() → _internal/mcp-server-card.json.
 
 function discoveryLinks(baseUrl) {
   const links = {};

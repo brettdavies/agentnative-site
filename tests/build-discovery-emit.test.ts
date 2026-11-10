@@ -13,6 +13,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -381,7 +382,13 @@ describe('emitAgentReadiness() in isolation', () => {
     await mkdir(tmp, { recursive: true });
     try {
       await writeFile(join(tmp, 'mcp-skill.md'), '# Using the MCP server\n\nhello\n');
+      const oauthFiles = ['oauth-protected-resource', 'oauth-authorization-server', 'jwks.json'].map((name) =>
+        join(tmp, '.well-known', name),
+      );
+      await mkdir(join(tmp, '.well-known'), { recursive: true });
+      for (const path of oauthFiles) await writeFile(path, '{}\n');
       const stats = await emitAgentReadiness({ distDir: tmp, baseUrl: 'https://example.test' });
+      expect(oauthFiles.filter((path) => existsSync(path))).toEqual([]);
       expect(stats.apiCatalogPath).toBe(join(tmp, '.well-known', 'api-catalog'));
       expect(stats.agentSkillsPath).toBe(join(tmp, '.well-known', 'agent-skills', 'index.json'));
       expect(stats.authMdPath).toBe(join(tmp, 'auth.md'));

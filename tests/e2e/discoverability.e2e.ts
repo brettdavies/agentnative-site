@@ -297,11 +297,15 @@ test.describe('staging agent-readiness well-known surfaces', () => {
       '/.well-known/oauth-protected-resource',
       '/.well-known/oauth-authorization-server',
       '/.well-known/jwks.json',
-      '/oauth2/token',
     ]) {
       const res = await request.get(`${STAGING_BASE}${path}`, { headers: ACCESS_HEADERS });
       expect(res.status(), path).toBe(404);
     }
+    const token = await request.post(`${STAGING_BASE}/oauth2/token`, {
+      headers: { ...ACCESS_HEADERS, 'content-type': 'application/json' },
+      data: {},
+    });
+    expect(token.status(), 'POST /oauth2/token').toBe(404);
   });
 
   test('/_internal/mcp-server-card.json is not publicly reachable', async ({ request }) => {
