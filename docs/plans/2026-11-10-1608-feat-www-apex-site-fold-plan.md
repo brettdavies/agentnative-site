@@ -483,4 +483,5 @@ Owner decisions sent to the coordinating session on 2026-11-10. Each gates the m
 
 ## Review log
 
-- 2026-11-10: plan written. No review has run; `/plan-eng-review`, `/plan-devex-review`, and `/compound-engineering:ce-doc-review` follow once D1 to D8 are answered.
+- 2026-11-10: plan written at 96549a9.
+- 2026-11-10: `/plan-eng-review` round 1 started (Opus, effort high), on the plan as written, with D1 to D8 still with the owner.
