@@ -509,6 +509,9 @@ gh release download v<version> -R brettdavies/agentnative-cli -p sha256sum.txt -
 or the two pin different archives. `scripts/release/preflight.sh coord` fails while a pinned image bakes a different anc
 than the Dockerfile.
 
+`results[].status` in `src/worker/score/scorecard-shape.ts` lists anc's status values, and a run reporting any other
+value fails. Compare it with the new release's `schema/scorecard.schema.json`, and add a new status in the same PR.
+
 ```bash
 # from a clean working tree on dev
 GIT_SHA=$(git rev-parse --short HEAD)

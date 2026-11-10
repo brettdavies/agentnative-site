@@ -26,6 +26,7 @@ import { handlers, Sandbox } from '../src/worker/score/do';
 import { type ContainerLike, type ExecLike, score } from '../src/worker/score/sandbox-exec';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 import { captureLogs, type LogCapture } from './helpers/log-capture';
+import { validScorecard } from './helpers/scorecard-fixture';
 
 // ---------------------------------------------------------------------------
 // Stub Sandbox — records every setOutboundHandler + exec call.
@@ -51,12 +52,9 @@ function makeStub(responder: ExecResponder = defaultResponder): { stub: Containe
   return { stub, calls };
 }
 
-const ANC_CHECK_OK = JSON.stringify({
-  spec_version: SPEC_VERSION,
-  anc_version: ANC_VERSION,
-  tool: { name: 'ripgrep', version: '14.1.0' },
-  score: { value: 87 },
-});
+const ANC_CHECK_OK = JSON.stringify(
+  validScorecard({ spec_version: SPEC_VERSION, tool: { name: 'ripgrep', binary: 'rg', version: '14.1.0' } }),
+);
 
 function defaultResponder(command: string): ExecLike {
   if (command.startsWith('which ')) {
