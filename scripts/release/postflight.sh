@@ -363,6 +363,12 @@ RETIRED_PATHS=(
   # bare path's retired `?input=` read is covered by tests/worker.test.ts.
   /api/score.md
   /api/score.json
+  # OAuth metadata: the MCP endpoint needs no sign-in. `/oauth2/token` is not
+  # listed because this gate sends HEAD, which that path answers 404 whether or
+  # not a POST route exists there.
+  /.well-known/oauth-protected-resource
+  /.well-known/oauth-authorization-server
+  /.well-known/jwks.json
 )
 
 # Retired paths that still resolve, as `<path>|<location>`. The entry page is
