@@ -1,7 +1,3 @@
-// Text from a request path or query reaches the page shell's breadcrumb and the
-// markdown twins' code spans. These tests drive the real template the build
-// emits, so the JSON-LD block under test is the one that ships.
-
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { emitShellTemplate } from '../src/build/shell.mjs';
 import { _resetResultCaches, handleResultRoute, type ResultEnv } from '../src/worker/audit/result';
@@ -29,7 +25,6 @@ function env(): ResultEnv & ScoringPageEnv {
         return null;
       },
     } as unknown as R2Bucket,
-    TURNSTILE_SITEKEY: 'sitekey-test',
   } as unknown as ResultEnv & ScoringPageEnv;
 }
 
@@ -60,7 +55,6 @@ function lastCrumbName(html: string): string | undefined {
   return items.at(-1)?.name;
 }
 
-/** Script elements as a real HTML tokenizer sees them, so one a value closed early counts twice. */
 async function scriptCount(html: string): Promise<number> {
   let count = 0;
   await new HTMLRewriter()
