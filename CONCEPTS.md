@@ -87,9 +87,12 @@ and a target can never shadow one.
 
 `/scoring?target=<t>`, the single page both lanes run on. The Worker paints it from the target alone; the client owns
 every state after that, spending a stashed admission token, probing without one, or waiting for the reader to press
-Start, then rendering the stream and forwarding to the result. With no target it serves a pointer to the audit page, and
-a refused target serves that pointer with the reason. The page exists for one run, so it is neither cached at the edge
-nor indexed, and it never loads the in-page tool script: a tool that could reach it could make it transact.
+Start, then rendering the stream and forwarding to the result. A result with no page of its own carries no
+`scorecard_url` and renders inline on this page instead of forwarding, and a refresh in the same tab restores it. That
+covers a website audit that saved no scorecard, a binary that shadows a curated slug, a binary the result route refuses,
+and an errored live CLI run. With no target it serves a pointer to the audit page, and a refused target serves that
+pointer with the reason. The page exists for one run, so it is neither cached at the edge nor indexed, and it never
+loads the in-page tool script: a tool that could reach it could make it transact.
 
 ### Result envelope
 
@@ -198,10 +201,10 @@ absent counts as not applicable, never as a miss.
 The two scores one web-audit run produces, each covering what an agent at the audit's vantage can verify. Relative (the
 headline) measures the site against only the checks that apply to it, so a site perfect for its type approaches the
 maximum; the web leaderboard ranks by it. Global measures the same outcomes against the most a single site could earn:
-every registry check outside a group of alternatives, not-applicable ones included, plus each alternative design the
-site presents, or the largest when it presents none. A check the audit could not reach (sign-in blocked it, or a host is
-private or unreachable) earns nothing, is excluded from relative, and stays in global; a check the audit reached scores
-on the answer it got, so a lane a server refuses without asking for sign-in reads as it does on an open server.
+every check in the registry outside a group of alternatives, not-applicable ones included, plus each alternative design
+the site presents, or the largest when it presents none. A check the audit could not reach (sign-in blocked it, or a
+host is private or unreachable) earns nothing, is excluded from relative, and stays in global; a check the audit reached
+scores on the answer it got, so a lane a server refuses without asking for sign-in reads as it does on an open server.
 Alternatives are designs, never access limits: the only group is MCP access, whose sign-in checks count for a site that
 presents the protected design (a token-less handshake, or the request that found the endpoint when neither handshake
 drew a 401 or a result, drew a 401 its RFC 9728 metadata backs) or one with no MCP endpoint. Exposing and nailing more
