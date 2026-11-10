@@ -707,7 +707,7 @@ describe('discoverMcpEndpoint: several card sources for one endpoint', () => {
       routedFetch(
         {
           [`GET ${CATALOG_URL}`]: inlineCatalog,
-          [`GET ${WELL_KNOWN_CARD_URL}`]: () => legacyCard({ authentication: { type: 'oauth2' } }),
+          [`GET ${WELL_KNOWN_CARD_URL}`]: () => legacyCard({ authentication: { required: true, schemes: ['oauth2'] } }),
           [`POST ${MCP_URL}`]: () => initializeResponse(),
         },
         [],
@@ -716,6 +716,28 @@ describe('discoverMcpEndpoint: several card sources for one endpoint', () => {
     expect(result.endpoint).toBe(MCP_URL);
     const declaringAuth = result.evidence.filter((e) => e.authentication === true);
     expect(declaringAuth.map((e) => e.source)).toEqual([WELL_KNOWN_CARD]);
+  });
+
+  test('a SEP-1649 card saying sign-in is not required and listing no scheme declares no auth', async () => {
+    for (const fields of [
+      { authentication: { required: false, schemes: [] } },
+      { authentication: { required: false } },
+      { auth: { required: false, schemes: [] } },
+    ]) {
+      const result = await discover(
+        routedFetch(
+          {
+            [`GET ${CATALOG_URL}`]: inlineCatalog,
+            [`GET ${WELL_KNOWN_CARD_URL}`]: () => legacyCard(fields),
+            [`POST ${MCP_URL}`]: () => initializeResponse(),
+          },
+          [],
+        ),
+      );
+      expect(result.endpoint).toBe(MCP_URL);
+      const declaringAuth = result.evidence.filter((e) => e.authentication === true);
+      expect({ fields, declaringAuth: declaringAuth.map((e) => e.source) }).toEqual({ fields, declaringAuth: [] });
+    }
   });
 
   test('a suffix answer that is not a card never displaces the SEP-1649 card of record', async () => {

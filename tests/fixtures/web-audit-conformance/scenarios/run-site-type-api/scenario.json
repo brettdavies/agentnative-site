@@ -298,7 +298,7 @@
         "headers": {
           "content-type": "application/json"
         },
-        "body": "{\"name\":\"example\",\"version\":\"1.0.0\",\"mcp_endpoint\":\"https://example.com/mcp\",\"documentation\":\"https://example.com/mcp-skill.md\",\"authentication\":{\"type\":\"oauth2\"}}"
+        "body": "{\"name\":\"example\",\"version\":\"1.0.0\",\"mcp_endpoint\":\"https://example.com/mcp\",\"documentation\":\"https://example.com/mcp-skill.md\",\"authentication\":{\"required\":true,\"schemes\":[\"oauth2\"]}}"
       }
     },
     {
