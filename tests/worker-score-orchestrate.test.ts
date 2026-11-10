@@ -4,7 +4,7 @@
 // file exercises both intents end-to-end against stubbed DO + R2 + KV
 // per the cloudflare-workers-do-mock-must-mirror-binding-shape solutions
 // doc. The mock chain has the call-site shape (idFromName -> get ->
-// {fetch}) so getRandom resolves the same way it would in workerd.
+// {fetch}) so the dispatch resolves the same way it would in workerd.
 //
 // Scope: orchestrate.ts pipeline only. The metered gates (Turnstile,
 // session, SCORE_LIMITER on the human form; MCP_AUDIT_LIMITER + KV
@@ -50,6 +50,7 @@ interface DoFetchSpy {
   calls: Array<{ url: string; body: string }>;
   response: Response;
   idFromNameCalls: number;
+  idFromNameArgs: string[];
 }
 
 interface CacheStub {
@@ -82,6 +83,7 @@ function makeOrchestrateEnv(opts: MakeEnvOpts = {}): {
         { status: 200, headers: { 'content-type': 'application/json' } },
       ),
     idFromNameCalls: 0,
+    idFromNameArgs: [],
   };
 
   const cacheStore = new Map<string, string>();
@@ -93,8 +95,9 @@ function makeOrchestrateEnv(opts: MakeEnvOpts = {}): {
   const scoreBinding =
     opts.scoreBinding !== false
       ? ({
-          idFromName(_name: string) {
+          idFromName(name: string) {
             doSpy.idFromNameCalls += 1;
+            doSpy.idFromNameArgs.push(name);
             return { name: 'stub' };
           },
           get(_id: unknown) {
@@ -303,20 +306,17 @@ describe('runFreshOnly: DO dispatch', () => {
     expect(bodyParsed.hash).toBe('beefcafe');
   });
 
-  test('DO dispatch uses idFromName via getRandom (pool pattern); never the single-instance idFromName', async () => {
+  test('each target dispatches to a Durable Object of its own, and a repeat reaches the same one', async () => {
     const { env, doSpy } = makeOrchestrateEnv();
-    const input: ValidatedInput = {
+    const input = (binary: string): ValidatedInput => ({
       kind: 'install-command',
-      spec: { pm: 'npm', package: 'pooltest', binary: 'pooltest' },
-    };
-    await runFreshOnly(input, env, FIXTURE_HINTS_INDEX, {
-      specVersion: SPEC_VERSION,
-      inputHash: 'deadbeef',
+      spec: { pm: 'npm', package: binary, binary },
     });
-    // getRandom calls idFromName once per dispatch — the pool pattern
-    // wraps it. The orchestrator itself never calls idFromName directly,
-    // so a single call here is the signature of getRandom-via-pool.
-    expect(doSpy.idFromNameCalls).toBe(1);
+    const options = { specVersion: SPEC_VERSION, inputHash: 'deadbeef' };
+    await runFreshOnly(input('first'), env, FIXTURE_HINTS_INDEX, options);
+    await runFreshOnly(input('second'), env, FIXTURE_HINTS_INDEX, options);
+    await runFreshOnly(input('first'), env, FIXTURE_HINTS_INDEX, options);
+    expect(doSpy.idFromNameArgs).toEqual(['first', 'second', 'first']);
   });
 
   test('DO returns sandbox_stub_until_u6 envelope → kind: sandbox_stub_until_u6 with spec attribution', async () => {
@@ -429,6 +429,13 @@ describe('runFreshOnly: git-clone branch-scoped specs skip the post-discovery ca
     // invoked instead.
     expect(cache.getCalls).toBe(0);
     expect(doSpy.calls.length).toBe(1);
+  });
+
+  test('a branch-scoped target dispatches to a Durable Object named owner/repo@branch', async () => {
+    const { env, doSpy } = makeOrchestrateEnv();
+    const input: ValidatedInput = { kind: 'github-url', owner: 'owner', repo: 'repo', branch: 'main' };
+    await runFreshOnly(input, env, FIXTURE_HINTS_INDEX, { specVersion: SPEC_VERSION, inputHash: 'd' });
+    expect(doSpy.idFromNameArgs).toEqual(['owner/repo@main']);
   });
 });
 

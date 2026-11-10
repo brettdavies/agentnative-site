@@ -4,7 +4,7 @@
 //
 //   lookupOnly ..... registry, then the R2 cache; no fresh audit
 //   runFreshOnly ... resolveSpec, the post-discovery cache lookup, then
-//                    a Durable Object dispatch through the getRandom pool,
+//                    a dispatch to the target's own Durable Object,
 //                    read line by line: `phase` lines go to the optional
 //                    callback, the one result line becomes the result
 //
@@ -15,8 +15,8 @@
 // itself; this module never writes R2. Neither function rate-limits: the
 // caller's gates run first.
 
-import { type Container, getRandom } from '@cloudflare/containers';
 import { CLI_PHASES, type CliPhase } from '../../shared/audit-events';
+import { targetOfSpec } from '../../shared/audit-routes';
 import * as cache from './cache';
 import type { InstallSpec, ResolvedStep } from './discover-binary';
 import { type DiscoveryHintsIndex, lookupScorecard, type ScorecardLookupResult } from './registry-lookup';
@@ -31,14 +31,6 @@ export interface OrchestrateEnv extends cache.CacheEnv {
   // designed behavior, not an error condition.
   SCORE?: DurableObjectNamespace;
 }
-
-// Mirrors handler.ts MAX_INSTANCES. Must match wrangler.jsonc
-// containers[].max_instances so getRandom's hash space lines up with
-// the CF Containers app config. Top-level prod is currently 3,
-// env.staging is 10; the constant here is 10 to match handler.ts's
-// existing value. Pinning the two constants together is the safety;
-// they should drift only when wrangler.jsonc bumps.
-const MAX_INSTANCES = 10;
 
 let hintsIndexPromise: Promise<DiscoveryHintsIndex> | null = null;
 
@@ -89,8 +81,8 @@ export async function lookupOnly(
 //
 // Takes a ValidatedInput, resolves it to an InstallSpec, consults the
 // post-discovery cache once more (discovery often produces a binary the
-// pre-discovery lookup could not derive), then dispatches to the Sandbox
-// DO pool through getRandom and returns a typed result the caller maps
+// pre-discovery lookup could not derive), then dispatches to the target's
+// own Sandbox DO and returns a typed result the caller maps
 // to its own response shape.
 //
 // Called only after the caller's metered gates. This function performs
@@ -239,7 +231,7 @@ export async function runFreshOnly(
     }
   }
 
-  // Step 3: DO dispatch via getRandom. The DO writes the cache itself
+  // Step 3: dispatch to the target's own DO. The DO writes the cache itself
   // via writeCacheBestEffort under the target's key, so the next request
   // for the same binary short-circuits at lookupOnly's cache tier (or the
   // post-discovery tier above, when the input is a github-url-without-hint)
@@ -255,10 +247,7 @@ export async function runFreshOnly(
     return { kind: 'sandbox_unavailable', spec, resolved_step };
   }
 
-  const stub = (await getRandom(
-    env.SCORE as unknown as DurableObjectNamespace<Container>,
-    MAX_INSTANCES,
-  )) as DurableObjectStub;
+  const stub = env.SCORE.get(env.SCORE.idFromName(targetOfSpec(spec)));
 
   const doRes = await stub.fetch(
     new Request('https://do.internal/score', {

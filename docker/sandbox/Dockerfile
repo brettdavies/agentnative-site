@@ -55,6 +55,19 @@ RUN apt-get update \
         xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
+# Debian's npm runs a git dependency's `prepare` under --ignore-scripts; npm 11
+# honors the setting when it packs a dependency directory. npm 12 needs a newer
+# Node than this base provides. The upgrade copies Debian's builtin config, and
+# npm 11 warns on every command about the one key it does not know; that warning
+# would lead each install failure's details.
+RUN set -eux; \
+    curl -fsSL -o /tmp/npm.tgz https://registry.npmjs.org/npm/-/npm-11.21.1.tgz; \
+    echo '613ccbe90044257c87713bb426251ced128ca7e9b3949b65eeb18b98445a5d441e14720c73d6ad76be86f4cf42f2f0d66efe347a9a13400ccd2f6fcfb5954385  /tmp/npm.tgz' | sha512sum -c -; \
+    npm install -g --ignore-scripts /tmp/npm.tgz; \
+    rm /tmp/npm.tgz; \
+    sed -i '/^globalignorefile=/d' /usr/local/lib/node_modules/npm/npmrc; \
+    /usr/local/bin/npm --version
+
 # Upstream Go (NOT Debian's golang-go). Debian builds Go with
 # CGO_ENABLED=0, which makes GODEBUG=netdns=cgo silently fall back to
 # Go's pure-Go resolver. The pure-Go resolver's IPv6 dual-stack
@@ -92,9 +105,18 @@ RUN set -eux; \
         https://github.com/brettdavies/agentnative-cli/releases/download/v0.7.0/agentnative-x86_64-unknown-linux-gnu.tar.gz; \
     echo '37d44d4ef1f577f37bc31a0dcaf49d0cdd73b5598199a1ea9031c18e63ce6a73  /tmp/anc.tgz' | sha256sum -c -; \
     tar xzf /tmp/anc.tgz -C /tmp/; \
-    install -m 0755 /tmp/agentnative-x86_64-unknown-linux-gnu/anc /usr/local/bin/anc; \
+    install -m 0111 /tmp/agentnative-x86_64-unknown-linux-gnu/anc /usr/local/bin/anc; \
     rm -rf /tmp/anc.tgz /tmp/agentnative-x86_64-unknown-linux-gnu; \
     anc --version
+
+# Installs and audits run as anc-audit, and the SDK control server stays root,
+# so the image declares no USER. Mode 0111 lets that user run `anc` without
+# reading or replacing it, and the kernel marks an unreadable executable
+# non-dumpable. /opt/anc-empty is the root-owned repo path for command audits.
+RUN set -eux; \
+    useradd --uid 1000 --user-group --create-home --shell /usr/sbin/nologin anc-audit; \
+    install -d -o anc-audit -g anc-audit /home/anc-audit/.local /home/anc-audit/.local/bin; \
+    install -d -o root -g root -m 0755 /opt/anc-empty
 
 # `unzip -j` flattens the archive's `bun-linux-x64/` directory so the
 # binary lands directly on PATH instead of in $HOME/.bun/bin.

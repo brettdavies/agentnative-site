@@ -358,6 +358,17 @@ describe('the relay over a streaming Durable Object', () => {
     expect([...env._kv.keys()].filter((k) => k.startsWith('inflight:'))).toEqual([]);
   });
 
+  test('a busy sandbox answers 503 with its own code and the retry text', async () => {
+    const env = makeEnv({ doFetch: streamingDo({ lines: [{ error: 'sandbox_busy' }] }) });
+    const { ctx, promises } = ctxWithPromises();
+    const res = await handleAuditApi(jsonPost('cargo binstall ouch'), env, ctx, env._deps);
+    await Promise.all(promises);
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({
+      error: { code: 'sandbox_busy', message: 'The scoring sandbox is busy. Try again in a minute.' },
+    });
+  });
+
   test('a request whose signal aborted before the relay listens is still recorded as client_gone', async () => {
     const controller = new AbortController();
     const env = makeEnv({ doFetch: streamingDo({ lines: [DO_RESULT] }) });

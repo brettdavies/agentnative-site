@@ -94,7 +94,7 @@ export interface WebSummaryModelInput {
   scoredAt?: string | null;
 }
 
-function scoresOf(scorecard: WebScorecardShape): { relative: number; global: number } {
+export function scoresOf(scorecard: WebScorecardShape): { relative: number; global: number } {
   return {
     relative: scorecard.score?.relative ?? scorecard.score_pct ?? 0,
     global: scorecard.score?.global ?? 0,

@@ -29,6 +29,8 @@ import {
   score,
 } from '../src/worker/score/sandbox-exec';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { plainCommand } from './helpers/sandbox-command';
+import { validScorecard } from './helpers/scorecard-fixture';
 
 // ---------------------------------------------------------------------------
 // Stub — mirrors the shape in score-do.test.ts so tests run offline.
@@ -40,12 +42,9 @@ type Call =
 
 type ExecResponder = (command: string) => ExecLike;
 
-const ANC_CHECK_OK = JSON.stringify({
-  spec_version: SPEC_VERSION,
-  anc_version: ANC_VERSION,
-  tool: { name: 'qmd', version: '0.1.0' },
-  score: { value: 70 },
-});
+const ANC_CHECK_OK = JSON.stringify(
+  validScorecard({ spec_version: SPEC_VERSION, tool: { name: 'qmd', binary: 'qmd', version: '0.1.0' } }),
+);
 
 function defaultResponder(command: string): ExecLike {
   // git clone — synthesize success without touching the network.
@@ -67,7 +66,8 @@ function makeStub(responder: ExecResponder = defaultResponder): { stub: Containe
     async setOutboundHandler<P = unknown>(name: string, params?: P): Promise<void> {
       calls.push({ kind: 'setOutboundHandler', name, params });
     },
-    async exec(command: string, options?: { timeout?: number }): Promise<ExecLike> {
+    async exec(wrapped: string, options?: { timeout?: number }): Promise<ExecLike> {
+      const command = plainCommand(wrapped);
       calls.push({ kind: 'exec', command, timeout: options?.timeout });
       return responder(command);
     },

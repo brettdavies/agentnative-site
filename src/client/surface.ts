@@ -1,6 +1,8 @@
 // Visitor surface preference (CLI | Website) — drives header Leaderboards/Audit
 // and homepage segment restore. Mirrors theme.ts storage guards.
 
+import { dropScoreQuery } from './score-address';
+
 export type Surface = 'cli' | 'web';
 
 const STORAGE_KEY = 'anc-surface';
@@ -109,6 +111,9 @@ const AUDIT_PROBE: SurfaceProbeConfig = {
 };
 
 function init(): void {
+  // Every shell page loads this script ahead of the Cloudflare beacon module,
+  // which reads the address when it starts, so the query is gone before it does.
+  dropScoreQuery();
   applyOffHomeReader();
   bindHomepage();
   bindSurfaceProbe(BOARD_PROBE);

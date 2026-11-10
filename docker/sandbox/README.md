@@ -137,6 +137,12 @@ For other GitHub-hosted releases (`agentnative-cli`, `cargo-binstall`, `uv`) the
 (`sha256sum.txt`, `<asset>.sha256`). For `bun`, the release page ships a `SHASUMS256.txt`. Always read the upstream
 checksum file rather than computing locally, because the upstream value is what you're trusting.
 
+## Audit user and auditor permissions
+
+`anc` is root-owned at mode 0111. The `anc-audit` user (UID 1000) can execute it and can neither read nor replace it.
+`/opt/anc-empty` is a root-owned empty directory. The image declares no `USER`: the SDK control server stays root, and
+the Worker drops each install and audit to `anc-audit`.
+
 ## What's NOT in the image (and why)
 
 - **brew.** Linuxbrew on Linux takes 20-60 s per install for most formulae; complex formulae exceed the 60 s install +

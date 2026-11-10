@@ -5,6 +5,7 @@
 
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { WEBMCP_SCRIPT } from '../shared/webmcp-script.ts';
 
 async function copyBinary(src, dest) {
   await mkdir(join(dest, '..'), { recursive: true });
@@ -83,9 +84,9 @@ export async function copyAssets({ repoRoot, distDir }) {
     join(repoRoot, 'src/client/leaderboard.ts'),
     join(distDir, 'js/leaderboard.js'),
   );
-  const webmcpJs = await bundleClient(join(repoRoot, 'src/client/webmcp.ts'), join(distDir, 'js/webmcp.js'));
-  // Result-page Re-audit control (countdown to refresh_after, then the same
-  // transact click as the entry form) and the ?v= forwarding-query strip.
+  const webmcpJs = await bundleClient(join(repoRoot, 'src/client/webmcp.ts'), join(distDir, WEBMCP_SCRIPT));
+  // Result-page Re-audit control: a countdown to refresh_after, then the same
+  // transact click as the entry form.
   const reauditJs = await bundleClient(join(repoRoot, 'src/client/reaudit.ts'), join(distDir, 'js/reaudit.js'));
   // Progress page (/scoring): the stashed click or a probe, the stream, the
   // forward. The Worker-rendered page loads it; no build shell does.

@@ -7,13 +7,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import type { StartAuditInput, StartAuditResult } from '../src/client/audit-start';
-import {
-  bindReaudit,
-  dropVersionQuery,
-  initReaudit,
-  type ReauditControl,
-  type ReauditDeps,
-} from '../src/client/reaudit';
+import { bindReaudit, initReaudit, type ReauditControl, type ReauditDeps } from '../src/client/reaudit';
 
 type Attrs = Record<string, string>;
 
@@ -184,50 +178,29 @@ describe('bindReaudit: wiring and inert controls', () => {
   });
 });
 
-type Globals = { location?: unknown; history?: unknown; document?: unknown };
-
-function withGlobals<T>(values: Globals, run: () => T): T {
-  const holder = globalThis as Globals;
-  const saved: Globals = { location: holder.location, history: holder.history, document: holder.document };
-  Object.assign(holder, values);
+function withDocument<T>(document: unknown, run: () => T): T {
+  const holder = globalThis as { document?: unknown };
+  const saved = holder.document;
+  holder.document = document;
   try {
     return run();
   } finally {
-    Object.assign(holder, saved);
+    holder.document = saved;
   }
 }
 
 describe('on load', () => {
-  test('a ?v= query is replaced with the bare pathname', () => {
-    const replaced: Array<[unknown, string, string | URL | null | undefined]> = [];
-    withGlobals(
-      {
-        location: { pathname: '/score/anc.dev', search: '?v=2026-09-10T12%3A00%3A00.000Z' },
-        history: { replaceState: (...args: [unknown, string, string | URL | null | undefined]) => replaced.push(args) },
-      },
-      () => dropVersionQuery(),
-    );
-    expect(replaced).toHaveLength(1);
-    expect(replaced[0][2]).toBe('/score/anc.dev');
-  });
-
-  test('a URL without v is left alone and a page without controls binds nothing', () => {
-    const replaced: unknown[] = [];
+  test('a page without controls binds nothing', () => {
     let queried = 0;
-    withGlobals(
+    withDocument(
       {
-        location: { pathname: '/score/anc.dev', search: '' },
-        history: { replaceState: (...args: unknown[]) => replaced.push(args) },
-        document: {
-          querySelectorAll: () => {
-            queried++;
-            return [];
-          },
+        querySelectorAll: () => {
+          queried++;
+          return [];
         },
       },
       () => initReaudit(),
     );
-    expect(replaced).toEqual([]);
     expect(queried).toBe(1);
   });
 });

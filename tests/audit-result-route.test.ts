@@ -9,9 +9,11 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
+import { emitShellTemplate } from '../src/build/shell.mjs';
 import { scoreJsonPath, scoreMarkdownPath, scorePath } from '../src/shared/audit-routes';
 import type { RenderService } from '../src/shared/og-render';
 import { SCORE_OG_TEMPLATE, scoreOgClipPath, scoreOgPath } from '../src/shared/score-og';
+import { WEBMCP_SCRIPT } from '../src/shared/webmcp-script';
 import { _resetResultCaches, badgeAliasRedirect, handleResultRoute, type ResultEnv } from '../src/worker/audit/result';
 import { sha256Hex, keyFor as webKeyFor } from '../src/worker/audit-web/cache';
 import { webEnvelope } from '../src/worker/audit-web/core';
@@ -20,7 +22,7 @@ import { keyFor as cliKeyFor } from '../src/worker/score/cache';
 import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
 import { _resetShellTemplateCache } from '../src/worker/shell-template';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
-import { parseHtml } from './helpers/html-elements';
+import { parseHtml, scriptSources } from './helpers/html-elements';
 import { captureLogs } from './helpers/log-capture';
 import { fakeRender } from './helpers/og-site-fakes';
 
@@ -380,7 +382,6 @@ describe('live and branch records', () => {
     const env = await seededEnv();
     const html = await route('/score/ouch', env);
     expect(html.status).toBe(200);
-    expect(html.headers.get('x-robots-tag')).toBe('noindex');
     const page = await html.text();
     expect(page).toContain('ouch');
     // The trail comes from the shell, not the spine, so it is absent from this
@@ -416,6 +417,73 @@ describe('live and branch records', () => {
     );
   });
 
+  test('an on-demand CLI scorecard that earned the badge is indexable as HTML; its twin and JSON stay noindex', async () => {
+    const env = await seededEnv({
+      cache: { [cliKeyFor('ouch', SPEC_VERSION)]: CLI_RECORD, [cliKeyFor('o/r', SPEC_VERSION)]: CLI_RECORD },
+    });
+    for (const target of ['ouch', 'o/r']) {
+      const html = await route(`/score/${target}`, env);
+      expect(html.status).toBe(200);
+      expect(html.headers.get('x-robots-tag')).toBeNull();
+      const negotiated = await route(`/score/${target}`, env, { accept: 'text/markdown' });
+      expect(negotiated.headers.get('x-robots-tag')).toBe('noindex');
+      for (const pinned of ['md', 'json']) {
+        expect((await route(`/score/${target}/${pinned}`, env)).headers.get('x-robots-tag')).toBe('noindex');
+      }
+    }
+  });
+
+  test('an on-demand CLI scorecard below the badge floor stays noindex in every representation', async () => {
+    const badge = { score_pct: 69, eligible: false };
+    const env = await seededEnv({
+      cache: { [cliKeyFor('ouch', SPEC_VERSION)]: { ...CLI_RECORD, scorecard: { ...CLI_RECORD.scorecard, badge } } },
+    });
+    for (const path of ['/score/ouch', '/score/ouch/md', '/score/ouch/json']) {
+      const res = await route(path, env);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('x-robots-tag')).toBe('noindex');
+    }
+  });
+
+  test('an on-demand CLI record with no badge serves its JSON noindex', async () => {
+    const { badge: _badge, ...scorecard } = CLI_RECORD.scorecard;
+    const env = await seededEnv({ cache: { [cliKeyFor('ouch', SPEC_VERSION)]: { ...CLI_RECORD, scorecard } } });
+    const res = await route('/score/ouch/json', env);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-robots-tag')).toBe('noindex');
+  });
+
+  test("a repo's default-branch page that earned the badge is indexable as HTML; its twin and JSON stay noindex", async () => {
+    const env = await seededEnv({
+      cache: { [cliKeyFor('o/r@main', SPEC_VERSION)]: { ...BRANCH_RECORD, default_branch: 'main' } },
+    });
+    const html = await route('/score/o/r@main', env);
+    expect(html.status).toBe(200);
+    expect(html.headers.get('x-robots-tag')).toBeNull();
+    for (const pinned of ['md', 'json']) {
+      expect((await route(`/score/o/r@main/${pinned}`, env)).headers.get('x-robots-tag')).toBe('noindex');
+    }
+  });
+
+  test('a branch page stays noindex when the branch is not the default, or the default-branch page is below the floor', async () => {
+    const badge = { score_pct: 69, eligible: false };
+    const env = await seededEnv({
+      cache: {
+        [cliKeyFor('o/r@feature', SPEC_VERSION)]: { ...BRANCH_RECORD, default_branch: 'main' },
+        [cliKeyFor('o/r@main', SPEC_VERSION)]: {
+          ...BRANCH_RECORD,
+          default_branch: 'main',
+          scorecard: { ...BRANCH_RECORD.scorecard, badge },
+        },
+      },
+    });
+    for (const path of ['/score/o/r@feature', '/score/o/r@main']) {
+      const res = await route(path, env);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('x-robots-tag')).toBe('noindex');
+    }
+  });
+
   test('/score/o/r@feature renders HTML, the twin, and JSON, all noindex; /score/o/r with no record is the 404 pointer', async () => {
     const env = await seededEnv();
     for (const path of ['/score/o/r@feature', '/score/o/r@feature/md', '/score/o/r@feature/json']) {
@@ -445,6 +513,161 @@ describe('live and branch records', () => {
     );
     expect(page).not.toMatch(/data-reaudit[^>]*aria-disabled/);
     expect(page).toContain('Re-audit runs a fresh audit.');
+  });
+});
+
+describe('on-demand CLI package page link', () => {
+  const NPM_PAGE = 'https://www.npmjs.com/package/ouch';
+  const withInstall = (install: unknown) => ({ ...CLI_RECORD, install });
+  const seed = (record: unknown) => seededEnv({ cache: { [cliKeyFor('ouch', SPEC_VERSION)]: record } });
+  const HTML = { accept: 'text/html,application/xhtml+xml' };
+
+  test('a record with an install identity links the package page in the page and the twin', async () => {
+    const env = await seed(withInstall({ pm: 'npm', package: 'ouch' }));
+    const page = await (await route('/score/ouch', env, HTML)).text();
+    const meta = (await parseHtml(page)).querySelector('.result-brief__meta');
+    const link = meta?.querySelector(`a[href="${NPM_PAGE}"]`);
+    expect(link?.textContent).toBe(NPM_PAGE);
+    expect(link?.getAttribute('referrerpolicy')).toBeNull();
+    expect(page).not.toContain('[object Object]');
+    expect(page).not.toContain('<dt>Install</dt>');
+    for (const twin of [
+      await route('/score/ouch/md', env),
+      await route('/score/ouch', env, { accept: 'text/markdown' }),
+    ]) {
+      const md = await twin.text();
+      expect(md).toContain(`**Package:** [${NPM_PAGE}](${NPM_PAGE})`);
+      expect(md).not.toContain('**Install:**');
+    }
+  });
+
+  test('each supported manager links its own registry', async () => {
+    const cases: Array<[unknown, string]> = [
+      [{ pm: 'cargo-binstall', package: 'ouch' }, 'https://crates.io/crates/ouch'],
+      [{ pm: 'pip', package: 'ouch' }, 'https://pypi.org/project/ouch/'],
+      [{ pm: 'brew', package: 'ouch' }, 'https://formulae.brew.sh/formula/ouch'],
+      [{ pm: 'go', package: 'github.com/o/ouch' }, 'https://pkg.go.dev/github.com/o/ouch'],
+    ];
+    for (const [install, url] of cases) {
+      const page = await (await route('/score/ouch', await seed(withInstall(install)), HTML)).text();
+      expect(page).toContain(`<a href="${url}">${url}</a>`);
+    }
+  });
+
+  test('a record without an install identity renders no meta line', async () => {
+    const env = await seed(CLI_RECORD);
+    const page = await (await route('/score/ouch', env, HTML)).text();
+    expect(page).toContain('class="result-brief"');
+    expect(page).not.toContain('result-brief__meta');
+    expect(page).not.toContain('npmjs.com');
+    expect(await (await route('/score/ouch/md', env)).text()).not.toContain('**Package:**');
+  });
+
+  test('an identity that names no linkable package renders no link and still serves the page', async () => {
+    const identities: unknown[] = [
+      { pm: 'npm', package: 'ouch@1.0.0' },
+      { pm: 'direct', package: 'ouch' },
+      { pm: 'npm' },
+      'npm i ouch',
+      null,
+    ];
+    for (const install of identities) {
+      const res = await route('/score/ouch', await seed(withInstall(install)), HTML);
+      expect(res.status).toBe(200);
+      const page = await res.text();
+      expect(page).not.toContain('result-brief__meta');
+      expect(page).not.toContain('<dt>Install</dt>');
+    }
+  });
+
+  test('the JSON twin does not carry the install identity', async () => {
+    const env = await seed(withInstall({ pm: 'npm', package: 'ouch' }));
+    const body = (await (await route('/score/ouch/json', env)).json()) as Record<string, unknown>;
+    expect(Object.keys(body)).not.toContain('install');
+    expect(JSON.stringify(body)).not.toContain('npmjs.com');
+  });
+});
+
+describe('on-demand website indexing', () => {
+  const HOST = 'ondemand.dev';
+
+  async function onDemandEnv(scorecard: Record<string, unknown>, host = HOST, overrides: Overrides = {}) {
+    return makeEnv({
+      cache: {
+        [await webKeyFor(`https://${host}/`, SPEC_VERSION)]: {
+          ...WEB_RECORD,
+          target_url: `https://${host}/`,
+          scorecard: { target_url: `https://${host}/`, results: WEB_RECORD.scorecard.results, ...scorecard },
+        },
+      },
+      ...overrides,
+    });
+  }
+
+  const HEADLINES = [
+    {
+      name: 'score.relative 70 over a lower score_pct',
+      scorecard: { score: { relative: 70, global: 30 }, score_pct: 40 },
+      headline: 70,
+      indexable: true,
+    },
+    {
+      name: 'score.relative 69 under a higher score_pct',
+      scorecard: { score: { relative: 69, global: 30 }, score_pct: 95 },
+      headline: 69,
+      indexable: false,
+    },
+    { name: 'score_pct 70 with no score object', scorecard: { score_pct: 70 }, headline: 70, indexable: true },
+    { name: 'score_pct 69 with no score object', scorecard: { score_pct: 69 }, headline: 69, indexable: false },
+    { name: 'neither score field', scorecard: {}, headline: 0, indexable: false },
+  ];
+
+  for (const { name, scorecard, headline, indexable } of HEADLINES) {
+    test(`${name}: the page headline reads ${headline} and the HTML is ${indexable ? 'indexable' : 'noindex'}`, async () => {
+      const res = await route(`/score/${HOST}`, await onDemandEnv(scorecard));
+      expect(res.status).toBe(200);
+      expect(await res.text()).toContain(`data-site-score="${headline}"`);
+      expect(res.headers.get('x-robots-tag')).toBe(indexable ? null : 'noindex');
+    });
+  }
+
+  test('a score.relative stored as a numeric string is not a number, so the HTML stays noindex', async () => {
+    const res = await route(`/score/${HOST}`, await onDemandEnv({ score: { relative: '95', global: 30 } }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-robots-tag')).toBe('noindex');
+  });
+
+  test('at 95 the .md twin and the JSON stay noindex on the pinned and the negotiated paths', async () => {
+    const env = await onDemandEnv({ score: { relative: 95, global: 90 }, score_pct: 90 });
+    expect((await route(`/score/${HOST}`, env)).headers.get('x-robots-tag')).toBeNull();
+    const twins: Array<[string, Record<string, string>]> = [
+      [`/score/${HOST}/md`, {}],
+      [`/score/${HOST}/json`, {}],
+      [`/score/${HOST}`, { accept: 'text/markdown' }],
+      [`/score/${HOST}`, { accept: 'application/json' }],
+    ];
+    for (const [path, headers] of twins) {
+      const res = await route(path, env, headers);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).not.toContain('text/html');
+      expect(res.headers.get('x-robots-tag')).toBe('noindex');
+    }
+  });
+
+  test('the in-flight 202 stays noindex for a host whose stored score clears the floor', async () => {
+    const env = await onDemandEnv({ score: { relative: 95, global: 90 } }, HOST, {
+      kvSeed: { [`inflight:web:${HOST}`]: JSON.stringify({ started_at: '2026-09-10T20:00:00.000Z' }) },
+    });
+    const res = await route(`/score/${HOST}/json`, env);
+    expect(res.status).toBe(202);
+    expect(res.headers.get('x-robots-tag')).toBe('noindex');
+  });
+
+  test('a seeded host stays indexable below the floor', async () => {
+    const env = await onDemandEnv({ score: { relative: 10, global: 5 } }, 'seeded.dev');
+    const res = await route('/score/seeded.dev', env);
+    expect(await res.text()).toContain('data-site-score="10"');
+    expect(res.headers.get('x-robots-tag')).toBeNull();
   });
 });
 
@@ -946,6 +1169,35 @@ describe('review pins', () => {
     expect(html).not.toContain('<img');
     expect(html).not.toContain('onerror=1>');
     expect(html).toContain('&lt;img');
+  });
+});
+
+describe('WebMCP script through the real shell template', () => {
+  async function scriptsOf(path: string): Promise<{ status: number; scripts: string[] }> {
+    const env = await seededEnv({ assets: { '/_internal/score-live-shell.html': emitShellTemplate() } });
+    const res = await route(path, env, { accept: 'text/html' });
+    return { status: res.status, scripts: await scriptSources(await res.text()) };
+  }
+
+  test('a website result loads it once, so its read-only tools register once', async () => {
+    const { status, scripts } = await scriptsOf('/score/anc.dev');
+    expect(status).toBe(200);
+    expect(scripts).toContain('/js/theme.js');
+    expect(scripts.filter((src) => src.includes('webmcp'))).toEqual([WEBMCP_SCRIPT]);
+  });
+
+  // The status and the shell's own script tell a real page from the plain-text
+  // 500 a missing shell answers with, which also loads no WebMCP script.
+  test.each([
+    ['a live CLI result', '/score/ouch', 200],
+    ['a branch-scoped result', '/score/o/r@feature', 200],
+    ['the no-audit page for a CLI target', '/score/no-such-target', 404],
+    ['the no-audit page for a website target', '/score/never-audited.dev', 404],
+  ])('%s publishes no tools', async (_name, path, expected) => {
+    const { status, scripts } = await scriptsOf(path);
+    expect(status).toBe(expected);
+    expect(scripts).toContain('/js/theme.js');
+    expect(scripts.filter((src) => src.includes('webmcp'))).toEqual([]);
   });
 });
 

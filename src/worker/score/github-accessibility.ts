@@ -121,3 +121,55 @@ export async function checkGithubAccessibility(
   cache.set(key, { result, expiresAt: now + CACHE_TTL_MS });
   return result;
 }
+
+const DEFAULT_BRANCH_TIMEOUT_MS = 2000;
+const DEFAULT_BRANCH_MAX_BYTES = 1024;
+const HEAD_SYMREF_RE = /^[0-9a-f]{4}[0-9a-f]{40,64} HEAD symref-target:refs\/heads\/(\S+)\n/;
+
+function pktLine(line: string): string {
+  return `${(line.length + 4).toString(16).padStart(4, '0')}${line}`;
+}
+
+// git protocol v2 `ls-refs` for HEAD alone: one POST, under 100 bytes back,
+// no credential, and clear of the REST API's anonymous rate limit, which a
+// Worker shares with everything else on Cloudflare's egress addresses.
+const LS_REFS_HEAD = `${pktLine('command=ls-refs\n')}${pktLine('object-format=sha1\n')}0001${pktLine('symrefs\n')}${pktLine('ref-prefix HEAD\n')}0000`;
+
+async function readUpTo(body: ReadableStream<Uint8Array>, maxBytes: number): Promise<string> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  let read = 0;
+  while (read < maxBytes) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    read += value.byteLength;
+    text += decoder.decode(value, { stream: true });
+  }
+  await reader.cancel();
+  return text;
+}
+
+/** The repository's default branch as GitHub reports it, or null on any other answer. */
+export async function fetchDefaultBranch(owner: string, repo: string, opts: CheckOpts = {}): Promise<string | null> {
+  if (!OWNER_RE.test(owner) || !REPO_RE.test(repo)) return null;
+  const fetcher = opts.fetcher ?? globalThis.fetch.bind(globalThis);
+  try {
+    const res = await fetcher(`https://github.com/${owner}/${repo}.git/git-upload-pack`, {
+      method: 'POST',
+      redirect: 'manual',
+      signal: AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_BRANCH_TIMEOUT_MS),
+      headers: {
+        'User-Agent': 'anc.dev-default-branch/1',
+        'Git-Protocol': 'version=2',
+        'Content-Type': 'application/x-git-upload-pack-request',
+        Accept: 'application/x-git-upload-pack-result',
+      },
+      body: LS_REFS_HEAD,
+    });
+    if (res.status !== 200 || !res.body) return null;
+    return HEAD_SYMREF_RE.exec(await readUpTo(res.body, DEFAULT_BRANCH_MAX_BYTES))?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}

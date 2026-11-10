@@ -1,0 +1,34 @@
+import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const dockerfile = readFileSync(join(import.meta.dir, '..', 'docker/sandbox/Dockerfile'), 'utf8');
+
+describe('sandbox image permissions', () => {
+  test('the auditor is installed execute-only', () => {
+    expect(dockerfile).toMatch(/install -m 0111 \S+\/anc \/usr\/local\/bin\/anc/);
+  });
+
+  test('nothing changes the auditor once it is installed', () => {
+    expect(dockerfile).not.toMatch(/(chmod|chown)\b[^\n]*\/usr\/local\/bin\/anc\b/);
+  });
+
+  test('the audit user has a fixed UID and its own install directory', () => {
+    expect(dockerfile).toMatch(/useradd --uid 1000 .*anc-audit/);
+    expect(dockerfile).toMatch(/install -d -o anc-audit -g anc-audit .*\/home\/anc-audit\/\.local\/bin/);
+  });
+
+  test('the empty config directory is root-owned', () => {
+    expect(dockerfile).toMatch(/install -d -o root -g root -m 0755 \/opt\/anc-empty/);
+  });
+
+  test('the image installs a verified npm at least as new as the one that honors ignore-scripts for a dependency directory', () => {
+    const version = dockerfile.match(/npm\/-\/npm-(\d+)\.\d+\.\d+\.tgz/);
+    expect(Number(version?.[1])).toBeGreaterThanOrEqual(11);
+    expect(dockerfile).toMatch(/[0-9a-f]{128} {2}\/tmp\/npm\.tgz' \| sha512sum -c -/);
+  });
+
+  test('the image declares no USER, so the control server stays root', () => {
+    expect(dockerfile).not.toMatch(/^\s*USER\s/im);
+  });
+});

@@ -16,6 +16,7 @@ import { describe, expect, test } from 'bun:test';
 import { buildCliEnvelope } from '../src/shared/audit-envelope';
 import type { InstallSpec } from '../src/worker/score/discover-binary';
 import { extractToolVersion, type ScoreSandboxEnv, writeCacheBestEffort } from '../src/worker/score/do';
+import { fetchDefaultBranch } from '../src/worker/score/github-accessibility';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 import { fakeRender, siteEnv } from './helpers/og-site-fakes';
 
@@ -147,6 +148,44 @@ describe('writeCacheBestEffort — happy path', () => {
     expect(parsed.scorecard.tool.name).toBe('cowsay');
   });
 
+  test('the record keeps the package identity the run installed from', async () => {
+    const { env, writes } = makeR2Stub();
+    await writeCacheBestEffort(env, SPEC, { scorecard: SCORECARD_WITH_VERSION, anc_version: ANC_VERSION });
+    const parsed = JSON.parse(writes[0].value) as { install?: unknown };
+    expect(parsed.install).toEqual({ pm: 'npm', package: 'cowsay' });
+  });
+
+  test('the install identity is the manager and package only, not the rest of the spec', async () => {
+    const { env, writes } = makeR2Stub();
+    const spec = { ...SPEC, audit_profile: 'cli-tool' } as InstallSpec;
+    await writeCacheBestEffort(env, spec, { scorecard: SCORECARD_WITH_VERSION, anc_version: ANC_VERSION });
+    const parsed = JSON.parse(writes[0].value) as { install?: unknown };
+    expect(parsed.install).toEqual({ pm: 'npm', package: 'cowsay' });
+  });
+
+  test('a direct download writes no install identity', async () => {
+    const { env, writes } = makeR2Stub();
+    const direct: InstallSpec = { pm: 'direct', url: 'https://x.example/cowsay.tar.gz', binary: 'cowsay' };
+    await writeCacheBestEffort(env, direct, { scorecard: SCORECARD_WITH_VERSION, anc_version: ANC_VERSION });
+    expect(writes).toHaveLength(1);
+    expect(Object.keys(JSON.parse(writes[0].value))).not.toContain('install');
+  });
+
+  test('a source clone writes no install identity', async () => {
+    const { env, writes } = makeR2Stub();
+    const clone: InstallSpec = { pm: 'git-clone', owner: 'o', repo: 'r', branch: 'feature', binary: 'r' };
+    await writeCacheBestEffort(
+      env,
+      clone,
+      { scorecard: { tool: { name: 'r' } }, anc_version: ANC_VERSION, source_sha: 'abc1234' },
+      undefined,
+      undefined,
+      async () => null,
+    );
+    expect(writes).toHaveLength(1);
+    expect(Object.keys(JSON.parse(writes[0].value))).not.toContain('install');
+  });
+
   test('different binaries write to different cache keys (no aliasing)', async () => {
     const { env, writes } = makeR2Stub();
     await writeCacheBestEffort(env, SPEC, { scorecard: SCORECARD_WITH_VERSION, anc_version: ANC_VERSION });
@@ -273,5 +312,135 @@ describe('writeCacheBestEffort — errored audits', () => {
       anc_version: ANC_VERSION,
     });
     expect(writes).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fetchDefaultBranch
+// ---------------------------------------------------------------------------
+
+describe('fetchDefaultBranch', () => {
+  const OID = 'a'.repeat(40);
+  const answering = (body: BodyInit | null, init: ResponseInit = {}) =>
+    (async () => new Response(body, init)) as unknown as typeof fetch;
+
+  test('returns the branch HEAD points at, from one ls-refs POST that follows no redirect', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetcher = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(`0051${OID} HEAD symref-target:refs/heads/trunk\n0000`);
+    }) as unknown as typeof fetch;
+    expect(await fetchDefaultBranch('cli', 'cli', { fetcher })).toBe('trunk');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('https://github.com/cli/cli.git/git-upload-pack');
+    expect(calls[0].init.method).toBe('POST');
+    expect(calls[0].init.redirect).toBe('manual');
+    expect(calls[0].init.body).toBe(
+      '0014command=ls-refs\n0017object-format=sha1\n0001000csymrefs\n0014ref-prefix HEAD\n0000',
+    );
+    expect((calls[0].init.headers as Record<string, string>)['Git-Protocol']).toBe('version=2');
+  });
+
+  test('any other answer is null', async () => {
+    const answers: Array<[string, ResponseInit]> = [
+      ['Repository not found.', { status: 401 }],
+      ['', { status: 500 }],
+      ['', { status: 429 }],
+      [`0032${OID} HEAD\n0000`, {}],
+      ['<html>not a pack result</html>', {}],
+    ];
+    for (const [body, init] of answers) {
+      expect(await fetchDefaultBranch('o', 'r', { fetcher: answering(body, init) })).toBeNull();
+    }
+    expect(await fetchDefaultBranch('o', 'r', { fetcher: answering(null, { status: 301 }) })).toBeNull();
+  });
+
+  test('a thrown request or a timeout is null', async () => {
+    const thrown = (async () => {
+      throw new Error('network');
+    }) as unknown as typeof fetch;
+    expect(await fetchDefaultBranch('o', 'r', { fetcher: thrown })).toBeNull();
+    const hung = ((_url: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+      })) as unknown as typeof fetch;
+    expect(await fetchDefaultBranch('o', 'r', { fetcher: hung, timeoutMs: 5 })).toBeNull();
+  });
+
+  test('stops reading a body that never ends', async () => {
+    const chunk = new TextEncoder().encode('x'.repeat(256));
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(chunk);
+      },
+    });
+    expect(await fetchDefaultBranch('o', 'r', { fetcher: answering(endless) })).toBeNull();
+  });
+
+  test('a slug that could leave the path is null and sends nothing', async () => {
+    let called = false;
+    const fetcher = (async () => {
+      called = true;
+      return new Response('');
+    }) as unknown as typeof fetch;
+    expect(await fetchDefaultBranch('o/../x', 'r', { fetcher })).toBeNull();
+    expect(await fetchDefaultBranch('o', 'r/../x', { fetcher })).toBeNull();
+    expect(called).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// writeCacheBestEffort — default branch
+// ---------------------------------------------------------------------------
+
+describe('writeCacheBestEffort — default branch', () => {
+  const BRANCH: InstallSpec = { pm: 'git-clone', owner: 'o', repo: 'r', branch: 'main', binary: 'r' };
+  const VALUE = { scorecard: SCORECARD_WITH_VERSION, anc_version: ANC_VERSION, source_sha: 'abc1234' };
+
+  test('a branch record names the default branch GitHub reported', async () => {
+    const { env, writes } = makeR2Stub();
+    const asked: string[] = [];
+    await writeCacheBestEffort(env, BRANCH, VALUE, undefined, undefined, async (owner, repo) => {
+      asked.push(`${owner}/${repo}`);
+      return 'main';
+    });
+    expect(asked).toEqual(['o/r']);
+    expect(JSON.parse(writes[0].value).default_branch).toBe('main');
+  });
+
+  test('a failed lookup still writes the record, without the field', async () => {
+    const { env, writes } = makeR2Stub();
+    await writeCacheBestEffort(env, BRANCH, VALUE, undefined, undefined, async () => null);
+    expect(writes).toHaveLength(1);
+    expect(JSON.parse(writes[0].value)).not.toHaveProperty('default_branch');
+  });
+
+  test('nothing the audit returns can set the field', async () => {
+    const { env, writes } = makeR2Stub();
+    const claiming = {
+      ...VALUE,
+      default_branch: 'main',
+      scorecard: { ...SCORECARD_WITH_VERSION, default_branch: 'main' },
+    };
+    await writeCacheBestEffort(env, BRANCH, claiming, undefined, undefined, async () => null);
+    expect(JSON.parse(writes[0].value)).not.toHaveProperty('default_branch');
+  });
+
+  test('a run that is not branch-scoped makes no lookup', async () => {
+    const { env, writes } = makeR2Stub();
+    let asked = false;
+    await writeCacheBestEffort(
+      env,
+      SPEC,
+      { scorecard: SCORECARD_WITH_VERSION, anc_version: ANC_VERSION },
+      undefined,
+      undefined,
+      async () => {
+        asked = true;
+        return 'main';
+      },
+    );
+    expect(asked).toBe(false);
+    expect(JSON.parse(writes[0].value)).not.toHaveProperty('default_branch');
   });
 });
