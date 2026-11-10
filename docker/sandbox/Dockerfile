@@ -92,9 +92,18 @@ RUN set -eux; \
         https://github.com/brettdavies/agentnative-cli/releases/download/v0.7.0/agentnative-x86_64-unknown-linux-gnu.tar.gz; \
     echo '37d44d4ef1f577f37bc31a0dcaf49d0cdd73b5598199a1ea9031c18e63ce6a73  /tmp/anc.tgz' | sha256sum -c -; \
     tar xzf /tmp/anc.tgz -C /tmp/; \
-    install -m 0755 /tmp/agentnative-x86_64-unknown-linux-gnu/anc /usr/local/bin/anc; \
+    install -m 0111 /tmp/agentnative-x86_64-unknown-linux-gnu/anc /usr/local/bin/anc; \
     rm -rf /tmp/anc.tgz /tmp/agentnative-x86_64-unknown-linux-gnu; \
     anc --version
+
+# Installs and audits run as anc-audit, and the SDK control server stays root,
+# so the image declares no USER. Mode 0111 lets that user run `anc` without
+# reading or replacing it, and the kernel marks an unreadable executable
+# non-dumpable. /opt/anc-empty is the root-owned repo path for command audits.
+RUN set -eux; \
+    useradd --uid 1000 --user-group --create-home --shell /usr/sbin/nologin anc-audit; \
+    install -d -o anc-audit -g anc-audit /home/anc-audit/.local /home/anc-audit/.local/bin; \
+    install -d -o root -g root -m 0755 /opt/anc-empty
 
 # `unzip -j` flattens the archive's `bun-linux-x64/` directory so the
 # binary lands directly on PATH instead of in $HOME/.bun/bin.
