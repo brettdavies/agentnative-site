@@ -366,9 +366,10 @@ Discovery surfaces advertise the MCP endpoint. Operators are responsible for kee
   `documentation` must equal the published client-skill URL (`https://anc.dev/mcp-skill.md`). Legacy aliases
   (`/.well-known/mcp`, `/mcp.json`, `/.well-known/mcp.json`) serve the same JSON body via the Worker.
 - `/.well-known/api-catalog`: RFC 9727 link set; `service-desc` and `status` both point at the server card.
-- `/.well-known/oauth-protected-resource`, `/.well-known/oauth-authorization-server`, `/.well-known/jwks.json`,
-  `/auth.md`: agent-readiness OAuth metadata for a public/no-auth catalog. `POST /oauth2/token` returns
-  `public_catalog`.
+- `/auth.md`: the no-auth declaration. The MCP endpoint needs no sign-in, so the site publishes no OAuth metadata:
+  `/.well-known/oauth-protected-resource`, `/.well-known/oauth-authorization-server`, `/.well-known/jwks.json`, and
+  `POST /oauth2/token` answer as unknown paths. A client that finds protected-resource metadata concludes the server
+  requires sign-in.
 - `/.well-known/ai.txt`: `Programmatic-API: https://anc.dev/mcp` plus the canonical contact
   (`97-boss-beetle@icloud.com`).
 - `/.well-known/security.txt`: RFC 9116 contact; `Expires` must stay at least 300 days in the future (tests assert).
@@ -381,15 +382,14 @@ test suite; trust it, but pull the e2e suite locally before deploying to confirm
 
 ## CORS policy
 
-Discovery metadata is **read-only** and returns `Access-Control-Allow-Origin: *` (server card, api-catalog, OAuth
-PRM/AS, JWKS). This is deliberate: automated scanners and browser-based catalog tools fetch these URLs cross-origin. No
-credentials or metered operations are exposed through them.
+Discovery metadata is **read-only** and returns `Access-Control-Allow-Origin: *` (server card, api-catalog). This is
+deliberate: automated scanners and browser-based catalog tools fetch these URLs cross-origin. No credentials or metered
+operations are exposed through them.
 
 **Server-to-agent paths omit CORS:**
 
 - `POST /mcp` — JSON-RPC including metered `score_cli`. A browser-reachable endpoint would let any malicious page
   trigger audits charged to the visitor's IP (KTD-10).
-- `POST /oauth2/token` — returns a typed `public_catalog` error only; posture is in `auth.md` and OAuth metadata.
 
 Full prose lives in `/auth.md` under **CORS posture**. Do not add CORS to `POST /mcp` without an explicit KTD revision.
 

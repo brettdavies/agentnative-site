@@ -319,58 +319,6 @@ describe('.well-known/api-catalog (built dist/)', () => {
   });
 });
 
-describe('.well-known/oauth-protected-resource (built dist/)', () => {
-  test('declares the MCP endpoint as the protected resource', async () => {
-    const raw = await readFile(join(DIST_DIR, '.well-known', 'oauth-protected-resource'), 'utf8');
-    const parsed = JSON.parse(raw) as {
-      resource: string;
-      authorization_servers: string[];
-      bearer_methods_supported: string[];
-      resource_documentation: string;
-    };
-    expect(parsed.resource).toBe('https://anc.dev/mcp');
-    expect(parsed.authorization_servers).toEqual(['https://anc.dev']);
-    expect(parsed.bearer_methods_supported).toContain('header');
-    expect(parsed.resource_documentation).toBe('https://anc.dev/auth.md');
-  });
-});
-
-describe('.well-known/oauth-authorization-server (built dist/)', () => {
-  test('carries OAuth discovery fields and an agent_auth anonymous block', async () => {
-    const raw = await readFile(join(DIST_DIR, '.well-known', 'oauth-authorization-server'), 'utf8');
-    const parsed = JSON.parse(raw) as {
-      issuer: string;
-      token_endpoint: string;
-      jwks_uri: string;
-      service_documentation: string;
-      grant_types_supported: string[];
-      agent_auth: {
-        skill: string;
-        register_uri: string;
-        identity_types_supported: string[];
-        anonymous: { credential_types_supported: string[]; claim_uri: string };
-      };
-    };
-    expect(parsed.issuer).toBe('https://anc.dev');
-    expect(parsed.token_endpoint).toBe('https://anc.dev/oauth2/token');
-    expect(parsed.jwks_uri).toBe('https://anc.dev/.well-known/jwks.json');
-    expect(parsed.service_documentation).toBe('https://anc.dev/auth.md');
-    expect(parsed.grant_types_supported.length).toBeGreaterThanOrEqual(1);
-    expect(parsed.agent_auth.skill).toBe('https://anc.dev/auth.md');
-    expect(parsed.agent_auth.identity_types_supported).toContain('anonymous');
-    expect(parsed.agent_auth.anonymous.claim_uri).toBe('https://anc.dev/auth.md');
-  });
-});
-
-describe('.well-known/jwks.json (built dist/)', () => {
-  test('is a valid JWKS document with an empty keys array', async () => {
-    const raw = await readFile(join(DIST_DIR, '.well-known', 'jwks.json'), 'utf8');
-    const parsed = JSON.parse(raw) as { keys: unknown[] };
-    expect(Array.isArray(parsed.keys)).toBe(true);
-    expect(parsed.keys.length).toBe(0);
-  });
-});
-
 describe('.well-known/agent-skills/index.json (built dist/)', () => {
   test('is a v0.2.0 discovery index with a digest matching the served artifact', async () => {
     const raw = await readFile(join(DIST_DIR, '.well-known', 'agent-skills', 'index.json'), 'utf8');
@@ -399,13 +347,11 @@ describe('auth.md (built dist/)', () => {
     expect(h1).toBeDefined();
     expect((h1 ?? '').toLowerCase()).toContain('auth.md');
     expect(raw).toContain('no authentication');
-    expect(raw).toContain('public_catalog');
     expect(raw).toContain('## CORS posture');
     expect(raw).toContain('authentication.required: false');
     expect(raw).toContain('https://anc.dev/mcp');
     expect(raw).toContain('https://anc.dev/mcp-docs.md');
-    expect(raw).toContain('oauth-protected-resource');
-    expect(raw).toContain('oauth-authorization-server');
+    expect(raw.toLowerCase()).not.toContain('oauth');
     expect(raw).toContain('/.well-known/mcp/server-card.json');
     expect(raw).toContain('https://anc.dev/mcp/server-card');
     expect(raw).toContain('https://anc.dev/.well-known/ai-catalog.json');
@@ -419,14 +365,7 @@ describe('emitAgentReadiness() emits pure ASCII (isolation pass)', () => {
     try {
       await writeFile(join(tmp, 'mcp-skill.md'), '# Using the MCP server\n\nhello\n');
       const stats = await emitAgentReadiness({ distDir: tmp, baseUrl: 'https://example.test' });
-      for (const path of [
-        stats.apiCatalogPath,
-        stats.oauthProtectedResourcePath,
-        stats.oauthAuthorizationServerPath,
-        stats.jwksPath,
-        stats.agentSkillsPath,
-        stats.authMdPath,
-      ]) {
+      for (const path of [stats.apiCatalogPath, stats.agentSkillsPath, stats.authMdPath]) {
         const hit = await findNonAsciiByte(path);
         expect(hit).toBeNull();
       }
@@ -444,9 +383,6 @@ describe('emitAgentReadiness() in isolation', () => {
       await writeFile(join(tmp, 'mcp-skill.md'), '# Using the MCP server\n\nhello\n');
       const stats = await emitAgentReadiness({ distDir: tmp, baseUrl: 'https://example.test' });
       expect(stats.apiCatalogPath).toBe(join(tmp, '.well-known', 'api-catalog'));
-      expect(stats.oauthProtectedResourcePath).toBe(join(tmp, '.well-known', 'oauth-protected-resource'));
-      expect(stats.oauthAuthorizationServerPath).toBe(join(tmp, '.well-known', 'oauth-authorization-server'));
-      expect(stats.jwksPath).toBe(join(tmp, '.well-known', 'jwks.json'));
       expect(stats.agentSkillsPath).toBe(join(tmp, '.well-known', 'agent-skills', 'index.json'));
       expect(stats.authMdPath).toBe(join(tmp, 'auth.md'));
 
@@ -507,9 +443,6 @@ describe('operational discovery surfaces are pure ASCII (mojibake gate)', () => 
     join(DIST_DIR, '.well-known', 'security.txt'),
     join(DIST_DIR, '.well-known', 'ai.txt'),
     join(DIST_DIR, '.well-known', 'api-catalog'),
-    join(DIST_DIR, '.well-known', 'oauth-protected-resource'),
-    join(DIST_DIR, '.well-known', 'oauth-authorization-server'),
-    join(DIST_DIR, '.well-known', 'jwks.json'),
     join(DIST_DIR, '.well-known', 'agent-skills', 'index.json'),
     join(DIST_DIR, 'auth.md'),
     join(DIST_DIR, 'robots.txt'),

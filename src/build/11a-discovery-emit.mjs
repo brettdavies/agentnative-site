@@ -131,8 +131,7 @@ function buildMcpDescriptor(baseUrl) {
 // is a different thing wearing the same word: it is a self-reference stating
 // where THIS document is served, which a scanner compares against the URL it
 // fetched. Naming production here from a staging build would make staging's
-// own security.txt disown itself. Same shape as the OAuth `resource` and
-// `issuer` fields below. Read these as "self", not as "the canonical site".
+// own security.txt disown itself. Read it as "self", not as "the canonical site".
 function buildSecurityTxt(baseUrl) {
   const expires = expiresInOneYearIso();
   return [
@@ -199,8 +198,7 @@ export async function emitDiscovery({ distDir, baseUrl }) {
   return { mcpServerCardSeedPath, aiCatalogPath, mcpDescriptorSeedPath, securityPath, aiPath };
 }
 
-// Agent-readiness discovery surfaces (api-catalog, OAuth metadata, agent-skills,
-// auth.md). MCP server card seed: emitDiscovery() → _internal/mcp-server-card.json.
+// Agent-readiness discovery surfaces (api-catalog, agent-skills, auth.md). MCP server card seed: emitDiscovery() → _internal/mcp-server-card.json.
 
 function discoveryLinks(baseUrl) {
   const links = {};
@@ -316,8 +314,6 @@ function buildAuthMd(baseUrl) {
     ...MCP_DISCOVERY_DOCUMENTS.map(({ label, path }) => `- ${label}: \`${baseUrl}${path}\`.`),
     `- MCP pointer aliases (301 to the SEP-1649 card): \`${baseUrl}/.well-known/mcp\`, \`${baseUrl}/mcp.json\`.`,
     `- API catalog: \`${baseUrl}/.well-known/api-catalog\`.`,
-    `- OAuth protected resource: \`${baseUrl}/.well-known/oauth-protected-resource\`.`,
-    `- OAuth authorization server: \`${baseUrl}/.well-known/oauth-authorization-server\`.`,
     `- Client guide: \`${baseUrl}/mcp-skill.md\`.`,
     '',
     '## Authentication method',
@@ -326,26 +322,18 @@ function buildAuthMd(baseUrl) {
     'registration are required. Agents call the MCP endpoint directly over HTTPS; `Authorization`',
     'headers are ignored.',
     '',
-    'OAuth discovery metadata (`/.well-known/oauth-protected-resource`,',
-    '`/.well-known/oauth-authorization-server`, `/.well-known/jwks.json`) is published for',
-    'agent-readiness scanners. The `token_endpoint` (`/oauth2/token`) exists only to answer',
-    'discovery probes: POSTs return a typed `public_catalog` error and issue no credentials.',
     `The SEP-1649 server card (\`${SEP_1649_CARD_PATH}\`) declares \`authentication.required: false\``,
-    'and points here via `authentication.documentation`. OAuth PRM/AS `resource_documentation` /',
-    '`service_documentation` also resolve to this file.',
+    'and points here via `authentication.documentation`.',
     '',
     '## CORS posture',
     '',
-    'Public discovery metadata (server card, api-catalog, OAuth PRM/AS, JWKS) returns',
+    'Public discovery metadata (server card, api-catalog) returns',
     '`Access-Control-Allow-Origin: *` because these are read-only catalogs meant for cross-origin',
     'agent tools and automated scanners. No secrets are exposed.',
     '',
     '`POST /mcp` deliberately omits CORS so a malicious web page cannot drive JSON-RPC calls',
     '(including metered `score_cli` audits) against the visitor IP. MCP clients are server-side',
     'agent runtimes, not browser tabs.',
-    '',
-    '`POST /oauth2/token` also omits CORS for the same browser-isolation reason; discovery',
-    'metadata already documents the public-catalog posture.',
     '',
     '## Credential use',
     '',
@@ -364,71 +352,11 @@ function buildAuthMd(baseUrl) {
   ].join('\n');
 }
 
-function buildOAuthProtectedResource(baseUrl) {
-  // RFC 9728 Protected Resource Metadata. The MCP endpoint is the
-  // programmatic resource; the catalog is public/no-auth, so scopes are
-  // empty and the authorization server metadata documents anonymous access.
-  return `${JSON.stringify(
-    {
-      // RFC 9728 self-reference: names the resource server as deployed, so it
-      // must match the host that served this document, not the canonical site.
-      resource: `${baseUrl}/mcp`,
-      authorization_servers: [baseUrl],
-      scopes_supported: [],
-      bearer_methods_supported: ['header'],
-      resource_documentation: `${baseUrl}/auth.md`,
-    },
-    null,
-    2,
-  )}\n`;
-}
-
-function buildOAuthAuthorizationServer(baseUrl) {
-  // RFC 8414 Authorization Server Metadata plus the auth.md agent_auth
-  // extension. The catalog is open by design; anonymous identity is the
-  // only supported registration path and issues no credentials. token_endpoint
-  // is a discovery stub for scanners — POST returns public_catalog (see auth.md).
-  // authorization_endpoint is omitted: RFC 8414 marks it OPTIONAL when no
-  // authorization-code grant is supported, and a real probe would only hit prose.
-  return `${JSON.stringify(
-    {
-      // RFC 8414 issuer identifier: clients compare it against the host they
-      // fetched from, so it names this deployment rather than the canonical site.
-      issuer: baseUrl,
-      token_endpoint: `${baseUrl}/oauth2/token`,
-      jwks_uri: `${baseUrl}/.well-known/jwks.json`,
-      service_documentation: `${baseUrl}/auth.md`,
-      grant_types_supported: ['urn:workos:agent-auth:grant-type:anonymous'],
-      response_types_supported: ['none'],
-      agent_auth: {
-        skill: `${baseUrl}/auth.md`,
-        register_uri: `${baseUrl}/auth.md`,
-        identity_types_supported: ['anonymous'],
-        anonymous: {
-          credential_types_supported: ['none'],
-          claim_uri: `${baseUrl}/auth.md`,
-        },
-      },
-    },
-    null,
-    2,
-  )}\n`;
-}
-
-function buildJwks() {
-  // Empty JWKS: the public catalog issues no bearer tokens. The endpoint
-  // exists so oauth-discovery scanners find a valid jwks_uri.
-  return `${JSON.stringify({ keys: [] }, null, 2)}\n`;
-}
-
 /**
  * Emit the agent-readiness discovery surfaces into distDir.
  *
  * Probed by generic agent-readiness scanners under the apex:
  *   dist/.well-known/api-catalog              (RFC 9727)
- *   dist/.well-known/oauth-protected-resource (RFC 9728 PRM)
- *   dist/.well-known/oauth-authorization-server (RFC 8414 + agent_auth)
- *   dist/.well-known/jwks.json                (empty JWKS for public catalog)
  *   dist/.well-known/agent-skills/index.json  (Agent Skills Discovery v0.2.0)
  *   dist/auth.md                              (auth declaration)
  *
@@ -442,9 +370,6 @@ function buildJwks() {
  * @param {string=} args.baseUrl — explicit override; defaults via resolveBaseUrl
  * @returns {Promise<{
  *   apiCatalogPath: string;
- *   oauthProtectedResourcePath: string;
- *   oauthAuthorizationServerPath: string;
- *   jwksPath: string;
  *   agentSkillsPath: string;
  *   authMdPath: string;
  *   skillDigest: string;
@@ -462,16 +387,10 @@ export async function emitAgentReadiness({ distDir, baseUrl, webAuditSkills = []
   const skillDigest = createHash('sha256').update(skillArtifact).digest('hex');
 
   const apiCatalogPath = join(wellKnownDir, 'api-catalog');
-  const oauthProtectedResourcePath = join(wellKnownDir, 'oauth-protected-resource');
-  const oauthAuthorizationServerPath = join(wellKnownDir, 'oauth-authorization-server');
-  const jwksPath = join(wellKnownDir, 'jwks.json');
   const agentSkillsPath = join(skillsDir, 'index.json');
   const authMdPath = join(distDir, 'auth.md');
 
   await writeFile(apiCatalogPath, buildApiCatalog(base));
-  await writeFile(oauthProtectedResourcePath, buildOAuthProtectedResource(base));
-  await writeFile(oauthAuthorizationServerPath, buildOAuthAuthorizationServer(base));
-  await writeFile(jwksPath, buildJwks());
   await writeFile(agentSkillsPath, buildAgentSkillsIndex(base, skillDigest, webAuditSkills));
   await writeFile(join(skillsDir, 'index.md'), buildAgentSkillsIndexMd(base, webAuditSkills));
   await writeFile(authMdPath, buildAuthMd(base));
@@ -481,11 +400,14 @@ export async function emitAgentReadiness({ distDir, baseUrl, webAuditSkills = []
   // delete the stale file when a prior artifact is still on disk.
   await unlink(join(wellKnownDir, 'mcp.json')).catch(() => {});
 
+  // The MCP endpoint needs no sign-in, so these paths must answer as unknown
+  // paths; delete any copy an earlier build left in dist/.
+  for (const name of ['oauth-protected-resource', 'oauth-authorization-server', 'jwks.json']) {
+    await unlink(join(wellKnownDir, name)).catch(() => {});
+  }
+
   return {
     apiCatalogPath,
-    oauthProtectedResourcePath,
-    oauthAuthorizationServerPath,
-    jwksPath,
     agentSkillsPath,
     authMdPath,
     skillDigest,
