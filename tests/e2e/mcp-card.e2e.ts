@@ -13,6 +13,7 @@
 // targets.
 
 import { expect, test } from '@playwright/test';
+import { CANONICAL_SITE_URL } from '../../src/shared/site-url';
 
 // Source of truth: MCP_DESCRIPTOR_ALIAS_PATHS and
 // MCP_DESCRIPTOR_CANONICAL_PATH in src/worker/mcp/descriptor-paths.ts.
@@ -106,8 +107,11 @@ test.describe('MCP endpoint — GET is protocol-only', () => {
     const res = await request.get('/llms.txt');
     expect(res.status()).toBe(200);
     const text = await res.text();
-    expect(text).toContain(`${baseURL}/mcp`);
-    expect(text).toContain(`${baseURL}/mcp-docs.md`);
+    // The file is written at build time, and only the staging deploy sets
+    // PUBLIC_BASE_URL, so any other build lists the canonical host.
+    const origin = text.match(/\((https?:\/\/[^)]+)\/mcp\)/)?.[1];
+    expect([baseURL, CANONICAL_SITE_URL]).toContain(origin);
+    expect(text).toContain(`${origin}/mcp-docs.md`);
     const docs = await request.get('/mcp-docs.md');
     expect(docs.status()).toBe(200);
   });
