@@ -92,21 +92,28 @@ Brett decided the fold in the og:video planning session (D24, D25 in `docs/plans
 - Only the www sibling folds. A third host that a root redirects to stays a separate site (`twitter.com` to `x.com`, `square.com` to `squareup.com`, both observed 2026-11-10), and the board's own alias choices stay curated in the seed.
 - Considered and not built: deciding sameness by comparing the two roots' content. Pages differ per request (timestamps, nonces, A/B variants), so the rule would flake; a redirect is the operator's own statement.
 - Considered and not built: a fold store of its own (a KV key or an R2 object per pair). The apex's stored scorecard already holds the observation (KTD1), and a second store could disagree with it. A need to know a fold for a site whose apex has no stored scorecard would change this call.
-- Considered and not built: resolving the fold before admission, so rate-limit and in-flight keys for `www.<a>` and `<a>` match (KTD9). It would put an unmetered R2 read ahead of the limiter, and the per-IP and hourly limits already bound a client that alternates names.
 - Considered and not built: a guard rejecting `www.` domains in `src/data/web-audit/seed.yaml`. No seed row starts with `www.`, rows land by reviewed PR, and the seed's own header requires each row to name the host an agent reaches. A `www.` seed row that folds would show as a missing curated row after the next rescore.
 - Considered and not built: a field on MCP answers echoing the input host that was folded. The envelope's `target` and `scorecard_url` already name the site, and the tool descriptions state the rule (R12). Agents re-asking for the www host in a loop would change this call.
+- Considered and not built: resolving the fold in the og card route. `/og/score/www.<a>/…` still reads `www.<a>`'s record (`src/worker/og/subject.ts`); no page links to it once `/score/www.<a>` answers 301.
 - Considered and not built: removing the `www.` strip in `wordmarkInitials` (`src/shared/score-og.ts`). It is harmless; deleting it is cleanup outside the brief.
 
 #### Deferred to Follow-Up Work
 
-- **The agentnative-cli web-audit port** (`brettdavies/agentnative-cli`, its own plan and PR). It bumps `src/web_audit/vendored/SITE_SHA` to the commit that lands this plan, then mirrors the engine half: the pair resolution in `src/web_audit/engine/waves.rs` before the root fetch, naming the site by the apex when the pair folds (`anc www.cnn.com` reports `cnn.com`; `anc www.x.test` with no redirect reports `www.x.test`); the on-site set in place of `same_origin` at its call sites (`follow_trail.rs`, `discovery_posts.rs`, `discovery.rs`, `discovery_documents.rs`, `api_targets.rs`, `handlers/api_probe_url.rs`, `handlers/shared.rs`); the redirect-hop rule in its fetch layer; and `site_hosts` in the strict scorecard mirror (`src/web_audit/scorecard.rs`) and its committed JSON Schema. The CLI keeps no record across runs, so it needs nothing from U2. The fold scenarios from U6 must pass with no divergence-ledger entry.
+- **The agentnative-cli web-audit port** (`brettdavies/agentnative-cli`, its own plan and PR). It bumps `src/web_audit/vendored/SITE_SHA` to the commit that lands this plan, then mirrors the engine half: the pair resolution in `src/web_audit/engine/waves.rs` before the root fetch, naming the site by the apex when the pair folds (`anc www.cnn.com` reports `cnn.com`; `anc www.x.test` with no redirect reports `www.x.test`); the on-site set in place of `same_origin` at its call sites (`follow_trail.rs`, `discovery_posts.rs`, `discovery.rs`, `discovery_documents.rs`, `api_targets.rs`, `handlers/api_probe_url.rs`, `handlers/content_without_js.rs`, `handlers/scoped_llms.rs`, `handlers/shared.rs`); the redirect-hop rule in its fetch layer; and `site_hosts` in the strict scorecard mirror (`src/web_audit/scorecard.rs`) and its committed JSON Schema. The CLI keeps no record across runs, so it needs nothing from U2. The fold scenarios from U6 must pass with no divergence-ledger entry.
 
 ### Success Criteria
 
-- A fresh staging audit of `cnn.com` shows no declared host, and its MCP rows report what `https://www.cnn.com/mcp` answers.
+- A fresh staging audit of `cnn.com` names no `www.cnn.com` declared host, and its MCP rows report what `https://www.cnn.com/mcp` answers.
 - After that audit, `/score/www.cnn.com`, `get_website_audit("www.cnn.com")`, and `audit_website("https://www.cnn.com/")` all answer with the site `cnn.com`.
 - A staging audit of a `www.` host that does not redirect to or from its apex is stored and shown under its `www.` name.
 - Every curated score move after the staging rescore is attributed in U8's table to a row the fold changed.
+
+### Outstanding Questions
+
+#### Resolve Before Implementation
+
+- **Does an unanswered sibling drop a recorded fold?** For a site that redirects `www.<a>` to `<a>` and is audited at `<a>`, the fold rests on the sibling's answer, so one timeout or edge 5xx would write `<a>` without `site_hosts` and send `/score/www.<a>` back to its own page until the next saved audit. Recommended: the engine reports the pair as folded, unfolded, or no-answer, and on no-answer the core keeps the `site_hosts` the stored record holds; R5's second clause then reads "A saved audit of the apex that does not fold, where both roots answered, writes it without one; when the other root did not answer, the saved audit keeps the fold the record holds." The CLI keeps no record, so its output and the goldens are the same either way. Owner decision, sent to the coordinating session.
+- **Does R1 fold on the first hop only, or on the first hop that leaves the audited origin?** The second would also fold a chain such as `a/` to `a/en` to `www.a/en`. Recommended: the first hop only, as R1 reads. It is the simpler rule. Owner decision, sent to the coordinating session.
 
 ---
 
@@ -115,15 +122,15 @@ Brett decided the fold in the og:video planning session (D24, D25 in `docs/plans
 ### Key Technical Decisions
 
 - KTD1. **The fold record is the apex's stored scorecard.** A folded audit stores `site_hosts` in the apex's scorecard, and `boardMetadataOf` (`src/worker/audit-web/cache.ts`) mirrors it into the record's R2 custom metadata, so the board listing sees it without reading bodies. An unfolded saved audit of the pair writes the apex's scorecard without it. No new store or binding: R2 reads are strongly consistent after a write, a `www.<a>` request needs the apex's record anyway when the pair folded, and the scorecard and the record of the fold cannot disagree. A transient run (follow opt-out, held run) saves nothing and records nothing, as it does today.
-- KTD2. **Each entry point resolves the name before its cache read.** A new resolver in `src/worker/audit-web/core.ts` takes a classified web host. For a host that is not `www.<a>` with a dotted `<a>`, the name is the host and nothing extra is read. For `www.<a>`, it reads the stored record of `<a>`; when that record's `site_hosts` contains `www.<a>`, the name is `<a>` and that record is the cache read. Otherwise the name is `www.<a>` and the usual read of its own record follows, so an unfolded `www.` target costs one extra R2 read. `handleWeb` (`src/worker/audit/api.ts`), `siteTarget` (`src/worker/mcp/tools/web-audit.ts`), and `serveWeb` (`src/worker/audit/result.ts`) call it; `serveWeb` answers a resolved `www.<a>` with the result route's existing 301 helper. The classifier (`src/shared/audit-routes.ts`) stays syntactic and gains only the pair helper (U1).
-- KTD3. **Pair resolution reads both roots at the start, concurrently.** The audited host's root fetch already runs first and doubles as the reachability probe; it now records its first hop. The other host's root is requested once with redirects not followed, in parallel, so the audit's wall clock does not grow. The pair folds when either first hop lands on a URL whose host is the other host of the pair. The probe origin is the host that hop lands on; with no fold it is the audited host. A redirect is any status in `REDIRECT_STATUSES` (`src/worker/audit-web/ssrf.ts`): mintlify.com's temporary 307 folds like a 301, because the question is where the content lives, not whether the move is permanent. Every request goes through `guardedFetch`, so the SSRF guard and the https-only rule apply to the sibling as to any probe.
-- KTD4. **One on-site predicate replaces exact-origin comparison wherever the audit's own origin is compared.** The audit carries a site: the probe origin plus, when folded, the other host's origin. The comparisons at `discovery-documents.ts` (endpoint resolution), `discovery.ts` (card fetch and catalog entries), `discovery-posts.ts` (`offOriginRedirect`), `follow-trail.ts` (`declaresHost`), `api-targets.ts` (audited-origin and declared grouping), and `handlers/api-description.ts` (`off_origin`) ask "on site?" instead of "same origin as base?". `guardedFetch` gains a site-origins entry in its options, read where it decides a hop is off-origin, so a POST that the apex redirects to www is followed under `crossOriginRedirects: 'refuse'` and `'return'` like any same-origin hop; `validatePublicUrl` still runs on every hop. Comparisons against a declared host's own origin (reciprocity, the follow slice) are untouched.
-- KTD5. **The site name is fixed when the audit completes.** The engine reports the fold and the site name. When an audit requested as `www.<a>` folds, `runWebAuditStream` writes under `<a>`: it resolves the listing against `<a>`'s stored record and the caller's explicit choice, meters the listing-flip budget on `<a>`, runs `heldRun` against `<a>`, and purges the domain tags of both hosts. When an audit of `<a>` finds no fold where the stored record had one, the rewrite drops `site_hosts` and purges `www.<a>`'s domain tag, so `/score/www.<a>` stops redirecting. A request for `www.<a>` resolved to `<a>` whose audit finds the fold gone returns `<a>`'s scorecard once; the next request for `www.<a>` audits it as its own site.
+- KTD2. **Each entry point resolves the name before its cache read.** A new resolver in `src/worker/audit-web/core.ts` takes a classified web host. For a host that is not `www.<a>` with a dotted `<a>`, the name is the host and nothing extra is read. For `www.<a>`, it reads the stored record of `<a>`; when that record's `site_hosts` contains `www.<a>`, the name is `<a>` and that record is the cache read. Otherwise the name is `www.<a>` and the usual read of its own record follows, so an unfolded `www.` target costs one extra R2 read. `handleWeb` (`src/worker/audit/api.ts`), `siteTarget` (`src/worker/mcp/tools/web-audit.ts`), and `serveWeb` (`src/worker/audit/result.ts`) call it; `serveWeb` answers a resolved `www.<a>` with the result route's existing 301 helper. When the read of `<a>`'s record throws `WebCacheUnavailableError`, the entry point answers through its existing unavailable path and never falls through to `www.<a>`'s record. The classifier (`src/shared/audit-routes.ts`) stays syntactic and gains only the pair helper (U1).
+- KTD3. **Pair resolution reads both roots at the start, concurrently.** The audited host's root fetch already runs first and doubles as the reachability probe; it now records its first hop. The other host's root is requested once with redirects not followed, in parallel. When the audited host's first hop lands on the other host, the fold is decided without waiting for the sibling; otherwise the sibling is awaited at most until the root fetch completes plus the engine's degraded per-check timeout (`DEGRADED_PER_CHECK_TIMEOUT_MS`, 2 s), then counts as not answering. The pair folds when either first hop lands on a URL whose host is the other host of the pair. The probe origin is the host that hop lands on; with no fold it is the audited host. A redirect is any status in `REDIRECT_STATUSES` (`src/worker/audit-web/ssrf.ts`): mintlify.com's temporary 307 folds like a 301, because the question is where the content lives, not whether the move is permanent. Every request goes through `guardedFetch`, so the SSRF guard and the https-only rule apply to the sibling as to any probe.
+- KTD4. **One on-site predicate replaces exact-origin comparison wherever the audit's own origin is compared.** The audit carries a site: the probe origin plus, when folded, the other host's origin. The comparisons at `discovery-documents.ts` (endpoint resolution), `discovery.ts` (card fetch and catalog entries), `discovery-posts.ts` (`offOriginRedirect`), `follow-trail.ts` (`declaresHost`), `api-targets.ts` (audited-origin and declared grouping), `handlers/api-description.ts` (`off_origin`), `handlers/api-probe-url.ts` (probe URL resolution), `handlers/content-without-js.ts` and `handlers/shared.ts` (`sameOriginRecoveryLink`, same-site links), and `handlers/scoped-llms.ts` (which llms.txt links are fetched) ask "on site?" instead of "same origin as base?". `guardedFetch` gains a site-origins entry in its options, read where it decides a hop is off-origin, so a POST that the apex redirects to www is followed under `crossOriginRedirects: 'refuse'` and `'return'` like any same-origin hop; `validatePublicUrl` still runs on every hop. Three comparisons stay exact, because they compare against a fixed URL or a declared host's own origin: the alias check against the canonical path (`assert.ts`), reciprocity (`reciprocity.ts`), and the follow slice.
+- KTD5. **The site name is fixed when the audit completes.** The engine reports the fold and the site name. When an audit requested as `www.<a>` folds, `runWebAuditStream` writes under `<a>`: it resolves the listing as the caller's explicit choice, else `<a>`'s stored listing, else `www.<a>`'s stored listing, else unlisted, so a blank never erases an opt-in stored under either name (the `public_listing` contract in the `audit_website` description); it meters the listing-flip budget on `<a>`, and when that budget refuses an explicit change, it saves the scorecard with `<a>`'s standing listing and the envelope carries that listing; it runs `heldRun` against `<a>` and purges the domain tags of both hosts. When an audit of `<a>` finds no fold where the stored record had one, the rewrite drops `site_hosts` and purges `www.<a>`'s domain tag, so `/score/www.<a>` stops redirecting. A request for `www.<a>` resolved to `<a>` whose audit finds the fold gone returns `<a>`'s scorecard once; the next request for `www.<a>` audits it as its own site. The rescore Workflow writes outside `runWebAuditStream` (`auditDomainToCache` in `src/worker/audit-web/rescore-workflow.ts`), so its cycle purge adds `www.<seed>`'s domain tag for each seed whose stored or new scorecard carries `site_hosts`.
 - KTD6. **The record, the envelope, and the cache key carry the name; the scorecard records where the checks ran.** `CachedWebAudit.target_url` stays the key URL, because `patchStoredPublicListing` rebuilds the key from it and the board metadata and listing backfill read the domain from it. The scorecard's `tool` comes from the name, its `target_url` from the probe origin, and `site_hosts` appears only on a fold. Row provenance keeps reading the entry host from `target_url`, so rows probed at the sibling read as the audited host with no change; a row whose evidence names the other host of a folded pair also reads as the audited host. Precedent for an optional field without a schema bump: `follow_declarations` (#395) under `0.5`.
-- KTD7. **No migration.** A stored `www.<a>` scorecard stays a valid separate site. `listAllWebAudits` (`src/worker/audit-web/cache.ts`), which both the board (`src/worker/audit-web/board.ts`) and `list_website_audits` call, drops a `www.<a>` row when the listing holds an `<a>` row whose `site_hosts` metadata names it. Records written before this change carry no `site_hosts`, so their pairs read as unfolded until the next saved audit of either host. The post-deploy curated pass re-audits every seeded site, which records the folds of the 13 curated apex-to-www sites on the deploy that ships this plan.
+- KTD7. **No migration.** A stored `www.<a>` scorecard stays a valid separate site. `listAllWebAudits` (`src/worker/audit-web/cache.ts`), which both the board (`src/worker/audit-web/board.ts`) and `list_website_audits` call, first collects the `site_hosts` metadata of every per-domain object at the spec version, before its excluded-domain and display-age filters run, then drops any `www.<a>` row whose host appears in a collected `site_hosts`. The two filters apply after that, so a curated apex, or one past the display window, still hides its folded `www.` row. Records written before this change carry no `site_hosts`, so their pairs read as unfolded until the next saved audit of either host. The post-deploy rescore re-audits every seeded site whose saved scorecard is older than two hours and not held back by a domain budget, which in the usual case records the folds of the 13 curated apex-to-www sites on the deploy that ships this plan. A spec-version bump rotates every key, so recorded folds read as absent until the rescore re-audits.
 - KTD8. **The fold is not following.** `effectiveFollow` and the declared-domain budget gate requests to hosts a site declares. The sibling is either the site or a host the pair rule ignores, so neither gate applies to the sibling's root request, no budget unit is drawn for it, and a run with following off still folds (R6).
-- KTD9. **Rate-limit and in-flight keys use the target as requested.** Admission (`src/worker/audit/admit.ts`) runs before any cache read, keyed `<sid>:<sha256(target)>`, and the in-flight lock is taken on the requested target. Resolving first would put an unmetered R2 read ahead of the limiter; the per-IP and hourly limits bound a client alternating `www.<a>` and `<a>`. The declared-domain budget keys on registrable domains and is unaffected.
-- KTD10. **Corpus scenarios name every request.** Each new fold scenario lists its sibling-root exchange. The four existing scenarios with `allow_unmatched: false` gain an explicit sibling exchange answering 404, which is what the other 134 already receive from their unmatched policy; their goldens do not change, because `site_hosts` appears only on a fold.
+- KTD9. **Rate-limit, in-flight, and job keys use the resolved name.** The cache read already comes before admission on both paths (`handleWeb` reads the tier before `admit`; `audit_website` reads before its limiter), so the resolver's read joins the unmetered read tier that precedes admission. Once a fold is recorded, `www.<a>` and `<a>` share one session-limiter bucket (`<sid>:<sha256(target)>`, `src/worker/audit/admit.ts`) and one in-flight run. A fold first observed mid-run keys on the name requested. The declared-domain budget keys on registrable domains and is unaffected.
+- KTD10. **Corpus scenarios name every request.** Each new fold scenario lists its sibling-root exchange. The four existing scenarios with `allow_unmatched: false` gain an explicit sibling exchange answering 404. Of the other 134, 132 answer an unmatched request with a 404, one with a transport error, and one with a 530; none is a redirect, so no existing scenario folds and their goldens do not change.
 
 ### High-Level Technical Design
 
@@ -178,7 +185,7 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 
 ### Assumptions
 
-- `isWebHostname` (`src/shared/audit-routes.ts`) admits `localhost`, IPv4 literals, and bracketed IPv6 literals as website targets, so the pair helper checks the host itself: a host has a pair only when it passes the classifier's dotted-domain test (`DOMAIN_RE`) and is not an IPv4 literal. A host such as `www.1.2.3.4` never reaches the helper, because the URL parser rejects it.
+- `isWebHostname` (`src/shared/audit-routes.ts`) admits `localhost`, IPv4 literals, and bracketed IPv6 literals as website targets, so the pair helper checks the host itself: a host has a pair only when it contains a dot, passes the classifier's domain test (`DOMAIN_RE`), and is not an IPv4 literal, as `isWebHostname` checks; `DOMAIN_RE` alone matches `co`. A host such as `www.1.2.3.4` never reaches the helper, because the URL parser rejects it.
 - No caller outside `src/worker/audit-web/` compares an audit's origin for same-site meaning; the call-site list in KTD4 is complete. U4 confirms it with a repository search before changing the predicate.
 - The CLI's drift workflow checks the vendored files against the pinned `SITE_SHA` only, so landing this plan does not break agentnative-cli CI before it bumps the pin.
 
@@ -190,7 +197,7 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 | A fold that disappears keeps `/score/www.<a>` redirecting for up to the redirect's cache lifetime (`max-age=300` today). | U2 purges `www.<a>`'s domain tag when the fold is dropped; Deferred to Implementation settles whether the 301 carries that tag. |
 | A request for `www.<a>`, resolved to `<a>` by a recorded fold that has since disappeared, returns `<a>`'s fresh scorecard once. | Accepted: the same audit drops the fold, and the next request audits `www.<a>` as its own site (KTD5). |
 | Following a POST across the pair re-sends its body to the other host. | Same treatment as a same-origin hop today, on a host the site's own redirect named; `validatePublicUrl` runs on the hop. |
-| The sibling request adds one request per audit against the per-audit deadline. | It runs in parallel with the existing root fetch, under the same per-check timeout. Stop condition if staging shows starvation. |
+| The sibling request adds one request per audit against the per-audit deadline. | It runs in parallel with the existing root fetch and is awaited at most 2 s past it (KTD3). Stop condition if staging shows starvation. |
 | The CLI port lags the site. | The site is the reference; the CLI's pinned corpus keeps it green until it bumps. |
 
 ### Deferred to Implementation
@@ -216,7 +223,7 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 - `tests/audit-routes.test.ts`
 
 **Approach:**
-1. Export a pure helper that returns a host's pair (apex, www) or null. `www.<a>` with `<a>` passing `DOMAIN_RE` and not an IPv4 literal pairs as (`<a>`, `www.<a>`); any other host passing that test pairs as (host, `www.` + host); everything else returns null. Case-insensitive; a non-default port is kept on both hosts.
+1. Export a pure helper that returns a host's pair (apex, www) or null. `www.<a>` with `<a>` containing a dot, passing `DOMAIN_RE`, and not an IPv4 literal pairs as (`<a>`, `www.<a>`); any other host passing those tests pairs as (host, `www.` + host); everything else returns null. Case-insensitive; a non-default port is kept on both hosts.
 2. `classifyTarget` and every existing classification stay unchanged.
 
 **Patterns to follow:** `isWebHostname` and `webHostOf` in the same file.
@@ -245,17 +252,20 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 - `src/worker/audit/api.ts`
 - `src/worker/audit/result.ts`
 - `src/worker/mcp/tools/web-audit.ts`
+- `src/worker/audit-web/rescore-workflow.ts`
 - `tests/audit-api.test.ts`
 - `tests/audit-result-route.test.ts`
 - `tests/web-audit-mcp-tools.test.ts`
 - `tests/web-audit-cache.test.ts`
+- `tests/web-audit-rescore-workflow.test.ts`
 
 **Approach:**
-1. Add the resolver to `core.ts` (KTD2) and call it from `handleWeb`, `siteTarget`, and `serveWeb`, before each one's cache read.
+1. Add the resolver to `core.ts` (KTD2) and call it from `handleWeb`, `siteTarget`, and `serveWeb`, before each one's cache read. On the follow opt-out path the resolver runs before `readStandingListing` (`handleWeb`'s transient branch and the opt-out branch of `audit_website`), and the transient envelope carries the engine's site name.
 2. `serveWeb` answers a resolved `www.<a>` with a 301 to the same representation of `/score/<a>`.
 3. In `runWebAuditStream`, write under the site name the engine reports, with the listing, flip budget, held-run, purge, aggregate, and render steps keyed on it (KTD5).
-4. `boardMetadataOf` adds a `site_hosts` value when the scorecard carries one; `listAllWebAudits` drops a `www.<a>` row when an `<a>` row's `site_hosts` names it (KTD7).
-5. Confirm by reading, not new code, that limiter and in-flight keys stay on the requested target (KTD9).
+4. `auditDomainToCache` reports whether the stored scorecard or the new one carries `site_hosts`; the rescore cycle's purge adds `webDomainTag('www.<seed>')` for each such seed (KTD5).
+5. `boardMetadataOf` adds a `site_hosts` value when the scorecard carries one; `listAllWebAudits` drops a `www.<a>` row when an `<a>` row's `site_hosts` names it, collected before the excluded-domain and display-age filters (KTD7).
+6. Key admission, the in-flight lock, and the job on the resolved name (KTD9).
 
 **Patterns to follow:** `readStoredWebAudit` and `readWebTier` in `core.ts`; the `redirect` helper in `result.ts`; `isBoardListable` as the shape of a listing predicate.
 
@@ -267,6 +277,13 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 - Covers AE2. `POST /api/score` for `www.stripe.com` with no stored records, whose stubbed audit folds, writes under `stripe.com`, ends on an envelope with `target: "stripe.com"`, and queues purges for both hosts' domain tags.
 - Covers AE5. A saved audit of `a.test` with no fold, where the stored record had `site_hosts`, writes `a.test` without `site_hosts` and queues a purge of `www.a.test`'s domain tag.
 - A listing holding `www.a.test` and an `a.test` row whose `site_hosts` metadata names it returns only `a.test`; with no such `a.test` row it returns both.
+- With `excludeDomains` holding `a.test`, an `a.test` row whose `site_hosts` names `www.a.test`, and a listed `www.a.test` row, the listing returns no row. The same holds when the `a.test` row is past the display window.
+- A blank-listing request for `www.a.test` whose audit folds, with no `a.test` record and an opted-in `www.a.test` record, writes `a.test` opted in.
+- An explicit listing change on a folding `www.a.test` request whose `a.test` flip budget refuses saves `a.test` with its standing listing, and the envelope carries that listing.
+- With a folded `a.test` record and an in-flight `a.test` run, a blank-listing request for `www.a.test` attaches to that run.
+- A follow opt-out request for `www.a.test` whose audit folds answers a transient envelope naming `a.test`, through `POST /api/score` and through `audit_website`.
+- When the read of `a.test`'s record throws `WebCacheUnavailableError`, `/score/www.a.test` and `get_website_audit` answer the unavailable path and never read `www.a.test`'s record.
+- A rescore whose run folds stores `site_hosts`, and its purge includes `web:www.<seed>`; a rescore that drops a stored fold includes it too.
 - A listing-only patch on a folded record keeps `site_hosts` in its metadata.
 
 **Verification:** the API, result-route, MCP, and cache suites pass, and a local `bun run dev` request for `/score/www.<a>` against a seeded local record returns 301.
@@ -289,7 +306,7 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 **Approach:**
 1. Before `readDiscoveryDocuments`, resolve the pair from the audited host's root fetch (first hop recorded) and the other host's root (one request, redirects not followed), in parallel.
 2. Apply KTD3 and the first HTD flowchart; return the fold, the probe origin, the site's origin set, and the site name.
-3. Set `base`, `host`, and the root response from the probe origin; hand the origin set to the U4 predicate and to `fetchOptions`; carry the site name to the scorecard build (U5).
+3. Set the engine's three reads of the requested URL from the probe origin: `normalizeBase(input.url)`, `readDiscoveryDocuments(input.url, …)`, and the scorecard `domain`; take the root response from the probe origin; hand the origin set to the U4 predicate and to `fetchOptions`; carry the site name to the scorecard build (U5).
 4. The unreachable test keeps its current wording, naming the audited host's origin.
 5. The pair resolution reads no follow switch and draws no domain-budget unit (KTD8).
 
@@ -307,6 +324,8 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 - Covers AE4. Audit of `n.test` that gets a transport failure or a 530 while `www.n.test` answers 200: not folded, unreachable.
 - Covers AE4. Audit of `www.n.test` answering 200 while `n.test` fails: not folded, name `www.n.test`, probe origin `https://www.n.test/`.
 - Both roots answer 200 with no redirect: not folded, name is the audited host.
+- `n.test` answers 301 to `https://www.n.test/` while `www.n.test` stalls: folded, with no wait for the sibling.
+- `n.test` answers 200 while `www.n.test` stalls past the bound: not folded, and the pair step ends at the bound.
 - Audit of `n.test` whose root redirects to `http://www.n.test/`: the existing insecure-scheme refusal fires; no fold.
 - With `followDeclarations: false`, a folding pair still folds and the declared-domain budget's `reserve` is never called for the sibling.
 
@@ -327,6 +346,9 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 - `src/worker/audit-web/follow-trail.ts`
 - `src/worker/audit-web/api-targets.ts`
 - `src/worker/audit-web/handlers/api-description.ts`
+- `src/worker/audit-web/handlers/api-probe-url.ts`
+- `src/worker/audit-web/handlers/content-without-js.ts`
+- `src/worker/audit-web/handlers/scoped-llms.ts`
 - `src/worker/audit-web/handlers/shared.ts`
 - `src/worker/audit-web/ssrf.ts`
 - `tests/web-audit-discovery.test.ts`
@@ -338,7 +360,7 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 1. Search the repository for `sameOrigin(` and `.origin ===` / `.origin !==` comparisons against the audit's base, and list each one; KTD4 names the expected set.
 2. Replace each with the on-site predicate over the site's origin set; a site with one origin behaves exactly as today.
 3. In `guardedFetch`, a hop whose origin is in the site-origin option counts as on-origin for `crossOriginRedirects`.
-4. Leave reciprocity, the follow slice, and comparisons against a declared host's origin unchanged.
+4. Leave the alias check in `assert.ts`, reciprocity, the follow slice, and comparisons against a declared host's origin unchanged.
 
 **Patterns to follow:** `sameOrigin` in `discovery-documents.ts` as the shape of the predicate; the `crossOriginRedirects` handling in `guardedFetch`.
 
@@ -350,6 +372,7 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 - An api-catalog anchor on the other host of a folded pair groups as `audited-origin`.
 - `guardedFetch` with site origins `{n.test, www.n.test}` follows a 308 from `n.test` to `www.n.test` under `crossOriginRedirects: 'refuse'`, and still refuses a hop to `evil.test`.
 - A hop from `n.test` to `www.n.test` that resolves to a blocked address is still refused by `validatePublicUrl`.
+- For a folded site probed at `www.n.test`, an llms.txt link to `https://n.test/docs.md` is fetched, and a root link to `https://n.test/about` counts for content-without-js.
 
 **Verification:** the discovery, follow, ssrf, and api-anchor suites pass; the declared-hosts trail of a folded stub audit never names the other host.
 
@@ -365,6 +388,7 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 - `src/worker/audit-web/scorecard.ts`
 - `src/worker/audit-web/engine.ts`
 - `src/worker/audit-web/provenance.ts`
+- `src/worker/audit-web/summary-provenance.ts`
 - `src/worker/audit-web/summary-model.ts`
 - `src/worker/audit-web/summary-render.ts`
 - `src/worker/audit-web/summary-markdown.ts`
@@ -375,7 +399,7 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 
 **Approach:**
 1. The engine's scorecard build takes the site name for `tool.name` and `tool.url`, the probe origin for `target_url`, and `site_hosts` (apex first) only on a fold.
-2. Row provenance treats a host in `site_hosts` as the audited host.
+2. Row provenance treats a host in `site_hosts` as the audited host, in `provenance.ts` and in the other-hosts split in `summary-provenance.ts`.
 3. The website line in `summary-render.ts` and its twin in `summary-markdown.ts` add the audited-at clause only when `site_hosts` is present and `target_url`'s host differs from `tool.name`.
 4. The schema doc's top-level table gains `site_hosts`, and its `tool.url` row states that it matches `target_url` except when the pair folded and the checks ran at the www host.
 
@@ -460,7 +484,7 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 
 **Approach:**
 1. Before the merge, record the staging scorecards of the 13 apex-to-www curated sites named in the Problem Frame.
-2. After the `dev` deploy, let the curated pass rescore them, or trigger the staging rescore per `docs/runbooks/web-audit-operations.md`.
+2. After the `dev` deploy, trigger the staging rescore per `docs/runbooks/web-audit-operations.md` (the og curated pass audits nothing), then confirm each of the 13 has an advanced `scored_at` and carries `site_hosts`.
 3. For each site, list every row whose status changed and the fold behavior that changed it (a declared host gone, an MCP probe now reaching www).
 4. Check `/score/www.cnn.com` (301 after `cnn.com` is audited), the `cnn.com` page in both themes, `get_website_audit("www.cnn.com")` through the staging MCP endpoint, and an audit of a `www.` host with no redirect to or from its apex, using the Cloudflare Access service-token headers.
 
@@ -477,6 +501,7 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 | Lint and types | `bun run lint`, `bun run typecheck` | style and types across touched files |
 | Build first | `bun run build` | `dist/` matches the branch before tests read it (AGENTS.md gate order) |
 | Unit and corpus | `bun test` | U1 to U7 scenarios, the regenerated corpus, and unchanged goldens |
+| Observed failing | each new U2 to U4 test run against the unfixed code, its failure output quoted in the PR | the tests detect the behavior they cover |
 | Local Worker | `bun run dev`, then `/score/www.<a>` against a folded local record and an MCP `get_website_audit` for it | the resolver, the redirect, and the MCP answer through the real Worker |
 | Browser | the folded scorecard page in light and dark themes | R11's clause renders legibly (AGENTS.md "Browser-verify before declaring done") |
 | Staging | U8 | live fold, redirect, MCP answer, an unfolded `www.` site, attributed score moves |
@@ -498,3 +523,4 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 - 2026-11-10: `/plan-eng-review` round 1 started at ccd44e6 and was stopped before it reported, because the owner's answer to D3 replaced the naming design it was reviewing.
 - 2026-11-10: plan reworked to the owner's answers to D1 to D8: folding needs an observed redirect, and the apex's stored scorecard records it.
 - 2026-11-10: `/plan-eng-review` round 1 started on the reworked plan at 5c62277 (Opus, effort high).
+- 2026-11-10: `/plan-eng-review` round 1 ended on dbc0942: ship with fixes; 0 P0, 1 P1 (the board guard could not see a curated apex), 7 P2. All folded in. The `www.<a>` opt-in carry was settled from the `public_listing` contract; the unanswered-sibling and first-hop questions went to the owner (Outstanding Questions).
