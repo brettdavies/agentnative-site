@@ -26,6 +26,7 @@ import { escHtml } from '../../shared/esc-html';
 import { LANE_EXPECTATION, scoringHeadingHtml, scoringTitle, TITLE_SUFFIX } from '../../shared/scoring-copy';
 import { detectPreference } from '../accept';
 import { loadWebAuditRegistry, type WebAuditRegistryEnv } from '../audit-web/registry';
+import { richMarkdown } from '../audit-web/rich-text';
 import { applyHeaders } from '../headers';
 import { loadShellTemplate, substituteShell } from '../shell-template';
 
@@ -176,7 +177,8 @@ function pointerMarkdown(origin: string, accepted: Accepted | null, refused: str
   if (refused) lines.push(refused, '');
   if (accepted) {
     const saved = `${origin}${scoreMarkdownPath(accepted.target)}`;
-    lines.push(`The saved result for \`${accepted.target}\`, once the audit finishes, is at [${saved}](${saved}).`, '');
+    const code = richMarkdown([{ code: accepted.target }]);
+    lines.push(`The saved result for ${code}, once the audit finishes, is at [${saved}](${saved}).`, '');
   }
   lines.push(
     `From an agent, read results with the \`get_scorecard\` (CLI tools) or \`get_website_audit\` (websites) MCP tool at \`${origin}/mcp\`.`,
