@@ -2,7 +2,7 @@
 // Exercises interactions: theme toggle persistence, copy-to-clipboard,
 // anchor navigation, skip-link, keyboard-only nav, mobile layout.
 
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type Locator, type Page, test } from '@playwright/test';
 import { checkA11y, injectAxe } from 'axe-playwright';
 import { AI_PROVIDER_COUNT, NAV_ENTRY_COUNT, PRINCIPLE_COUNT, WEB_CHECK_COUNT } from '../helpers/site-facts';
 
@@ -495,12 +495,18 @@ test.describe('leaderboard surface nav', () => {
     expect(await page.evaluate(() => localStorage.getItem('anc-surface'))).toBe('web');
   });
 
-  test('Probe A navigates Website → CLI and writes preference', async ({ page }) => {
+  test('the leaderboard segment swaps back from Website to CLI in place and writes the preference', async ({
+    page,
+  }) => {
     await page.goto('/');
     await page.locator('label[for="s-web"]').click();
-    await page.goto('/web');
-    await page.locator('label[for="board-s-cli"]').click();
+    await page.goto('/scorecards');
+    await expect(page.locator('.board[data-s="web"]')).toBeVisible();
+    await expect(page.locator('.board[data-s="cli"]')).toBeHidden();
+    await page.locator('label[for="s-cli"]').click();
     await expect(page).toHaveURL(/\/scorecards$/);
+    await expect(page.locator('.board[data-s="cli"]')).toBeVisible();
+    await expect(page.locator('.board[data-s="web"]')).toBeHidden();
     expect(await page.evaluate(() => localStorage.getItem('anc-surface'))).toBe('cli');
   });
 });
@@ -535,12 +541,16 @@ test.describe('audit surface nav', () => {
     await expect(page.locator('.site-nav [data-audit-nav]')).toHaveAttribute('href', '/audit');
   });
 
-  test('Probe A navigates web audit → CLI audit and writes preference', async ({ page }) => {
+  test('the entry form switches back from Website to CLI in place on /audit and writes the preference', async ({
+    page,
+  }) => {
     await page.goto('/');
     await page.locator('label[for="s-web"]').click();
     await page.goto('/audit');
-    await page.locator('label[for="audit-s-cli"]').click();
+    await expect(page.locator('[data-audit-listing]')).toBeVisible();
+    await page.locator('label[for="s-cli"]').click();
     await expect(page).toHaveURL(/\/audit$/);
+    await expect(page.locator('[data-audit-listing]')).toBeHidden();
     expect(await page.evaluate(() => localStorage.getItem('anc-surface'))).toBe('cli');
   });
 });
@@ -559,20 +569,64 @@ test.describe('scorecard remediation copy-prompt', () => {
   });
 });
 
+test.describe('scorecard address', () => {
+  test('inbound tracking parameters leave the address and the fragment stays', async ({ page }) => {
+    await page.goto('/score/ripgrep?utm_source=x&fbclid=y#some-anchor');
+    await expect(page).toHaveURL(/\/score\/ripgrep#some-anchor$/);
+  });
+
+  test('a page that reads its query keeps it', async ({ page }) => {
+    await page.goto('/scorecards?lane=web');
+    await expect(page).toHaveURL(/\/scorecards\?lane=web$/);
+  });
+});
+
+async function expectPaintedBox(svg: Locator, label: string) {
+  const box = await svg.boundingBox();
+  expect(box, `${label} has no bounding box`).not.toBeNull();
+  expect(box!.width, `${label} width`).toBeGreaterThan(0);
+  expect(box!.height, `${label} height`).toBeGreaterThan(0);
+}
+
 test.describe('footer AI-provider icons', () => {
-  // Regression guard for #016: iOS Safari paints inline <svg> with viewBox
-  // but no width/height as 0×0. Anchor stays tappable, glyph disappears.
-  // The CSS rule on `.ai-summary__link svg` forces a non-zero box.
+  // iOS Safari paints an inline <svg> with a viewBox and no width/height as
+  // 0×0: the anchor stays tappable and the glyph disappears. Each icon is
+  // sized twice, by `width="18" height="18"` on the <svg> and by the CSS rule
+  // on `.ai-summary__link svg`, and either gives an 18×18 box on its own. The
+  // assertion fails only when both are gone, and only in WebKit: Chromium
+  // stretches the unsized <svg> to the anchor's content box.
   test('every footer ai-provider icon has a non-zero rendered bounding box', async ({ page }) => {
     await page.goto('/');
     const svgs = page.locator('.ai-summary__link svg');
     await expect(svgs).toHaveCount(AI_PROVIDER_COUNT);
     const count = await svgs.count();
     for (let i = 0; i < count; i++) {
-      const box = await svgs.nth(i).boundingBox();
-      expect(box, `provider svg #${i} has no bounding box`).not.toBeNull();
-      expect(box!.width).toBeGreaterThan(0);
-      expect(box!.height).toBeGreaterThan(0);
+      await expectPaintedBox(svgs.nth(i), `provider svg #${i}`);
     }
+  });
+});
+
+test.describe('GitHub mark and copy icons', () => {
+  test('footer GitHub mark has a non-zero rendered bounding box', async ({ page }) => {
+    await page.goto('/');
+    const svg = page.locator('.site-footer__source-icon svg');
+    await expect(svg).toHaveCount(1);
+    await expectPaintedBox(svg, 'footer GitHub mark');
+  });
+
+  test('header install-pill copy icon has a non-zero rendered bounding box', async ({ page }) => {
+    const viewport = page.viewportSize();
+    test.skip(!viewport || viewport.width <= 640, 'the header install pill is hidden at 640px and below');
+    await page.goto('/');
+    await expect(page.locator('.site-header__install-cmd:not([hidden])')).toBeVisible();
+    await expectPaintedBox(page.locator('.install-cmd__icon svg'), 'header copy icon');
+  });
+
+  test('code-block copy icon has a non-zero rendered bounding box', async ({ page }) => {
+    await page.goto('/audit');
+    await page.locator('html.js').waitFor();
+    const svg = page.locator('main .code-wrap .copy-button .copy-button__icon svg').first();
+    await expect(svg).toHaveCount(1);
+    await expectPaintedBox(svg, 'code-block copy icon');
   });
 });

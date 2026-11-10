@@ -1099,7 +1099,9 @@ async function injectHomepageBoards(
   ]);
   const entries = aggregate?.entries ?? [];
   let substituted = opts.markdown ? body : substituteTurnstileSitekey(body, env);
-  substituted = substituted.replaceAll('{{WEB_BOARD_ROWS}}', frontpageBoardSlice(opts.markdown, entries));
+  // A function replacement, because a row's name is an audited site's own title
+  // and a string replacement expands `$&` and its siblings.
+  substituted = substituted.replaceAll('{{WEB_BOARD_ROWS}}', () => frontpageBoardSlice(opts.markdown, entries));
   const headers = new Headers(upstream.headers);
   headers.delete('etag');
   headers.delete('last-modified');

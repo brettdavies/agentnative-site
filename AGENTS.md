@@ -360,6 +360,11 @@ staging Worker and bypass the local build.
 gitignored, so the file is yours alone and never reaches a deploy. Same shape for `MCP_LIVE_SCORING_ENABLED` when
 exercising `score_cli`.
 
+**Local CLI audits need `CAP_SYS_ADMIN`.** `anc --version` and the audit run under `unshare --net`, which Docker's default
+capabilities refuse, so an audit through `bun run dev` fails closed with `anc_version_unreadable` naming the refused
+namespace. Cloudflare's default scheduling policy grants the capability; the `durable_object` policy does not
+(`tests/wrangler-config.test.ts`).
+
 **The video binding has no local simulation.** `--local` turns remote bindings off, so a local render cannot call the
 Media binding. Set `OG_VIDEO_ENABLED="true"` in the site's `.dev.vars.staging` and `LOCAL_MEDIA_STANDIN="true"` in the
 render Worker's `src/og-render/.dev.vars.staging`, and each render stores the committed sample clip

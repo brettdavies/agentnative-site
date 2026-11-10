@@ -224,6 +224,20 @@ const APPLIED_MIGRATIONS = {
 };
 const STAGING_REHEARSAL_TAGS = ['v2-drop-sandbox', 'v3-restore-sandbox'];
 
+describe('wrangler.jsonc — container scheduling', () => {
+  // `unshare --net` needs CAP_SYS_ADMIN, which the durable_object scheduling
+  // policy does not grant, so a run under it would fail closed.
+  test('no container selects the durable_object scheduling policy', () => {
+    const config = loadWranglerConfig();
+    const blocks = [config, getStagingEnv(config)];
+    for (const block of blocks) {
+      for (const container of block.containers as Array<Record<string, unknown>>) {
+        expect(container.scheduling_policy).not.toBe('durable_object');
+      }
+    }
+  });
+});
+
 describe('wrangler.jsonc — Durable Object migrations', () => {
   const config = loadWranglerConfig();
   const staging = getStagingEnv(config);

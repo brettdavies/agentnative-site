@@ -191,3 +191,44 @@ describe('parseInstallCommand — error paths', () => {
     expect(parseInstallCommand('npm install -g --silent --no-fund').ok).toBe(false);
   });
 });
+
+describe('parseInstallCommand — registry names only', () => {
+  const commands = [
+    'cargo install',
+    'bun add -g',
+    'uv tool install',
+    'pip install',
+    'pip3 install',
+    'pipx install',
+    'npm install -g',
+    'yarn global add',
+    'pnpm add -g',
+  ];
+  const tokens = [
+    'https://example.com/pkg.tgz',
+    'git+https://example.com/pkg.git',
+    'git+ssh://git@example.com/pkg.git',
+    'github:owner/repo',
+    'file:vendor/pkg',
+    'owner/repo',
+    './pkg',
+    '../pkg',
+    '/opt/pkg',
+    '~/pkg',
+  ];
+
+  for (const command of commands) {
+    test.each(tokens.map((t) => [t]))(`${command} refuses %s`, (token) => {
+      expect(parseInstallCommand(`${command} ${token}`)).toEqual({ ok: false, error: 'unparseable_install_command' });
+    });
+  }
+
+  test.each([
+    ['npm install -g @scope/tool', '@scope/tool'],
+    ['npm install -g tool@1.2.3', 'tool@1.2.3'],
+    ['pip install black==24.1.0', 'black==24.1.0'],
+    ['cargo install ripgrep', 'ripgrep'],
+  ])('%s is accepted', (command, pkg) => {
+    expect(parseInstallCommand(command)).toMatchObject({ ok: true, value: { package: pkg } });
+  });
+});

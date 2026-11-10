@@ -3,6 +3,7 @@
 // Re-audit control, and no closing note pointing at one.
 
 import { describe, expect, test } from 'bun:test';
+import { WEBMCP_SCRIPT } from '../src/shared/webmcp-script';
 import { WEB_CTA_NOTE_HTML } from '../src/worker/audit-web/copy';
 import type { WebScorecardShape } from '../src/worker/audit-web/summary-model';
 import { buildWebSummaryBody } from '../src/worker/audit-web/summary-render';
@@ -58,7 +59,7 @@ describe('the transient website summary', () => {
     expect(html).not.toContain('data-reaudit');
     expect(html).not.toContain(WEB_CTA_NOTE_HTML);
     expect(html).not.toContain('control above');
-    expect(html).not.toContain('/js/webmcp.js');
+    expect(html).not.toContain(WEBMCP_SCRIPT);
     expect(html).toContain('data-id="mcp-initialize"');
   });
 

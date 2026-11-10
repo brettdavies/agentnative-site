@@ -24,12 +24,19 @@ import { emitLog } from '../telemetry/log';
 
 export type CacheEnv = { SCORE_CACHE: R2Bucket };
 
+/** The package-manager identity a binary record was installed from. */
+export type CachedInstall = { pm: string; package: string };
+
 export type CachedScorecard = {
   spec_version: string;
   anc_version: string;
   /** Empty only on a branch record, which carries `source_sha` instead. */
   tool_version: string;
   source_sha?: string;
+  /** On a branch record, the repo's default branch when GitHub reported it at write time. */
+  default_branch?: string;
+  /** Absent on a record written without one and on a source clone; the page links to nothing then. */
+  install?: CachedInstall;
   scorecard: unknown;
 };
 
@@ -96,6 +103,8 @@ export async function put(
   toolVersion: string,
   specVersion: string,
   sourceSha?: string,
+  defaultBranch?: string | null,
+  install?: CachedInstall,
 ): Promise<boolean> {
   if (!ancVersion) throw new Error('cache.put: ancVersion required (refusal-to-cache-half-state)');
   if (!toolVersion && !sourceSha) {
@@ -108,6 +117,8 @@ export async function put(
     anc_version: ancVersion,
     tool_version: toolVersion,
     ...(sourceSha ? { source_sha: sourceSha } : {}),
+    ...(defaultBranch ? { default_branch: defaultBranch } : {}),
+    ...(install ? { install } : {}),
     scorecard,
   };
 

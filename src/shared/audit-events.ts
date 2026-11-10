@@ -60,6 +60,7 @@ export type AuditErrorCode =
   | 'chain_resolved_no_binary_produced'
   | 'timeout'
   | 'sandbox_unavailable'
+  | 'sandbox_busy'
   | 'incomplete_response_contract'
   | 'unreachable'
   | 'patch_failed'
@@ -115,6 +116,7 @@ export const AUDIT_ERROR_MESSAGES: Readonly<Record<AuditErrorCode, string>> = {
     'We installed it, but no command-line entry point appeared on PATH. anc only scores binaries. If this is wrong, paste the actual binary name as <command> to retry.',
   timeout: 'The scan ran past the time budget.',
   sandbox_unavailable: 'The scoring sandbox is unavailable right now.',
+  sandbox_busy: 'The scoring sandbox is busy. Try again in a minute.',
   incomplete_response_contract: 'The scoring service returned an incomplete response.',
   unreachable: 'The site could not be reached.',
   patch_failed: 'The listing change did not save.',
@@ -155,6 +157,7 @@ export const LEGACY_CLI_ERROR_CODES = {
   scoring_disabled: 'scoring_disabled',
   sandbox_stub_until_u6: 'sandbox_unavailable',
   sandbox_unavailable: 'sandbox_unavailable',
+  sandbox_busy: 'sandbox_busy',
   incomplete_response_contract: 'incomplete_response_contract',
   service_misconfigured: 'service_misconfigured',
 } as const satisfies Record<string, AuditErrorCode>;

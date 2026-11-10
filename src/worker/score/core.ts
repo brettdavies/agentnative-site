@@ -447,6 +447,8 @@ export function doError(error: string, rawDetails?: string): ScoreError {
       // The sandbox budget covers install and audit together; the audit is
       // the long pole, so a timeout is reported as the score phase.
       return { code: 'timeout', phase: 'score', cta_text: CTA_INSTALL_ANC };
+    case 'sandbox_busy':
+      return { code: 'sandbox_busy', cta_text: CTA_INSTALL_ANC };
     default:
       return {
         code: 'incomplete_response_contract',

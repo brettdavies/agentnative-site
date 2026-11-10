@@ -48,9 +48,8 @@
 // --------------
 // `sandbox-exec.ts:installCommandFor()` joins `SDIST_TRUSTED_NAMES` into
 // the `--no-binary=<comma-list>` portion of the pip install command.
-// Empty list emits no `--no-binary` flag at all. uv installs already
-// fall back to sdist automatically (no equivalent flag needed); this
-// file targets the pip path specifically.
+// Empty list emits no `--no-binary` flag at all. uv installs take wheels
+// only; this file targets the pip path specifically.
 
 export type SdistTrustedEntry = {
   /** PyPI package name exactly as it appears in `--no-binary=<name>`. */

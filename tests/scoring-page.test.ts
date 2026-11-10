@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { emitShellTemplate } from '../src/build/shell.mjs';
 import {
   discoveryLine,
   inlineSubline,
@@ -10,11 +11,13 @@ import { handleScoringPage, type ScoringPageEnv } from '../src/worker/audit/scor
 import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
 import { _resetShellTemplateCache } from '../src/worker/shell-template';
 import { webRegistryJson } from './helpers/audit-api-env';
+import { scriptSources } from './helpers/html-elements';
 
 // GET /scoring renders the progress page's first paint from the target
 // alone. These tests drive the handler against a stub shell and the real
 // website registry, and pin the page's contract with its client, its
-// headers, and its prose pointer.
+// headers, and its prose pointer. The suite that checks which scripts load
+// uses the real shell template instead, because the stub names none.
 
 const SHELL = `<!doctype html><html><head><title>{{TITLE}}</title><meta name="description" content="{{DESCRIPTION}}" /><link rel="canonical" href="https://anc.dev{{CANONICAL_PATH}}" />
     {{ALTERNATES}}
@@ -22,12 +25,12 @@ const SHELL = `<!doctype html><html><head><title>{{TITLE}}</title><meta name="de
 
 const SITEKEY = '1x00000000000000000000AA';
 
-function env(sitekey: string | null = SITEKEY): ScoringPageEnv {
+function env(sitekey: string | null = SITEKEY, shell: string = SHELL): ScoringPageEnv {
   return {
     ASSETS: {
       async fetch(req: Request | string): Promise<Response> {
         const path = new URL(typeof req === 'string' ? req : req.url).pathname;
-        if (path === '/_internal/score-live-shell.html') return new Response(SHELL, { status: 200 });
+        if (path === '/_internal/score-live-shell.html') return new Response(shell, { status: 200 });
         if (path === '/_internal/web-audit-registry.json')
           return new Response(await webRegistryJson(), { status: 200 });
         return new Response('not found', { status: 404 });
@@ -53,8 +56,26 @@ beforeEach(() => {
   resetWebAuditRegistryCacheForTests();
 });
 
+describe('GET /scoring through the real shell template', () => {
+  // A script the shell adds to every page is invisible to the stub above, which
+  // names no scripts at all.
+  test.each([
+    ['a CLI target', '/scoring?target=ripgrep', 200, true],
+    ['a website target', '/scoring?target=stripe.dev', 200, true],
+    ['no target', '/scoring', 200, false],
+    ['a refused target', `/scoring?target=${'a'.repeat(129)}`, 400, false],
+  ])('%s loads no WebMCP script', async (_name, path, status, isProgressPage) => {
+    const { res, html } = await page(path, env(SITEKEY, emitShellTemplate()));
+    expect(res.status).toBe(status);
+    expect(html.includes('data-lane=')).toBe(isProgressPage);
+    expect(await scriptSources(html)).toContain('/js/theme.js');
+    // The whole page, so a preload hint or an inline import counts as well as a tag.
+    expect(html).not.toContain('webmcp');
+  });
+});
+
 describe('GET /scoring?target=', () => {
-  test('a CLI target renders its page: lane, target, sitekey meta, the page script, and the probe line, and never WebMCP', async () => {
+  test('a CLI target renders its page: lane, target, sitekey meta, the page script, and the probe line', async () => {
     const { res, html } = await page('/scoring?target=ripgrep');
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/html');
@@ -62,7 +83,6 @@ describe('GET /scoring?target=', () => {
     expect(html).toContain('data-target="ripgrep"');
     expect(html).toContain(`name="turnstile-sitekey" content="${SITEKEY}"`);
     expect(html).toContain('src="/js/scoring.js"');
-    expect(html).not.toContain('webmcp');
     expect(html).toContain('Auditing <code>ripgrep</code>');
     expect(html).toContain('Installs the tool in a sandbox; usually under a minute.');
     expect(html).toContain('Checking for a recent result');

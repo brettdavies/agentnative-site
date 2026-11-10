@@ -102,6 +102,15 @@ describe('homepage web-board inject', () => {
     expect(webPane).toContain('class="lrow');
   });
 
+  test('a site title holding a replacement pattern is injected literally', async () => {
+    const entry = frontpageEntry('top.dev', 80);
+    entry.name = "Acme $& $' Co";
+    const html = await fetchHomepage(makeEnv([entry]));
+    expect(html).toContain('(Acme $&amp; $&#39; Co)');
+    expect(html).not.toContain('{{WEB_BOARD_ROWS}}');
+    expect(html.split('</html>').length - 1).toBe(1);
+  });
+
   test('renders the scoring-in-progress state when the aggregate is absent, still HTTP 200', async () => {
     const html = await fetchHomepage(makeEnv(null));
     expect(html).not.toContain('{{WEB_BOARD_ROWS}}');

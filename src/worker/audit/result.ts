@@ -74,15 +74,17 @@ import { webEnvelope } from '../audit-web/core';
 import { normalizeScorecardCategories } from '../audit-web/display';
 import { loadWebAuditRegistry } from '../audit-web/registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from '../audit-web/remediation';
+import { richMarkdown } from '../audit-web/rich-text';
 import { loadWebSeed, type WebSeedEntry } from '../audit-web/seed';
 import { freshnessHtml, freshnessState } from '../audit-web/summary-freshness';
 import type { WebSummaryInput } from '../audit-web/summary-input';
 import { buildWebSummaryMarkdown } from '../audit-web/summary-markdown';
+import { scoresOf, type WebScorecardShape } from '../audit-web/summary-model';
 import { buildWebSummaryBody } from '../audit-web/summary-render';
 import { applyHeaders, type CacheClassSpec, resultCacheClass } from '../headers';
 import { curatedCardOf, pageClip, withOgVideo } from '../og/page-clip';
 import type { OgVideoEnv } from '../og/render-request';
-import { get as cliCacheGet, keyFor as cliKeyFor } from '../score/cache';
+import { type CachedInstall, get as cliCacheGet, keyFor as cliKeyFor } from '../score/cache';
 import { readCuratedEnvelope } from '../score/core';
 import { loadRegistryIndex, type RegistryIndex } from '../score/registry-lookup';
 import { loadShellTemplate, substituteShell } from '../shell-template';
@@ -192,7 +194,7 @@ type Rendered = {
   /** Server-rendered HTML body and markdown twin for the envelope. */
   html: () => Promise<string>;
   markdown: () => Promise<string>;
-  /** The page's `<meta name="robots">` equivalent: branch pages are unlisted. */
+  /** The page's `<meta name="robots">` equivalent. */
   noindex: boolean;
 };
 
@@ -226,7 +228,7 @@ async function serveResult(request: Request, env: ResultEnv, deps: ResultDeps, s
   };
 
   if (classified.lane === 'web') return serveWeb(ctx, classified.target);
-  if (classified.kind === 'cli-branch') return serveBranch(ctx, classified.target);
+  if (classified.kind === 'cli-branch') return serveBranch(ctx, classified.target, classified.branch);
   return serveCli(ctx, classified.target);
 }
 
@@ -273,8 +275,8 @@ async function serveWeb(ctx: RenderContext, host: string): Promise<Response> {
     linked: true,
     control,
   };
-  // Listing follows provenance: a seeded host is indexable, an on-demand
-  // one is not; the same seed entry names the page.
+  // A seeded host's page is indexable; an on-demand host's page is once its
+  // headline score reaches the floor. The same seed entry names the page.
   const seedEntry = await seedEntryFor(ctx.env, host);
   const summaryInput = async (): Promise<WebSummaryInput> => {
     const [remediationLoad, registryLoad] = await Promise.allSettled([
@@ -309,13 +311,28 @@ async function serveWeb(ctx: RenderContext, host: string): Promise<Response> {
     envelope,
     tier: 'cache',
     spine,
-    noindex: seedEntry === undefined,
+    noindex: webPageNoindex(seedEntry !== undefined, record.scorecard),
     html: async () => buildWebSummaryBody(await summaryInput()),
     markdown: async () => buildWebSummaryMarkdown(await summaryInput()),
   });
 }
 
-async function serveBranch(ctx: RenderContext, target: string): Promise<Response> {
+// Lowest headline score at which an on-demand website scorecard is offered to search engines.
+const WEB_INDEXABLE_MIN_SCORE_PCT = 70;
+
+/**
+ * Reads the headline through the function the page prints it with, so a page
+ * showing 70 is indexable and one showing 69 is not. A score that is not a
+ * number fails closed.
+ */
+function webPageNoindex(seeded: boolean, scorecard: unknown): boolean {
+  if (seeded) return false;
+  const headline =
+    typeof scorecard === 'object' && scorecard !== null ? scoresOf(scorecard as WebScorecardShape).relative : 0;
+  return !(typeof headline === 'number' && headline >= WEB_INDEXABLE_MIN_SCORE_PCT);
+}
+
+async function serveBranch(ctx: RenderContext, target: string, branch: string): Promise<Response> {
   const inFlight = await inFlightResponse(ctx, 'cli', target);
   if (inFlight) return inFlight;
   const registry = await registryOrNull(ctx.env);
@@ -334,7 +351,10 @@ async function serveBranch(ctx: RenderContext, target: string): Promise<Response
   const sha = envelope.source_sha ? envelope.source_sha.slice(0, 7) : null;
   const scored = sha ? `Scored at <code>${escHtml(sha)}</code>` : 'Scored';
   const freshness = `${scored}${date ? ` on ${escHtml(date)}` : ''}. Re-audit runs a fresh audit.`;
-  return respondCli(ctx, envelope, record, {
+  // Only a repo's default branch is indexable, and a record that does not
+  // name it stays out of the index.
+  const noindex = !earnedBadge(record) || record.default_branch !== branch;
+  return respondCli(ctx, envelope, record, noindex, {
     target,
     lane: 'cli',
     tier: 'cache',
@@ -367,7 +387,8 @@ async function serveCli(ctx: RenderContext, target: string): Promise<Response> {
   const date = shortDate(cliScoredAt(record));
   const version = record.tool_version ? `v${escHtml(record.tool_version)}` : '';
   const freshness = `Scored${version ? ` ${version}` : ''}${date ? ` on ${escHtml(date)}` : ''}. Re-audit runs a fresh audit.`;
-  return respondCli(ctx, envelope, record, {
+  const noindex = !earnedBadge(record);
+  return respondCli(ctx, envelope, record, noindex, {
     target,
     lane: 'cli',
     tier: 'cache',
@@ -375,6 +396,11 @@ async function serveCli(ctx: RenderContext, target: string): Promise<Response> {
     linked: true,
     control: { kind: 'refresh', target, lane: 'cli' },
   });
+}
+
+/** The same field that decides whether the page offers the badge embed. */
+function earnedBadge(record: { scorecard: unknown }): boolean {
+  return (record.scorecard as { badge?: { eligible?: boolean } }).badge?.eligible === true;
 }
 
 async function seedEntryFor(env: ResultEnv, host: string): Promise<WebSeedEntry | undefined> {
@@ -473,24 +499,31 @@ function unavailable(ctx: RenderContext): Response {
 // Rendering
 // ---------------------------------------------------------------------------
 
-// A live or branch result is on-demand, so its page is unlisted.
 async function respondCli(
   ctx: RenderContext,
   envelope: AuditEnvelope,
-  record: { tool_version: string; anc_version: string; spec_version: string; scorecard: unknown },
+  record: {
+    tool_version: string;
+    anc_version: string;
+    spec_version: string;
+    install?: CachedInstall;
+    scorecard: unknown;
+  },
+  noindex: boolean,
   spine: SpineInput,
 ): Promise<Response> {
   const scorecard = record.scorecard as Parameters<typeof buildScorecardBody>[1];
   const tool = {
     name: (scorecard as { tool?: { name?: string } }).tool?.name ?? spine.target,
     binary: (scorecard as { tool?: { binary?: string } }).tool?.binary ?? spine.target,
+    ...(record.install ? { packageRef: record.install } : {}),
   };
   const links = { scorecard: envelope.scorecard_url, markdown: envelope.markdown_url, json: envelope.json_url };
   return respond(ctx, {
     envelope,
     tier: 'cache',
     spine,
-    noindex: true,
+    noindex,
     html: async () =>
       buildScorecardBody(tool, scorecard, { version: record.tool_version, spine, showBadgePreview: false }),
     markdown: async () =>
@@ -702,12 +735,8 @@ async function notFound(request: Request, env: ResultEnv, deps: ResultDeps, inpu
     return applyHeaders(new Response(JSON.stringify(body), { status: 404 }), opts);
   }
   if (input.rep === 'md') {
-    const lines = [
-      `# No audit exists for \`${input.target}\` yet.`,
-      '',
-      `[Audit \`${input.target}\`](${origin}${audit})`,
-      '',
-    ];
+    const code = richMarkdown([{ code: input.target }]);
+    const lines = [`# No audit exists for ${code} yet.`, '', `Start one: [Audit ${code}](${origin}${audit})`, ''];
     if (suggestions.length > 0) {
       lines.push('## Did you mean?', '', ...suggestions.map((s) => `- [${s}](${origin}${scorePath(s)})`), '');
     }

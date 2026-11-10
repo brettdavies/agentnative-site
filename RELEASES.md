@@ -185,7 +185,7 @@ git diff --cached --name-only origin/main | grep -E "$GUARDED" \
 #    D: what this release ADDS to main. The leak check screens against the registered
 #       set, so it is blind to a category nobody registered yet; that blind spot is how
 #       docs/TODOS.md and docs/designs/ reached an open release with a green guard-docs.
-#       Every docs/ entry and every added markdown file needs a reason to ship, or it
+#       Every entry under docs/ and every added markdown file needs a reason to ship, or it
 #       needs registering in the workflow's extra_paths and removing from the branch.
 #       `--no-renames` lists a doc moved from one main carries as added; rename detection
 #       would report it as R, and the A filter would drop it.
@@ -252,10 +252,14 @@ script that removes files `main` does not have would be dead weight there. Runni
 from deleting a tool that has not run yet. The script is the record of what is held back, so the removal is applied
 rather than re-derived by hand at each cut, and it is deliberately brittle: an exact match that no longer matches is a
 hard error, because a silently skipped edit ships the feature. After applying, it greps the tree for every marker the
-feature owns and fails on any survivor, which catches a miss whichever edit caused it. It also fails when a removal
-takes a `describe` or `test` the feature does not own, so an edit that matches too much cannot strip unrelated tests
-from `main`. `--check` runs the same removals in memory, reports without writing, and exits non-zero while anything is
-still pending.
+feature owns and fails on any survivor, which catches a miss whichever edit caused it. The grep skips hidden,
+gitignored and binary files, `bun.lock`, `node_modules`, `dist`, the script itself, the guarded paths, and top-level
+`scorecards/*.json`: a scorecard is audit data about a third-party CLI, so its evidence strings can name a marker
+without carrying any of the feature. The script also fails when a removal takes a `describe` or `test` the feature does
+not own, so an edit that matches too much cannot strip unrelated tests from `main`. A grep that cannot run is a hard
+error, never a clean tree. `--check` runs the same removals in memory and the same grep on the tree they would leave,
+reports without writing, exits 1 on a survivor or a grep that could not run, and exits 2 while anything is still
+pending, so a clean `--check` predicts a clean cut.
 
 | Feature        | Script                                       | Held back because                                                                                                                                                                      |
 | -------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -270,7 +274,7 @@ guarded set: that gate is how a withholding stays visible rather than becoming i
 The overlay is the release construction for this repo. Cherry-picking the dev squash-commits onto the `origin/main` base
 is the exception, kept only for a release with a stated reason it cannot overlay; the per-PR changelog is not such a
 reason, since `--from-dev-prs` builds it from `dev` either way. A cherry-pick release ships no single `dev` commit's
-tree, so step 1 names it after the newest commit it picks (`site-version.sh --commit <newest picked sha>`), and
+tree, so step 1 names it after the newest commit it picks (`site-version.sh --commit <newest-picked-sha>`), and
 preflight's diff-B then lists the `dev` changes it leaves out. When cherry-picking, run the triple-diff verification:
 
 ```bash
@@ -480,7 +484,7 @@ A `paths-ignore` filter on the `push` trigger skips deploy when a commit only to
 
 - **Base**: `python:3.12-slim-trixie` + Cloudflare Sandbox SDK + PMs (cargo-binstall, pip, uv, npm, bun, upstream Go).
 - **Image**: `registry.cloudflare.com/<account-id>/anc-sandbox:<git-sha>`. Build decoupled from deploy.
-- **Instance type**: staging `standard-2` (1 vCPU, 6 GiB RAM, 12 GB disk); prod `basic` (1/4 vCPU). Promotion: release
+- **Instance type**: staging and prod `standard-2` (1 vCPU, 6 GiB RAM, 12 GB disk). Promotion: release
   PR + soak.
 - **Rationale + version-pin matrix**:
   [`docs/solutions/tooling-decisions/cloudflare-sandbox-python-3.12-base-2026-05-19.md`](docs/solutions/tooling-decisions/cloudflare-sandbox-python-3.12-base-2026-05-19.md).
@@ -505,11 +509,17 @@ gh release download v<version> -R brettdavies/agentnative-cli -p sha256sum.txt -
 or the two pin different archives. `scripts/release/preflight.sh coord` fails while a pinned image bakes a different anc
 than the Dockerfile.
 
+`results[].status` in `src/worker/score/scorecard-shape.ts` lists anc's status values, and a run reporting any other
+value fails. Compare it with the new release's `schema/scorecard.schema.json`, and add a new status in the same PR.
+
 ```bash
 # from a clean working tree on dev
 GIT_SHA=$(git rev-parse --short HEAD)
 bun x wrangler containers build -p -t "anc-sandbox:$GIT_SHA" docker/sandbox/
 ```
+
+A command audit sets `AGENTNATIVE_REPO` and `AGENTNATIVE_HOME_CONFIG` (`src/worker/score/sandbox-exec.ts`), and anc ignores
+a variable it does not recognize. Check both names against the new anc before bumping.
 
 Update **only `env.staging.containers[0].image`** in `wrangler.jsonc` with the new tag. Commit Dockerfile change +
 staging-pin update together. PR to `dev`.
@@ -567,7 +577,7 @@ command above.
 #### og:video setup
 
 Run once per environment before the og:video code first deploys there, whether by a staging dispatch of a branch or by
-the merge, because the site Worker's deploy fails without its `og-rendered` queue:
+the merge, because the deploy of the site Worker fails without its `og-rendered` queue:
 
 ```bash
 scripts/og/setup.sh staging

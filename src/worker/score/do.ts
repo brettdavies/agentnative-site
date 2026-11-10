@@ -39,7 +39,9 @@ import { type OgVideoEnv, requestRender } from '../og/render-request';
 import { SPEC_VERSION } from '../spec-version.gen';
 import { emitLog } from '../telemetry/log';
 import * as cache from './cache';
+import { ContainerRuns } from './container-runs';
 import type { InstallSpec } from './discover-binary';
+import { fetchDefaultBranch } from './github-accessibility';
 import { score as runSandboxScore, type SandboxPhase, type ScoreResult } from './sandbox-exec';
 
 // ---------------------------------------------------------------------------
@@ -121,6 +123,12 @@ export const handlers = { allowedInstall, noHttp };
 // DO class
 // ---------------------------------------------------------------------------
 
+// A run that cannot get an instance within this limit reports the sandbox as
+// busy, so a caller at the cap is told to retry sooner than the SDK's own
+// start limits would.
+export const CONTAINER_INSTANCE_TIMEOUT_MS = 15_000;
+export const CONTAINER_READY_TIMEOUT_MS = 30_000;
+
 export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
   // DIAGNOSTIC: HTTPS interception OFF to isolate whether the SDK's
   // Worker-fetch passthrough is the cause of the upstream-403 regressions
@@ -129,6 +137,18 @@ export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
   // hits upstream from the CF Container IP rather than the Worker fetch
   // IP. Phase 2 lockdown is lost while this flag is false.
   override interceptHttps = false;
+
+  private readonly runs = new ContainerRuns({
+    isRunning: () => this.ctx.container?.running === true,
+    start: () =>
+      this.startAndWaitForPorts({
+        cancellationOptions: {
+          instanceGetTimeoutMS: CONTAINER_INSTANCE_TIMEOUT_MS,
+          portReadyTimeoutMS: CONTAINER_READY_TIMEOUT_MS,
+        },
+      }),
+    destroy: () => this.destroy(),
+  });
 
   // Override BaseSandbox.fetch (which normally proxies to the container's
   // HTTP listener) to dispatch the score endpoint instead. Our container
@@ -149,21 +169,16 @@ export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
       return json({ error: 'invalid_do_body' }, 400);
     }
 
+    const claim = this.runs.claim();
     const { body, done } = streamScore(parsed.spec, {
       env: this.env,
-      run: (spec, onPhase) => this.score(spec, onPhase),
+      run: (spec, onPhase) => claim.run(() => runSandboxScore(claim.scoped(this), spec, { onPhase })),
       purge: async (tags) => {
         await invokeCachedPurge(this.ctx, tags);
       },
     });
-    this.ctx.waitUntil(done);
+    this.ctx.waitUntil(claim.settle(done));
     return new Response(body, { status: 200, headers: { 'content-type': 'application/x-ndjson; charset=utf-8' } });
-  }
-
-  // RPC entry point: the score flow without a Request round-trip, for a
-  // server-side caller such as a batch-scoring cron Worker.
-  async score(spec: InstallSpec, onPhase?: (phase: SandboxPhase) => void): Promise<ScoreResult> {
-    return runSandboxScore(this, spec, { onPhase });
   }
 }
 
@@ -231,7 +246,7 @@ export type ScoredValue = { scorecard: unknown; anc_version: string; source_sha?
 
 // The purge sits between the R2 write and the result line; a stalled RPC
 // must not hold the client's result.
-const PURGE_TIMEOUT_MS = 5_000;
+export const PURGE_TIMEOUT_MS = 5_000;
 
 // Best-effort R2 write after a successful score, under the key the result
 // route reads: `scores/<binary>/...` for an installed binary and
@@ -253,6 +268,7 @@ export async function writeCacheBestEffort(
   value: ScoredValue,
   purge?: (tags: string[]) => Promise<void>,
   purgeTimeoutMs: number = PURGE_TIMEOUT_MS,
+  lookupDefaultBranch: typeof fetchDefaultBranch = fetchDefaultBranch,
 ): Promise<void> {
   const bucket = env.SCORE_CACHE;
   if (!bucket) {
@@ -283,6 +299,9 @@ export async function writeCacheBestEffort(
   // the key vs. payload split is intentional. See cache.ts module
   // header for the full rationale.
   const key = cache.keyFor(target, SPEC_VERSION);
+  // Asked of GitHub here so indexing never depends on what the audit reports.
+  const defaultBranch = spec.pm === 'git-clone' ? await lookupDefaultBranch(spec.owner, spec.repo) : null;
+  const install = installOf(spec);
   let wrote = false;
   try {
     wrote = await cache.put(
@@ -293,6 +312,8 @@ export async function writeCacheBestEffort(
       toolVersion,
       SPEC_VERSION,
       sourceSha,
+      defaultBranch,
+      install,
     );
   } catch (err) {
     // cache.put only throws on refusal-to-cache-half-state, which the
@@ -303,6 +324,13 @@ export async function writeCacheBestEffort(
   if (!wrote) return;
   if (purge) await purgeWithin(purge, [cliTargetTag(target)], purgeTimeoutMs);
   await requestRender({ ...env, SCORE_CACHE: bucket }, target);
+}
+
+// The identity a page links to. Named fields rather than the spec itself,
+// because a spec can carry request-side extras that must not reach the record.
+function installOf(spec: InstallSpec): cache.CachedInstall | undefined {
+  if (spec.pm === 'direct' || spec.pm === 'git-clone') return undefined;
+  return { pm: spec.pm, package: spec.package };
 }
 
 async function purgeWithin(purge: (tags: string[]) => Promise<void>, tags: string[], ms: number): Promise<void> {
