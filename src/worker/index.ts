@@ -841,9 +841,10 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
       runWithMcpEnv(env as McpEnv, () => handler.fetch(sdkRequest, { parsedBody })),
     );
     // Legacy transport SSE→JSON when the client negotiated JSON (see
-    // coerce-json-response.ts). Modern responseMode:'json' already returns
-    // application/json; this is a no-op on that path.
-    const response = await coerceMcpJsonResponse(rawResponse, format);
+    // coerce-json-response.ts). The modern lane answers JSON under
+    // responseMode:'json' except for subscriptions/listen, an event stream
+    // that stays open, so coercing it would wait forever.
+    const response = legacyEra ? await coerceMcpJsonResponse(rawResponse, format) : rawResponse;
     const headers = new Headers(response.headers);
     stripCorsHeaders(headers);
     headers.set('cache-control', 'no-store');
