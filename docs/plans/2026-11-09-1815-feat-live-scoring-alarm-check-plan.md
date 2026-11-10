@@ -4,8 +4,8 @@ execution: code
 product_contract_source: ce-plan-bootstrap
 title: "Live-scoring alarm check - Plan"
 type: feat
-status: waiting-for-production-live-scoring-traffic
-prs: []
+status: blocked
+blocked_on: "production live-scoring traffic beyond curated requests"
 date: 2026-11-09
 topic: live-scoring-alerts
 ---
@@ -57,7 +57,7 @@ Three runbook rows stay manual because a `score.tier` line cannot answer them: G
 
 Measured against production on 2026-11-09 by running the script end to end.
 
-- `CF_ANALYTICS_READ_TOKEN` is set as a repo secret and `CF_ACCOUNT_ID` exists. A token with Workers Observability Read answers `telemetry/query` with HTTP 200. The public OpenAPI schema lists only Workers Observability Write for that endpoint, and Write is not needed.
+- `CF_ACCOUNT_ID` is a repo secret. `CF_ANALYTICS_READ_TOKEN` is not set. A token with Workers Observability Read answers `telemetry/query` with HTTP 200. The public OpenAPI schema lists only Workers Observability Write for that endpoint, and Write is not needed.
 - Boolean group values arrive as strings: `{"key":"cache_pre_attempted","value":"true"}`.
 - A window with no matching lines answers `result.calculations[0].aggregates: []`, with `calculations` present.
 - A 400 has no `errors` array: `{"success":false,"_e":null,"_i":<the request>,"_c":{"issues":[{"code","path","message"}],"name":"ZodError"}}`.
@@ -139,7 +139,8 @@ An alarm's `value` holds `alarm`, `window`, `window_start`, `window_end`, `basis
 1. **The pre-hit alarm misfires.** `src/worker/audit/api.ts` (around line 602) sets `cache_pre_attempted` before the registry lookup, so every `curated` request logs an attempt with no hit. Under the runbook's formula a curated-only hour reads 0% and trips above 40 attempts with nothing wrong. Decide: exclude `curated` rows in the script (recommended, one runbook line), keep the formula, or drop this alarm from the check.
 2. **The Turnstile alarm counts tokenless requests.** `src/worker/audit/api.ts` logs a POST with no token as `error_turnstile_failed`, so a run of tokenless agent POSTs trips the alarm while siteverify is healthy. Decide whether the runbook's reading of this signal stands.
 3. **Decide on tier-edited fixtures** (see Fixtures).
-4. **Correct two runbook pointers.** The keys-endpoint recipe says the token's name is in `docs/runbooks/sitewide-analytics.md`, which does not name it. The telemetry contract cites `src/worker/score/handler.ts`, and the emitter is `src/worker/score/telemetry.ts`.
+4. **Provision the credential.** Set the `CF_ANALYTICS_READ_TOKEN` repo secret from the read-only Analytics Read token in 1Password (account-scoped Workers Observability Read).
+5. **Correct two runbook pointers.** The keys-endpoint recipe says the token's name is in `docs/runbooks/sitewide-analytics.md`, which does not name it. The telemetry contract cites `src/worker/score/handler.ts`, and the emitter is `src/worker/score/telemetry.ts`.
 
 ## When to resume
 
