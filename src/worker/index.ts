@@ -851,8 +851,11 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
 
     // Read the error code before the body is handed to the outgoing
     // Response: extractTransportErrorCode clones, and a cloned body cannot
-    // be taken after another Response has adopted it.
-    const errorCode = await extractTransportErrorCode(response);
+    // be taken after another Response has adopted it. The read waits for the
+    // body to end, which a modern event stream (subscriptions/listen) never
+    // does. A legacy stream ends with its result, so its line times the call.
+    const openStream = !legacyEra && servedResponseFormat(response) === 'sse';
+    const errorCode = openStream ? null : await extractTransportErrorCode(response);
     let outcome: McpRequestOutcome = errorCode != null ? 'error' : 'ok';
     if (outcome === 'ok' && !response.ok) outcome = 'error';
 

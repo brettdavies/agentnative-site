@@ -66,8 +66,6 @@ export function servedResponseFormat(response: Response): McpResponseFormat {
  * not parse as JSON with a numeric `error.code` still yields null.
  */
 export async function extractTransportErrorCode(response: Response): Promise<number | null> {
-  // An event stream can stay open indefinitely, and its framing never parses as JSON.
-  if (servedResponseFormat(response) === 'sse') return null;
   try {
     const clone = response.clone();
     const buf = await clone.arrayBuffer();

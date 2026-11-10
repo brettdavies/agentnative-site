@@ -761,6 +761,29 @@ describe('POST /mcp — subscriptions/listen', () => {
     });
   }
 
+  test('a legacy call that streams is logged with the duration of the whole call', async () => {
+    const env = makeEnv();
+    const assets = env.ASSETS;
+    env.ASSETS = {
+      async fetch(req: Request) {
+        if (new URL(req.url).pathname !== '/_internal/mcp-catalog.json') {
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+        return assets.fetch(req);
+      },
+    } as unknown as Fetcher;
+    const { result: res, lines } = await captureMcpRequestLogs(() =>
+      postMcp(env, 'text/event-stream', {
+        jsonrpc: '2.0',
+        id: 4,
+        method: 'tools/call',
+        params: { name: 'get_scorecard', arguments: { slug: 'curl' } },
+      }),
+    );
+    expect(res.headers.get('content-type') ?? '').toContain('text/event-stream');
+    expect(lines[0]).toMatchObject({ era: 'legacy', response_format: 'sse', outcome: 'ok', ms_bucket: '200-1000' });
+  });
+
   test('a refused listen answers JSON and logs its error code', async () => {
     const env = makeEnv();
     const { result: res, lines } = await captureMcpRequestLogs(() =>
