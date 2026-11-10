@@ -15,6 +15,9 @@ import { markdownAlternateLink } from '../shared/result-head';
 import { escHtml } from '../shared/scorecard-format.mjs';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
 
+const BREADCRUMB_JSONLD_SLOT = `,"${BREADCRUMB_JSONLD_TOKEN}"`;
+const SHELL_TOKEN = new RegExp(`${BREADCRUMB_JSONLD_SLOT.replace(/[{}]/g, '\\$&')}|\\{\\{[A-Z_]+\\}\\}`, 'g');
+
 let shellTemplatePromise: Promise<string> | null = null;
 
 export async function loadShellTemplate(env: { ASSETS: Fetcher }): Promise<string> {
@@ -62,28 +65,29 @@ export type ShellFields = {
 
 export function substituteShell(template: string, fields: ShellFields): string {
   const twin = fields.markdownTwinPath ?? `${fields.canonicalPath}.md`;
-  const alternates = fields.alternatesHtml ?? markdownAlternateLink(twin);
   const ogImage = fields.ogImage ?? `${CANONICAL_SITE_URL}${SITE_OG_IMAGE_PATH}`;
-  const ogImageAlt = fields.ogImageAlt ?? SITE_OG_IMAGE_ALT;
   // The template deferred its breadcrumb to request time, because a trail
   // cannot be split out of a path that does not exist at build time. Both
   // renderings come from one trail here, the same way a built page's do.
   const trail = breadcrumbTrail(fields.canonicalPath, fields.breadcrumb);
   const crumbNode = breadcrumbJsonLd(trail, CANONICAL_SITE_URL);
-  return (
-    template
-      .replaceAll('{{BREADCRUMB_NAV}}', renderBreadcrumbNav(trail))
-      // Quoted token and its separating comma: removing both leaves the graph
-      // well-formed when a path has no trail to state.
-      .replaceAll(`,"${BREADCRUMB_JSONLD_TOKEN}"`, crumbNode ? `,${JSON.stringify(crumbNode)}` : '')
-      .replaceAll('{{TITLE}}', escHtml(fields.title))
-      .replaceAll('{{DESCRIPTION}}', escHtml(fields.description))
-      .replaceAll('{{CANONICAL_PATH}}', escHtml(fields.canonicalPath))
-      .replaceAll('{{MARKDOWN_TWIN_PATH}}', escHtml(twin))
-      .replaceAll('{{ALTERNATES}}', alternates)
-      .replaceAll('{{OG_IMAGE}}', escHtml(ogImage))
-      .replaceAll('{{OG_IMAGE_ALT}}', escHtml(ogImageAlt))
-      .replaceAll('{{OG_VIDEO}}', fields.ogVideoHtml ?? '')
-      .replaceAll('{{BODY}}', fields.body)
-  );
+  const values: Readonly<Record<string, string>> = {
+    '{{BREADCRUMB_NAV}}': renderBreadcrumbNav(trail),
+    // Removing the quoted token and its comma together leaves the graph
+    // well-formed when a path has no trail to state.
+    [BREADCRUMB_JSONLD_SLOT]: crumbNode ? `,${JSON.stringify(crumbNode)}` : '',
+    '{{TITLE}}': escHtml(fields.title),
+    '{{DESCRIPTION}}': escHtml(fields.description),
+    '{{CANONICAL_PATH}}': escHtml(fields.canonicalPath),
+    '{{MARKDOWN_TWIN_PATH}}': escHtml(twin),
+    '{{ALTERNATES}}': fields.alternatesHtml ?? markdownAlternateLink(twin),
+    '{{OG_IMAGE}}': escHtml(ogImage),
+    '{{OG_IMAGE_ALT}}': escHtml(fields.ogImageAlt ?? SITE_OG_IMAGE_ALT),
+    '{{OG_VIDEO}}': fields.ogVideoHtml ?? '',
+    '{{BODY}}': fields.body,
+  };
+  // One pass with a function replacement, because these values carry request
+  // text: a string replacement expands `$&` and its siblings, and a later pass
+  // would fill any token a value spells out.
+  return template.replace(SHELL_TOKEN, (token) => values[token] ?? token);
 }
