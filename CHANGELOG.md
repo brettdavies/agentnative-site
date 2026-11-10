@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.1794347407-g9c1e97a] - 2026-11-10
+
+### Fixed
+
+- Fix MCP clients on the 2026-07-28 protocol timing out on connect when they open a `subscriptions/listen` stream. by @brettdavies in [#543](https://github.com/brettdavies/agentnative-site/pull/543)
+
+### Documentation
+
+- Note in the MCP client skill that `subscriptions/listen` always answers an open `text/event-stream`, whatever the `Accept` value. by @brettdavies in [#543](https://github.com/brettdavies/agentnative-site/pull/543)
+
+**Full Changelog**: [v0.0.1794281993-gc008640...v0.0.1794347407-g9c1e97a](https://github.com/brettdavies/agentnative-site/compare/v0.0.1794281993-gc008640...v0.0.1794347407-g9c1e97a)
+
 ## [0.0.1794281993-gc008640] - 2026-11-10
 
 ### Added
