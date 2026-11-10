@@ -510,12 +510,18 @@ test.describe('leaderboard surface nav', () => {
     expect(await page.evaluate(() => localStorage.getItem('anc-surface'))).toBe('web');
   });
 
-  test('Probe A navigates Website → CLI and writes preference', async ({ page }) => {
+  test('the leaderboard segment swaps back from Website to CLI in place and writes the preference', async ({
+    page,
+  }) => {
     await page.goto('/');
     await page.locator('label[for="s-web"]').click();
-    await page.goto('/web');
-    await page.locator('label[for="board-s-cli"]').click();
+    await page.goto('/scorecards');
+    await expect(page.locator('.board[data-s="web"]')).toBeVisible();
+    await expect(page.locator('.board[data-s="cli"]')).toBeHidden();
+    await page.locator('label[for="s-cli"]').click();
     await expect(page).toHaveURL(/\/scorecards$/);
+    await expect(page.locator('.board[data-s="cli"]')).toBeVisible();
+    await expect(page.locator('.board[data-s="web"]')).toBeHidden();
     expect(await page.evaluate(() => localStorage.getItem('anc-surface'))).toBe('cli');
   });
 });
@@ -550,12 +556,16 @@ test.describe('audit surface nav', () => {
     await expect(page.locator('.site-nav [data-audit-nav]')).toHaveAttribute('href', '/audit');
   });
 
-  test('Probe A navigates web audit → CLI audit and writes preference', async ({ page }) => {
+  test('the entry form switches back from Website to CLI in place on /audit and writes the preference', async ({
+    page,
+  }) => {
     await page.goto('/');
     await page.locator('label[for="s-web"]').click();
     await page.goto('/audit');
-    await page.locator('label[for="audit-s-cli"]').click();
+    await expect(page.locator('[data-audit-listing]')).toBeVisible();
+    await page.locator('label[for="s-cli"]').click();
     await expect(page).toHaveURL(/\/audit$/);
+    await expect(page.locator('[data-audit-listing]')).toBeHidden();
     expect(await page.evaluate(() => localStorage.getItem('anc-surface'))).toBe('cli');
   });
 });
