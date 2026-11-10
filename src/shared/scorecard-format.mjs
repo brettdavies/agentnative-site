@@ -221,7 +221,7 @@ export function renderAuditRows(checks) {
   return checks
     .map((check) => {
       const category = suppressionCategory(check);
-      const rowClass = category ? 'audit audit--skip audit--suppressed' : `audit audit--${check.status}`;
+      const rowClass = category ? 'audit audit--skip audit--suppressed' : `audit audit--${escHtml(check.status)}`;
       const label = category ? `N/A by ${escHtml(category)}` : escHtml(statusLabel(check.status));
       const evidence = check.evidence ? escHtml(check.evidence) : '';
       return `        <tr class="${rowClass}">
@@ -414,7 +414,7 @@ function renderEligibleEmbed(tool, scorecard, opts) {
     : '';
   return `<section class="scorecard-embed scorecard-embed--eligible">
   <h2>Embed the badge</h2>
-  <p>This score (${pct}%) clears the <a href="/badge">badge floor</a> (${BADGE_ELIGIBILITY_FLOOR_PCT}%). Copy this into your README:</p>
+  <p>This score (${escHtml(pct)}%) clears the <a href="/badge">badge floor</a> (${BADGE_ELIGIBILITY_FLOOR_PCT}%). Copy this into your README:</p>
   <pre tabindex="0"><code>${escHtml(embedMd)}</code></pre>${preview}
 </section>
 `;
@@ -427,7 +427,7 @@ function renderBelowFloorHint(pct, hasIssues) {
     : ' See the full audit results below for the gaps.';
   return `<section class="scorecard-embed scorecard-embed--below">
   <h2>Embed the badge</h2>
-  <p>The <a href="/badge">badge floor</a> is ${BADGE_ELIGIBILITY_FLOOR_PCT}%; this scorecard is at ${pct}% (${gap} point${gap === 1 ? '' : 's'} below). Once the score clears the floor, the embed snippet will appear here.${issuesPointer}</p>
+  <p>The <a href="/badge">badge floor</a> is ${BADGE_ELIGIBILITY_FLOOR_PCT}%; this scorecard is at ${escHtml(pct)}% (${gap} point${gap === 1 ? '' : 's'} below). Once the score clears the floor, the embed snippet will appear here.${issuesPointer}</p>
 </section>
 `;
 }
@@ -502,11 +502,11 @@ export function buildScorecardBody(tool, scorecard, opts = {}) {
   const cov = scorecard.coverage_summary;
   if (cov?.must)
     chips.push(
-      `<span class="chip ${cov.must.verified === cov.must.total ? 'chip--ok' : 'chip--warn'}">MUST ${cov.must.verified} / ${cov.must.total}</span>`,
+      `<span class="chip ${cov.must.verified === cov.must.total ? 'chip--ok' : 'chip--warn'}">MUST ${escHtml(cov.must.verified)} / ${escHtml(cov.must.total)}</span>`,
     );
   if (cov?.should)
     chips.push(
-      `<span class="chip ${cov.should.verified === cov.should.total ? 'chip--ok' : 'chip--warn'}">SHOULD ${cov.should.verified} / ${cov.should.total}</span>`,
+      `<span class="chip ${cov.should.verified === cov.should.total ? 'chip--ok' : 'chip--warn'}">SHOULD ${escHtml(cov.should.verified)} / ${escHtml(cov.should.total)}</span>`,
     );
   const failCount = results.filter((r) => r.status === 'fail').length;
   const warnCount = results.filter((r) => r.status === 'warn').length;

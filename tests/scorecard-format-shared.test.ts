@@ -215,3 +215,40 @@ describe('buildScorecardBody sends the audited tool the scorecard URL', () => {
     expect(link?.getAttribute('referrerpolicy')).toBe('no-referrer-when-downgrade');
   });
 });
+
+describe('buildScorecardBody escapes every scorecard field it renders', () => {
+  const MARKUP = '"><img src=x onerror=1>';
+  const render = (fields: Record<string, unknown>) =>
+    buildScorecardBody(
+      { name: 'tool', binary: 'tool' },
+      { spec_version: SPEC_VERSION, badge: { score_pct: 10, eligible: false }, results: [], ...fields },
+    );
+  const coverage = (band: 'must' | 'should', count: 'verified' | 'total') => ({
+    coverage_summary: { [band]: { verified: 1, total: 2, [count]: MARKUP } },
+  });
+  const statusRow = { id: 'a', group: 'P1', status: MARKUP, label: 'label', evidence: null };
+
+  test.each([
+    ['badge.score_pct on an eligible card', { badge: { score_pct: MARKUP, eligible: true, embed_markdown: 'md' } }],
+    ['badge.score_pct below the floor', { badge: { score_pct: MARKUP, eligible: false } }],
+    ['results[].status', { results: [statusRow] }],
+    ['coverage_summary.must.verified', coverage('must', 'verified')],
+    ['coverage_summary.must.total', coverage('must', 'total')],
+    ['coverage_summary.should.verified', coverage('should', 'verified')],
+    ['coverage_summary.should.total', coverage('should', 'total')],
+  ])('%s', (_field, fields) => {
+    const html = render(fields);
+    expect(html).not.toContain('<img src=x');
+    expect(html).toContain('&lt;img src=x');
+  });
+
+  test('valid numbers render unchanged', () => {
+    const html = render({
+      badge: { score_pct: 74, eligible: true, embed_markdown: 'md' },
+      coverage_summary: { must: { verified: 3, total: 4 }, should: { verified: 5, total: 5 } },
+    });
+    expect(html).toContain('This score (74%)');
+    expect(html).toContain('MUST 3 / 4');
+    expect(html).toContain('SHOULD 5 / 5');
+  });
+});
