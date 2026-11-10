@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.1794281993-gc008640] - 2026-11-10
+
+### Added
+
+- Add search indexing for a repo's default-branch scorecard page when the tool earns the agent-native badge. by @brettdavies in [#518](https://github.com/brettdavies/agentnative-site/pull/518)
+- Add a link from a CLI scorecard with no repo or homepage to its package's registry page. by @brettdavies in [#534](https://github.com/brettdavies/agentnative-site/pull/534)
+- Add a `sandbox_busy` error to the score API, returned with HTTP 503 and the message "The scoring sandbox is busy. Try again in a minute." when no container can be started. by @brettdavies in [#539](https://github.com/brettdavies/agentnative-site/pull/539)
+
+### Changed
+
+- Change website scorecard pages for on-demand audits to be indexable by search engines when the headline score is 70 or more. by @brettdavies in [#520](https://github.com/brettdavies/agentnative-site/pull/520)
+- Change the live-scoring image to carry an unprivileged audit user and an execute-only auditor. by @brettdavies in [#532](https://github.com/brettdavies/agentnative-site/pull/532)
+- Change live CLI scoring to install and audit each tool as an unprivileged user, with the audit in its own network namespace. by @brettdavies in [#536](https://github.com/brettdavies/agentnative-site/pull/536)
+- Change pasted install commands to accept registry package names only. A URL, git form, or path returns `unparseable_install_command`.
+- Change live CLI audits to run in a new container for each run, keyed to the audit's target. by @brettdavies in [#539](https://github.com/brettdavies/agentnative-site/pull/539)
+
+### Fixed
+
+- Fix the audit progress page loading the WebMCP in-page tool script, which that page must never load. Live CLI results and the no-audit page stop loading it too, and website results load it once instead of twice. by @brettdavies in [#512](https://github.com/brettdavies/agentnative-site/pull/512)
+- Fix JSON-LD on result pages so breadcrumb text stays inside its script element. by @brettdavies in [#514](https://github.com/brettdavies/agentnative-site/pull/514)
+- Fix the markdown twins of not-found and progress pages so a target stays inside its code span.
+- Fix on-demand CLI scorecards staying out of search results when the tool earns the agent-native badge. by @brettdavies in [#517](https://github.com/brettdavies/agentnative-site/pull/517)
+- Fix outbound links from anc.dev to tell the destination site that the visit came from anc.dev. by @brettdavies in [#525](https://github.com/brettdavies/agentnative-site/pull/525)
+- Fix a scorecard's link to the audited site or tool so it tells that site which scorecard the visitor came from. by @brettdavies in [#526](https://github.com/brettdavies/agentnative-site/pull/526)
+- Fix scorecard pages so the badge score, result status, and coverage counts are HTML-escaped like every other scorecard field. by @brettdavies in [#528](https://github.com/brettdavies/agentnative-site/pull/528)
+- Fix live CLI scoring so a run stores only a scorecard that matches anc's published shape. by @brettdavies in [#529](https://github.com/brettdavies/agentnative-site/pull/529)
+- Fix live CLI scoring so a direct install cannot be audited under the auditor's own name. by @brettdavies in [#531](https://github.com/brettdavies/agentnative-site/pull/531)
+- Fix scorecard pages keeping inbound tracking parameters in the address: they now drop any query parameters on load. by @brettdavies in [#535](https://github.com/brettdavies/agentnative-site/pull/535)
+- Fix pages whose text contains a `$` sequence so the text renders as written. by @brettdavies in [#537](https://github.com/brettdavies/agentnative-site/pull/537)
+- Fix pages whose text spells a template token, such as `{{BODY}}`, so the text renders as written and the page's JSON-LD stays valid.
+- Fix the homepage web board and website audit probe paths so a `$` sequence in a site's title or declared MCP endpoint stays as written.
+
+**Full Changelog**: [v0.0.1793762860-g031ec6e...v0.0.1794281993-gc008640](https://github.com/brettdavies/agentnative-site/compare/v0.0.1793762860-g031ec6e...v0.0.1794281993-gc008640)
+
 ## [0.0.1793762860-g031ec6e] - 2026-11-09
 
 ### Added

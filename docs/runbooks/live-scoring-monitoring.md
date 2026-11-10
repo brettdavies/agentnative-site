@@ -203,7 +203,7 @@ easier to tighten later than to recover from a missed incident.
 | Pre-hit rate                        | < 40% with `cache_pre_attempted>0` | < 20% with `cache_pre_attempted>0` | Cache shape candidate (defer action to U10)                    |
 | GitHub 403 rate on outbound         | any                                | sustained > 5 min                  | `wrangler tail`, `api.github.com` Status                       |
 | Sandbox p99 duration                | > 45 s                             | > 60 s                             | Observability `duration` filtered to `tier === 'live'`         |
-| Active sandbox instance count       | -                                  | At configured ceiling for > 5 min  | Containers dashboard (`max_instances: 3` per `wrangler.jsonc`) |
+| Active sandbox instance count       | -                                  | At configured ceiling for > 5 min  | Containers dashboard (`max_instances: 10` per `wrangler.jsonc`) |
 
 Rate-limit + Turnstile alarms presume traffic is non-trivial. Below ~50 requests in the window, treat ratios as noisy
 and rely on absolute counts.
@@ -359,7 +359,7 @@ reference points, not contracts; tune as soak data arrives.
 
 - Wrangler dashboard request count for the last 24 h. Baseline expected: low (this is staging, gated by CF Access). A
   jump means traffic shape changed or a test harness ran loose.
-- Active sandbox container instance count. Ceiling is `max_instances: 3` per `wrangler.jsonc`. Sustained at-ceiling
+- Active sandbox container instance count. Ceiling is `max_instances: 10` per `wrangler.jsonc`. Sustained at-ceiling
   means traffic is exceeding the container budget; the kill-switch flip is the safety valve.
 - R2 storage size for `anc-score-cache-staging` `scores/` prefix. Should plateau because of the 7-day lifecycle. Steady
   growth means lifecycle is broken; see the R2 cache failure entry above.
