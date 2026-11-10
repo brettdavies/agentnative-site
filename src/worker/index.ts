@@ -841,17 +841,21 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
       runWithMcpEnv(env as McpEnv, () => handler.fetch(sdkRequest, { parsedBody })),
     );
     // Legacy transport SSE→JSON when the client negotiated JSON (see
-    // coerce-json-response.ts). Modern responseMode:'json' already returns
-    // application/json; this is a no-op on that path.
-    const response = await coerceMcpJsonResponse(rawResponse, format);
+    // coerce-json-response.ts). The modern lane answers JSON under
+    // responseMode:'json' except for subscriptions/listen, an event stream
+    // that stays open, so coercing it would wait forever.
+    const response = legacyEra ? await coerceMcpJsonResponse(rawResponse, format) : rawResponse;
     const headers = new Headers(response.headers);
     stripCorsHeaders(headers);
     headers.set('cache-control', 'no-store');
 
     // Read the error code before the body is handed to the outgoing
     // Response: extractTransportErrorCode clones, and a cloned body cannot
-    // be taken after another Response has adopted it.
-    const errorCode = await extractTransportErrorCode(response);
+    // be taken after another Response has adopted it. The read waits for the
+    // body to end, which a modern event stream (subscriptions/listen) never
+    // does. A legacy stream ends with its result, so its line times the call.
+    const openStream = !legacyEra && servedResponseFormat(response) === 'sse';
+    const errorCode = openStream ? null : await extractTransportErrorCode(response);
     let outcome: McpRequestOutcome = errorCode != null ? 'error' : 'ok';
     if (outcome === 'ok' && !response.ok) outcome = 'error';
 

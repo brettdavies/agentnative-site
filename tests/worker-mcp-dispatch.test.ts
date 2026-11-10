@@ -20,6 +20,8 @@ import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 import { withLogCapture } from './helpers/log-capture';
 import {
   legacyToolsListBatchBody,
+  MODERN_META,
+  MODERN_PROTOCOL,
   modernElementBatchBody,
   modernResourcesReadBody,
   modernResourcesReadHeaders,
@@ -704,6 +706,91 @@ describe('POST /mcp — response_format records the served format', () => {
     expect(lines.length).toBe(1);
     expect((lines[0] as { outcome?: string }).outcome).toBe('rate_limited');
     expect(formatOf(lines)).toBe('json');
+  });
+});
+
+describe('POST /mcp — subscriptions/listen', () => {
+  const LISTEN_HEADERS = { 'MCP-Protocol-Version': MODERN_PROTOCOL, 'Mcp-Method': 'subscriptions/listen' };
+
+  function listenBody(params: object) {
+    return { jsonrpc: '2.0', id: 'listen:1', method: 'subscriptions/listen', params: { ...params, ...MODERN_META } };
+  }
+
+  // The stream stays open, so a dispatch that reads it to the end never
+  // settles. The race turns that hang into a failure with a readable message.
+  function settlesPromptly<T>(pending: Promise<T>): Promise<T> {
+    return Promise.race([
+      pending,
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('POST /mcp did not answer within 2 s')), 2_000);
+      }),
+    ]);
+  }
+
+  for (const accept of ['application/json, text/event-stream', 'text/event-stream']) {
+    test(`Accept: ${accept} gets the open stream and its acknowledgement`, async () => {
+      const env = makeEnv();
+      const { result: res, lines } = await captureMcpRequestLogs(() =>
+        settlesPromptly(
+          postMcpHeaders(env, listenBody({ notifications: { toolsListChanged: true } }), {
+            ...LISTEN_HEADERS,
+            accept,
+          }),
+        ),
+      );
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type') ?? '').toContain('text/event-stream');
+      expect(res.headers.get('cache-control') ?? '').toContain('no-store');
+      expect(res.headers.get('access-control-allow-origin')).toBeNull();
+
+      const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+      try {
+        const { value } = await settlesPromptly(reader.read());
+        expect(new TextDecoder().decode(value)).toContain('notifications/subscriptions/acknowledged');
+      } finally {
+        await reader.cancel();
+      }
+
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatchObject({
+        method: 'subscriptions/listen',
+        response_format: 'sse',
+        outcome: 'ok',
+        error_code: null,
+      });
+    });
+  }
+
+  test('a legacy call that streams is logged with the duration of the whole call', async () => {
+    const env = makeEnv();
+    const assets = env.ASSETS;
+    env.ASSETS = {
+      async fetch(req: Request) {
+        if (new URL(req.url).pathname !== '/_internal/mcp-catalog.json') {
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+        return assets.fetch(req);
+      },
+    } as unknown as Fetcher;
+    const { result: res, lines } = await captureMcpRequestLogs(() =>
+      postMcp(env, 'text/event-stream', {
+        jsonrpc: '2.0',
+        id: 4,
+        method: 'tools/call',
+        params: { name: 'get_scorecard', arguments: { slug: 'curl' } },
+      }),
+    );
+    expect(res.headers.get('content-type') ?? '').toContain('text/event-stream');
+    expect(lines[0]).toMatchObject({ era: 'legacy', response_format: 'sse', outcome: 'ok', ms_bucket: '200-1000' });
+  });
+
+  test('a refused listen answers JSON and logs its error code', async () => {
+    const env = makeEnv();
+    const { result: res, lines } = await captureMcpRequestLogs(() =>
+      postMcpHeaders(env, listenBody({}), { ...LISTEN_HEADERS, accept: 'application/json, text/event-stream' }),
+    );
+    expect(res.headers.get('content-type') ?? '').toContain('application/json');
+    expect(lines[0]).toMatchObject({ outcome: 'error', error_code: -32602, response_format: 'json' });
   });
 });
 
