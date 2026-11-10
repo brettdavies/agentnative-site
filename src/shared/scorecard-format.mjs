@@ -432,6 +432,45 @@ function renderBelowFloorHint(pct, hasIssues) {
 `;
 }
 
+const NPM_NAME = /^(?:@[A-Za-z0-9][A-Za-z0-9._~-]*\/)?[A-Za-z0-9][A-Za-z0-9._~-]*$/;
+const PYPI_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
+const GO_MODULE = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+(?:\/[A-Za-z0-9][A-Za-z0-9._~+-]*)+$/;
+
+// Per package manager: the shape of a bare package name and its public page.
+// A name that carries a version pin, extras, a flag, or a tap prefix fails
+// the shape, so the page links nothing rather than a guess.
+const PACKAGE_PAGES = {
+  'cargo-binstall': { name: /^[A-Za-z][A-Za-z0-9_-]*$/, url: (n) => `https://crates.io/crates/${n}` },
+  npm: { name: NPM_NAME, url: (n) => `https://www.npmjs.com/package/${n}` },
+  bun: { name: NPM_NAME, url: (n) => `https://www.npmjs.com/package/${n}` },
+  pip: { name: PYPI_NAME, url: (n) => `https://pypi.org/project/${n}/` },
+  uv: { name: PYPI_NAME, url: (n) => `https://pypi.org/project/${n}/` },
+  brew: { name: /^[a-z0-9][a-z0-9._+@-]*$/, url: (n) => `https://formulae.brew.sh/formula/${n}` },
+  go: { name: GO_MODULE, url: (n) => `https://pkg.go.dev/${n}` },
+};
+
+// `@` stays literal: it is a legal path character and the canonical npm and
+// Homebrew URLs carry it.
+const pathOf = (name) =>
+  name
+    .split('/')
+    .map((seg) => encodeURIComponent(seg).replaceAll('%40', '@'))
+    .join('/');
+
+/**
+ * The public registry page of the package a CLI was installed from, or null
+ * when the identity is not a bare package name on a supported manager.
+ *
+ * @param {{ pm?: unknown, package?: unknown } | null | undefined} install
+ * @returns {string | null}
+ */
+export function packagePageUrl(install) {
+  if (typeof install?.pm !== 'string' || typeof install.package !== 'string') return null;
+  if (!Object.hasOwn(PACKAGE_PAGES, install.pm)) return null;
+  const page = PACKAGE_PAGES[install.pm];
+  return page.name.test(install.package) ? page.url(pathOf(install.package)) : null;
+}
+
 /**
  * Build the per-tool scorecard page body HTML. One renderer for both a
  * curated page (build-time, registry-joined `tool`) and a live page
@@ -448,6 +487,7 @@ function renderBelowFloorHint(pct, hasIssues) {
  *   install?: string,
  *   repo?: string,
  *   url?: string,
+ *   packageRef?: { pm: string, package: string },
  * }} tool
  * @param {object} scorecard — schema 0.5/0.6/0.7 parsed JSON
  * @param {{
@@ -483,10 +523,10 @@ export function buildScorecardBody(tool, scorecard, opts = {}) {
   const spine = opts.spine ?? curatedSpine(tool, meta, !opts.hideBreadcrumb);
   let html = renderResultSpine(spine);
 
-  // The brief: description, tier badge, language tag, and repo/url link
-  // are emitted only when present on the `tool` object, so the live path
-  // (no registry editorial fields) stays clean without branches in the
-  // caller.
+  // The brief: description, tier badge, language tag, and the repo, homepage,
+  // or package-page link (first one present) are emitted only when present on
+  // the `tool` object, so the live path (no registry editorial fields) stays
+  // clean without branches in the caller.
   const metaParts = [];
   if (tool.tier)
     metaParts.push(`<span class="tier-badge tier-badge--${escHtml(tool.tier)}">${escHtml(tool.tier)}</span>`);
@@ -496,6 +536,10 @@ export function buildScorecardBody(tool, scorecard, opts = {}) {
     metaParts.push(
       `<a href="${escHtml(tool.url)}" referrerpolicy="no-referrer-when-downgrade">${escHtml(tool.url)}</a>`,
     );
+  else {
+    const pageUrl = packagePageUrl(tool.packageRef);
+    if (pageUrl) metaParts.push(`<a href="${escHtml(pageUrl)}">${escHtml(pageUrl)}</a>`);
+  }
 
   // Summary chips: MUST/SHOULD coverage, non-pass counts, audit stamp.
   const chips = [];
@@ -724,6 +768,9 @@ export function buildScorecardMarkdown(tool, scorecard, opts = {}) {
     lines.push(`**Repo:** [${tool.repo}](https://github.com/${tool.repo})`);
   } else if (tool.url) {
     lines.push(`**Source:** [${tool.url}](${tool.url})`);
+  } else {
+    const pageUrl = packagePageUrl(tool.packageRef);
+    if (pageUrl) lines.push(`**Package:** [${pageUrl}](${pageUrl})`);
   }
   if (tool.language) lines.push(`**Language:** ${tool.language}`);
   if (!opts.hideVersionRow) lines.push(`**Version scored:** ${version || '—'}`);

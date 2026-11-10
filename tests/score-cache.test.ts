@@ -256,6 +256,22 @@ describe('cache records per family', () => {
     });
   });
 
+  test('put keeps the install identity it is given, and get returns it', async () => {
+    const { env, store } = memoryEnv();
+    const key = keyFor('ouch', SPEC_VERSION);
+    const install = { pm: 'cargo-binstall', package: 'ouch' };
+    await put(env, key, { tool: { name: 'ouch' } }, '0.9.0', '0.5.0', SPEC_VERSION, undefined, undefined, install);
+    expect(JSON.parse(store.get(key) ?? '{}').install).toEqual(install);
+    expect((await get(env, key))?.install).toEqual(install);
+  });
+
+  test('put without an install identity writes no install key', async () => {
+    const { env, store } = memoryEnv();
+    const key = keyFor('ouch', SPEC_VERSION);
+    await put(env, key, {}, '0.9.0', '0.5.0', SPEC_VERSION);
+    expect(Object.keys(JSON.parse(store.get(key) ?? '{}'))).not.toContain('install');
+  });
+
   test('put refuses a record with neither a tool version nor a source sha', async () => {
     const { env } = memoryEnv();
     await expect(put(env, BRANCH_KEY, {}, '0.9.0', '', SPEC_VERSION)).rejects.toThrow(/toolVersion or sourceSha/);
