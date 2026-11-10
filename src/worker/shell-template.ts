@@ -18,6 +18,12 @@ import { CANONICAL_SITE_URL } from '../shared/site-url';
 const BREADCRUMB_JSONLD_SLOT = `,"${BREADCRUMB_JSONLD_TOKEN}"`;
 const SHELL_TOKEN = new RegExp(`${BREADCRUMB_JSONLD_SLOT.replace(/[{}]/g, '\\$&')}|\\{\\{[A-Z_]+\\}\\}`, 'g');
 
+// The HTML tokenizer ends a script element at `</script` whatever the JSON around
+// it says, and `\u003c` reads back as `<`.
+function jsonForScript(value: object): string {
+  return JSON.stringify(value).replaceAll('<', '\\u003c');
+}
+
 let shellTemplatePromise: Promise<string> | null = null;
 
 export async function loadShellTemplate(env: { ASSETS: Fetcher }): Promise<string> {
@@ -75,7 +81,7 @@ export function substituteShell(template: string, fields: ShellFields): string {
     '{{BREADCRUMB_NAV}}': renderBreadcrumbNav(trail),
     // Removing the quoted token and its comma together leaves the graph
     // well-formed when a path has no trail to state.
-    [BREADCRUMB_JSONLD_SLOT]: crumbNode ? `,${JSON.stringify(crumbNode)}` : '',
+    [BREADCRUMB_JSONLD_SLOT]: crumbNode ? `,${jsonForScript(crumbNode)}` : '',
     '{{TITLE}}': escHtml(fields.title),
     '{{DESCRIPTION}}': escHtml(fields.description),
     '{{CANONICAL_PATH}}': escHtml(fields.canonicalPath),
