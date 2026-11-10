@@ -33,6 +33,51 @@ import { validBranchName } from './validate';
 // Lives under /tmp so it's wiped by the container's tmpfs semantics.
 const CLONE_DEST = '/tmp/anc-clone-target';
 
+// Every install and audit runs as the image's anc-audit user. The wrapper
+// inherits the session environment and overrides only these variables, and
+// sets the working directory because the SDK session starts in /root.
+const AUDIT_UID = 1000;
+const AUDIT_HOME = '/home/anc-audit';
+const AUDIT_BIN = `${AUDIT_HOME}/.local/bin`;
+const AUDITOR = '/usr/local/bin/anc';
+const EMPTY_REPO = '/opt/anc-empty';
+const ROOT_OWNED_PATH =
+  '/usr/local/bin:/usr/local/cargo/bin:/usr/local/go/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin';
+const AUDIT_PATH = `${AUDIT_BIN}:${ROOT_OWNED_PATH}`;
+const DROP_TO_AUDIT_USER = `setpriv --reuid=${AUDIT_UID} --regid=${AUDIT_UID} --clear-groups --no-new-privs --bounding-set=-all --inh-caps=-all`;
+const INSTALL_PREFIX_ENV = [
+  `BUN_INSTALL=${AUDIT_HOME}/.local`,
+  `UV_TOOL_BIN_DIR=${AUDIT_BIN}`,
+  `UV_TOOL_DIR=${AUDIT_HOME}/.local/share/uv/tools`,
+  `npm_config_prefix=${AUDIT_HOME}/.local`,
+  'npm_config_ignore_scripts=true',
+  'PIP_USER=1',
+].join(' ');
+// Without these, anc reads an .anc.toml from the audited package's own files.
+const COMMAND_AUDIT_CONFIG_ENV = `AGENTNATIVE_REPO=${EMPTY_REPO} AGENTNATIVE_HOME_CONFIG=/dev/null`;
+const AUDITOR_NOT_WRITABLE_CHECK = `${DROP_TO_AUDIT_USER} /usr/bin/test ! -w ${AUDITOR} -a ! -w /usr/local/bin`;
+
+function asAuditUser(path: string): string {
+  return `${DROP_TO_AUDIT_USER} env -C ${AUDIT_HOME} HOME=${AUDIT_HOME} PATH=${path}`;
+}
+
+// The install PATH holds root-owned directories only, so a package's own
+// `bash` or tool of the same name cannot run in place of the real one.
+function installCommand(command: string): string {
+  return `${asAuditUser(ROOT_OWNED_PATH)} ${INSTALL_PREFIX_ENV} /bin/bash -c ${shellQuote(command)}`;
+}
+
+// `env` resolves the program it starts on the PATH it was just given, so the
+// program is named absolutely whenever the audit user's directory is on it.
+function whichCommand(binary: string): string {
+  return `${asAuditUser(AUDIT_PATH)} /usr/bin/which ${shellQuote(binary)}`;
+}
+
+function auditorCommand(ancCommand: string, configEnv = ''): string {
+  const env = configEnv ? `${asAuditUser(AUDIT_PATH)} ${configEnv}` : asAuditUser(AUDIT_PATH);
+  return `unshare --net -- ${env} ${AUDITOR}${ancCommand.slice('anc'.length)}`;
+}
+
 // ---------------------------------------------------------------------------
 // Result + error types
 // ---------------------------------------------------------------------------
@@ -204,9 +249,14 @@ async function runScore(
     allowedHostnames: [...hosts],
   });
 
+  const writeCheck = await sandbox.exec(AUDITOR_NOT_WRITABLE_CHECK, { timeout: SHORT_EXEC_TIMEOUT_MS });
+  if (!writeCheck.success) {
+    throw new Error('audit user can write the auditor');
+  }
+
   phase('installing');
   const installStart = Date.now();
-  const installResult = await sandbox.exec(installCmd, { timeout: TOTAL_TIMEOUT_MS });
+  const installResult = await sandbox.exec(installCommand(installCmd), { timeout: TOTAL_TIMEOUT_MS });
   const installMs = Date.now() - installStart;
   if (!installResult.success) {
     // Gate-capture (Fix 3): direct-install commands emit `GATE:<step>` markers
@@ -264,8 +314,7 @@ async function runScore(
     // Verify the install produced a runnable binary on PATH. Catches the
     // pallets/click case (wheel installs cleanly, no console_scripts entry).
     phase('verifying');
-    const whichCmd = `which ${shellQuote(binary)}`;
-    const whichResult = await sandbox.exec(whichCmd, { timeout: SHORT_EXEC_TIMEOUT_MS });
+    const whichResult = await sandbox.exec(whichCommand(binary), { timeout: SHORT_EXEC_TIMEOUT_MS });
     if (!whichResult.success || !whichResult.stdout.trim()) {
       return { ok: false, error: 'chain_resolved_no_binary_produced', details: `binary=${binary}` };
     }
@@ -280,9 +329,9 @@ async function runScore(
   // Capture anc_version live from the running binary, never a build-time
   // constant — a cached scorecard must record the anc that actually
   // produced it so re-deployed sites don't lie about provenance.
-  const versionResult = await sandbox.exec('anc --version', { timeout: SHORT_EXEC_TIMEOUT_MS });
+  const versionResult = await sandbox.exec(auditorCommand('anc --version'), { timeout: SHORT_EXEC_TIMEOUT_MS });
   if (!versionResult.success) {
-    return { ok: false, error: 'anc_version_unreadable' };
+    return { ok: false, error: 'anc_version_unreadable', details: truncate(versionResult.stderr, 120) };
   }
   const ancVersion = parseAncVersion(versionResult.stdout);
   if (!ancVersion) {
@@ -310,7 +359,9 @@ async function runScore(
       : `anc audit --command ${shellQuote(binary)} --output json`;
   phase('auditing');
   const ancAuditStart = Date.now();
-  const auditResult = await sandbox.exec(ancAuditCmd, { timeout: TOTAL_TIMEOUT_MS });
+  const auditResult = await sandbox.exec(auditorCommand(ancAuditCmd, isSourceScoped ? '' : COMMAND_AUDIT_CONFIG_ENV), {
+    timeout: TOTAL_TIMEOUT_MS,
+  });
   const ancAuditMs = Date.now() - ancAuditStart;
 
   // anc emits a structured envelope on stdout even on non-zero exit when
@@ -377,21 +428,20 @@ function installCommandFor(spec: InstallSpec): string | null {
       // $HOME/.local/bin, covered by Dockerfile PATH). uv's resolver
       // sidesteps the pip 24+ PEP 658 metadata fast-path that 403s
       // through CF fetch passthrough for some packages (Bug M).
-      return `uv tool install ${shellQuote(spec.package)}`;
+      return `uv tool install --no-build ${shellQuote(spec.package)}`;
     case 'cargo-binstall':
-      // Standalone `cargo-binstall` binary lives at /usr/local/bin/
-      // (Dockerfile lines 73-80). The image ships NO rust toolchain per
+      // The image ships NO rust toolchain per
       // Premise #2 ("no compilers, no toolchains"), so the `cargo` CLI
       // does not exist — calling `cargo binstall <pkg>` would fail with
       // `cargo: command not found`. The binstall README documents the
       // standalone use case.
       //
-      // --install-path /usr/local/bin overrides cargo-binstall's default
+      // --install-path overrides cargo-binstall's default
       // of $CARGO_HOME/bin (= ~/.cargo/bin), which isn't on our PATH.
       // Without it, the binary installs successfully but the post-install
       // `which <binary>` gate misses and the request bounces as
       // chain_resolved_no_binary_produced.
-      return `cargo-binstall --no-confirm --no-symlinks --install-path /usr/local/bin ${shellQuote(spec.package)}`;
+      return `cargo-binstall --no-confirm --no-symlinks --install-path ${AUDIT_BIN} ${shellQuote(spec.package)}`;
     case 'pip':
       // --only-binary=:all: refuses sdist execution (the setup.py
       // arbitrary-code-exec class). --no-cache-dir keeps the container
@@ -441,8 +491,13 @@ function installCommandFor(spec: InstallSpec): string | null {
     case 'npm':
       // --ignore-scripts suppresses preinstall/install/postinstall
       // lifecycle hooks — keeps Phase 1 egress from being abused by
-      // lifecycle scripts before the Phase 2 lockdown fires.
-      return `npm install -g --ignore-scripts ${shellQuote(spec.package)}`;
+      // lifecycle scripts before the Phase 2 lockdown fires. For a git
+      // dependency, the image's npm (11 or later) is what skips `prepare`
+      // under this setting, and npm_config_ignore_scripts states it for the
+      // inner npm such a dependency starts. A full-commit dependency on a
+      // hosted repository arrives as a tarball; --git=/bin/false fails the
+      // rest.
+      return `npm install -g --ignore-scripts --git=/bin/false ${shellQuote(spec.package)}`;
     case 'go':
       // pm=go bounces here so resolveSpec()'s go discovery-fallback
       // (resolve-spec.ts:resolveGoFallback) translates `go install <module>`
@@ -467,7 +522,7 @@ function installCommandFor(spec: InstallSpec): string | null {
       // install_unsupported with pm=git-clone.
       return buildGitCloneCommand(spec);
     case 'direct':
-      // Archive download + extract to /usr/local/bin. The user-pasted
+      // Archive download + extract to the audit user's bin directory. The user-pasted
       // URL is the trust boundary; SHA verification is not done at
       // this layer (no known-good SHA available for arbitrary user
       // input). -L follows redirects so github.com release URLs that
@@ -501,8 +556,8 @@ function installCommandFor(spec: InstallSpec): string | null {
 // shapes are individually testable and the test file pins each form.
 //
 // All formats extract into a per-invocation tmp dir, then `find` an
-// executable and `install` it to /usr/local/bin. The earlier streaming
-// `tar -C /usr/local/bin/` shape failed for archives whose binary was
+// executable and `install` it to the audit user's bin directory. A streaming
+// `tar -C <bin>/` fails for archives whose binary is
 // nested inside a top-level directory (csvlens ships
 // `csvlens-x86_64-unknown-linux-musl/csvlens`); the recursive find+install
 // shape handles both flat and nested layouts.
@@ -603,7 +658,7 @@ function directInstallCommand(url: string, preferredBinary: string): string {
     `exit 11; ` +
     `fi; ` +
     `echo '${GATE_PREFIX}install_binary' >&2; ` +
-    `install -m 0755 "$tmp/x/$best" "/usr/local/bin/$detected" 2>"$tmp/inst_err" || ` +
+    `install -m 0755 "$tmp/x/$best" "${AUDIT_BIN}/$detected" 2>"$tmp/inst_err" || ` +
     `{ echo "${DETAILS_PREFIX}Install staging failed: $(cat "$tmp/inst_err" | head -c 200)" >&2; exit 13; }; ` +
     `rm -rf "$tmp"; ` +
     `echo "${DETECTED_BINARY_PREFIX}$detected" )`
@@ -679,8 +734,8 @@ function timeoutAfter(ms: number): Promise<ScoreFailure> {
 }
 
 // Parse the DETECTED_BINARY=<name> line emitted by directInstallCommand.
-// Returns the basename of the file the install path actually staged at
-// /usr/local/bin, or null if the marker is absent (any non-direct PM
+// Returns the basename of the file the install path actually staged in
+// the audit user's bin directory, or null if the marker is absent (any non-direct PM
 // install command, or a future direct-install variant that doesn't
 // emit the marker). The name is filename-character-restricted before
 // it lands back in spec.binary, since downstream it shell-quotes the

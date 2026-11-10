@@ -26,6 +26,7 @@ import { handlers, Sandbox } from '../src/worker/score/do';
 import { type ContainerLike, type ExecLike, score } from '../src/worker/score/sandbox-exec';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 import { captureLogs, type LogCapture } from './helpers/log-capture';
+import { plainCommand } from './helpers/sandbox-command';
 import { validScorecard } from './helpers/scorecard-fixture';
 
 // ---------------------------------------------------------------------------
@@ -45,8 +46,9 @@ function makeStub(responder: ExecResponder = defaultResponder): { stub: Containe
       calls.push({ kind: 'setOutboundHandler', name, params });
     },
     async exec(command: string, options?: { timeout?: number }): Promise<ExecLike> {
-      calls.push({ kind: 'exec', command, timeout: options?.timeout });
-      return responder(command);
+      const plain = plainCommand(command);
+      calls.push({ kind: 'exec', command: plain, timeout: options?.timeout });
+      return responder(plain);
     },
   };
   return { stub, calls };
@@ -387,7 +389,7 @@ describe('sandbox-exec.score() — install table per PM', () => {
       `exit 11; ` +
       `fi; ` +
       `echo 'GATE:install_binary' >&2; ` +
-      `install -m 0755 "$tmp/x/$best" "/usr/local/bin/$detected" 2>"$tmp/inst_err" || ` +
+      `install -m 0755 "$tmp/x/$best" "/home/anc-audit/.local/bin/$detected" 2>"$tmp/inst_err" || ` +
       `{ echo "DETAILS:Install staging failed: $(cat "$tmp/inst_err" | head -c 200)" >&2; exit 13; }; ` +
       `rm -rf "$tmp"; ` +
       `echo "DETECTED_BINARY=$detected" )`
@@ -397,8 +399,8 @@ describe('sandbox-exec.score() — install table per PM', () => {
   const cases: Array<{ spec: InstallSpec; expected: string }> = [
     {
       spec: { pm: 'cargo-binstall', package: 'ripgrep', binary: 'rg' },
-      // --install-path /usr/local/bin forces binary onto PATH (Bug L).
-      expected: "cargo-binstall --no-confirm --no-symlinks --install-path /usr/local/bin 'ripgrep'",
+      // --install-path forces binary onto PATH (Bug L).
+      expected: "cargo-binstall --no-confirm --no-symlinks --install-path /home/anc-audit/.local/bin 'ripgrep'",
     },
     {
       spec: { pm: 'pip', package: 'black', binary: 'black' },
@@ -430,7 +432,7 @@ describe('sandbox-exec.score() — install table per PM', () => {
       spec: { pm: 'uv', package: 'black', binary: 'black' },
       // Native uv path (split from pm=pip). uv's resolver sidesteps
       // pip 24+'s PEP 658 metadata fast-path (Bug M).
-      expected: "uv tool install 'black'",
+      expected: "uv tool install --no-build 'black'",
     },
     {
       spec: { pm: 'bun', package: 'prettier', binary: 'prettier' },
@@ -440,7 +442,7 @@ describe('sandbox-exec.score() — install table per PM', () => {
     },
     {
       spec: { pm: 'npm', package: 'typescript', binary: 'tsc' },
-      expected: "npm install -g --ignore-scripts 'typescript'",
+      expected: "npm install -g --ignore-scripts --git=/bin/false 'typescript'",
     },
     {
       spec: { pm: 'direct', url: 'https://example.com/foo.tar.gz', binary: 'foo' },
@@ -518,6 +520,7 @@ describe('sandbox-exec.score() — install table per PM', () => {
       const installCmds = calls.filter(
         (c) =>
           c.kind === 'exec' &&
+          !c.command.includes('/usr/bin/test ') &&
           !c.command.startsWith('which ') &&
           c.command !== 'anc --version' &&
           !c.command.startsWith('anc audit '),
@@ -1210,6 +1213,7 @@ describe('sandbox-exec.score() — phase callback', () => {
     });
     await score(stub, CARGO_SPEC, { onPhase: (phase) => events.push(`phase:${phase}`) });
     expect(events).toEqual([
+      'exec:setpriv --reuid=1000',
       'phase:installing',
       'exec:cargo-binstall --no-confirm',
       'phase:installed',
@@ -1229,7 +1233,7 @@ describe('sandbox-exec.score() — phase callback', () => {
         events.push(`swap:${name}`);
       },
       async exec(command: string): Promise<ExecLike> {
-        return defaultResponder(command);
+        return defaultResponder(plainCommand(command));
       },
     };
     await score(stub, CARGO_SPEC, { onPhase: (phase) => events.push(`phase:${phase}`) });

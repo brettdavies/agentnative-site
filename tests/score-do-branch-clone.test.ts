@@ -29,6 +29,7 @@ import {
   score,
 } from '../src/worker/score/sandbox-exec';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { plainCommand } from './helpers/sandbox-command';
 import { validScorecard } from './helpers/scorecard-fixture';
 
 // ---------------------------------------------------------------------------
@@ -65,7 +66,8 @@ function makeStub(responder: ExecResponder = defaultResponder): { stub: Containe
     async setOutboundHandler<P = unknown>(name: string, params?: P): Promise<void> {
       calls.push({ kind: 'setOutboundHandler', name, params });
     },
-    async exec(command: string, options?: { timeout?: number }): Promise<ExecLike> {
+    async exec(wrapped: string, options?: { timeout?: number }): Promise<ExecLike> {
+      const command = plainCommand(wrapped);
       calls.push({ kind: 'exec', command, timeout: options?.timeout });
       return responder(command);
     },
