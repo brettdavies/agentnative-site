@@ -495,6 +495,9 @@ resolve unequal preferences. Absent or `*/*` Accept → JSON. Only a request tha
 | `application/json;q=0.5, text/event-stream;q=0.9` | `text/event-stream` (higher q-value wins) |
 | any value with neither type acceptable            | `406 Not Acceptable` (plain text)         |
 
+`subscriptions/listen` is the exception: it always answers `text/event-stream`, whatever the `Accept` value, with a
+stream that stays open and carries keep-alives until the client closes it. The table applies to every other method.
+
 **Discovery siblings.**
 
 - `https://anc.dev/mcp/server-card`: the MCP server card (SEP-2127), described under [Server cards](#server-cards).
