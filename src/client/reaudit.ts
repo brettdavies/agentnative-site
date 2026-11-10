@@ -21,7 +21,7 @@
 // result.
 //
 // The progress page forwards here with ?v=<scored_at> to step past a stale
-// edge copy; the query is dropped on load so the address bar matches the
+// edge copy; dropScoreQuery clears it on load so the address bar matches the
 // canonical URL and the twin links.
 
 import type { Lane } from '../shared/audit-routes';
@@ -109,14 +109,7 @@ export function bindReaudit(control: ReauditControl, deps: ReauditDeps = product
   });
 }
 
-/** Replace a ?v=<scored_at> forwarding URL with the bare path the page canonicalizes to. */
-export function dropVersionQuery(): void {
-  if (!new URLSearchParams(location.search).has('v')) return;
-  history.replaceState(null, '', location.pathname);
-}
-
 export function initReaudit(): void {
-  dropVersionQuery();
   for (const control of document.querySelectorAll<HTMLButtonElement>('[data-reaudit]')) bindReaudit(control);
 }
 

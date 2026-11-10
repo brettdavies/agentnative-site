@@ -574,6 +574,18 @@ test.describe('scorecard remediation copy-prompt', () => {
   });
 });
 
+test.describe('scorecard address', () => {
+  test('inbound tracking parameters leave the address and the fragment stays', async ({ page }) => {
+    await page.goto('/score/ripgrep?utm_source=x&fbclid=y#some-anchor');
+    await expect(page).toHaveURL(/\/score\/ripgrep#some-anchor$/);
+  });
+
+  test('a page that reads its query keeps it', async ({ page }) => {
+    await page.goto('/scorecards?lane=web');
+    await expect(page).toHaveURL(/\/scorecards\?lane=web$/);
+  });
+});
+
 test.describe('footer AI-provider icons', () => {
   // Regression guard for #016: iOS Safari paints inline <svg> with viewBox
   // but no width/height as 0×0. Anchor stays tappable, glyph disappears.
