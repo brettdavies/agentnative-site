@@ -8,7 +8,7 @@
 //
 // Mocks mirror the binding shape per the cloudflare-workers-do-mock-
 // must-mirror-binding-shape solutions doc: SCORE.idFromName → get →
-// {fetch} chain so getRandom resolves the same way it would in workerd.
+// {fetch} chain so the dispatch resolves the same way it would in workerd.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { AuditEvent } from '../src/shared/audit-events';
@@ -85,6 +85,7 @@ interface DoFetchSpy {
   calls: Array<{ url: string; body: string }>;
   response: Response;
   idFromNameCalls: number;
+  idFromNameArgs: string[];
 }
 
 interface CacheStub {
@@ -128,6 +129,7 @@ function makeEnv(opts: MakeEnvOpts = {}): {
         { status: 200, headers: { 'content-type': 'application/json' } },
       ),
     idFromNameCalls: 0,
+    idFromNameArgs: [],
   };
 
   const cacheStore = new Map<string, string>();
@@ -141,8 +143,9 @@ function makeEnv(opts: MakeEnvOpts = {}): {
   const scoreBinding =
     opts.scoreBinding !== false
       ? ({
-          idFromName(_name: string) {
+          idFromName(name: string) {
             doSpy.idFromNameCalls += 1;
+            doSpy.idFromNameArgs.push(name);
             return { name: 'stub' };
           },
           get(_id: unknown) {
@@ -600,11 +603,11 @@ describe('score_cli: happy path fresh audit', () => {
     expect(body.source_sha).toBe('e'.repeat(40));
   });
 
-  test('DO dispatch uses getRandom pool pattern (idFromName called once per request)', async () => {
+  test('a fresh audit dispatches to the Durable Object named for its target', async () => {
     const audit: RateStub = { calls: 0, shouldSucceed: true };
     const { env, doSpy } = makeEnv({ auditLimiter: audit });
     await callScoreCli(env, { install: 'npm install -g pooltest' }, '198.51.100.10');
-    expect(doSpy.idFromNameCalls).toBe(1);
+    expect(doSpy.idFromNameArgs).toEqual(['pooltest']);
   });
 
   test('DO body carries spec + sha256 of raw input as hash', async () => {

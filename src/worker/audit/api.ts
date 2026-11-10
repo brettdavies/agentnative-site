@@ -981,6 +981,7 @@ function statusForCode(code: string): number {
     case 'scoring_disabled':
     case 'web_audit_disabled':
     case 'sandbox_unavailable':
+    case 'sandbox_busy':
       return 503;
     case 'chain_no_resolve':
     case 'github_repo_not_accessible':

@@ -45,6 +45,7 @@ const ALL_ERRORS: readonly ScoreError[] = [
   { code: 'scoring_disabled', cta_text: '...' },
   { code: 'sandbox_stub_until_u6', cta_text: '...' },
   { code: 'sandbox_unavailable', cta_text: '...' },
+  { code: 'sandbox_busy', cta_text: '...' },
   { code: 'incomplete_response_contract', details: 'no anc', cta_text: '...' },
   { code: 'service_misconfigured', details: 'missing secret', cta_text: '...' },
 ];

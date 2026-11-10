@@ -22,11 +22,11 @@ import { ATTACH_PATH, type AuditJob, JOB_GRACE_MS } from './job';
 /**
  * The relay's deadline over the Durable Object read, the TTL of the
  * in-flight flags, and the job's running deadline. It sits above the
- * sandbox's own 60 s install-plus-audit budget (`TOTAL_TIMEOUT_MS` in
- * sandbox-exec.ts) so the sandbox answers first and the slack covers the
- * container's cold start, the R2 write, and the purge.
+ * container start, the sandbox's own 60 s install-plus-audit budget
+ * (`TOTAL_TIMEOUT_MS` in sandbox-exec.ts), the R2 write, and the purge, so
+ * the sandbox answers first.
  */
-export const RELAY_DEADLINE_SECONDS = 90;
+export const RELAY_DEADLINE_SECONDS = 120;
 
 export type InFlight = { started_at: string; job: string | null };
 

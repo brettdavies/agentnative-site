@@ -128,7 +128,9 @@ export type ScoreErrorCode =
   | 'anc_version_unreadable' // anc --version returned no parseable version.
   | 'anc_audit_failed' // no parseable JSON envelope, or one that is not a scorecard.
   // Wall-clock.
-  | 'timeout';
+  | 'timeout'
+  // No container instance could be started for the run.
+  | 'sandbox_busy';
 
 // Marker tokens the direct-install command emits so the orchestrator can
 // classify shell-subshell failures into specific error details (Fix 3 —
@@ -175,7 +177,7 @@ type _ContainerLikeShapeCheck = Sandbox extends ContainerLike ? true : never;
 const _shapeCheck: _ContainerLikeShapeCheck = true;
 void _shapeCheck;
 
-const TOTAL_TIMEOUT_MS = 60_000; // R7 — install + score combined.
+export const TOTAL_TIMEOUT_MS = 60_000; // R7 — install + score combined.
 const SHORT_EXEC_TIMEOUT_MS = 5_000; // `which`, `anc --version`.
 
 // Per-PM install-host allowlists. Only these hosts are reachable during
