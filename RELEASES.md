@@ -484,7 +484,7 @@ A `paths-ignore` filter on the `push` trigger skips deploy when a commit only to
 
 - **Base**: `python:3.12-slim-trixie` + Cloudflare Sandbox SDK + PMs (cargo-binstall, pip, uv, npm, bun, upstream Go).
 - **Image**: `registry.cloudflare.com/<account-id>/anc-sandbox:<git-sha>`. Build decoupled from deploy.
-- **Instance type**: staging `standard-2` (1 vCPU, 6 GiB RAM, 12 GB disk); prod `basic` (1/4 vCPU). Promotion: release
+- **Instance type**: staging and prod `standard-2` (1 vCPU, 6 GiB RAM, 12 GB disk). Promotion: release
   PR + soak.
 - **Rationale + version-pin matrix**:
   [`docs/solutions/tooling-decisions/cloudflare-sandbox-python-3.12-base-2026-05-19.md`](docs/solutions/tooling-decisions/cloudflare-sandbox-python-3.12-base-2026-05-19.md).
