@@ -524,3 +524,4 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 - 2026-11-10: plan reworked to the owner's answers to D1 to D8: folding needs an observed redirect, and the apex's stored scorecard records it.
 - 2026-11-10: `/plan-eng-review` round 1 started on the reworked plan at 5c62277 (Opus, effort high).
 - 2026-11-10: `/plan-eng-review` round 1 ended on dbc0942: ship with fixes; 0 P0, 1 P1 (the board guard could not see a curated apex), 7 P2. All folded in. The `www.<a>` opt-in carry was settled from the `public_listing` contract; the unanswered-sibling and first-hop questions went to the owner (Outstanding Questions).
+- 2026-11-10: `/plan-devex-review` round 1 started at 9030fcc (Opus, effort high).
