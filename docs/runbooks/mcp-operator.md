@@ -20,7 +20,7 @@ environment, and the flip verb follows the shape.
 | `MCP_ENABLED`              | secret, both environments                           | the entire `/mcp` branch                  | `503 Service Unavailable` with `Retry-After: 3600` and a one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error. Discoverability siblings stay live.                                                  |
 | `MCP_LIVE_SCORING_ENABLED` | secret, both environments                           | only the `score_cli` tool                 | `score_cli` returns `isError: false` with `audited: false, message: "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard"`. Read tier stays alive.                                 |
 | `MCP_LEGACY_ENABLED`       | committed var `"true"`, top-level and `env.staging` | legacy `initialize` lane                  | When `'false'`, shell logs `legacy_rejected` with `error_code: -32022` and returns JSON-RPC `-32022` (`data.supported: ["2026-07-28"]`) before SDK dispatch. Modern lane unaffected.                                                    |
-| `WEB_AUDIT_FOLLOW_ENABLED` | var `"true"` on `env.staging`, secret in production | following declared hosts, every web audit | Audits keep running on the site's own origin. The stored scorecard records `follow_declarations: false`, and rows that need a declared host read `n_a` with reason `follow-disabled`. Re-audits save unfollowed; see the decision flow. |
+| `WEB_AUDIT_FOLLOW_ENABLED` | var `"true"` on `env.staging`, secret in production | following declared hosts, every web audit | Audits keep running on the site's own origin. The stored scorecard records `follow_declarations: false`, and rows that need a declared host read `n_a` with reason `follow-disabled`. Re-audits save with following off; see the decision flow. |
 
 The split is a decision, not an accident. `MCP_ENABLED` and `MCP_LIVE_SCORING_ENABLED` are secrets because incident
 response needs a flip that lands without a deploy and survives the next unrelated one, and because an unset secret reads
@@ -162,7 +162,7 @@ Every `POST /mcp` attempt emits **exactly one** PII-free JSON log line with `"ev
 | `era`              | `legacy` or `modern` (`isLegacyRequest`)                                           |
 | `method`           | `Mcp-Method` header when present; else JSON-RPC method when known                  |
 | `name`             | `Mcp-Name` when present (nullable)                                                 |
-| `client_name`      | Truncated from initialize / `_meta` clientInfo when available                      |
+| `client_name`      | Truncated from initialize / `_meta` `clientInfo` when available                      |
 | `protocol_version` | From header or `_meta` when available                                              |
 | `host`             | Request host                                                                       |
 | `response_format`  | `sse` when the served `content-type` is `text/event-stream`, else `json`           |
@@ -267,7 +267,7 @@ scripts/release/mcp-smoke.sh https://agentnative-site-staging.brettdavies.worker
 ```
 
 Expect **6/6** pass: server card `2026-07-28`, legacy initialize + 13 tools, modern list cache hints, modern
-get_scorecard hit/miss.
+`get_scorecard` hit/miss.
 
 **Check 6 miss input (recorded 2026-08-26):** unknown registry slugs (`nope-not-a-tool`) are validator rejection
 (`isError: true`, `unrecognized_input`), not cache-miss. The smoke miss probe uses a well-formed `github_url` absent
@@ -301,7 +301,7 @@ Confirm exactly **one** JSON log message per POST with `era=modern`, `method=too
 {"event":"mcp.request","era":"modern","method":"tools/list","name":null,"client_name":"anc-mcp-smoke","protocol_version":"2026-07-28","host":"agentnative-site-staging.brettdavies.workers.dev","response_format":"json","outcome":"ok","error_code":null,"ms_bucket":"<50"}
 ```
 
-Scripted smoke: **6/6** (+ symmetry + live-cache figlet extension) green after the SSE→JSON coerce and check-6 miss
+Scripted smoke: **6/6** (+ symmetry + live-cache `figlet` extension) green after the SSE→JSON coerce and check-6 miss
 probe fix.
 
 ### Legacy lane disable (staging-only manual)
@@ -316,7 +316,7 @@ bun x wrangler deploy --env staging --var MCP_LEGACY_ENABLED:false
 
 1. After that deploy, POST legacy `initialize` → expect HTTP 200 with JSON-RPC `{ "error": { "code": -32022, "message":
    "legacy MCP requests are disabled; use MCP 2026-07-28", "data": { "supported": ["2026-07-28"] } } }`, the request
-   `id` echoed, and shell log `"outcome":"legacy_rejected"` with `"error_code":-32022`.
+   `id` echoed, and the shell's log line `"outcome":"legacy_rejected"` with `"error_code":-32022`.
 2. Re-run modern checks 5–6 → expect pass.
 3. Restore dual-stack (required for normal soak — preflight/postflight legacy recipes assume it):
 
@@ -366,9 +366,10 @@ Discovery surfaces advertise the MCP endpoint. Operators are responsible for kee
   `documentation` must equal the published client-skill URL (`https://anc.dev/mcp-skill.md`). Legacy aliases
   (`/.well-known/mcp`, `/mcp.json`, `/.well-known/mcp.json`) serve the same JSON body via the Worker.
 - `/.well-known/api-catalog`: RFC 9727 link set; `service-desc` and `status` both point at the server card.
-- `/.well-known/oauth-protected-resource`, `/.well-known/oauth-authorization-server`, `/.well-known/jwks.json`,
-  `/auth.md`: agent-readiness OAuth metadata for a public/no-auth catalog. `POST /oauth2/token` returns
-  `public_catalog`.
+- `/auth.md`: the no-auth declaration. The MCP endpoint needs no sign-in, so the site publishes no OAuth metadata:
+  `/.well-known/oauth-protected-resource`, `/.well-known/oauth-authorization-server`, `/.well-known/jwks.json`, and
+  `POST /oauth2/token` answer as unknown paths. A client that finds protected-resource metadata concludes it must sign
+  in.
 - `/.well-known/ai.txt`: `Programmatic-API: https://anc.dev/mcp` plus the canonical contact
   (`97-boss-beetle@icloud.com`).
 - `/.well-known/security.txt`: RFC 9116 contact; `Expires` must stay at least 300 days in the future (tests assert).
@@ -381,15 +382,14 @@ test suite; trust it, but pull the e2e suite locally before deploying to confirm
 
 ## CORS policy
 
-Discovery metadata is **read-only** and returns `Access-Control-Allow-Origin: *` (server card, api-catalog, OAuth
-PRM/AS, JWKS). This is deliberate: automated scanners and browser-based catalog tools fetch these URLs cross-origin. No
-credentials or metered operations are exposed through them.
+Discovery metadata is **read-only** and returns `Access-Control-Allow-Origin: *` (server card, api-catalog). This is
+deliberate: automated scanners and browser-based catalog tools fetch these URLs cross-origin. No credentials or metered
+operations are exposed through them.
 
 **Server-to-agent paths omit CORS:**
 
 - `POST /mcp` — JSON-RPC including metered `score_cli`. A browser-reachable endpoint would let any malicious page
   trigger audits charged to the visitor's IP (KTD-10).
-- `POST /oauth2/token` — returns a typed `public_catalog` error only; posture is in `auth.md` and OAuth metadata.
 
 Full prose lives in `/auth.md` under **CORS posture**. Do not add CORS to `POST /mcp` without an explicit KTD revision.
 

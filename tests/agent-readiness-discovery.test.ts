@@ -1,7 +1,7 @@
 // Agent-readiness discovery: cross-surface drift gates, build smoke tests,
 // and Worker red-team coverage for every endpoint touched by the
-// isitagentready remediation (MCP descriptor aliases, api-catalog, OAuth
-// metadata, agent-skills index, auth.md, oauth2/token, webmcp.js).
+// isitagentready remediation (MCP descriptor aliases, api-catalog,
+// agent-skills index, auth.md, webmcp.js).
 //
 // Complements tests/build-discovery-emit.test.ts (emit shape) and
 // tests/worker-mcp-dispatch.test.ts (GET /mcp returns 405).
@@ -16,6 +16,7 @@ import { MCP_DISCOVERY_DOCUMENTS } from '../src/shared/mcp-discovery';
 import { WEBMCP_SCRIPT } from '../src/shared/webmcp-script';
 import worker from '../src/worker/index';
 import { MCP_DESCRIPTOR_ALIAS_PATHS, MCP_DESCRIPTOR_CANONICAL_PATH } from '../src/worker/mcp/descriptor-paths';
+import { distAssetsEnv, requireDistBuild } from './helpers/dist';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..');
 const DIST_DIR = join(REPO_ROOT, 'dist');
@@ -65,25 +66,6 @@ const FIXTURE_API_CATALOG = JSON.stringify({
   ],
 });
 
-const FIXTURE_OAUTH_PR = JSON.stringify({
-  resource: 'https://anc.dev/mcp',
-  authorization_servers: ['https://anc.dev'],
-  bearer_methods_supported: ['header'],
-  resource_documentation: 'https://anc.dev/auth.md',
-});
-
-const FIXTURE_OAUTH_AS = JSON.stringify({
-  issuer: 'https://anc.dev',
-  token_endpoint: 'https://anc.dev/oauth2/token',
-  jwks_uri: 'https://anc.dev/.well-known/jwks.json',
-  service_documentation: 'https://anc.dev/auth.md',
-  agent_auth: {
-    skill: 'https://anc.dev/auth.md',
-    register_uri: 'https://anc.dev/auth.md',
-    anonymous: { claim_uri: 'https://anc.dev/auth.md' },
-  },
-});
-
 const FIXTURE_AUTH_MD = `# auth.md - anc.dev agent authentication
 
 No authentication required.
@@ -93,8 +75,6 @@ const FIXTURE_AGENT_SKILLS = JSON.stringify({
   $schema: 'https://schemas.agentskills.io/discovery/0.2.0/schema.json',
   skills: [{ name: 'anc-mcp', type: 'skill-md', url: 'https://anc.dev/mcp-skill.md', digest: 'sha256:abc' }],
 });
-
-const FIXTURE_JWKS = JSON.stringify({ keys: [] });
 
 function req(url: string, init: RequestInit = {}): Request {
   return new Request(url, init);
@@ -106,10 +86,7 @@ function makeEnv(bodyByPath: Record<string, string> = {}) {
     '/_internal/mcp-server-card-sep2127.json': FIXTURE_SERVER_CARD_SEED,
     '/.well-known/ai-catalog.json': FIXTURE_AI_CATALOG,
     '/.well-known/api-catalog': FIXTURE_API_CATALOG,
-    '/.well-known/oauth-protected-resource': FIXTURE_OAUTH_PR,
-    '/.well-known/oauth-authorization-server': FIXTURE_OAUTH_AS,
     '/.well-known/agent-skills/index.json': FIXTURE_AGENT_SKILLS,
-    '/.well-known/jwks.json': FIXTURE_JWKS,
     '/auth.md': FIXTURE_AUTH_MD,
   };
   const merged = { ...defaults, ...bodyByPath };
@@ -354,21 +331,6 @@ describe('MCP descriptor aliases — 301 to the canonical (R9)', () => {
     expect(await res.text()).toContain('unavailable');
   });
 
-  test('missing OAuth seed returns 503 instead of an unhandled exception', async () => {
-    const noSeedEnv = {
-      ASSETS: {
-        async fetch(): Promise<Response> {
-          return new Response('not found', { status: 404 });
-        },
-      } as unknown as Fetcher,
-    };
-    for (const path of ['/.well-known/oauth-protected-resource', '/.well-known/oauth-authorization-server']) {
-      const res = await worker.fetch(req(`https://anc.dev${path}`), noSeedEnv, {} as ExecutionContext);
-      expect(res.status).toBe(503);
-      expect(await res.text()).toContain('unavailable');
-    }
-  });
-
   test('authentication.documentation rewrites to the inbound origin', async () => {
     const env = makeEnv();
     const res = await worker.fetch(
@@ -538,78 +500,38 @@ describe('/.well-known/api-catalog — worker red-team', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Worker — OAuth metadata
+// Worker — OAuth metadata paths
 // ---------------------------------------------------------------------------
 
-describe('OAuth discovery metadata — worker red-team', () => {
-  test('GET /.well-known/oauth-protected-resource stamps JSON + CORS', async () => {
-    const env = makeEnv();
-    const res = await worker.fetch(
-      req('https://anc.dev/.well-known/oauth-protected-resource'),
-      env,
-      {} as ExecutionContext,
-    );
-    expect(res.status).toBe(200);
-    expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
-    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
-  });
+describe('OAuth metadata paths (built dist/)', () => {
+  const PAIRS = [
+    { method: 'GET', path: '/.well-known/oauth-protected-resource', unknown: '/.well-known/no-such-document' },
+    { method: 'GET', path: '/.well-known/oauth-authorization-server', unknown: '/.well-known/no-such-document' },
+    { method: 'GET', path: '/.well-known/jwks.json', unknown: '/.well-known/no-such-document.json' },
+    { method: 'POST', path: '/oauth2/token', unknown: '/no-such-path' },
+  ] as const;
 
-  test('GET /.well-known/oauth-authorization-server stamps JSON + CORS', async () => {
-    const env = makeEnv();
-    const res = await worker.fetch(
-      req('https://anc.dev/.well-known/oauth-authorization-server'),
-      env,
-      {} as ExecutionContext,
-    );
-    expect(res.status).toBe(200);
-    expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
-    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
-  });
-
-  test('POST on oauth-protected-resource returns 405 Allow: GET', async () => {
-    const env = makeEnv();
-    const res = await worker.fetch(
-      req('https://anc.dev/.well-known/oauth-protected-resource', { method: 'POST' }),
-      env,
-      {} as ExecutionContext,
-    );
-    expect(res.status).toBe(405);
-    expect(res.headers.get('Allow')).toBe('GET');
-  });
-
-  test('GET /.well-known/oauth-protected-resource rewrites resource_documentation to auth.md', async () => {
-    const env = makeEnv();
-    const res = await worker.fetch(
-      req('https://staging.example/.well-known/oauth-protected-resource'),
-      env,
-      {} as ExecutionContext,
-    );
-    const body = JSON.parse(await res.text()) as { resource_documentation: string };
-    expect(body.resource_documentation).toBe('https://staging.example/auth.md');
-  });
-
-  test('GET /.well-known/oauth-authorization-server rewrites service_documentation to auth.md', async () => {
-    const env = makeEnv();
-    const res = await worker.fetch(
-      req('https://staging.example/.well-known/oauth-authorization-server'),
-      env,
-      {} as ExecutionContext,
-    );
-    const body = JSON.parse(await res.text()) as { service_documentation: string };
-    expect(body.service_documentation).toBe('https://staging.example/auth.md');
-  });
-
-  test('Accept: text/markdown still returns JSON (GET intercept precedes CN rewrite)', async () => {
-    const env = makeEnv();
-    const res = await worker.fetch(
-      req('https://anc.dev/.well-known/oauth-protected-resource', { headers: { accept: 'text/markdown' } }),
-      env,
-      {} as ExecutionContext,
-    );
-    expect(res.status).toBe(200);
-    expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
-    const body = JSON.parse(await res.text()) as { resource: string };
-    expect(body.resource).toBe('https://anc.dev/mcp');
+  test("anc.dev's MCP server needs no sign-in, so each OAuth metadata path answers as an unknown path", async () => {
+    requireDistBuild(DIST_DIR);
+    const env = distAssetsEnv(DIST_DIR);
+    const answer = async (method: string, path: string, accept: string) => {
+      const res = await worker.fetch(
+        req(`https://anc.dev${path}`, { method, headers: { accept } }),
+        env,
+        {} as ExecutionContext,
+      );
+      return { status: res.status, contentType: res.headers.get('content-type'), body: await res.text() };
+    };
+    for (const { method, path, unknown } of PAIRS) {
+      for (const accept of ['text/html', 'text/markdown']) {
+        const expected = await answer(method, unknown, accept);
+        expect(expected.status).toBe(404);
+        expect({ request: `${method} ${path} (${accept})`, ...(await answer(method, path, accept)) }).toEqual({
+          request: `${method} ${path} (${accept})`,
+          ...expected,
+        });
+      }
+    }
   });
 });
 
@@ -618,27 +540,6 @@ describe('OAuth discovery metadata — worker red-team', () => {
 // ---------------------------------------------------------------------------
 
 describe('static discovery JSON — worker red-team', () => {
-  test('GET /.well-known/jwks.json returns JSON with CORS via applyHeaders', async () => {
-    const env = makeEnv();
-    const res = await worker.fetch(req('https://anc.dev/.well-known/jwks.json'), env, {} as ExecutionContext);
-    expect(res.status).toBe(200);
-    expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
-    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
-    expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
-  });
-
-  test('Accept: text/markdown on /.well-known/jwks.json does not CN-rewrite (.json suffix wins)', async () => {
-    const env = makeEnv();
-    const res = await worker.fetch(
-      req('https://anc.dev/.well-known/jwks.json', { headers: { accept: 'text/markdown' } }),
-      env,
-      {} as ExecutionContext,
-    );
-    expect(res.status).toBe(200);
-    expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
-    expect(await res.text()).toBe(FIXTURE_JWKS);
-  });
-
   test('GET /.well-known/agent-skills/index.json returns JSON with CORS', async () => {
     const env = makeEnv();
     const res = await worker.fetch(
@@ -672,41 +573,6 @@ describe('auth.md — worker content negotiation', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
     expect(res.headers.get('X-Echo-Path')).toBe('/auth.md');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Worker — oauth2/token
-// ---------------------------------------------------------------------------
-
-describe('POST /oauth2/token — worker red-team', () => {
-  test('GET is not handled by the token stub (404 via asset fallthrough)', async () => {
-    const env = makeEnv();
-    const res = await worker.fetch(req('https://anc.dev/oauth2/token', { method: 'GET' }), env, {} as ExecutionContext);
-    expect(res.status).toBe(404);
-  });
-
-  test('POST rewrites documentation and mcp_endpoint to the inbound origin', async () => {
-    const env = makeEnv();
-    const res = await worker.fetch(
-      req('https://staging.example/oauth2/token', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: '{}',
-      }),
-      env,
-      {} as ExecutionContext,
-    );
-    expect(res.status).toBe(400);
-    const body = JSON.parse(await res.text()) as {
-      error: string;
-      documentation: string;
-      mcp_endpoint: string;
-    };
-    expect(body.error).toBe('public_catalog');
-    expect(body.documentation).toBe('https://staging.example/auth.md');
-    expect(body.mcp_endpoint).toBe('https://staging.example/mcp');
-    expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
   });
 });
 
