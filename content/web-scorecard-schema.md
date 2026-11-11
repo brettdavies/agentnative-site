@@ -27,6 +27,7 @@ The web scorecard is site-owned. Its `schema_version` is **0.5**, independent of
   "vantage": { "network": "public", "credentialed": false },
   "follow_declarations": true,
   "declared_hosts": [ ... ],
+  "site_hosts": ["example.com", "www.example.com"],
   "registry_fingerprint": "3f2a9c1b7e40",
   "summary": { ... },
   "coverage_summary": { ... },
@@ -41,7 +42,7 @@ The web scorecard is site-owned. Its `schema_version` is **0.5**, independent of
 | ---------------------- | ------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `schema_version`       | string              | engine  | Version of the web-scorecard envelope. Site-owned, independent of the CLI schema.                                                  |
 | `spec_version`         | string              | engine  | Version of the agentnative spec the run scored against. Same value the CLI scorecard carries.                                      |
-| `target_url`           | string              | engine  | The normalized audited URL: scheme, host, and a trailing slash. Web-specific.                                                      |
+| `target_url`           | string              | engine  | The origin the checks ran against: scheme, host, trailing slash. On a folded site, the host the www/bare redirect lands on.       |
 | `mcp_endpoint`         | string \| null      | engine  | The discovered MCP endpoint (on a followed declared host when the site serves none), or `null` when none was found. Web-specific.  |
 | `mcp_discovery`        | array               | engine  | The discovery trail: each document read (server cards, AI catalog, API catalog) and common-path probe, and what it returned.       |
 | `tool`                 | object              | engine  | Web identity: `{ name, url }`. No `binary`, `install`, `tier`, or `language`. See [tool](#tool).                                   |
@@ -52,6 +53,7 @@ The web scorecard is site-owned. Its `schema_version` is **0.5**, independent of
 | `vantage`              | object              | engine  | Where the audit ran and whether it presented a credential. See [vantage](#vantage).                                                |
 | `follow_declarations`  | boolean, optional   | engine  | Whether the audit followed the hosts the site declares (its MCP server, its API host). Absent means no follow state was recorded.  |
 | `declared_hosts`       | array, optional     | engine  | The declared-hosts trail: one entry per host the site declares, with how the audit treated it. Absent means no trail was recorded. |
+| `site_hosts`           | array of string, optional | engine | Present only when one of the bare and www hosts redirects to the other: both hosts, bare first. Absent means no fold was recorded: the pair did not fold, or the scorecard predates the field. |
 | `registry_fingerprint` | string, optional    | stored  | The first 12 characters of the fingerprint of the check registry the score was computed under. The engine never sets it.           |
 | `summary`              | object              | derived | Tally of check outcomes by status. See [summary](#summary).                                                                        |
 | `coverage_summary`     | object              | derived | MUST / SHOULD / MAY totals and how many were verified. See [coverage_summary](#coverage_summary).                                  |
@@ -60,7 +62,7 @@ The web scorecard is site-owned. Its `schema_version` is **0.5**, independent of
 | `categories`           | array               | derived | Per-category `passed/counted` rollups in display order. See [categories](#categories).                                             |
 | `results`              | array of result obj | engine  | One entry per check. See [results](#results).                                                                                      |
 
-`follow_declarations`, `declared_hosts`, and `registry_fingerprint` are optional, and a reader treats a missing one as
+`follow_declarations`, `declared_hosts`, `site_hosts`, and `registry_fingerprint` are optional, and a reader treats a missing one as
 not evaluated rather than as a recorded value: a missing `follow_declarations` never reads as following on, a missing
 `declared_hosts` means no trail was recorded (an empty array is a recorded trail with nothing in it), and a missing
 `registry_fingerprint` means the registry version is unknown. The engine records `follow_declarations` and
@@ -68,6 +70,8 @@ not evaluated rather than as a recorded value: a missing `follow_declarations` n
 and never records `registry_fingerprint`; anc.dev adds it to every complete audit it returns or saves. The result page
 closes its checks with "Scored against registry `<prefix>`." and the markdown twin ends its freshness line with the same
 sentence, or with "Registry version not recorded." when the field is missing.
+
+The audited host is `target_url`'s host; the audited site is every host in `site_hosts`, or the audited host alone.
 
 ## Response freshness
 
@@ -115,8 +119,8 @@ Web identity. The CLI-only header fields (`tier`, `language`, `repo`, `install`)
 
 | Field  | Type   | Meaning                                              |
 | ------ | ------ | ---------------------------------------------------- |
-| `name` | string | The audited domain (host), used as the display name. |
-| `url`  | string | The normalized audited URL. Matches `target_url`.    |
+| `name` | string | The site's name: the audited host, or the bare domain when `site_hosts` is present. |
+| `url`  | string | The site's URL. Equals `target_url` unless `site_hosts` is present and the checks ran at the www host. |
 
 ## `vantage`
 
@@ -157,8 +161,8 @@ to on another origin, in probe order. A URL declared twice keeps its first entry
 
 | Field         | Type             | Meaning                                                                                                                                                                                                                |
 | ------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `surface`     | string           | Where the URL was declared: a path on the audited origin, an AI catalog entry or an API catalog link as a JSON Pointer, or a followed card's URL.                                                                      |
-| `kind`        | string           | `mcp-endpoint` for an MCP server URL, `card-document` for a server card hosted off the audited origin, `api-anchor` for an API catalog anchor, `api-description` for the description an anchor's `service-desc` names. |
+| `surface`     | string           | Where the URL was declared: a path on the audited site, an AI catalog entry or an API catalog link as a JSON Pointer, or a followed card's URL.                                                                      |
+| `kind`        | string           | `mcp-endpoint` for an MCP server URL, `card-document` for a server card hosted off the audited site, `api-anchor` for an API catalog anchor, `api-description` for the description an anchor's `service-desc` names. |
 | `url`         | string           | The declared URL.                                                                                                                                                                                                      |
 | `host`        | string, optional | The declared URL's host.                                                                                                                                                                                               |
 | `final_url`   | string, optional | Where one redirect from the declared URL led, when it changed the URL, including a hop the audit refused.                                                                                                              |

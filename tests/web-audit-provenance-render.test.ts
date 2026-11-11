@@ -757,3 +757,50 @@ describe('a host carrying a backtick, which the URL parser accepts', () => {
     expect(read.results.find((r) => r.id === 'json-errors')?.access_remedy).toBe(REMEDY);
   });
 });
+
+describe('a folded site names the bare host and says where it was audited', () => {
+  const rows = () => [
+    row('robots', 'pass', { evidence: 'https://www.n.test/robots.txt -> 200', ...at('www.n.test') }),
+    row('llms-txt', 'pass', { evidence: 'https://n.test/llms.txt -> 200', ...at('n.test') }),
+    row('sitemap', 'n_a', { na_reason: 'optional-absent', ...at('www.n.test') }),
+  ];
+  const folded = (): Scorecard =>
+    scorecardOf('www.n.test', rows(), {
+      tool: { name: 'n.test', url: 'https://n.test/' },
+      site_hosts: ['n.test', 'www.n.test'],
+    });
+  const unfolded = (): Scorecard => scorecardOf('www.n.test', rows());
+
+  test('the page names the bare host in its website line and adds the audited-at clause', () => {
+    const note = textOf(page(folded()).slice(page(folded()).indexOf('result-score__note')));
+    expect(note).toContain('Website https://n.test/ (audited at www.n.test).');
+  });
+
+  test('the markdown twin carries the same clause', () => {
+    expect(twin(folded())).toContain('Website: [https://n.test/](https://n.test/) (audited at www.n.test)');
+    expect(twin(folded())).toContain('# n.test — Agent-Readiness Audit');
+  });
+
+  test('a site audited at its bare host adds no clause', () => {
+    const card = scorecardOf('n.test', rows(), {
+      tool: { name: 'n.test', url: 'https://n.test/' },
+      site_hosts: ['n.test', 'www.n.test'],
+    });
+    expect(textOf(page(card))).not.toContain('audited at');
+    expect(twin(card)).not.toContain('audited at');
+  });
+
+  test('an unfolded www site names itself and adds no clause', () => {
+    expect(textOf(page(unfolded()))).toContain('Website https://www.n.test/.');
+    expect(textOf(page(unfolded()))).not.toContain('audited at');
+    expect(twin(unfolded())).not.toContain('audited at');
+  });
+
+  test('a row whose evidence came from the other host of the pair reads as evaluated at the audited host', () => {
+    expect(textOf(page(folded()))).not.toMatch(/evaluated at/i);
+    expect(twin(folded())).not.toMatch(/evaluated at/i);
+    // The same rows with no recorded fold name the second host.
+    const control = scorecardOf('www.n.test', rows());
+    expect(textOf(page(control))).toContain('Evaluated at n.test');
+  });
+});

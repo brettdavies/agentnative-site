@@ -78,6 +78,8 @@ export type SummaryCategory = Counts & {
 export type WebSummaryModel = {
   name: string;
   targetUrl: string;
+  /** The host the checks ran at, when the site is a folded pair audited at its other host; else null. */
+  auditedAt: string | null;
   relative: number;
   global: number;
   counts: Record<ScorecardStatus, number>;
