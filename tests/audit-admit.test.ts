@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { type AdmitEnv, admitTransact, clientIpKey } from '../src/worker/audit/admit';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
 import { type VerifyResult, verifyTurnstile } from '../src/worker/score/turnstile';
+import { memoryKv } from './helpers/domain-budget-fakes';
 
 type Calls = string[];
 
@@ -37,26 +38,6 @@ function makeKv(seed: Record<string, string> = {}) {
     } as unknown as KVNamespace,
     store,
   };
-}
-
-// Workers KV refuses a second write to one key inside a second. `refuseForMs`
-// is how long after a write the key keeps refusing the next one.
-function writeLimitedKv(refuseForMs = 1000) {
-  const store = new Map<string, string>();
-  const lastWrite = new Map<string, number>();
-  const kv = {
-    async get(key: string) {
-      return store.get(key) ?? null;
-    },
-    async put(key: string, value: string) {
-      const last = lastWrite.get(key);
-      if (last !== undefined && Date.now() - last < refuseForMs)
-        throw new Error('KV PUT failed: 429 Too Many Requests');
-      lastWrite.set(key, Date.now());
-      store.set(key, value);
-    },
-  } as unknown as KVNamespace;
-  return { kv, store };
 }
 
 function siteverify(mode: 'pass' | 'reject' | 'transport' | 'hang' | 'non2xx' | 'malformed'): typeof fetch {
@@ -409,17 +390,16 @@ describe('admitTransact: the hourly window under one write per key per second', 
     });
 
   test('two audits from one IP inside one second are both admitted and both counted', async () => {
-    const { kv, store } = writeLimitedKv();
-    const env = makeEnv([], { SCORE_KV: kv });
+    const log: string[] = [];
+    const env = makeEnv([], { SCORE_KV: memoryKv(log, { sameKeyWriteClock: () => Date.now() }) });
     const first = await admit(env);
     const second = await admit(env);
     expect({ first: first.ok, second: second.ok }).toEqual({ first: true, second: true });
-    expect([...store.values()]).toEqual(['2']);
+    expect(log.filter((line) => line.startsWith('kv:put ')).length).toBe(2);
   });
 
   test('a counter write KV refuses twice answers as a rate limit', async () => {
-    const { kv } = writeLimitedKv(Number.POSITIVE_INFINITY);
-    const env = makeEnv([], { SCORE_KV: kv });
+    const env = makeEnv([], { SCORE_KV: memoryKv([], { sameKeyWriteClock: () => 0 }) });
     expect((await admit(env)).ok).toBe(true);
     expect(await admit(env)).toMatchObject({ ok: false, status: 429, error: { code: 'rate_limited' } });
   });

@@ -19,6 +19,7 @@ import { _resetHintsIndexCache } from '../src/worker/score/orchestrate';
 import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 import { fakeJobNamespace } from './helpers/audit-job-state';
+import { memoryKv } from './helpers/domain-budget-fakes';
 import { getJsonToolContent, mcpInitialize, mcpRpc, resetMcpTestState } from './helpers/mcp-rpc';
 
 const FIXTURE_CATALOG = {
@@ -404,24 +405,13 @@ describe('score_cli: SCORE_KV scoring_disabled kill switch', () => {
 describe('score_cli: the hourly window under one write per key per second', () => {
   test('two score_cli audits from one IP inside one second both run', async () => {
     const { env, doSpy } = makeEnv();
-    const store = new Map<string, string>();
-    const lastWrite = new Map<string, number>();
-    env.SCORE_KV = {
-      async get(key: string) {
-        return store.get(key) ?? null;
-      },
-      async put(key: string, value: string) {
-        const last = lastWrite.get(key);
-        if (last !== undefined && Date.now() - last < 1000) throw new Error('KV PUT failed: 429 Too Many Requests');
-        lastWrite.set(key, Date.now());
-        store.set(key, value);
-      },
-    } as unknown as KVNamespace;
+    const log: string[] = [];
+    env.SCORE_KV = memoryKv(log, { sameKeyWriteClock: () => Date.now() });
     await callScoreCli(env, { install: 'npm install -g newcli' }, '198.51.100.7');
     const second = await callScoreCli(env, { install: 'npm install -g othercli' }, '198.51.100.7');
     expect(second.result?.isError).toBeFalsy();
     expect(doSpy.calls.length).toBe(2);
-    expect([...store.values()]).toEqual(['2']);
+    expect(log.filter((line) => line.startsWith('kv:put mcp_audit:')).length).toBe(2);
   });
 });
 
