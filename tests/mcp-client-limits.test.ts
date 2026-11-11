@@ -307,7 +307,7 @@ describe.each(ORIGINS)('served metadata at %s', (origin) => {
       orderFailures(
         'the server instructions',
         served.initializeInstructions,
-        ['score_cli', 'Every call shares', FOLLOW_DISCLOSURE_SHORT],
+        ['score_cli', 'audit_website', 'Every call shares', FOLLOW_DISCLOSURE_SHORT],
         origin,
       ),
     );

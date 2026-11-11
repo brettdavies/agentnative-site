@@ -39,8 +39,8 @@ function buildInstructionsText(siteUrl: string): string {
       'eight principles for software that AI agents operate. Use these tools when asked how well a CLI or a ' +
       'website works for agents, its agent-readiness score or fixes, or what the principles and spec require. ' +
       `Full guide: ${siteUrl}/mcp-skill.md.`,
-    'Read the cache first: get_scorecard (a CLI) or get_website_audit (a website). A miss is not an error; its ' +
-      'next_tool names the metered audit to run: ' +
+    'Read the cache first; it costs no audit: get_scorecard (a CLI) or get_website_audit (a website). A miss is ' +
+      'not an error, and its next_tool names the metered audit. Only then run one: ' +
       `score_cli (${AUDIT_LIMIT_REQUESTS} fresh audits per ${AUDIT_LIMIT_WINDOW_MINUTES} minutes per IP) or ` +
       `audit_website (${WEB_AUDIT_HOURLY_REQUESTS} fresh audits per ${AUDIT_LIMIT_WINDOW_MINUTES} minutes per IP). ` +
       `Every call shares ${READ_LIMIT_REQUESTS} requests per ${READ_LIMIT_WINDOW_SECONDS} seconds per IP; a breach ` +
