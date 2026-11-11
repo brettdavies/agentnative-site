@@ -53,7 +53,6 @@ import {
   type RetainedDocument,
   readCard,
   retainedCard,
-  sameOrigin,
   unparseablePublishedCard,
 } from './discovery-documents';
 import { probeCommonPaths } from './discovery-posts';
@@ -62,6 +61,7 @@ import type { EvidenceItem } from './handlers/types';
 import { directArtifactSource, type SignInChallenge, signInEndpoint } from './mcp-auth';
 import type { MetadataMatch } from './reciprocity';
 import type { WebAuditDiscoveryConfig } from './registry';
+import { onSite } from './site-origins';
 import { type AuditFetchOptions, DOCUMENT_MAX_BODY_BYTES, guardedFetch } from './ssrf';
 
 export interface DiscoveryOptions {
@@ -142,6 +142,7 @@ export async function readDiscoveryDocuments(
     now: opts.now ?? Date.now,
   });
   const passBudget = budget.slice;
+  const siteOrigins = opts.fetchOptions?.siteOrigins;
   const readDocument = (url: string, timeoutMs: number, headers?: Record<string, string>) =>
     guardedFetch(url, headers === undefined ? {} : { headers }, {
       ...opts.fetchOptions,
@@ -266,7 +267,7 @@ export async function readDiscoveryDocuments(
     readDocument(catalogUrl, documentPass),
     readDocument(apiCatalogUrl, documentPass),
   ]);
-  wellKnown = wellKnownTargets.map((t, i) => readCard(t.path, t.url, cardResponses[i], false, base));
+  wellKnown = wellKnownTargets.map((t, i) => readCard(t.path, t.url, cardResponses[i], false, base, siteOrigins));
   const catalog = catalogResp.status === 200 ? parseJsonObject(catalogResp) : null;
   documentResponses.push(catalogResp, apiCatalogResp);
   const apiCatalog = { url: apiCatalogUrl, response: apiCatalogResp };
@@ -293,22 +294,29 @@ export async function readDiscoveryDocuments(
     const url = 'url' in entry ? resolveUrl(catalogUrl, entry.url) : '';
     return { entry, url: url === '' ? null : url };
   });
-  const fetchesCard = entries.some(({ url }) => url !== null && sameOrigin(url, base));
+  const fetchesCard = entries.some(({ url }) => url !== null && onSite(url, base, siteOrigins));
   const cardPass = fetchesCard ? passBudget() : 0;
   if (cardPass === null) return spent();
   const catalogSlot = async ({ entry, url }: (typeof entries)[number]): Promise<CatalogSlot> => {
     const pointer = `#/entries/${entry.index}`;
     if ('data' in entry) {
       const response = { ...catalogResp, body: JSON.stringify(entry.data) };
-      const read = readCard(`${cfg.ai_catalog}${pointer}/data`, `${catalogUrl}${pointer}/data`, response, true, base);
+      const read = readCard(
+        `${cfg.ai_catalog}${pointer}/data`,
+        `${catalogUrl}${pointer}/data`,
+        response,
+        true,
+        base,
+        siteOrigins,
+      );
       return { index: entry.index, read };
     }
     if (url === null) return { index: entry.index };
-    if (!sameOrigin(url, base)) {
+    if (!onSite(url, base, siteOrigins)) {
       return { index: entry.index, declaration: { kind: 'card-document', url, source: `${cfg.ai_catalog}${pointer}` } };
     }
     const response = await readDocument(url, cardPass, CARD_REQUEST_HEADERS);
-    return { index: entry.index, read: readCard(pathOf(url), url, response, false, base) };
+    return { index: entry.index, read: readCard(pathOf(url), url, response, false, base, siteOrigins) };
   };
   catalogSlots.push(...(await Promise.all(entries.map(catalogSlot))));
 
@@ -344,7 +352,14 @@ export async function readDiscoveryDocuments(
       const suffixPass = passBudget();
       if (suffixPass === null) return exhausted();
       const url = cardSuffixUrl(endpoint, cfg.card_suffix);
-      suffix = readCard(pathOf(url), url, await readDocument(url, suffixPass, CARD_REQUEST_HEADERS), false, base);
+      suffix = readCard(
+        pathOf(url),
+        url,
+        await readDocument(url, suffixPass, CARD_REQUEST_HEADERS),
+        false,
+        base,
+        siteOrigins,
+      );
     }
     return finish();
   });

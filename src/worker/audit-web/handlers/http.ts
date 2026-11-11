@@ -63,6 +63,7 @@ export function assessResponse(
   resp: ProbeResponse,
   w: HttpWith,
   base: string,
+  siteOrigins?: readonly string[],
 ): { ok: boolean; item: EvidenceItem & { why: string[] } } {
   if (redirectsToHttp(resp)) {
     return { ok: false, item: { ...redirectsToHttpItem(url, resp.status), elapsed_ms: resp.elapsed_ms, error: null } };
@@ -71,7 +72,7 @@ export function assessResponse(
   const asserted = assertHttp(expect, resp);
   const recovery =
     asserted.ok && expect.same_origin_recovery_link
-      ? sameOriginRecoveryLink(resp.body ?? '', base)
+      ? sameOriginRecoveryLink(resp.body ?? '', base, siteOrigins)
       : { ok: true, why: '' };
   const ok = asserted.ok && recovery.ok;
   const reasons = recovery.why ? [...asserted.reasons, recovery.why] : asserted.reasons;
@@ -127,7 +128,7 @@ export async function runHttp(check: WebCheck, ctx: HandlerContext): Promise<Pro
       misses.push('error');
       continue;
     }
-    const { ok, item } = assessResponse(url, resp, w, ctx.base);
+    const { ok, item } = assessResponse(url, resp, w, ctx.base, ctx.fetchOptions?.siteOrigins);
     evidence.push(item);
     if (ok) return { status: 'pass', evidence };
     misses.push(classifyMiss(resp, expect, w.timeout !== undefined));
@@ -156,7 +157,7 @@ export async function runRetainedDocument(check: WebCheck, ctx: HandlerContext):
       evidence: [{ retained: w.retained, why: [`discovery kept no ${w.retained} document`] }],
     };
   }
-  const { ok, item } = assessResponse(doc.url, doc.response, w, ctx.base);
+  const { ok, item } = assessResponse(doc.url, doc.response, w, ctx.base, ctx.fetchOptions?.siteOrigins);
   const evidence = [{ ...item, retained: w.retained }];
   if (ok) return { status: 'pass', evidence };
   return { status: classifyMiss(doc.response, w.expect ?? {}, w.timeout !== undefined), evidence };

@@ -18,6 +18,7 @@ import {
   type Route,
   redirect,
   requestsTo,
+  requestsToOtherHosts,
   router,
   row,
   type Seen,
@@ -441,7 +442,7 @@ describe('API category on api-catalog anchors', () => {
       ),
       { registry: apiRegistry(), siteType: 'content' },
     );
-    expect(seen.filter((r) => new URL(r.url).host !== 'example.com')).toEqual([]);
+    expect(requestsToOtherHosts(seen)).toEqual([]);
     expect(scorecard.declared_hosts?.filter((entry) => entry.outcome === 'followed')).toEqual([]);
     for (const id of API_IDS) expect(row(scorecard, id).status).toBe('n_a');
   });
@@ -466,7 +467,7 @@ describe('API category on api-catalog anchors', () => {
       host: 'specs.example.org',
     });
     expect(row(scorecard, 'json-errors')).toMatchObject({ status: 'n_a', na_reason: 'follow-disabled', host: API });
-    expect(seen.filter((r) => new URL(r.url).host !== 'example.com')).toEqual([]);
+    expect(requestsToOtherHosts(seen)).toEqual([]);
   });
 
   test('a description host that gives no response leaves the OpenAPI row unreachable and the MCP rows their own reason', async () => {
@@ -608,7 +609,7 @@ describe('API category on api-catalog anchors', () => {
       site(() => linkset(anchor('https://127.0.0.1/', 'http://localhost/openapi.json'))),
       seen,
     );
-    expect(seen.filter((r) => new URL(r.url).host !== 'example.com')).toEqual([]);
+    expect(requestsToOtherHosts(seen)).toEqual([]);
     expect(scorecard.declared_hosts?.map((entry) => [entry.kind, entry.outcome])).toEqual([
       ['api-anchor', 'blocked'],
       ['api-description', 'blocked'],

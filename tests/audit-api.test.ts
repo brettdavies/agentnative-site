@@ -18,6 +18,7 @@ import {
   ndjson,
   newTracker,
   post,
+  purgeCtx,
   WEB_RECORD,
   webRegistryJson,
 } from './helpers/audit-api-env';
@@ -37,23 +38,6 @@ import {
 } from './helpers/follow-fixtures';
 import { captureLogs } from './helpers/log-capture';
 import { fakeRender } from './helpers/og-site-fakes';
-
-// A context whose purge RPC records every tag batch the run queued.
-function purgeCtx(): ReturnType<typeof makeCtx> & { purged: string[][] } {
-  const purged: string[][] = [];
-  const ctx = makeCtx();
-  return Object.assign(ctx, {
-    purged,
-    exports: {
-      Cached: {
-        async purgeHitMinTags(tags: string[]) {
-          purged.push(tags);
-          return { success: true, errors: [] };
-        },
-      },
-    },
-  });
-}
 
 beforeEach(() => {
   _resetIndexCache();

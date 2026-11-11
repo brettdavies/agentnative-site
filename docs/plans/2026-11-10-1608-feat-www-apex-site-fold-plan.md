@@ -4,7 +4,7 @@ execution: code
 product_contract_source: ce-plan-bootstrap
 title: "Fold www and apex into one site at the start of every web audit - Plan"
 type: feat
-status: proposed
+status: active
 date: 2026-11-10
 topic: www-apex-site-fold
 ---
@@ -332,7 +332,7 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 1. Before `readDiscoveryDocuments`, resolve the pair from the audited host's root fetch (first hop recorded) and the other host's root (one request, redirects not followed), in parallel.
 2. Apply KTD3 and the first HTD flowchart; return the pair outcome (folded, unfolded, or no answer), the probe origin, the site's origin set, and the site name.
 3. Of what `normalizeBase(input.url)` returns, `base` and the root response come from the probe origin, and `readDiscoveryDocuments` reads from it; `domain` (the scorecard's `tool.name`) and `host` come from the site name. The handler context's `host`, which only `dns-doh` reads, stays the site name (the apex on a fold), because a redirect says nothing about where DNS records live. Hand the origin set to the U4 predicate and to `fetchOptions`, and carry the site name to the scorecard build (U5).
-4. When the probe origin did not answer and the sibling's root answered (not a timeout, a transport failure, a 429, or a 5xx) without redirecting to the audited host, the unreachable reason ends `www.a.test answered; audit https://www.a.test/ instead.` with the sibling's host and origin, and the core's `cta` reads `Audit https://www.a.test/ instead.` Otherwise the reason and `cta` keep their current wording.
+4. When the probe origin did not answer and the sibling's root answered (not a timeout, a transport failure, a 429, or a 5xx) without redirecting to the audited host, the unreachable reason ends `www.a.test answered.` with the sibling's host, the event carries the sibling's origin, and the core's `cta` reads `Audit https://www.a.test/ instead.` Otherwise the reason and `cta` keep their current wording.
 5. The pair resolution reads no follow switch and draws no domain-budget unit (KTD8).
 6. The audit's existing `web-audit.run` log record (`src/worker/audit-web/audit-log.ts`) carries the pair outcome (folded, unfolded, or no answer) and the first-hop status of each root, so a site that did not fold can be diagnosed from the logs.
 
@@ -347,7 +347,7 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 - Audit of `n.test` whose root redirects to `https://www.n.test/en-us/`: folded, probe origin `https://www.n.test/`.
 - Covers AE3. Audit of `www.n.test` whose root redirects to `https://n.test/`, which redirects to `https://third.test/`: folded, name `n.test`, and the root response is the one followed to `third.test`.
 - Audit of `n.test` whose root redirects to `https://third.test/` while `www.n.test`'s root answers 404: not folded, name `n.test`.
-- Covers AE4. Audit of `n.test` that gets a transport failure or a 530 while `www.n.test` answers 200: not folded, unreachable, and the reason ends `www.n.test answered; audit https://www.n.test/ instead.`
+- Covers AE4. Audit of `n.test` that gets a transport failure or a 530 while `www.n.test` answers 200: not folded, unreachable, and the reason ends `www.n.test answered.` and the `cta` reads `Audit https://www.n.test/ instead.`
 - Audit of `n.test` that gets a transport failure while `www.n.test` also fails: unreachable with the current wording.
 - An apex-to-www fold of `n.test` queries `_index._agents.n.test` in the DNS-AID check.
 - Covers AE4. Audit of `www.n.test` answering 200 while `n.test` fails: not folded, name `www.n.test`, probe origin `https://www.n.test/`.
@@ -571,3 +571,9 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 - 2026-11-10: owner answers folded in: a recorded fold survives a sibling that gives no answer (a timeout, a transport failure, a 429, or a 5xx), and the pair rule reads the first hop only. The opt-in carry, `schema_version` `0.5`, and the unreachable-error hint wait for the owner (Outstanding Questions).
 - 2026-11-10: `/compound-engineering:ce-doc-review` round 1 ended on 9fc6220: ship with fixes; 0 P0, 2 P1 (a stored `www.` opt-in could leave the board; U8 could not run before merge approval), 10 P2. All folded in, including starting the engine at the host as requested, raising `FOLLOW_POLICY_VERSION`, and `/cso`. Mid-run flip metering on `<a>` was cut under the smallest-change rule. Owner answers folded in at the same time: the opt-in carry and `schema_version` `0.5` are confirmed, and the unreachable error names a sibling that answered; Outstanding Questions is cleared.
 - 2026-11-10: owner decision folded in: one stored record per site. A folded write deletes `www.<a>`'s record once the apex's write lands, the listing order puts the apex's stored listing before `www.<a>`'s, the rescore Workflow deletes too, and the board guard stays as the backstop for a delete that does not land. No review round: the decision applies to a plan whose three reviews are done, and the implementation PR carries the code reviews.
+- 2026-11-10: `/compound-engineering:ce-code-review` round 1 started on PR 557 at 76d9ff1 (Opus, effort high).
+- 2026-11-10: `/devex-review` round 1 started on PR 557 at 76d9ff1 (Opus, effort high).
+- 2026-11-10: `/cso` round 1 started on PR 557 at 76d9ff1 (Opus, effort xhigh).
+- 2026-11-10: `/compound-engineering:ce-code-review` round 1 ended on PR 557 at 76d9ff1: 0 P0, 0 P1, 5 P2. Fixed: a fold decided by the first hop no longer waits on the sibling root, a stream test covers a folded site's rows naming no host, the unreachable answer names the sibling once, a dropped fold leaves `tool.url` on the stored `target_url`, and the `get_website_audit` description lists every `isError` outcome. A shared identity helper, a bundled site value, a structured sibling field on the error, a seed guard, and a dedicated log scope for the fold-drop patch went under Not in scope.
+- 2026-11-10: `/devex-review` round 1 ended on PR 557 at 76d9ff1: 0 P0, 0 P1, 5 P2. Fixed: the `get_website_audit` description lists every `isError` outcome, the `www.` 301 carries no `Link` header or content type, the sibling instruction appears once, the tool description reads without contradiction, and the envelope `target_url` is documented as the origin the checks ran at. A JSON body on `cache_unavailable` and on the `/json` 301 went under Not in scope.
+- 2026-11-10: `/cso` round 1 ended on PR 557 at 76d9ff1: 0 P0, 0 P1, 1 P2, declined by the owner's session on the invariant that the fold changes only the site's name and which origin counts as the site, with every hop still passing `validatePublicUrl`. The run was partial: the helper capped it at 600 seconds, the on-site predicate changes in the follow trail, API targets and endpoint of record were read at diff level only, and no secrets scan ran.

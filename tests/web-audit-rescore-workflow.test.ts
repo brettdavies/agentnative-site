@@ -41,6 +41,7 @@ import {
   followRegistry,
   html,
   type Route,
+  redirect,
   requestsTo,
   router,
   type Seen,
@@ -695,6 +696,78 @@ describe('public listing on re-audit writes', () => {
     const cached = (await cacheGet(env, key)) as CachedWebAudit;
     expect((cached.scorecard as { public_listing?: boolean }).public_listing).toBe(false);
     expect(putOptions.get(key)?.customMetadata?.public_listing).toBe('false');
+  });
+});
+
+describe('a rescore of a seed and its www sibling', () => {
+  const FOLD = ['a.dev', 'www.a.dev'];
+
+  async function storedScorecard(store: Map<string, string>, host: string) {
+    const raw = store.get(await keyFor(`https://${host}/`, SPEC_VERSION));
+    return raw === undefined
+      ? null
+      : (JSON.parse(raw) as { scorecard: { site_hosts?: string[]; public_listing?: boolean } });
+  }
+
+  const foldsToWww = {
+    'GET https://a.dev/': () => redirect('https://www.a.dev/', 301),
+    'GET https://www.a.dev/': () => html(),
+  };
+  const bothAnswer = { 'GET https://a.dev/': () => html(), 'GET https://www.a.dev/': () => html() };
+
+  async function rescoreWith(routes: Record<string, Route>, prime: (store: Map<string, string>) => Promise<void>) {
+    const { env, store } = makeEnv([seedEntry('a.dev')], { registry: MINIMAL_REGISTRY });
+    await prime(store);
+    const original = globalThis.fetch;
+    globalThis.fetch = router(routes, []);
+    try {
+      return { env, store, outcome: await auditDomainToCache(env, 'https://a.dev/') };
+    } finally {
+      globalThis.fetch = original;
+    }
+  }
+
+  test('a seed whose root redirects to www stores site_hosts, stays listed, and deletes the www record', async () => {
+    const { store, outcome } = await rescoreWith(foldsToWww, (s) => primeCache(s, 'www.a.dev', 3 * HOUR_MS));
+    expect(outcome).toEqual({ kind: 'saved', alsoPurge: ['www.a.dev'] });
+    expect((await storedScorecard(store, 'a.dev'))?.scorecard).toMatchObject({
+      site_hosts: FOLD,
+      public_listing: true,
+    });
+    expect(store.has(await keyFor('https://www.a.dev/', SPEC_VERSION))).toBe(false);
+  });
+
+  test('a seed whose pair is unfolded drops a stored fold, deletes nothing, and still names the www page to purge', async () => {
+    const { store, outcome } = await rescoreWith(bothAnswer, async (s) => {
+      await primeCache(s, 'www.a.dev', 3 * HOUR_MS);
+      await primeCache(s, 'a.dev', 3 * HOUR_MS);
+      const key = await keyFor('https://a.dev/', SPEC_VERSION);
+      const record = JSON.parse(s.get(key) as string);
+      record.scorecard.site_hosts = FOLD;
+      s.set(key, JSON.stringify(record));
+    });
+    expect(outcome).toEqual({ kind: 'saved', alsoPurge: ['www.a.dev'] });
+    expect((await storedScorecard(store, 'a.dev'))?.scorecard.site_hosts).toBeUndefined();
+    expect(store.has(await keyFor('https://www.a.dev/', SPEC_VERSION))).toBe(true);
+  });
+
+  test('a seed with no fold, stored or found, names nothing extra to purge', async () => {
+    const { outcome } = await rescoreWith(bothAnswer, async () => {});
+    expect(outcome).toEqual({ kind: 'saved' });
+  });
+
+  test('the cycle purge includes the www page of a folded seed', async () => {
+    const { env } = makeEnv([seedEntry('a.dev')], { registry: MINIMAL_REGISTRY });
+    const { step } = makeStep();
+    const purged: string[][] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = router(foldsToWww, []);
+    try {
+      await runWebRescore(env, step, { purgeTags: async (tags) => void purged.push(tags) });
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(purged.flat()).toEqual(expect.arrayContaining(['web:a.dev', 'web:www.a.dev']));
   });
 });
 

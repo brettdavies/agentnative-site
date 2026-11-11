@@ -197,7 +197,9 @@ upgraded, so it names the same record as the bare host.
 
 - `get_website_audit` (cheap read): pass a `url`; returns `{ found: true, ...envelope }` with `kind: "web"` on a cache
   hit, `{ found: false, in_progress: true, started_at }` while an audit for that host is already running, or
-  `{ found: false, next_tool: "audit_website" }` on a miss.
+  `{ found: false, next_tool: "audit_website" }` on a miss. A read of a `www.<domain>` host that cannot reach the
+  `<domain>` record returns `isError: true` with `cache_unavailable`; retry in 30 seconds, because the scorecard has not
+  been removed.
 - `audit_website` (metered fresh audit): runs a fresh audit and returns a single terminal envelope. There are no
   progress notifications: the server runs stateless per-request. A cached result younger than one minute is returned
   without re-running. Gated by `WEB_AUDIT_ENABLED` + `WEB_AUDIT_LIMITER_IP` (30 per hour per IP, no anon fallback).
@@ -213,6 +215,13 @@ upgraded, so it names the same record as the bare host.
 ```jsonc
 // tools/call audit_website { "url": "anc.dev" }
 ```
+
+**Bare and `www.` hosts.** A bare host and its `www.` host are one site when the first redirect from either root lands
+on the other. An audit checks that first, probes the host the redirect lands on, and stores one scorecard under the bare
+host: `target` and `scorecard_url` name the bare host, `scorecard.target_url` is the origin the checks ran at, and
+`scorecard.tool.url` is the bare host's origin. The envelope's own `target_url` carries the same value as `scorecard.target_url`. `get_website_audit` for `www.<domain>` reads that scorecard when it
+records the fold, and `list_website_audits` lists the site once. A `www.` host with no such redirect is its own site, and
+a miss on it may mean the pair has not been audited since folds were recorded.
 
 **Declared hosts.** By default a website audit also contacts third-party hosts the site declares. An MCP server named in
 the site's server card receives GET requests for the documents that could confirm it (a card at
@@ -242,8 +251,11 @@ every non-passing row. `get_web_remediation` is for a check id you do not alread
 
 A read also carries where each row's evidence came from and what the audit could not run:
 
-- `host`: the host a row's evidence came from, when there is exactly one; a row that recorded none reads as the audited
-  host ([results](/web-scorecard-schema#results)).
+- `site_hosts`: on a site whose bare or `www.` host redirects to the other, both hosts, bare first; `target` and
+  `scorecard_url` name the bare host and `target_url` is where the checks ran
+  ([top-level fields](/web-scorecard-schema#top-level-fields)).
+- `host`: the host a row's evidence came from, when there is exactly one; a row that recorded none reads as the host the
+  checks ran at (`target_url`'s host) ([results](/web-scorecard-schema#results)).
 - `hosts[]`: every host a row's evidence came from, as `{ host }`, with each one's own `status` and `na_reason` on a row
   over several hosts ([results](/web-scorecard-schema#results)).
 - `access_remedy`: on a row the public audit could not run, why it could not

@@ -28,7 +28,16 @@
 
 import { isNotRunReason } from '../../shared/web-audit-findings';
 import { resultLine } from '../../shared/web-audit-result-line';
-import { entryHostOf, type RowHost, recordedHostOf, recordsRowHosts, rowHostOf, rowHostOutcomes } from './provenance';
+import {
+  entryHostOf,
+  type RowHost,
+  readSiteHosts,
+  recordedHostOf,
+  recordsRowHosts,
+  rowAtAuditedHost,
+  rowHostOf,
+  rowHostOutcomes,
+} from './provenance';
 import { notRunRemedy, notRunScoreNote } from './provenance-copy';
 import { assembleRemediation, isFixableStatus, type WebRemediationCatalog } from './remediation';
 import { richMarkdown } from './rich-text';
@@ -69,7 +78,7 @@ type EnrichableRow = {
  * carries a results[] array. A minimal or malformed payload (no array)
  * passes through the enrichers unchanged.
  */
-function hasResults(value: unknown): value is { results: EnrichableRow[]; target_url?: unknown } {
+function hasResults(value: unknown): value is { results: EnrichableRow[]; target_url?: unknown; site_hosts?: unknown } {
   return typeof value === 'object' && value !== null && Array.isArray((value as { results?: unknown }).results);
 }
 
@@ -157,7 +166,9 @@ export function attachInlineRemediation(
   const domain = entryHost ?? '';
   let notRun = 0;
   let signIn = false;
-  const results = scorecard.results.map((row) => {
+  const siteHosts = readSiteHosts(scorecard.site_hosts);
+  const results = scorecard.results.map((stored) => {
+    const row = rowAtAuditedHost(stored, entryHost, siteHosts);
     const host = rowHostOf(row, entryHost);
     const result = resultLine(row.status, row.evidence ?? null, row.na_reason, host, rowHostOutcomes(row));
     const successor = successorOf(row.id, retired);

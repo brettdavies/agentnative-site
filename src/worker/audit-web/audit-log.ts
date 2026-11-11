@@ -9,7 +9,10 @@
 //     from the declared-hosts trail, the request count, the elapsed time,
 //     the requests per declared domain under that domain's hash, the same
 //     hash its budget's KV key carries, and the reservations a budget layer
-//     error decided, so an outage reads apart from a spent hour. It also
+//     error decided, so an outage reads apart from a spent hour. A run that
+//     resolved a pair also records its outcome and the status of each root's
+//     first request, so a fold that stops reaching a sibling reads apart from
+//     one that never folded. It also
 //     records what the request memo held: the requests sent and answered
 //     from the memo, the body bytes kept, and the bodies either cap turned
 //     away, so the memo's caps can be sized from what audits actually keep.
@@ -25,6 +28,7 @@ import type { AuditEvent } from './engine';
 import type { FollowStats } from './follow';
 import type { DeclaredHostEntry } from './provenance';
 import type { MemoStats } from './request-hop';
+import type { PairReport } from './site-pair';
 
 export interface AuditLogEnv {
   WEB_AUDIT_DEBUG?: string;
@@ -74,6 +78,16 @@ function memoFields(stats: MemoStats): Record<string, number> {
   };
 }
 
+/** The run record's pair fields: what the pair resolution observed, and the status each root's first request got. */
+function pairFields(pair: PairReport | undefined): Record<string, unknown> {
+  if (pair === undefined) return {};
+  return {
+    pair_outcome: pair.outcome,
+    pair_requested_status: pair.requestedStatus,
+    pair_sibling_status: pair.siblingStatus,
+  };
+}
+
 /**
  * Pass-through wrapper over the engine's event stream that emits the
  * per-audit summary (and per-event debug lines) as events flow, so the
@@ -92,6 +106,7 @@ export async function* instrumentAuditEvents(
   let endpoint: string | null = null;
   let follow: Record<string, unknown> = {};
   let memo: Record<string, number> = {};
+  let pair: Record<string, unknown> = {};
   try {
     for await (const event of events) {
       if (event.type === 'discovery') {
@@ -112,8 +127,10 @@ export async function* instrumentAuditEvents(
         terminal = event.complete ? 'complete' : 'incomplete';
         follow = await followFields(event.scorecard.declared_hosts ?? [], event.follow);
         memo = memoFields(event.memo);
+        pair = pairFields(event.pair);
       } else if (event.type === 'unreachable') {
         terminal = 'unreachable';
+        pair = pairFields(event.pair);
       }
       yield event;
     }
@@ -128,6 +145,7 @@ export async function* instrumentAuditEvents(
         mcp_endpoint: endpoint,
         elapsed_ms: Date.now() - started,
         checks: statusCounts,
+        ...pair,
         ...follow,
         ...memo,
       },

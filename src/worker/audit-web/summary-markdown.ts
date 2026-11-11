@@ -119,7 +119,7 @@ export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
   lines.push(
     `# ${model.name} — Agent-Readiness Audit`,
     '',
-    `Website: [${model.targetUrl}](${model.targetUrl})`,
+    `Website: [${model.targetUrl}](${model.targetUrl})${model.auditedAt === null ? '' : ` (audited at ${model.auditedAt})`}`,
     '',
     `**Score:** ${model.relative}% (${RELATIVE_SUBLABEL}${clause})`,
     `**Global:** ${model.global}% ${GLOBAL_LABEL}`,

@@ -8,6 +8,7 @@ import type { RetainedDocumentKey } from '../../shared/web-audit-documents';
 import type { ProbeResponse } from './assert';
 import { resolveUrl } from './handlers/shared';
 import type { EvidenceItem } from './handlers/types';
+import { onSite } from './site-origins';
 
 export { MCP_SERVER_CARD_TYPE };
 
@@ -207,16 +208,8 @@ export interface CardRead {
   declaration: McpDeclaration | null;
   /** The card's other remotes: one card names one endpoint of record, so these are never followed. */
   others: McpDeclaration[];
-  /** The declared endpoint when it is on the audited origin and not a template. */
+  /** The declared endpoint when it is on the audited site and not a template. */
   endpoint: string | null;
-}
-
-export function sameOrigin(candidate: string, base: string): boolean {
-  try {
-    return new URL(candidate).origin === new URL(base).origin;
-  } catch {
-    return false;
-  }
 }
 
 /** A SEP-2127 card's remotes other than the one `cardEndpoint` takes. */
@@ -236,6 +229,7 @@ export function readCard(
   response: ProbeResponse,
   inline: boolean,
   base: string,
+  siteOrigins?: readonly string[],
 ): CardRead {
   const answered = inline || response.status === 200;
   const card = answered ? parseJsonObject(response) : null;
@@ -259,7 +253,7 @@ export function readCard(
   return {
     ...read,
     declaration: { kind: 'mcp-endpoint', url: resolved, source },
-    endpoint: sameOrigin(resolved, base) ? resolved : null,
+    endpoint: onSite(resolved, base, siteOrigins) ? resolved : null,
   };
 }
 

@@ -117,6 +117,8 @@ export interface WebScorecard {
   follow_declarations?: boolean;
   /** The declared-hosts trail; absent reads as no trail, which is not an empty one. */
   declared_hosts?: DeclaredHostEntry[];
+  /** Both hosts of a site whose bare or www host redirects to the other, bare first; absent means no fold was recorded. */
+  site_hosts?: string[];
   /** The registry fingerprint prefix the score was computed under; never set by the engine. */
   registry_fingerprint?: string;
   summary: Record<ScorecardStatus, number>;
@@ -162,6 +164,8 @@ export interface WebScorecardMeta {
   /** The effective follow state and the trail it produced; a build given neither records neither. */
   followDeclarations?: boolean;
   declaredHosts?: DeclaredHostEntry[];
+  /** Both hosts of a folded pair, bare first; the site is then named by `domain` and its URL is built from it. */
+  siteHosts?: readonly string[];
   registry: Pick<WebAuditRegistry, 'category_order' | 'categories' | 'checks' | 'alternatives'>;
   scoreConfig?: ScoreConfig;
 }
@@ -198,7 +202,11 @@ export function buildWebScorecard(results: EngineResult[], meta: WebScorecardMet
     target_url: meta.targetUrl,
     mcp_endpoint: meta.mcpEndpoint,
     mcp_discovery: meta.discoveryEvidence,
-    tool: { name: meta.domain, url: meta.targetUrl },
+    tool: {
+      name: meta.domain,
+      url: meta.siteHosts ? `${new URL(meta.targetUrl).protocol}//${meta.domain}/` : meta.targetUrl,
+    },
+    ...(meta.siteHosts ? { site_hosts: [...meta.siteHosts] } : {}),
     audience: null,
     audit_profile: null,
     site_type: meta.siteType ?? null,

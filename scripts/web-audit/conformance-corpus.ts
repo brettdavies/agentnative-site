@@ -498,7 +498,7 @@ always recorded as \`TimeoutError: deadline exceeded\`. Redirects are ordinary e
 header) that the guarded fetch above the seam follows with a new request, except where the engine keeps a probe off
 hosts nothing confirmed. The guarded fetch sends nothing over \`http\`: a request URL on \`http\` never reaches the seam
 and reads as a failure with the error \`not requested: not https\`, and a redirect to \`http\` it would otherwise follow
-is not taken, so the probe's answer is that redirect's status and headers with an empty body and the error \`redirect
+is not taken, so the probe's answer is the status and headers of that redirect with an empty body and the error \`redirect
 refused: <status> to <location>: not https\`. A request to the MCP endpoint on the audited origin (discovery's
 common-path POSTs and every probe of that endpoint) takes only hops that keep the scheme, host, and port: discovery
 records a redirect to another origin with its target and declares the target, and any other probe reads it as a
@@ -506,6 +506,15 @@ refused redirect. A probe of an endpoint on a declared host takes no redirect at
 document on that endpoint's origin (a registry path written with \`{mcp_origin}\`, which the engine replaces with the
 endpoint's scheme, host, and port). The GET an API anchor host off the audited origin receives takes only hops that
 keep the scheme, host, and port, and a redirect to another origin is its answer.
+
+Every run of a bare host or its \`www.\` sibling also requests the other host's root with a GET that takes no redirect,
+so the strict scenarios list that request as an exchange. When either root's first redirect (the request is made over
+\`https\`) lands on the other host of the pair, the two hosts are one site: the scorecard's \`tool.name\` is the bare host,
+\`target_url\` is the origin the checks ran at, and \`site_hosts\` lists the bare host then the \`www.\` host. Every path
+the run requests, the discovery documents and the MCP endpoint included, is then requested at the \`target_url\` origin,
+and a redirect between the two hosts of a folded site is a hop that stays on the site. A pair that does not fold records
+no \`site_hosts\`, and the sibling's answer plays no further part in the run. A run whose host gives no answer at all
+ends unreachable, and when the sibling's root answered, the reason names that host.
 
 ## scorecard.json
 
@@ -526,7 +535,7 @@ Each row's \`hosts\` lists the distinct hosts its raw evidence items were reques
 requested because it is not \`https\`, reached no host. An item with a string \`url\` counts that URL's host; one with no
 \`url\` and a non-empty string \`host\` counts that value, which is how a row a declared host kept from being evaluated
 names that host. The host is the WHATWG URL \`host\`, which keeps a non-default port (\`example.com:8443\`), so an engine
-whose URL library drops the port must add it back. An item whose \`url\` does not parse contributes nothing, and a row
+whose URL library drops the port must add it back. An item whose \`url\` fails to parse contributes nothing, and a row
 with no counting item has \`hosts: []\`. \`host\` is present, holding the same value, exactly when \`hosts\` has one entry.
 A row that evaluates several targets (the API rows when the api-catalog lists API anchors: one per declared
 description, one per anchor host) marks each target's items with its outcome, and when those items name more than one
@@ -536,7 +545,7 @@ was evaluated. The row's own status is the same rule over all its targets.
 
 \`declared_hosts\` holds one entry per URL the target's discovery documents declare off its origin, in declaration
 order (the AI catalog's card entries, the card under the discovered endpoint, then the well-known cards; the endpoints a
-followed card document names come right after that document's entry), then the api-catalog's anchors in linkset order
+followed card document names come right after that document's entry), then the api-catalog's anchors in \`linkset\` order
 (\`api-anchor\`; one with no \`service-desc\` other than an MCP surface reads \`not-followed\` with reason
 \`no-service-desc\`), then the description each API anchor declares (\`api-description\`) in the same order, then the
 targets the common-path POSTs were redirected to off the origin, in probe order and with the redirecting path as

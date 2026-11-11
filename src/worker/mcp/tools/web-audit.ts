@@ -23,7 +23,7 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { TerminalEvent } from '../../../shared/audit-events';
-import { leaderboardPath, scorePath } from '../../../shared/audit-routes';
+import { leaderboardPath, scorePath, sitePairOf } from '../../../shared/audit-routes';
 import { awaitInFlightTerminal, type InFlightEnv, readInFlight } from '../../audit/inflight';
 import type { AuditLogEnv } from '../../audit-web/audit-log';
 import {
@@ -38,6 +38,7 @@ import {
   patchStoredPublicListing,
   scorecardWithPublicListing,
   WEB_AUDIT_STALE_AFTER_MS,
+  WebCacheUnavailableError,
 } from '../../audit-web/cache';
 import { prepareWebTarget, type WebTarget, webEnvelope } from '../../audit-web/core';
 import type { DomainBudgetEnv } from '../../audit-web/domain-budget';
@@ -52,6 +53,7 @@ import {
   standingPublicListing,
 } from '../../audit-web/public-listing';
 import { boardExcludeDomains } from '../../audit-web/seed';
+import { resolveWebTarget, type WebResolution } from '../../audit-web/web-target';
 import type { NotifyEnv } from '../../notify';
 import { SPEC_VERSION } from '../../spec-version.gen';
 import { getMcpRequest } from '../request-context';
@@ -140,9 +142,18 @@ function siteTarget(url: string): { ok: true; target: WebTarget } | { ok: false;
   return prepareWebTarget(parsed.host);
 }
 
-/** The site's stored audit at its https key; null on a miss. */
-async function readCachedAudit(env: WebAuditToolsEnv, target: WebTarget): Promise<CachedWebAudit | null> {
-  return cacheGet(env, await keyFor(target.canonical, SPEC_VERSION));
+/** The site's stored audit at its https key, which the resolution may already have read; null on a miss. */
+async function readCachedAudit(env: WebAuditToolsEnv, resolution: WebResolution): Promise<CachedWebAudit | null> {
+  if (resolution.stored !== undefined) return resolution.stored;
+  return cacheGet(env, await keyFor(resolution.target.canonical, SPEC_VERSION));
+}
+
+/** The answer when the record that names a `www.` host's site could not be read; the host's own record is never read in its place. */
+function cacheUnavailable(host: string) {
+  const site = sitePairOf(host)?.apex ?? host;
+  return isError(
+    `cache_unavailable: the stored scorecard for ${site} could not be read right now; it has not been removed. Retry get_website_audit in 30 seconds.`,
+  );
 }
 
 export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv): void {
@@ -152,7 +163,8 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       title: 'Get a cached website audit',
       description:
         'Read a cached website agent-readiness scorecard by URL without re-running the audit. Returns isError:false for ' +
-        'every outcome: a hit returns { found:true, ...envelope } carrying kind, tier, target, scorecard_url, ' +
+        'a hit, a target already being audited, and a miss, and isError:true for an invalid or refused url and with ' +
+        'cache_unavailable when a www.<domain> read cannot reach the <domain> record. A hit returns { found:true, ...envelope } carrying kind, tier, target, scorecard_url, ' +
         'markdown_url, json_url, freshness and the scorecard, the same envelope the result page serves at its ' +
         'json_url; a target already being audited returns { found:false, in_progress:true, started_at }; a miss ' +
         'returns { found:false, next_tool:"audit_website" }. freshness.cached is always true on a hit; ' +
@@ -165,7 +177,10 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
           .string()
           .describe(
             'The website URL or bare domain, e.g. "anc.dev" or "https://anc.dev/". Read at its https origin; an ' +
-              'http:// URL reads the https record.',
+              'http:// URL reads the https record. www.<domain> reads the <domain> scorecard when that scorecard ' +
+              'records that one of the two hosts redirects to the other (its site_hosts lists both); target and ' +
+              'scorecard_url then name <domain>. Otherwise www.<domain> is its own site, and a miss there may mean ' +
+              'the pair has not been audited since folds were recorded.',
           ),
       },
       annotations: { readOnlyHint: true },
@@ -174,8 +189,15 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       const siteUrl = siteOrigin();
       const site = siteTarget(url);
       if (!site.ok) return isError(site.reason);
-      const domain = site.target.host;
-      const hit = await readCachedAudit(env, site.target);
+      let resolution: WebResolution;
+      try {
+        resolution = await resolveWebTarget(env, site.target, 'strict');
+      } catch (err) {
+        if (err instanceof WebCacheUnavailableError) return cacheUnavailable(site.target.host);
+        throw err;
+      }
+      const domain = resolution.target.host;
+      const hit = await readCachedAudit(env, resolution);
       if (hit) {
         const envelope = await webEnvelope(env, { tier: 'cache', host: domain, record: hit, origin: siteUrl });
         return textContent({ found: true, ...envelope });
@@ -217,7 +239,11 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         url: z
           .string()
           .describe(
-            'The website URL or bare domain to audit; audited at its https origin; an http:// URL is upgraded.',
+            'The website URL or bare domain to audit; audited at its https origin; an http:// URL is upgraded. ' +
+              'The audit first checks whether <domain> or www.<domain> redirects to the other. If one does, they are ' +
+              'one site named <domain>: target and scorecard_url name <domain>, scorecard.target_url is the origin ' +
+              'the checks ran at, and scorecard.site_hosts lists both hosts. A www. host with no such redirect is ' +
+              'audited as its own site.',
           ),
         site_type: z
           .enum(['content', 'api'])
@@ -252,7 +278,8 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       const siteUrl = siteOrigin();
       const site = siteTarget(url);
       if (!site.ok) return isError(site.reason);
-      const target = site.target;
+      const resolution = await resolveWebTarget(env, site.target, 'tolerant');
+      const target = resolution.target;
       const domain = target.host;
       // A run that does not follow declared hosts is never saved, so no
       // stored scorecard answers it, it joins no run, and it may not change
@@ -264,7 +291,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       // A hit older than the staleness threshold falls through to the
       // fresh path (still behind every gate below) so a re-run refreshes
       // the board.
-      const cached = await readCachedAudit(env, target);
+      const cached = await readCachedAudit(env, resolution);
       // Resolve the opt-in flag against the stored entry once. A fresh hit
       // only short-circuits when the request asks for no flag change; an
       // explicit, differing public_listing falls through the full gate stack
@@ -344,6 +371,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       if (optedOut) {
         const run = await hostWebAudit(env, {
           target,
+          requested: resolution.requested,
           siteType: site_type ?? null,
           listing: standingPublicListing(cached),
           followDeclarations: false,
@@ -390,8 +418,10 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       // caller that arrives mid-run attaches to it.
       const run = await hostWebAudit(env, {
         target,
+        requested: resolution.requested,
         siteType: site_type ?? null,
         listing: resolveAuditListing(listingWrite, public_listing, cached),
+        explicitListing: public_listing,
         followDeclarations: true,
         origin: siteUrl,
         attach: public_listing === undefined,
@@ -410,6 +440,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         'Return the website half of the leaderboard (curated + opted-in). Each entry carries domain, url, name, ' +
         'score_pct, and scorecard_url. view "curated" (the default) returns only the curated board; ' +
         `view "all" adds the user-submitted domains that opted in to public listing, bounded to the first ${LIST_ALL_MAX_USER_ROWS}. ` +
+        'A site whose bare or www. host redirects to the other is listed once, under the bare domain. ' +
         'An empty list means the board is mid-rescore; get_website_audit still serves per-domain results.',
       inputSchema: {
         view: z

@@ -150,7 +150,7 @@ async function probeHost(
   if (target.plaintext !== undefined) {
     return { status: 'absent', evidence: [{ url: target.anchors[0]?.url, ...plaintextItem(target.plaintext) }] };
   }
-  const derived = deriveHostProbeUrl(target, ctx.apiDescriptionBodies ?? new Map());
+  const derived = deriveHostProbeUrl(target, ctx.apiDescriptionBodies ?? new Map(), ctx.fetchOptions?.siteOrigins);
   return probeOnce(op, derived, anchorHostGet(target, timeoutMs, ctx));
 }
 
@@ -163,7 +163,11 @@ export async function runApiHygiene(check: WebCheck, ctx: HandlerContext): Promi
     const maxBodyBytes = op === 'rate-limit' ? STATUS_ONLY_BODY_BYTES : AUDIT_PROBE_MAX_BODY_BYTES;
     const get: HostGet = (url) =>
       guardedFetch(url, { method: 'GET' }, { ...ctx.fetchOptions, timeoutMs, maxBodyBytes });
-    return probeOnce(op, deriveApiProbeUrl(ctx.retainedBodies?.get('openapi') ?? '', ctx.base), get);
+    return probeOnce(
+      op,
+      deriveApiProbeUrl(ctx.retainedBodies?.get('openapi') ?? '', ctx.base, ctx.fetchOptions?.siteOrigins),
+      get,
+    );
   }
   if (targets.hosts.length === 0) {
     return { status: 'na', evidence: [{ why: ['no API anchor host the audit can probe'] }] };

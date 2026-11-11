@@ -138,6 +138,19 @@ export function wireProbesTo(seen: readonly Seen[], host: string): Seen[] {
   return seen.filter((r) => (r.method === 'POST' || r.method === 'OPTIONS') && new URL(r.url).host === host);
 }
 
+/**
+ * Requests to hosts the audited site did not publish: everything but the audited host, DNS lookups, and the
+ * root request that resolves whether the host and its www or bare sibling are one site.
+ */
+export function requestsToOtherHosts(seen: readonly Seen[], site = 'example.com'): Seen[] {
+  const sibling = site.startsWith('www.') ? site.slice('www.'.length) : `www.${site}`;
+  return seen.filter((r) => {
+    const url = new URL(r.url);
+    if (url.host === site || r.url.includes('dns')) return false;
+    return !(url.host === sibling && r.method === 'GET' && url.pathname === '/');
+  });
+}
+
 export function requestsTo(seen: readonly Seen[], host: string): Seen[] {
   return seen.filter((r) => new URL(r.url).host === host);
 }

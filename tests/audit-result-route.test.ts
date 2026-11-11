@@ -135,6 +135,8 @@ type Overrides = Partial<{
   assets: Record<string, string>;
   failRegistry: boolean;
   failCacheGet: boolean;
+  /** Cache keys whose read throws; every other key reads normally. */
+  failCacheKeys: string[];
   aggregate: unknown;
   sitekey: string;
   seed: unknown[];
@@ -204,6 +206,9 @@ async function makeEnv(overrides: Overrides = {}): Promise<TestEnv> {
     SCORE_CACHE: {
       async get(key: string) {
         r2Gets.push(key);
+        if (overrides.failCacheKeys?.includes(key)) {
+          throw new Error('get: We encountered an internal error. Please try again. (10001)');
+        }
         if (overrides.failCacheGet && key !== aggregateKey) {
           throw new Error('get: We encountered an internal error. Please try again. (10001)');
         }
@@ -1384,5 +1389,126 @@ describe('scorecard clip', () => {
     expect(first.headers.get('x-anc-clip')).toBe('queued');
     state = 'rendering';
     expect((await route('/score/anc.dev?v=2', env, html)).headers.get('x-anc-clip')).toBe('rendering');
+  });
+});
+
+describe('a www host that a recorded fold names', () => {
+  const FOLDED = {
+    ...WEB_RECORD,
+    target_url: 'https://cnn.com/',
+    scorecard: {
+      ...WEB_RECORD.scorecard,
+      target_url: 'https://www.cnn.com/',
+      tool: { name: 'cnn.com', url: 'https://cnn.com/' },
+      site_hosts: ['cnn.com', 'www.cnn.com'],
+    },
+  };
+  const OWN = { ...WEB_RECORD, target_url: 'https://www.cnn.com/' };
+
+  async function foldedEnv(overrides: Overrides = {}): Promise<TestEnv> {
+    return makeEnv({ cache: { [await webKeyFor('https://cnn.com/', SPEC_VERSION)]: FOLDED }, ...overrides });
+  }
+
+  test('every representation of /score/www.cnn.com answers 301 to the same representation of the site', async () => {
+    const env = await foldedEnv();
+    const answers: Record<string, string | null> = {};
+    for (const path of ['/score/www.cnn.com', '/score/www.cnn.com/md', '/score/www.cnn.com/json']) {
+      const res = await route(path, env);
+      expect(res.status).toBe(301);
+      answers[path] = res.headers.get('location');
+    }
+    expect(answers).toEqual({
+      '/score/www.cnn.com': '/score/cnn.com',
+      '/score/www.cnn.com/md': '/score/cnn.com/md',
+      '/score/www.cnn.com/json': '/score/cnn.com/json',
+    });
+  });
+
+  test('the JSON redirect carries the CORS header, and each redirect carries the www page tag', async () => {
+    const env = await foldedEnv();
+    const json = await route('/score/www.cnn.com/json', env);
+    expect(json.headers.get('access-control-allow-origin')).toBe('*');
+    for (const path of ['/score/www.cnn.com', '/score/www.cnn.com/md', '/score/www.cnn.com/json']) {
+      expect((await route(path, env)).headers.get('cache-tag')).toBe('web:www.cnn.com');
+    }
+  });
+
+  test('each redirect has no body, so it carries no alternate-representation Link and no Content-Type', async () => {
+    const env = await foldedEnv();
+    for (const path of ['/score/www.cnn.com', '/score/www.cnn.com/md', '/score/www.cnn.com/json']) {
+      const res = await route(path, env);
+      expect({
+        path,
+        status: res.status,
+        link: res.headers.get('link'),
+        type: res.headers.get('content-type'),
+      }).toEqual({
+        path,
+        status: 301,
+        link: null,
+        type: null,
+      });
+    }
+  });
+
+  test('the site itself is served from its record, and the record names where the checks ran', async () => {
+    const env = await foldedEnv();
+    const res = await route('/score/cnn.com/json', env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { target: string; target_url: string };
+    expect(body).toMatchObject({ target: 'cnn.com', target_url: 'https://www.cnn.com/' });
+  });
+
+  test('a record of cnn.com that records no fold leaves /score/www.cnn.com serving the www record', async () => {
+    const env = await makeEnv({
+      cache: {
+        [await webKeyFor('https://cnn.com/', SPEC_VERSION)]: { ...FOLDED, scorecard: WEB_RECORD.scorecard },
+        [await webKeyFor('https://www.cnn.com/', SPEC_VERSION)]: OWN,
+      },
+    });
+    const res = await route('/score/www.cnn.com/json', env);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { target: string }).target).toBe('www.cnn.com');
+  });
+
+  test('with no record of either host /score/www.cnn.com is the missing page', async () => {
+    const env = await makeEnv();
+    expect((await route('/score/www.cnn.com', env)).status).toBe(404);
+  });
+
+  test('an unreadable record of cnn.com answers 503 in all three representations without reading the www record', async () => {
+    const env = await foldedEnv({ failCacheGet: true });
+    for (const path of ['/score/www.cnn.com', '/score/www.cnn.com/md', '/score/www.cnn.com/json']) {
+      const res = await route(path, env);
+      expect({ path, status: res.status, retry: res.headers.get('retry-after') }).toEqual({
+        path,
+        status: 503,
+        retry: '30',
+      });
+      expect(await res.text()).toContain('The scorecard for cnn.com could not be read');
+    }
+    const wwwKey = await webKeyFor('https://www.cnn.com/', SPEC_VERSION);
+    expect(env._r2Gets).not.toContain(wwwKey);
+  });
+
+  test('an unreadable record of www.cnn.com, when the record of cnn.com records no fold, names www.cnn.com in the 503', async () => {
+    const env = await makeEnv({
+      cache: { [await webKeyFor('https://cnn.com/', SPEC_VERSION)]: { ...FOLDED, scorecard: WEB_RECORD.scorecard } },
+      failCacheKeys: [await webKeyFor('https://www.cnn.com/', SPEC_VERSION)],
+    });
+    for (const path of ['/score/www.cnn.com', '/score/www.cnn.com/md', '/score/www.cnn.com/json']) {
+      const res = await route(path, env);
+      expect({ path, status: res.status }).toEqual({ path, status: 503 });
+      expect(await res.text()).toContain('The scorecard for www.cnn.com could not be read');
+    }
+  });
+
+  test('a run in flight for cnn.com answers the redirected JSON request with 202', async () => {
+    const env = await foldedEnv({
+      kvSeed: { 'inflight:web:cnn.com': JSON.stringify({ started_at: '2026-09-10T20:00:00.000Z' }) },
+    });
+    const redirected = await route('/score/www.cnn.com/json', env);
+    expect(redirected.status).toBe(301);
+    expect((await route('/score/cnn.com/json', env)).status).toBe(202);
   });
 });

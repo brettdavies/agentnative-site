@@ -4,8 +4,9 @@
 
 import { CANONICAL_SITE_URL } from '../../shared/site-url';
 import { hostOf } from '../../shared/url-host';
-import { type Declaration, isTemplatedUrl, sameOrigin } from './discovery-documents';
+import { type Declaration, isTemplatedUrl } from './discovery-documents';
 import { type AdmittedBy, normalizeEndpointUrl } from './reciprocity';
+import { onSite } from './site-origins';
 import { parseIpv4Literal, validatePublicUrl } from './ssrf';
 
 const SELF_ZONE = new URL(CANONICAL_SITE_URL).hostname;
@@ -49,9 +50,9 @@ export function declarationKey(declaration: Pick<Declaration, 'kind' | 'url'>): 
   return `${declaration.kind} ${normalizeEndpointUrl(declaration.url) ?? declaration.url}`;
 }
 
-/** A declaration names a host other than the audited one: off its origin, or a template it cannot be placed on. */
-export function declaresHost(declaration: Declaration, base: string): boolean {
-  return !sameOrigin(declaration.url, base);
+/** A declaration names a host outside the audited site: off its origins, or a template it cannot be placed on. */
+export function declaresHost(declaration: Declaration, base: string, siteOrigins?: readonly string[]): boolean {
+  return !onSite(declaration.url, base, siteOrigins);
 }
 
 export function trailEntry(declaration: Declaration, settled: Settled): TrailEntry {
