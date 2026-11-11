@@ -3,12 +3,14 @@
 // and how a request for either host is keyed once a fold is recorded.
 
 import { beforeEach, describe, expect, test } from 'bun:test';
+import type { AuditEvent } from '../src/shared/audit-events';
+import { rowHostPhrase } from '../src/shared/scoring-copy';
 import { sha256Hex, keyFor as webKeyFor } from '../src/worker/audit-web/cache';
 import { _resetIndexCache } from '../src/worker/score/core';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
-import { call, makeEnv, newTracker, post, purgeCtx, WEB_RECORD } from './helpers/audit-api-env';
-import { html, redirect, router, type Seen } from './helpers/follow-fixtures';
+import { call, makeEnv, ndjson, newTracker, post, purgeCtx, WEB_RECORD } from './helpers/audit-api-env';
+import { html, json, redirect, router, type Seen } from './helpers/follow-fixtures';
 
 beforeEach(() => {
   _resetIndexCache();
@@ -16,6 +18,7 @@ beforeEach(() => {
 });
 
 const STALE_MS = 10 * 60_000;
+const STREAM = { accept: 'application/x-ndjson' };
 
 type Stored = {
   scored_at?: string;
@@ -62,6 +65,7 @@ type Fold = {
   cachePutThrows?: boolean;
   tracker?: ReturnType<typeof newTracker>;
   kvSeed?: Record<string, string>;
+  followSwitch?: string;
 };
 
 /** Both roots redirect nowhere and answer 200. */
@@ -76,6 +80,7 @@ async function harness(fold: Fold) {
     cachePutThrows: fold.cachePutThrows,
     tracker: fold.tracker,
     kvSeed: fold.kvSeed,
+    followSwitch: fold.followSwitch,
     deps: { probeFetch: router(fold.routes, seen) },
   });
   const deleted: string[] = [];
@@ -97,6 +102,13 @@ async function harness(fold: Fold) {
       const { res } = await call(post({ turnstile_token: 'x', ...body }), env, ctx);
       await Promise.all(ctx._promises);
       return { res, purged: ctx.purged.flat() };
+    },
+    async stream(body: Record<string, unknown>) {
+      const ctx = purgeCtx();
+      const { res } = await call(post({ turnstile_token: 'x', ...body }, STREAM), env, ctx);
+      const events = (await ndjson(res)) as AuditEvent[];
+      await Promise.all(ctx._promises);
+      return events;
     },
   };
 }
@@ -265,6 +277,43 @@ describe('POST /api/score: the listing a folded write carries', () => {
   });
 });
 
+describe('POST /api/score: a streamed audit of a folded site', () => {
+  type Check = Extract<AuditEvent, { type: 'check' }>;
+
+  async function checksOf(routes: Record<string, () => Response>, target: string): Promise<Check[]> {
+    const h = await harness({ routes, followSwitch: 'true' });
+    return (await h.stream({ target })).filter((e): e is Check => e.type === 'check');
+  }
+
+  test('a row evaluated on the other host of the pair names no host', async () => {
+    const checks = await checksOf(
+      {
+        'GET https://a.test/': () => redirect('https://www.a.test/', 301),
+        'GET https://www.a.test/': () => html(),
+        'GET https://www.a.test/.well-known/mcp.json': () =>
+          json({ name: 'a', mcp_endpoint: 'https://www.a.test/mcp' }),
+      },
+      'a.test',
+    );
+    expect(checks.length).toBeGreaterThan(0);
+    expect(checks.filter((c) => c.host !== undefined || c.hosts !== undefined)).toEqual([]);
+    expect(checks.map((c) => rowHostPhrase(c, 'a.test', null)).filter((phrase) => phrase !== null)).toEqual([]);
+  });
+
+  test('a row evaluated on a host outside the pair still names it', async () => {
+    const checks = await checksOf(
+      {
+        'GET https://a.test/': () => html(),
+        'GET https://www.a.test/': () => html(),
+        'GET https://a.test/.well-known/mcp.json': () =>
+          json({ name: 'a', mcp_endpoint: 'https://mcp.example.net/mcp' }),
+      },
+      'a.test',
+    );
+    expect(checks.some((c) => c.host === 'mcp.example.net')).toBe(true);
+  });
+});
+
 describe('POST /api/score: a recorded fold', () => {
   const FOLD = ['a.test', 'www.a.test'];
 
@@ -307,6 +356,17 @@ describe('POST /api/score: a recorded fold', () => {
     expect((await h.storedRecord('a.test'))?.scorecard.site_hosts).toBeUndefined();
     expect(h.deleted).toEqual([]);
     expect(purged).toContain('web:www.a.test');
+  });
+
+  test('ending a fold leaves the bare host record naming the origin its checks ran at', async () => {
+    const folded = stored('a.test', { siteHosts: FOLD });
+    folded.scorecard.target_url = 'https://www.a.test/';
+    const h = await harness({ routes: bothAnswer('a.test'), records: { 'a.test': folded } });
+    await h.audit({ target: 'www.a.test' });
+    const kept = (await h.storedRecord('a.test'))?.scorecard;
+    expect(kept?.site_hosts).toBeUndefined();
+    expect(kept?.target_url).toBe('https://www.a.test/');
+    expect(kept?.tool?.url).toBe(kept?.target_url as string);
   });
 
   test('a request for www.a.test whose pair gives no answer writes a.test with the fold kept', async () => {

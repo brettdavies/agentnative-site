@@ -115,7 +115,8 @@ export async function planSiteRecord(env: WebCacheEnv, input: SiteRecordInput): 
 export async function settleSiteRecord(env: WebCacheEnv, record: SiteRecord): Promise<void> {
   if (record.supersedes !== null) await remove(env, record.supersedes.canonical, SPEC_VERSION);
   if (record.foldToDrop !== null) {
-    const { site_hosts: _fold, ...rest } = record.foldToDrop.scorecard as Record<string, unknown>;
-    await patchStoredScorecard(env, record.foldToDrop, rest, 'web-cache.put');
+    const { site_hosts: _fold, ...rest } = record.foldToDrop.scorecard as WebScorecard;
+    const tool = { ...rest.tool, url: rest.target_url };
+    await patchStoredScorecard(env, record.foldToDrop, { ...rest, tool }, 'web-cache.put');
   }
 }
