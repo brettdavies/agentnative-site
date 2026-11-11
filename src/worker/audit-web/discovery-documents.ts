@@ -126,9 +126,19 @@ export function cardEndpoint(card: JsonObject): string | null {
   return null;
 }
 
-/** A card declares authentication the way SEP-1649 cards spell it. */
-export function cardHasAuthField(card: JsonObject): boolean {
-  return card.authentication !== undefined || card.auth !== undefined;
+/** A SEP-1649 `authentication` object that says sign-in is required or lists at least one scheme. */
+function declaresAuthentication(value: unknown): boolean {
+  if (!isJsonObject(value)) return false;
+  if (value.required === true) return true;
+  return Array.isArray(value.schemes) && value.schemes.some((scheme) => typeof scheme === 'string' && scheme !== '');
+}
+
+/**
+ * A card declares authentication the way SEP-1649 cards spell it. A card
+ * saying `required: false` with no scheme documents an open server.
+ */
+export function cardDeclaresAuthentication(card: JsonObject): boolean {
+  return declaresAuthentication(card.authentication) || declaresAuthentication(card.auth);
 }
 
 /** A URL carrying a `{variable}` needs values the auditor does not have, so it is never requested. */

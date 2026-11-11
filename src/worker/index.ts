@@ -339,31 +339,6 @@ async function buildOriginAwareJsonBody(
   }
 }
 
-function rewriteOAuthProtectedResource(data: Record<string, unknown>, origin: string): void {
-  data.resource = `${origin}/mcp`;
-  data.resource_documentation = `${origin}/auth.md`;
-  if (Array.isArray(data.authorization_servers)) {
-    data.authorization_servers = [origin];
-  }
-}
-
-function rewriteOAuthAuthorizationServer(data: Record<string, unknown>, origin: string): void {
-  data.issuer = origin;
-  data.token_endpoint = `${origin}/oauth2/token`;
-  data.jwks_uri = `${origin}/.well-known/jwks.json`;
-  data.service_documentation = `${origin}/auth.md`;
-  const agentAuth = data.agent_auth;
-  if (agentAuth && typeof agentAuth === 'object') {
-    const block = agentAuth as Record<string, unknown>;
-    block.skill = `${origin}/auth.md`;
-    block.register_uri = `${origin}/auth.md`;
-    const anonymous = block.anonymous;
-    if (anonymous && typeof anonymous === 'object') {
-      (anonymous as Record<string, unknown>).claim_uri = `${origin}/auth.md`;
-    }
-  }
-}
-
 function rewriteServerCard(data: Record<string, unknown>, origin: string): void {
   data.websiteUrl = `${origin}/mcp-skill`;
   if (!Array.isArray(data.remotes)) return;
@@ -498,12 +473,7 @@ function mcpProtocolMethodNotAllowed(request: Request): Response {
   });
 }
 
-const DISCOVERY_GET_ONLY_PATHS = new Set([
-  '/.well-known/oauth-protected-resource',
-  '/.well-known/oauth-authorization-server',
-  '/.well-known/api-catalog',
-  AI_CATALOG_PATH,
-]);
+const DISCOVERY_GET_ONLY_PATHS = new Set(['/.well-known/api-catalog', AI_CATALOG_PATH]);
 
 async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
@@ -562,54 +532,6 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
 
   if (DISCOVERY_GET_ONLY_PATHS.has(pathname) && request.method !== 'GET' && request.method !== 'OPTIONS') {
     return discoveryGetOnly405();
-  }
-
-  // /.well-known/oauth-protected-resource + oauth-authorization-server —
-  // agent-readiness discovery metadata. Origin-aware rewrite keeps staging
-  // and local previews self-consistent.
-  if (pathname === '/.well-known/oauth-protected-resource' && request.method === 'GET') {
-    const body = await buildOriginAwareJsonBody(
-      request,
-      env,
-      '/.well-known/oauth-protected-resource',
-      rewriteOAuthProtectedResource,
-    );
-    if (body === null) return discoveryMetadataUnavailable();
-    return mcpDescriptorJsonResponse(body);
-  }
-  if (pathname === '/.well-known/oauth-authorization-server' && request.method === 'GET') {
-    const body = await buildOriginAwareJsonBody(
-      request,
-      env,
-      '/.well-known/oauth-authorization-server',
-      rewriteOAuthAuthorizationServer,
-    );
-    if (body === null) return discoveryMetadataUnavailable();
-    return mcpDescriptorJsonResponse(body);
-  }
-
-  // Public-catalog token endpoint. The MCP surface requires no credentials;
-  // POSTs receive a typed JSON body explaining the no-auth posture rather
-  // than a misleading 404. No CORS: browser-origin probes are not a
-  // supported client; posture is documented in auth.md and OAuth metadata.
-  if (pathname === '/oauth2/token' && request.method === 'POST') {
-    const origin = new URL(request.url).origin;
-    return new Response(
-      JSON.stringify({
-        error: 'public_catalog',
-        error_description:
-          'anc.dev publishes a public catalog. No OAuth tokens are issued; call the MCP endpoint directly.',
-        documentation: `${origin}/auth.md`,
-        mcp_endpoint: `${origin}/mcp`,
-      }),
-      {
-        status: 400,
-        headers: {
-          'content-type': 'application/json; charset=utf-8',
-          'cache-control': 'no-store',
-        },
-      },
-    );
   }
 
   // /.well-known/api-catalog — RFC 9727 link set. The static asset is

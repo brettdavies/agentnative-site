@@ -1093,6 +1093,54 @@ describe('auth enforcement rows', () => {
   });
 });
 
+describe("a card's authentication declaration on an endpoint that never answers 401", () => {
+  const metadata = (): Response => json({ resource: SAME, authorization_servers: ['https://auth.example.net'] });
+  const protectedResourceRow = async (card: Record<string, unknown>, publishesMetadata: boolean) => {
+    const { scorecard } = await audit(
+      router(
+        {
+          ...ROOT,
+          'GET https://example.com/.well-known/mcp.json': () => json({ name: 'open', mcp_endpoint: SAME, ...card }),
+          [`POST ${SAME}`]: () => initializeResult(),
+          ...(publishesMetadata ? { [`GET ${SAME_METADATA}`]: metadata } : {}),
+        },
+        [],
+      ),
+      { registry: mcpRegistry() },
+    );
+    const found = row(scorecard, 'oauth-protected-resource');
+    return [found.status, found.na_reason ?? null];
+  };
+
+  test('a card saying sign-in is not required and listing no scheme leaves the protected-resource row n_a, published metadata or not', async () => {
+    for (const card of [
+      { authentication: { required: false, schemes: [] } },
+      { authentication: { required: false } },
+      { authentication: {} },
+      { auth: { required: false, schemes: [] } },
+    ]) {
+      for (const publishesMetadata of [true, false]) {
+        expect({ card, publishesMetadata, reading: await protectedResourceRow(card, publishesMetadata) }).toEqual({
+          card,
+          publishesMetadata,
+          reading: ['n_a', 'antecedent-unmet'],
+        });
+      }
+    }
+  });
+
+  test('a card saying sign-in is required, or listing a scheme, scores the protected-resource row', async () => {
+    for (const card of [
+      { authentication: { required: true, schemes: ['oauth2'] } },
+      { authentication: { required: true } },
+      { authentication: { required: false, schemes: ['bearer'] } },
+      { auth: { required: true } },
+    ]) {
+      expect({ card, reading: await protectedResourceRow(card, true) }).toEqual({ card, reading: ['pass', null] });
+    }
+  });
+});
+
 describe('values the audited server chose reach every reader inert', () => {
   test('authorization_servers carrying markup render escaped on the HTML page, in the markdown twin, and in the MCP read', async () => {
     const remediation = normalizeWebRemediation(

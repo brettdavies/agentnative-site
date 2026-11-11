@@ -236,36 +236,6 @@ test.describe('staging agent-readiness well-known surfaces', () => {
     }
   });
 
-  test('/.well-known/oauth-protected-resource declares the MCP resource', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/.well-known/oauth-protected-resource`, { headers: ACCESS_HEADERS });
-    expect(res.status()).toBe(200);
-    const body = (await res.json()) as { resource: string; authorization_servers: string[] };
-    expect(body.resource).toBe(`${STAGING_BASE}/mcp`);
-    expect(body.authorization_servers).toContain(STAGING_BASE);
-  });
-
-  test('/.well-known/oauth-authorization-server carries agent_auth anonymous block', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/.well-known/oauth-authorization-server`, {
-      headers: ACCESS_HEADERS,
-    });
-    expect(res.status()).toBe(200);
-    const body = (await res.json()) as {
-      issuer: string;
-      token_endpoint: string;
-      agent_auth: { anonymous: { claim_uri: string } };
-    };
-    expect(body.issuer).toBe(STAGING_BASE);
-    expect(body.token_endpoint).toBe(`${STAGING_BASE}/oauth2/token`);
-    expect(body.agent_auth.anonymous.claim_uri).toBe(`${STAGING_BASE}/auth.md`);
-  });
-
-  test('/.well-known/jwks.json is a valid JWKS document', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/.well-known/jwks.json`, { headers: ACCESS_HEADERS });
-    expect(res.status()).toBe(200);
-    const body = (await res.json()) as { keys: unknown[] };
-    expect(Array.isArray(body.keys)).toBe(true);
-  });
-
   test('/.well-known/agent-skills/index.json lists every web-audit fix skill with resolvable targets', async ({
     request,
   }) => {
@@ -308,7 +278,6 @@ test.describe('staging agent-readiness well-known surfaces', () => {
     const text = await res.text();
     expect(text.toLowerCase()).toContain('auth.md');
     expect(text).toContain('no authentication');
-    expect(text).toContain('public_catalog');
     expect(text).toContain('## CORS posture');
     expect(text).toContain('/.well-known/mcp/server-card.json');
     for (const d of MCP_DISCOVERY_DOCUMENTS) expect(text).toContain(`- ${d.label}: \`${STAGING_BASE}${d.path}\`.`);
@@ -323,19 +292,20 @@ test.describe('staging agent-readiness well-known surfaces', () => {
     expect(text).toMatch(/^Content-Signal:.*ai-input=/m);
   });
 
-  test('POST /oauth2/token returns public_catalog error', async ({ request }) => {
-    const res = await request.post(`${STAGING_BASE}/oauth2/token`, {
+  test('the MCP server needs no sign-in, so no OAuth metadata path is served (404)', async ({ request }) => {
+    for (const path of [
+      '/.well-known/oauth-protected-resource',
+      '/.well-known/oauth-authorization-server',
+      '/.well-known/jwks.json',
+    ]) {
+      const res = await request.get(`${STAGING_BASE}${path}`, { headers: ACCESS_HEADERS });
+      expect(res.status(), path).toBe(404);
+    }
+    const token = await request.post(`${STAGING_BASE}/oauth2/token`, {
       headers: { ...ACCESS_HEADERS, 'content-type': 'application/json' },
       data: {},
     });
-    expect(res.status()).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe('public_catalog');
-  });
-
-  test('GET /oauth2/token is not a token endpoint (404)', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/oauth2/token`, { headers: ACCESS_HEADERS });
-    expect(res.status()).toBe(404);
+    expect(token.status(), 'POST /oauth2/token').toBe(404);
   });
 
   test('/_internal/mcp-server-card.json is not publicly reachable', async ({ request }) => {

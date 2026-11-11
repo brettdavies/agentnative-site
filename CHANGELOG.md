@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.1794364986-ga6ad604] - 2026-11-11
+
+### Fixed
+
+- Fix the web audit reading an MCP server card that says `required: false` and lists no scheme as declaring authentication; `oauth-protected-resource`, `oauth-discovery` and `auth-md` now read not applicable for that open server. by @brettdavies in [#547](https://github.com/brettdavies/agentnative-site/pull/547)
+- Remove the OAuth discovery metadata anc.dev published for its MCP server (`/.well-known/oauth-protected-resource`, `/.well-known/oauth-authorization-server`, `/.well-known/jwks.json`, and the `POST /oauth2/token` stub). The server needs no sign-in, and the metadata told clients it did. Each path now answers 404 like any unknown path; `/auth.md` and the server card's `authentication.required: false` remain the statement of the no-auth posture. by @brettdavies in [#548](https://github.com/brettdavies/agentnative-site/pull/548)
+
+**Full Changelog**: [v0.0.1794347407-g9c1e97a...v0.0.1794364986-ga6ad604](https://github.com/brettdavies/agentnative-site/compare/v0.0.1794347407-g9c1e97a...v0.0.1794364986-ga6ad604)
+
 ## [0.0.1794347407-g9c1e97a] - 2026-11-10
 
 ### Fixed
