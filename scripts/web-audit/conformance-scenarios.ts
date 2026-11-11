@@ -829,7 +829,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     ],
   ),
   'http-get-fast-fail-markdown-broken': scenario(
-    'a GET with Accept text/event-stream that returns 200 markdown is broken',
+    'a GET with Accept text/event-stream that returns 200 with a markdown body is broken',
     ['mcp-get-fast-fail'],
     [
       ...baseline(),
@@ -1181,7 +1181,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     ],
   ),
   'mcp-www-authenticate': scenario(
-    'an endpoint that answers legacy POSTs with a 401 whose challenge names no metadata, while root RFC 9728 metadata names it: it requires sign-in, so the legacy session rows, the resources rows, and every row a 401 answers read auth-required, and the challenge satisfies the mcp-auth antecedent; its modern lane refuses server/discover with a method-not-found and no 401, an answer a token would not change, so the modern session rows read absent as they do on an open server',
+    'an endpoint that answers legacy POSTs with a 401 whose challenge names no metadata, while root RFC 9728 metadata names it: it requires signing in, so the legacy session rows, the resources rows, and every row a 401 answers read auth-required, and the challenge satisfies the mcp-auth antecedent; its modern lane refuses server/discover with a method-not-found and no 401, an answer a token would not change, so the modern session rows read absent as they do on an open server',
     ['mcp-initialize', 'mcp-server-discover', 'mcp-auth-challenge', 'oauth-protected-resource', 'auth-md'],
     [
       ...baseline(),

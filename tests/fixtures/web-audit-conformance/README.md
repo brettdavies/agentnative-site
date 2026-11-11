@@ -82,7 +82,7 @@ Each row's `hosts` lists the distinct hosts its raw evidence items were requeste
 requested because it is not `https`, reached no host. An item with a string `url` counts that URL's host; one with no
 `url` and a non-empty string `host` counts that value, which is how a row a declared host kept from being evaluated
 names that host. The host is the WHATWG URL `host`, which keeps a non-default port (`example.com:8443`), so an engine
-whose URL library drops the port must add it back. An item whose `url` does not parse contributes nothing, and a row
+whose URL library drops the port must add it back. An item whose `url` fails to parse contributes nothing, and a row
 with no counting item has `hosts: []`. `host` is present, holding the same value, exactly when `hosts` has one entry.
 A row that evaluates several targets (the API rows when the api-catalog lists API anchors: one per declared
 description, one per anchor host) marks each target's items with its outcome, and when those items name more than one
@@ -191,7 +191,7 @@ the first two, `im` for the body patterns) and `results[i] = new RegExp(pattern,
 | `http-discovery-cards` | the well-known discovery and auth documents answer with the expected JSON shapes | `a2a-agent-card`, `ai-catalog`, `agent-skills`, `security-txt`, `web-bot-auth`, `oauth-discovery`, `api-catalog`, `sitemap`, `llms-full-txt` |
 | `http-discovery-cards-broken` | discovery documents that answer 200 with the wrong shape are broken | `a2a-agent-card`, `ai-catalog`, `agent-skills`, `security-txt`, `web-bot-auth` |
 | `http-get-fast-fail-html-broken` | a GET with Accept text/event-stream that returns 200 HTML is broken | `mcp-get-fast-fail` |
-| `http-get-fast-fail-markdown-broken` | a GET with Accept text/event-stream that returns 200 markdown is broken | `mcp-get-fast-fail` |
+| `http-get-fast-fail-markdown-broken` | a GET with Accept text/event-stream that returns 200 with a markdown body is broken | `mcp-get-fast-fail` |
 | `http-get-fast-fail-sse-pass` | a GET that returns 200 text/event-stream passes | `mcp-get-fast-fail` |
 | `http-get-fast-fail-timeout-broken` | a held-open GET on the MCP endpoint times out against its explicit budget and is broken | `mcp-get-fast-fail` |
 | `http-header-regex-absent` | Link and Vary header assertions miss when the headers are absent | `link-headers`, `markdown-vary` |
@@ -236,7 +236,7 @@ the first two, `im` for the body patterns) and `results[i] = new RegExp(pattern,
 | `mcp-stateful-session` | a stateful server issues a session on initialize, refuses sessionless conformance probes with -32000, and is scored on the re-ask | `mcp-malformed-body`, `mcp-batch-reject`, `mcp-unknown-tool`, `mcp-tools-list`, `mcp-resources-list` |
 | `mcp-typed-http-refusals` | bare HTTP 400/415 refusals with no envelope conform where the row allows them; a bare 404 never does | `mcp-malformed-body`, `mcp-accept-unsatisfiable`, `mcp-batch-reject`, `mcp-unknown-tool` |
 | `mcp-wrong-error-codes` | conformance probes refused under the wrong code are noncompliant; a result where a refusal was required is broken | `mcp-malformed-body`, `mcp-batch-reject`, `mcp-unknown-tool`, `mcp-unknown-method`, `mcp-modern-unknown-method`, `mcp-modern-clientcaps`, `mcp-modern-header-mismatch`, `mcp-modern-version-reject`, `mcp-modern-resources-miss` |
-| `mcp-www-authenticate` | an endpoint that answers legacy POSTs with a 401 whose challenge names no metadata, while root RFC 9728 metadata names it: it requires sign-in, so the legacy session rows, the resources rows, and every row a 401 answers read auth-required, and the challenge satisfies the mcp-auth antecedent; its modern lane refuses server/discover with a method-not-found and no 401, an answer a token would not change, so the modern session rows read absent as they do on an open server | `mcp-initialize`, `mcp-server-discover`, `mcp-auth-challenge`, `oauth-protected-resource`, `auth-md` |
+| `mcp-www-authenticate` | an endpoint that answers legacy POSTs with a 401 whose challenge names no metadata, while root RFC 9728 metadata names it: it requires signing in, so the legacy session rows, the resources rows, and every row a 401 answers read auth-required, and the challenge satisfies the mcp-auth antecedent; its modern lane refuses server/discover with a method-not-found and no 401, an answer a token would not change, so the modern session rows read absent as they do on an open server | `mcp-initialize`, `mcp-server-discover`, `mcp-auth-challenge`, `oauth-protected-resource`, `auth-md` |
 | `pair-apex-folds-to-www` | the bare host redirects its root to the `www.` host, which serves the site and its MCP endpoint: the pair is one site named by the bare host, audited at the `www.` host, and no declared host names the `www.` host | `mcp-initialize`, `mcp-tools-list`, `mcp-server-card` |
 | `pair-apex-unreachable-www-answers` | the bare host gives no answer and the `www.` host answers its root without a redirect: the audit ends unreachable and names the `www.` host as the one that answered | `agent-ua-reachable` |
 | `pair-both-roots-answer` | both roots answer with a page and neither redirects: the two hosts are two sites, and the `www.` host is requested as any other host would be | `agent-ua-reachable`, `root-meta-description` |

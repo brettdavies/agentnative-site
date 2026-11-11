@@ -391,7 +391,7 @@ its vantage. Such a row, like every `n_a` row, earns nothing, is excluded from t
 global denominator. A local run evaluates what its own network reaches and, presenting a credential, what sign-in
 blocks.
 
-A handler with nothing to probe (no discovered MCP endpoint) emits `n_a` with no `na_reason`. The derived `result` line
+A handler with nothing to probe (the MCP endpoint was not discovered) emits `n_a` and records no `na_reason`. The derived `result` line
 leads with the reason's own phrase, and the last six reasons begin "Not evaluated:", for example "Not evaluated:
 mcp.example.com requires sign-in". A row whose `hosts` carry their own outcomes ends its `result` line with each host
 and its outcome, for example `; api.example.com: pass, api2.example.com: broken`. A `noncompliant` row decided by a link

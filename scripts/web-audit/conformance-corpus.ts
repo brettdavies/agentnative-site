@@ -535,7 +535,7 @@ Each row's \`hosts\` lists the distinct hosts its raw evidence items were reques
 requested because it is not \`https\`, reached no host. An item with a string \`url\` counts that URL's host; one with no
 \`url\` and a non-empty string \`host\` counts that value, which is how a row a declared host kept from being evaluated
 names that host. The host is the WHATWG URL \`host\`, which keeps a non-default port (\`example.com:8443\`), so an engine
-whose URL library drops the port must add it back. An item whose \`url\` does not parse contributes nothing, and a row
+whose URL library drops the port must add it back. An item whose \`url\` fails to parse contributes nothing, and a row
 with no counting item has \`hosts: []\`. \`host\` is present, holding the same value, exactly when \`hosts\` has one entry.
 A row that evaluates several targets (the API rows when the api-catalog lists API anchors: one per declared
 description, one per anchor host) marks each target's items with its outcome, and when those items name more than one
