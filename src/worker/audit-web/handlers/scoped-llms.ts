@@ -10,6 +10,7 @@
 // dropped, never fetched.
 
 import type { WebCheck } from '../registry';
+import { onSite } from '../site-origins';
 import { guardedFetch, validatePublicUrl } from '../ssrf';
 import { markdownHrefs, redirectsToHttp, redirectsToHttpItem, timeoutMsFor } from './shared';
 import type { HandlerContext, ProbeOutcome, ProbeStatus } from './types';
@@ -17,14 +18,14 @@ import type { HandlerContext, ProbeOutcome, ProbeStatus } from './types';
 const DEFAULT_MAX_CANDIDATES = 8;
 const SITEMAP_LOC_RE = /<loc>\s*([^<\s]+)\s*<\/loc>/gi;
 
-function topLevelDir(href: string, base: string): string | null {
+function topLevelDir(href: string, base: string, siteOrigins?: readonly string[]): string | null {
   let url: URL;
   try {
     url = new URL(href, base);
   } catch {
     return null;
   }
-  if (url.origin !== new URL(base).origin) return null; // off-origin href: dropped, never fetched
+  if (!onSite(url.toString(), base, siteOrigins)) return null; // off-site href: dropped, never fetched
   const segments = url.pathname.split('/').filter((s) => s.length > 0);
   if (segments.length < 2) return null; // a root-level file has no section directory
   return `/${segments[0]}`;
@@ -35,14 +36,19 @@ function topLevelDir(href: string, base: string): string | null {
  * the root llms.txt link index and the sitemap. Pure; exported for the
  * engine to compute once per audit.
  */
-export function enumerateScopedDirs(llmsBody: string, sitemapBody: string, base: string): string[] {
+export function enumerateScopedDirs(
+  llmsBody: string,
+  sitemapBody: string,
+  base: string,
+  siteOrigins?: readonly string[],
+): string[] {
   const dirs = new Set<string>();
   for (const href of markdownHrefs(llmsBody)) {
-    const dir = topLevelDir(href, base);
+    const dir = topLevelDir(href, base, siteOrigins);
     if (dir) dirs.add(dir);
   }
   for (const match of sitemapBody.matchAll(SITEMAP_LOC_RE)) {
-    const dir = topLevelDir(match[1], base);
+    const dir = topLevelDir(match[1], base, siteOrigins);
     if (dir) dirs.add(dir);
   }
   return [...dirs];

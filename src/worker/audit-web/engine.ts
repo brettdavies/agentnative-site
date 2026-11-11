@@ -63,7 +63,8 @@ import { directArtifactSource, settleMcpAuth, signInResolver } from './mcp-auth'
 import type { WebAuditRegistry, WebCheck, WebSiteType } from './registry';
 import { closeRequestMemo, createRequestMemo, type MemoStats, type RequestMemo } from './request-hop';
 import { buildWebScorecard, type EngineResult, type ScorecardStatus, type WebScorecard } from './scorecard';
-import { type AuditFetchOptions, type GuardedFetchOptions, guardedFetch, isEdgeErrorStatus } from './ssrf';
+import { type PairReport, resolveSite } from './site-pair';
+import { type AuditFetchOptions, type GuardedFetchOptions, isEdgeErrorStatus } from './ssrf';
 
 const DEFAULT_CONCURRENCY = 6;
 const DEFAULT_PER_CHECK_TIMEOUT_MS = 8_000;
@@ -99,19 +100,27 @@ export interface RunWebAuditInput {
 }
 
 export type AuditEvent =
-  | { type: 'discovery'; endpoint: string | null; evidence: EvidenceItem[] }
+  | { type: 'discovery'; endpoint: string | null; evidence: EvidenceItem[]; siteHosts?: readonly string[] | null }
   | { type: 'result'; result: EngineResult }
-  // `follow` is what the follow slice spent and `memo` what the request
-  // memo held: for the run record, never stored.
-  | { type: 'complete'; scorecard: WebScorecard; complete: boolean; follow: FollowStats; memo: MemoStats }
+  // `follow` is what the follow slice spent, `memo` what the request memo
+  // held, and `pair` how the www and bare roots compared: for the run
+  // record, never stored. `pair` is absent for a host with no pair.
+  | {
+      type: 'complete';
+      scorecard: WebScorecard;
+      complete: boolean;
+      follow: FollowStats;
+      memo: MemoStats;
+      pair?: PairReport;
+    }
   // Terminal for a target the auditor cannot reach: nothing answered at
   // the network level (no HTTP status from the root fetch or any discovery
   // probe), or the root is http or redirects to http, which anc never
   // requests. Scoring such a run would publish a misleading 0% for a site
   // the audit measured nothing of (a block of datacenter egress, a dead
   // host, a tarpit, a plaintext root), so the run ends here and nothing is
-  // cached.
-  | { type: 'unreachable'; reason: string };
+  // cached. `sibling` is the origin of a www or bare sibling that answered.
+  | { type: 'unreachable'; reason: string; sibling?: string; pair?: PairReport };
 
 type Handler = (check: WebCheck, ctx: HandlerContext) => Promise<ProbeOutcome>;
 
@@ -152,12 +161,6 @@ function retainedBody(sources: ReadonlyMap<string, ProbeOutcome>, checkId: strin
     if (typeof item.body === 'string') return item.body;
   }
   return '';
-}
-
-function normalizeBase(rawUrl: string): { base: string; host: string; domain: string } {
-  const u = new URL(rawUrl);
-  const base = `${u.protocol}//${u.host}/`;
-  return { base, host: u.hostname, domain: u.host };
 }
 
 function probeStatusToScorecard(status: ProbeOutcome['status']): ScorecardStatus {
@@ -395,7 +398,6 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
 }
 
 async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGenerator<AuditEvent> {
-  const { base, host, domain } = normalizeBase(input.url);
   const now = input.now ?? Date.now;
   const concurrency = input.concurrency ?? DEFAULT_CONCURRENCY;
   const configuredTimeoutMs = input.perCheckTimeoutMs ?? DEFAULT_PER_CHECK_TIMEOUT_MS;
@@ -403,26 +405,40 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
   const deadline = now() + perAuditDeadlineMs;
   // A row that needs an answer another row already received reads it from
   // the memo instead of asking the target again.
-  const fetchOptions: AuditFetchOptions = { ...input.fetchOptions, memo };
+  const memoOptions: AuditFetchOptions = { ...input.fetchOptions, memo };
 
   // The single canonical root fetch every root-HTML check and several
   // antecedents read. null = failed at the network level. It runs before
   // discovery because it doubles as the reachability probe: a network-dead
   // root drops every later probe to the degraded timeout so a tarpitting
-  // target cannot spend the whole deadline on a handful of fetches.
-  const rootResp = await guardedFetch(base, {}, { ...fetchOptions, timeoutMs: configuredTimeoutMs });
+  // target cannot spend the whole deadline on a handful of fetches. The
+  // pair resolution rides on it: the audited host's first hop and its
+  // sibling's root decide which origin the checks probe.
+  const site = await resolveSite({
+    url: input.url,
+    fetchOptions: memoOptions,
+    timeoutMs: configuredTimeoutMs,
+    siblingWaitMs: DEGRADED_PER_CHECK_TIMEOUT_MS,
+  });
+  const { base, pair } = site;
+  const siteOrigins = site.siteHosts?.map((siteHost) => `https://${siteHost}`);
+  const fetchOptions: AuditFetchOptions = siteOrigins === undefined ? memoOptions : { ...memoOptions, siteOrigins };
+  const rootResp = site.root;
   if (rootResp.refused === 'insecure-scheme') {
     const how = rootResp.status === null ? 'is not https' : 'redirects to http';
-    yield { type: 'unreachable', reason: `${base} ${how}, and ${NO_PLAINTEXT_REQUEST}.` };
+    yield { type: 'unreachable', reason: `${site.requestedBase} ${how}, and ${NO_PLAINTEXT_REQUEST}.` };
     return;
   }
+  const siteUrl = new URL(`https://${site.name}/`);
+  const host = siteUrl.hostname;
+  const domain = siteUrl.host;
   const root: ProbeResponse | null = rootResp.status === null ? null : rootResp;
   const perCheckTimeoutMs =
     root === null ? Math.min(configuredTimeoutMs, DEGRADED_PER_CHECK_TIMEOUT_MS) : configuredTimeoutMs;
 
   const discoveryConfig = input.registry.mcp_discovery;
   const phaseOptions = { timeoutMs: perCheckTimeoutMs, deadlineAt: deadline, now, fetchOptions };
-  const documents = await readDiscoveryDocuments(input.url, discoveryConfig, phaseOptions);
+  const documents = await readDiscoveryDocuments(base, discoveryConfig, phaseOptions);
   const rootFromTarget = root !== null && !isEdgeErrorStatus(root.status);
   const following = input.followDeclarations !== false;
   const {
@@ -431,6 +447,7 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
     follow: followStats,
   } = await settleEndpointOfRecord(documents, {
     base,
+    siteOrigins,
     siteAnswered: rootFromTarget || documents.statuses.some(answeredByTarget),
     // Every API row applies only to an `api` site type or an unset one.
     apiRowsApply: input.siteType === null || input.siteType === undefined || input.siteType === 'api',
@@ -439,8 +456,8 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
     budget: input.domainBudget,
     ...phaseOptions,
   });
-  yield { type: 'discovery', endpoint: declared.endpoint, evidence: discovery.evidence };
-  const api = apiTargets(base, discovery.apiAnchors, declared.api);
+  yield { type: 'discovery', endpoint: declared.endpoint, evidence: discovery.evidence, siteHosts: site.siteHosts };
+  const api = apiTargets(base, discovery.apiAnchors, declared.api, siteOrigins);
 
   // Nothing from the target itself answered: it is unreachable from the
   // auditor's vantage point. Any real response, even a 401 or 404, is
@@ -453,15 +470,21 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
   if (!rootFromTarget && discovery.endpoint === null && !anyTargetResponse) {
     const onlyEdgeErrors =
       root !== null || discovery.evidence.some((e) => typeof e.status === 'number' && isEdgeErrorStatus(e.status));
+    const siblingHint =
+      site.sibling === null ? '' : ` ${new URL(site.sibling).host} answered; audit ${site.sibling} instead.`;
     yield {
       type: 'unreachable',
-      reason: onlyEdgeErrors
-        ? `${base} did not answer any probe (every response was a Cloudflare edge error, ` +
-          `which means the host did not resolve or never replied). ` +
-          'The site may be down, its DNS may be misconfigured, or it may block requests from datacenter IP ranges ' +
-          'such as the auditor’s.'
-        : `${base} did not answer any probe (no HTTP response from the root fetch or MCP discovery). ` +
-          'The site may be down, or it may block requests from datacenter IP ranges such as the auditor’s.',
+      reason:
+        (onlyEdgeErrors
+          ? `${base} did not answer any probe (every response was a Cloudflare edge error, ` +
+            `which means the host did not resolve or never replied). ` +
+            'The site may be down, its DNS may be misconfigured, or it may block requests from datacenter IP ranges ' +
+            'such as the auditor’s.'
+          : `${base} did not answer any probe (no HTTP response from the root fetch or MCP discovery). ` +
+            'The site may be down, or it may block requests from datacenter IP ranges such as the auditor’s.') +
+        siblingHint,
+      ...(site.sibling !== null ? { sibling: site.sibling } : {}),
+      ...(pair !== null ? { pair } : {}),
     };
     return;
   }
@@ -562,7 +585,9 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
 
   // Section directories for the scoped-llms probes: the root llms.txt
   // link index unioned with sitemap paths, both retained in wave 1.
-  scopedDirs.push(...enumerateScopedDirs(retainedBody(sources, 'llms-txt'), retainedBody(sources, 'sitemap'), base));
+  scopedDirs.push(
+    ...enumerateScopedDirs(retainedBody(sources, 'llms-txt'), retainedBody(sources, 'sitemap'), base, siteOrigins),
+  );
   const llmsTxtBody = retainedBody(sources, 'llms-txt');
   if (llmsTxtBody.length > 0) retainedBodies.set('llms-txt', llmsTxtBody);
   const openapiBody = retainedBody(sources, 'openapi');
@@ -633,11 +658,19 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
     publicListing: input.publicListing,
     followDeclarations: following,
     declaredHosts: declared.trail,
+    siteHosts: site.siteHosts ?? undefined,
     registry: input.registry,
   });
   // The stats describe the audit as it finished, including the body reads
   // close is about to stop.
   const memoStats = { ...memo.stats };
   closeRequestMemo(memo);
-  yield { type: 'complete', scorecard, complete: !incomplete, follow: followStats, memo: memoStats };
+  yield {
+    type: 'complete',
+    scorecard,
+    complete: !incomplete,
+    follow: followStats,
+    memo: memoStats,
+    ...(pair !== null ? { pair } : {}),
+  };
 }

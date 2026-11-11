@@ -81,6 +81,7 @@ export function endpointOfRecord(
     'endpoint' | 'endpointMetadata' | 'endpointChallenge' | 'declarations' | 'redirected'
   >,
   follow: Pick<FollowResult, 'endpoint' | 'endpointMetadata' | 'entries' | 'api'>,
+  siteOrigins?: readonly string[],
 ): EndpointOfRecord {
   const own = discovery.endpoint;
   const trail: TrailEntry[] = [];
@@ -95,7 +96,7 @@ export function endpointOfRecord(
   };
   const recordMcp = (declarations: readonly McpDeclaration[]): void => {
     for (const declaration of declarations) {
-      if (!declaresHost(declaration, base)) continue;
+      if (!declaresHost(declaration, base, siteOrigins)) continue;
       // Only a card read after the POSTs (one at the audited site's own
       // endpoint) declares what the slice never saw.
       const group = follow.entries.get(declarationKey(declaration)) ?? [
@@ -154,7 +155,7 @@ export async function settleEndpointOfRecord(
   await session.settle(discovery.redirected);
   await session.settleApi(siteAnswered && apiRowsApply ? apiDeclarations(documents.apiAnchors) : []);
   const followed = session.result();
-  const declared = endpointOfRecord(follow.base, discovery, followed);
+  const declared = endpointOfRecord(follow.base, discovery, followed, follow.siteOrigins);
   return {
     discovery: declared.followed ? withEndpointCard(discovery, followed.endpointCard) : discovery,
     declared,

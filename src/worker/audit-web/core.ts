@@ -236,8 +236,11 @@ export type RunWebAuditInput = {
   surface: 'stream' | 'mcp';
 };
 
-function checkEvent(result: EngineResult): AuditEvent {
-  const { host, hosts } = rowHostFields(result.raw_evidence);
+/** A streamed row names its hosts only when one lies outside the audited site; a row from the site itself names none. */
+function checkEvent(result: EngineResult, siteHosts: readonly string[]): AuditEvent {
+  const fields = rowHostFields(result.raw_evidence);
+  const onSite = fields.hosts.length > 0 && fields.hosts.every((entry) => siteHosts.includes(entry.host));
+  const { host, hosts } = onSite ? { host: undefined, hosts: [] } : fields;
   return {
     type: 'check',
     id: result.id,
@@ -268,6 +271,7 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
   let scorecard: WebScorecard | null = null;
   let complete = false;
   let refusals: Readonly<Record<string, DomainRefusal>> = {};
+  let siteHosts: readonly string[] = [];
   const followDeclarations = effectiveFollow(env, input.followDeclarations);
   try {
     const registry = await loadWebAuditRegistry(env);
@@ -286,13 +290,18 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
       { target: target.canonical, surface: input.surface, followDeclarations },
     )) {
       if (event.type === 'discovery') {
+        siteHosts = event.siteHosts ?? [];
         yield { type: 'discovery', mcp_endpoint: event.endpoint };
       } else if (event.type === 'result') {
-        yield checkEvent(event.result);
+        yield checkEvent(event.result, siteHosts);
       } else if (event.type === 'unreachable') {
         yield {
           type: 'error',
-          error: { code: 'unreachable', message: event.reason, cta: 'Check the address and try again.' },
+          error: {
+            code: 'unreachable',
+            message: event.reason,
+            cta: event.sibling === undefined ? 'Check the address and try again.' : `Audit ${event.sibling} instead.`,
+          },
         };
         return;
       } else if (event.type === 'complete') {
