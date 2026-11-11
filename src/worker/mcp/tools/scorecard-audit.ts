@@ -159,7 +159,9 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
         'gated by MCP_AUDIT_LIMITER (5 per 60-second burst) AND a KV-backed per-hour window (5 audits per 60 minutes ' +
         'per IP — the plan ceiling that the CF binding alone cannot express). No anon fallback at the audit tier: a ' +
         'request without cf-connecting-ip returns -32099 immediately. Disabled when MCP_LIVE_SCORING_ENABLED is not ' +
-        '"true" — the read tier on get_scorecard stays alive serving cached scorecards. A fresh audit whose ' +
+        '"true" or the operator sets scoring_disabled: the answer is then isError: false with audited: false and ' +
+        'next_tool: get_scorecard, and the read tier on get_scorecard stays alive serving cached scorecards. A fresh ' +
+        'audit whose ' +
         'scorecard reports summary.error above 0 is returned but not saved: its URLs and freshness.refresh_after ' +
         'are null, and the next call runs a fresh audit.',
       inputSchema: {

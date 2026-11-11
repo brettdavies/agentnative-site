@@ -265,12 +265,14 @@ beforeEach(() => {
   resetMcpTestState();
   _resetRegistryIndexCache();
   _resetHintsIndexCache();
+  _resetKillSwitchCache();
 });
 
 afterEach(() => {
   resetMcpTestState();
   _resetRegistryIndexCache();
   _resetHintsIndexCache();
+  _resetKillSwitchCache();
 });
 
 async function callGetScorecard(env: McpEnv, args: Record<string, unknown>): Promise<JsonRpcResult> {
@@ -382,13 +384,6 @@ describe('score_cli: MCP_LIVE_SCORING_ENABLED kill switch', () => {
 });
 
 describe('score_cli: SCORE_KV scoring_disabled kill switch', () => {
-  beforeEach(() => {
-    _resetKillSwitchCache();
-  });
-  afterEach(() => {
-    _resetKillSwitchCache();
-  });
-
   test('scoring_disabled on runs no container audit and answers as the MCP live-scoring switch does', async () => {
     const offEnv = makeEnv({ liveScoringEnabled: false }).env;
     const switchedOff = getJsonContent(
