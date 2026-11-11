@@ -14,6 +14,7 @@ import {
   put as cachePut,
   getAggregate,
   keyFor,
+  putAggregate,
 } from '../src/worker/audit-web/cache';
 import {
   FOLLOW_POLICY_VERSION,
@@ -1022,12 +1023,19 @@ describe('rebuildWebAggregates', () => {
     expect(board?.entries.map((e) => e.domain)).toEqual(['a.dev', 'unstamped.dev']);
   });
 
-  test('a seeded domain whose entry R2 cannot read keeps the row the stored board gives it', async () => {
+  test('a seeded domain whose entry R2 cannot read keeps the row the stored board gives it, with the seed fields', async () => {
     const { env } = makeEnv([seedEntry('a.dev'), seedEntry('b.dev')]);
     await cachePut(env, 'https://a.dev/', scorecardFor('a.dev', 70), SPEC_VERSION);
     await cachePut(env, 'https://b.dev/', scorecardFor('b.dev', 60), SPEC_VERSION);
     await rebuildWebAggregates(env, SPEC_VERSION);
-    const before = await getAggregate(env, 'leaderboard', SPEC_VERSION);
+    const built = (await getAggregate(env, 'leaderboard', SPEC_VERSION))?.entries ?? [];
+    const storedScore = { score_pct: 40, score: { relative: 40, global: 35 } };
+    const stored = built.map((e) =>
+      e.domain === 'b.dev'
+        ? { ...e, ...storedScore, url: 'https://old.b.dev/', name: 'old name', description: 'old description' }
+        : e,
+    );
+    await putAggregate(env, 'leaderboard', stored, SPEC_VERSION);
 
     const unreadable = await keyFor('https://b.dev/', SPEC_VERSION);
     const realGet = env.SCORE_CACHE.get.bind(env.SCORE_CACHE);
@@ -1044,7 +1052,7 @@ describe('rebuildWebAggregates', () => {
     }
 
     const after = await getAggregate(env, 'leaderboard', SPEC_VERSION);
-    expect(after?.entries).toEqual(before?.entries);
+    expect(after?.entries).toEqual(built.map((e) => (e.domain === 'b.dev' ? { ...e, ...storedScore } : e)));
   });
 
   test('an empty seed writes empty aggregates (cold-start shape, not an error)', async () => {
