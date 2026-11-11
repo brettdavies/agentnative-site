@@ -8,13 +8,16 @@
 
 import { emitLog } from '../telemetry/log';
 import {
-  get as cacheGet,
+  type CachedWebAudit,
   canonicalTargetOf,
+  getAggregate,
+  getForRequest,
   keyFor,
   putAggregate,
   vantageNetworkOf,
   type WebAggregateEntry,
   type WebCacheEnv,
+  WebCacheUnavailableError,
 } from './cache';
 import { homeTag, queueHitMinPurge, webTag } from './hit-min-purge';
 import { isSeededDomain, loadWebSeed, type WebSeedEnv } from './seed';
@@ -51,6 +54,9 @@ type ScoreShape = { score_pct?: number; score?: { relative?: number; global?: nu
  * with no cached entry (never scored, or orphaned by a SPEC_VERSION bump)
  * is omitted from the board rather than failing the rebuild, and so is one
  * whose entry ran from a local vantage: the board ranks public scores only.
+ * A seeded domain whose entry R2 cannot read keeps the row the stored board
+ * already gives it: the entry still exists, and dropping the row would tell
+ * every board reader the site was never scored.
  */
 export async function rebuildWebAggregates(
   env: WebAggregateEnv,
@@ -58,9 +64,19 @@ export async function rebuildWebAggregates(
 ): Promise<{ seeded: number; scored: number; wrote: boolean }> {
   const seed = await loadWebSeed(env);
   const entries: WebAggregateEntry[] = [];
+  let stored: Map<string, WebAggregateEntry> | null = null;
   for (const s of seed) {
     const target = canonicalTargetOf(new URL(s.url));
-    const cached = await cacheGet(env, await keyFor(target, specVersion));
+    let cached: CachedWebAudit | null;
+    try {
+      cached = await getForRequest(env, await keyFor(target, specVersion));
+    } catch (err) {
+      if (!(err instanceof WebCacheUnavailableError)) throw err;
+      stored ??= await storedBoardRows(env, specVersion);
+      const row = stored.get(s.domain);
+      if (row) entries.push({ ...row, url: s.url, name: s.name, description: s.description });
+      continue;
+    }
     if (!cached || vantageNetworkOf(cached.scorecard) !== 'public') continue;
     const scorecard = cached.scorecard as ScoreShape | null;
     if (typeof scorecard?.score_pct !== 'number') continue;
@@ -91,6 +107,11 @@ export async function rebuildWebAggregates(
     specVersion,
   );
   return { seeded: seed.length, scored: entries.length, wrote: wroteBoard || wroteFrontpage };
+}
+
+async function storedBoardRows(env: WebAggregateEnv, specVersion: string): Promise<Map<string, WebAggregateEntry>> {
+  const board = await getAggregate(env, 'leaderboard', specVersion);
+  return new Map((board?.entries ?? []).map((e) => [e.domain, e]));
 }
 
 /**

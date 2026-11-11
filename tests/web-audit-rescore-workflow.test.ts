@@ -1022,6 +1022,31 @@ describe('rebuildWebAggregates', () => {
     expect(board?.entries.map((e) => e.domain)).toEqual(['a.dev', 'unstamped.dev']);
   });
 
+  test('a seeded domain whose entry R2 cannot read keeps the row the stored board gives it', async () => {
+    const { env } = makeEnv([seedEntry('a.dev'), seedEntry('b.dev')]);
+    await cachePut(env, 'https://a.dev/', scorecardFor('a.dev', 70), SPEC_VERSION);
+    await cachePut(env, 'https://b.dev/', scorecardFor('b.dev', 60), SPEC_VERSION);
+    await rebuildWebAggregates(env, SPEC_VERSION);
+    const before = await getAggregate(env, 'leaderboard', SPEC_VERSION);
+
+    const unreadable = await keyFor('https://b.dev/', SPEC_VERSION);
+    const realGet = env.SCORE_CACHE.get.bind(env.SCORE_CACHE);
+    env.SCORE_CACHE.get = (async (key: string) => {
+      if (key === unreadable) throw new Error('get: We encountered an internal error. Please try again. (10001)');
+      return realGet(key);
+    }) as R2Bucket['get'];
+    const logs = captureLogs();
+    try {
+      await rebuildWebAggregates(env, SPEC_VERSION);
+    } finally {
+      logs.restore();
+      env.SCORE_CACHE.get = realGet as R2Bucket['get'];
+    }
+
+    const after = await getAggregate(env, 'leaderboard', SPEC_VERSION);
+    expect(after?.entries).toEqual(before?.entries);
+  });
+
   test('an empty seed writes empty aggregates (cold-start shape, not an error)', async () => {
     const { env } = makeEnv([]);
     await rebuildWebAggregates(env, SPEC_VERSION);
