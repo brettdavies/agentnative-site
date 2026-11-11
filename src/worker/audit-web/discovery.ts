@@ -40,7 +40,7 @@ import {
   aiCatalogShape,
   apiCatalogShape,
   type CardRead,
-  cardHasAuthField,
+  cardDeclaresAuthentication,
   cardItem,
   cardSuffixUrl,
   catalogCardEntries,
@@ -184,7 +184,7 @@ export async function readDiscoveryDocuments(
       endpoint === null
         ? null
         : ([...catalogReads(), ...(suffix !== null ? [suffix] : []), ...wellKnown].find(
-            (r) => r.endpoint === endpoint && r.card !== null && cardHasAuthField(r.card),
+            (r) => r.endpoint === endpoint && r.card !== null && cardDeclaresAuthentication(r.card),
           ) ?? null);
     const item = (read: CardRead) => cardItem(read, read === record, read === authCard);
     const catalogItem = (slot: CatalogSlot): EvidenceItem => {

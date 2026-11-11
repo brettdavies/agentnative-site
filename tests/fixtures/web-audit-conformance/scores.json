@@ -1696,9 +1696,9 @@
       {"id":"a2a-agent-card","status":"n_a","na_reason":"optional-absent"},
       {"id":"ai-catalog","status":"n_a","na_reason":"optional-absent"},
       {"id":"agent-skills","status":"n_a","na_reason":"optional-absent"},
-      {"id":"oauth-discovery","status":"n_a","na_reason":"optional-absent"},
-      {"id":"oauth-protected-resource","status":"n_a","na_reason":"optional-absent"},
-      {"id":"auth-md","status":"n_a","na_reason":"optional-absent"}
+      {"id":"oauth-discovery","status":"n_a","na_reason":"antecedent-unmet"},
+      {"id":"oauth-protected-resource","status":"n_a","na_reason":"antecedent-unmet"},
+      {"id":"auth-md","status":"n_a","na_reason":"antecedent-unmet"}
     ]
   },
   "auth-own-endpoint": {
