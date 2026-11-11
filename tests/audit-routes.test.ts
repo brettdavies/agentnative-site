@@ -25,6 +25,7 @@ import {
   scoreMarkdownPath,
   scorePath,
   scoringPath,
+  sitePairOf,
   splitRepresentation,
   suggestTargets,
   TARGET_MAX_LENGTH,
@@ -452,5 +453,46 @@ describe('review fixtures: result-target agreement', () => {
     expect(isAuditPath('/audits')).toBe(false);
     expect(isFixPath('/fix/llms-txt')).toBe(true);
     expect(isFixPath('/fixed')).toBe(false);
+  });
+});
+
+describe('sitePairOf: the www and bare hosts of one name', () => {
+  test('a www host and its bare host name the same pair', () => {
+    expect(sitePairOf('www.cnn.com')).toEqual({ apex: 'cnn.com', www: 'www.cnn.com' });
+    expect(sitePairOf('cnn.com')).toEqual({ apex: 'cnn.com', www: 'www.cnn.com' });
+  });
+
+  test('a subdomain is the apex of its own pair', () => {
+    expect(sitePairOf('docs.stripe.com')).toEqual({ apex: 'docs.stripe.com', www: 'www.docs.stripe.com' });
+  });
+
+  test('a non-default port rides on both hosts', () => {
+    expect(sitePairOf('www.cnn.com:8443')).toEqual({ apex: 'cnn.com:8443', www: 'www.cnn.com:8443' });
+    expect(sitePairOf('cnn.com:8443')).toEqual({ apex: 'cnn.com:8443', www: 'www.cnn.com:8443' });
+  });
+
+  test('case does not change the pair', () => {
+    expect(sitePairOf('WWW.CNN.COM')).toEqual({ apex: 'cnn.com', www: 'www.cnn.com' });
+  });
+
+  test('localhost and IP literals have no pair', () => {
+    expect(sitePairOf('localhost')).toBeNull();
+    expect(sitePairOf('1.2.3.4')).toBeNull();
+    expect(sitePairOf('[::1]')).toBeNull();
+    expect(sitePairOf('[::1]:8443')).toBeNull();
+  });
+
+  test('a www label over an undotted name is itself the apex', () => {
+    expect(sitePairOf('www.co')).toEqual({ apex: 'www.co', www: 'www.www.co' });
+  });
+
+  test('a name that is not a domain has no pair', () => {
+    expect(sitePairOf('')).toBeNull();
+    expect(sitePairOf('co')).toBeNull();
+    expect(sitePairOf('exa mple.com')).toBeNull();
+  });
+
+  test('the classifier still returns the host as typed', () => {
+    expect(ok('www.cnn.com').target).toBe('www.cnn.com');
   });
 });
