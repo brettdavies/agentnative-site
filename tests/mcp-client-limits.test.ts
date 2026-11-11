@@ -101,7 +101,7 @@ describe('limit selectors', () => {
     expect(critical).not.toContain('claude-code-upfront-4096');
   });
 
-  test('the instructions lead is the ChatGPT and Codex request', () => {
+  test('the instructions lead selector returns the lead record', () => {
     expect(ids(leadLimits('server-instructions'))).toContain('chatgpt-codex-lead-512');
   });
 

@@ -151,7 +151,7 @@ export const CLIENT_LIMITS: readonly ClientLimit[] = [
       {
         url: null,
         described:
-          'The check is described, not named: its fix line and 2,048-byte threshold as the site operator reported them. The check itself was not read.',
+          'The check is described, not named: its fix line and 2,048-byte threshold as reported on 2026-11-11. The check itself was not read.',
         quote:
           'Keep each tool description and the server instructions field at or below 2 KB, and put critical guidance first',
         readOn: READ_ON,
