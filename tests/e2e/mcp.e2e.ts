@@ -204,7 +204,7 @@ test.describe('staging /mcp — tools/list', () => {
       expect(tool.annotations).toEqual(
         NON_READ_TOOL_NAMES.has(tool.name)
           ? { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }
-          : { readOnlyHint: true },
+          : { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       );
     }
   });

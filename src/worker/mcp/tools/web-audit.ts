@@ -183,7 +183,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
               'the pair has not been audited since folds were recorded.',
           ),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async ({ url }) => {
       const siteUrl = siteOrigin();
@@ -451,7 +451,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
               `user-submitted domains that opted in to public listing. Mirrors ${leaderboardPath({ lane: 'web', view: 'all' })}.`,
           ),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async ({ view }) => {
       const siteUrl = siteOrigin();

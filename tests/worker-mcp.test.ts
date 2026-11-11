@@ -317,7 +317,7 @@ describe('MCP tools/list', () => {
     inputSchema?: unknown;
   }
 
-  const READ_ONLY_ANNOTATIONS = { readOnlyHint: true };
+  const READ_ONLY_ANNOTATIONS = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
 
   // score_cli and audit_website reach external systems and write cache /
   // leaderboard state, so readOnlyHint is false and openWorldHint true.
@@ -359,6 +359,23 @@ describe('MCP tools/list', () => {
       expect((tool.title ?? '').length).toBeGreaterThan(0);
       expect(tool.annotations).toBeDefined();
       expect(typeof tool.annotations).toBe('object');
+    }
+  });
+
+  test('every tool declares readOnlyHint, destructiveHint and openWorldHint as booleans', async () => {
+    const env = makeEnv();
+    await initialize(env);
+    const result = await rpc(env, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
+    const tools = (result.result?.tools ?? []) as ListedTool[];
+    expect(tools.length).toBe(EXPECTED_TOOL_COUNT);
+    for (const tool of tools) {
+      for (const hint of ['readOnlyHint', 'destructiveHint', 'openWorldHint'] as const) {
+        expect({ tool: tool.name, hint, type: typeof tool.annotations?.[hint] }).toEqual({
+          tool: tool.name,
+          hint,
+          type: 'boolean',
+        });
+      }
     }
   });
 
