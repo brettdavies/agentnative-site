@@ -18,7 +18,7 @@ topic: mcp-metadata-length
 - **Authority:** Product Contract requirements win on behavior, Key Technical Decisions win on mechanism, and units override neither. The owner decisions D1 to D3 bind both.
 - **Execution profile:** code. One PR from a `fix/` branch cut from `dev` (which holds #557 at `082d380`), built alongside the hints PR (`fix/mcp-read-tool-hints`). Units U1 to U5 land in that PR.
 - **Stop conditions:**
-  - D1, D2, or D3 is unanswered when implementation starts. Stop: each one changes the text the units write.
+  - D1 or D2 is unanswered when implementation starts. Stop: each one changes the text the units write.
   - The full follow disclosure does not fit `audit_website` under the budget once the tool's own text carries only the facts KTD4 keeps. Stop and report; the fallback is D2's option (b), an owner call.
   - Fitting a string needs a fact removed that no published surface carries after U4. Stop and report.
 - **Who finishes:** an agentnative-site session builds the PR, runs `ce-code-review` and `/devex-review`, and hands it to Brett for merge approval to `dev`.
@@ -92,7 +92,7 @@ The instructions also break the specification's own guidance: they repeat `FOLLO
 
 ### Key Decisions
 
-Owner decisions. Each is open until the owner answers; the plan carries the recommended option, and an answer is folded in here and in the KTDs it changes.
+Owner decisions. D1 and D2 are open until the owner answers; the plan carries the recommended option, and an answer is folded in here and in the KTDs it changes. D3 is decided.
 
 - D1. **Budget target.** Pending owner. Recommended: (a) honor every recorded limit, which makes 2,048 UTF-8 bytes the binding limit for the instructions and every tool description. Options:
   - (a) 2,048 UTF-8 bytes. Clears the tool-registry check, fits Claude Code from v2.1.84 through v2.1.295 (2,048 characters) and v2.1.296 onward (4,096), and follows ChatGPT and Codex guidance. The instructions draft fits at 1,829 bytes at the longest origin and the `audit_website` draft at 1,956 bytes (KTD3, KTD4).
@@ -102,7 +102,7 @@ Owner decisions. Each is open until the owner answers; the plan carries the reco
   - (a) The instructions carry a short form (about 325 characters: declared hosts contacted by default, the per-audit and per-domain caps, `follow_declarations: false` audits only the site and is never saved, and where the full form is). `audit_website`'s description keeps the full form word for word, moved to follow its purpose sentence. `content/mcp-skill.md` keeps its full form.
   - (b) The short form in both the instructions and `audit_website`'s description, with the full form only in `content/mcp-skill.md` and the `follow_declarations` parameter's own effect sentence. This leaves the most headroom, but it moves the full disclosure off the wire.
   - (c) The full form stays in the instructions. Fits only under D1 (b) or (c), and duplicates the tool description against the specification's guidance.
-- D3. **Pinned facts removed from the instructions.** Pending owner. Recommended: remove them, and re-pin each where it already lives (KTD7). The pins are the Accept MIME types (`application/json`, `text/event-stream`), the binding names `MCP_LIMITER` and `MCP_AUDIT_LIMITER`, the kill-switch names `MCP_ENABLED` and `MCP_LIVE_SCORING_ENABLED` with the `WEB_AUDIT_FOLLOW_ENABLED` clause, the full disclosure with its cap sentences, and the plaintext sentence. The other pins stay in the instructions: `13 tools`, `5 resources`, both rate-limit literals, `2026-07-28`, `<origin>/mcp-skill.md`, `Connect now at <origin>/mcp`, `tools/list`, and `resources/templates/list`.
+- D3. **Pinned facts removed from the instructions.** Decided: remove them, and re-pin each on the surface that carries the fact (KTD7). (session-settled: user-directed: chosen over keeping some named pins in the instructions: every removed fact already lives on a published surface or is added to one by U4, and each kept pin costs bytes against D1.) The pins are the Accept MIME types (`application/json`, `text/event-stream`), the binding names `MCP_LIMITER` and `MCP_AUDIT_LIMITER`, the kill-switch names `MCP_ENABLED` and `MCP_LIVE_SCORING_ENABLED` with the `WEB_AUDIT_FOLLOW_ENABLED` clause, the full disclosure with its cap sentences, and the plaintext sentence. The other pins stay in the instructions: `13 tools`, `5 resources`, both rate-limit literals, `2026-07-28`, `<origin>/mcp-skill.md`, `Connect now at <origin>/mcp`, `tools/list`, and `resources/templates/list`.
 
 ### Scope Boundaries
 
@@ -365,7 +365,7 @@ Order of work: U1, U5, U2, U3, U4. U5 comes second so it is observed failing on 
 
 ## Definition of Done
 
-- D1 to D3 are answered and folded into this plan.
+- D1 and D2 are answered and folded into this plan; D3 is folded in.
 - R1 to R12 hold, each covered by a U1 to U5 test scenario or the local Worker measurement.
 - No limit value appears outside `src/worker/mcp/client-limits.ts`.
 - The PR's `## Changelog` carries: "Fixed: the MCP server instructions and the `audit_website` description now fit within 2,048 bytes, so clients that cut long metadata receive the whole text. The instructions lead with what the server is for and point to `/mcp-skill.md`; the full third-party disclosure stays in `audit_website`'s description."
@@ -379,3 +379,4 @@ Order of work: U1, U5, U2, U3, U4. U5 comes second so it is observed failing on 
 - 2026-11-11: `/plan-eng-review` round 1 started at 5a47b76 (Opus, effort high).
 - 2026-11-11: `/plan-devex-review` round 1 started at 5a47b76 (Opus, effort high).
 - 2026-11-11: `/compound-engineering:ce-doc-review` round 1 started at 5a47b76 (Opus, effort high, non-interactive).
+- 2026-11-11: owner decision folded in: D3 (a), the pinned facts leave the instructions and are re-pinned where KTD7 says. D1 and D2 wait for the owner.
