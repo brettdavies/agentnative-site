@@ -2275,16 +2275,6 @@ describe('web MCP tools: a host and its www sibling', () => {
     expect(description).not.toContain('Returns isError:false for every outcome:');
   });
 
-  test('the session instructions carry the fold clause, both halves', async () => {
-    const env = await makeEnv();
-    const init = await mcpInitialize(env);
-    const instructions = (init.result as { instructions?: string } | undefined)?.instructions ?? '';
-    expect(instructions).toContain(
-      'A bare host and its www host are one site, named by the bare host, when one redirects to the other',
-    );
-    expect(instructions).toContain('a www. host with no such redirect is its own site');
-  });
-
   const foldedRecord = (staleMs = 0) => ({
     spec_version: SPEC_VERSION,
     target_url: 'https://cnn.com/',

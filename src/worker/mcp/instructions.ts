@@ -1,25 +1,21 @@
-// Session-time MCP usage summary returned in InitializeResult.instructions.
+// The server instructions, returned in InitializeResult.instructions and
+// DiscoverResult.instructions.
 //
-// The McpServer constructor accepts free-form usage guidance via
-// ServerOptions.instructions. It fires once per session, so the cost of
-// the prose amortizes across every subsequent tool call. Absent
-// instructions would force every agent to fetch the server card out of
-// band or guess the contract.
+// They are written lead-first: what the server is for and where the full
+// guide lives, then which tool answers which question, then what a website
+// audit sends to third-party hosts, then the details. A client that cuts the
+// string still delivers what comes first. tests/mcp-client-limits.test.ts holds
+// the string inside the limits recorded in client-limits.ts.
 //
-// The numeric facts authored below (13 tools, 5 resources total, both
-// rate limits, the spec revision pin, the docs URL) are the same facts
-// that appear in content/mcp-skill.md and the AGENTS.md disclosure (U8).
-// The tests in tests/worker-mcp.test.ts assert each literal digit and
-// pinned URL so a change in one source forces a change in all three.
-// Drift gate per KTD-8 of the plan.
+// The numeric facts below (13 tools, 5 resources, the rate limits, the spec
+// revision, the guide URL) also appear in content/mcp-skill.md. The tests in
+// tests/worker-mcp.test.ts assert each literal, so a change in one source
+// forces a change in the other.
 //
-// The URLs are minted per session from the origin the initialize request
-// arrived on, so an agent that connects to staging is told to keep
-// talking to staging.
+// The URLs are minted per session from the origin the request arrived on, so
+// an agent that connects to staging is told to keep talking to staging.
 
-import { SCORE_PREFIX } from '../../shared/audit-routes';
-import { SEP_1649_CARD_PATH } from '../../shared/mcp-discovery';
-import { FOLLOW_DISCLOSURE } from '../audit-web/follow-disclosure';
+import { FOLLOW_DISCLOSURE_SHORT } from '../audit-web/follow-disclosure';
 import { siteOrigin } from './site-origin';
 
 export const SPEC_REVISION = '2026-07-28';
@@ -36,55 +32,27 @@ export interface InstructionsEnv {
 }
 
 function buildInstructionsText(siteUrl: string): string {
-  const docsUrl = `${siteUrl}/mcp-skill.md`;
   return [
-    `anc.dev exposes the agent-native CLI standard catalog over a streamable HTTP MCP server, per spec revision ${SPEC_REVISION}. ` +
-      'Every scored CLI, every principle of the spec, and the vendored spec sections are queryable without authentication.',
-    'Response format is driven by the Accept header. The server accepts application/json alone, text/event-stream ' +
-      'alone, both together (any order, any q-values), */*, and absent Accept. JSON wins ties; q-values resolve ' +
-      'unequal preferences. A request that accepts neither MIME type receives 406 Not Acceptable with a text/plain ' +
-      'body, no JSON-RPC envelope, since the rejection is pre-JSON-RPC.',
-    `Surface: ${TOOL_COUNT} tools (list_tools, get_tool, search_tools, list_principles, get_principle, ` +
-      'list_spec_sections, get_spec_section, get_scorecard, score_cli, get_website_audit, audit_website, ' +
-      'list_website_audits, get_web_remediation) plus ' +
-      `${RESOURCE_TOTAL} resources total (1 concrete anc://registry plus 4 templates anc://tool/{slug}, ` +
-      'anc://principle/{n}, anc://spec/{section}, anc://scorecard/{binary}). ' +
-      'Per-item records live behind the templates; full schemas are on tools/list and resources/templates/list.',
-    'The four web tools score a website and its MCP server against the same eight principles as a CLI. ' +
-      'get_website_audit reads a cached web scorecard by URL (miss returns next_tool: audit_website); audit_website ' +
-      'runs a fresh audit and returns a single terminal scorecard with no progress notifications (stateless mode); ' +
-      'list_website_audits returns the curated web leaderboard; get_web_remediation returns the static fix for a ' +
-      'web-audit check id. A bare host and its www host are one site, named by the bare host, when one redirects ' +
-      'to the other; a www. host with no such redirect is its own site. Web scorecards carry the ' +
-      `score_pct/score/categories/results shape at ${siteUrl}/web-scorecard-schema.`,
-    'Every read and transact tool returns the one result envelope: { kind, tier, target, scorecard_url, ' +
-      'markdown_url, json_url, freshness, spec_version, scorecard } plus the lane metadata. The same envelope is ' +
-      `what ${siteUrl}${SCORE_PREFIX}<target>/json serves, so a tool result and the page an agent follows it to ` +
-      'cannot disagree. Follow scorecard_url for the page, markdown_url or json_url for the pinned twins. The three ' +
-      'URLs are null for a result with no page: a live CLI run whose scorecard.summary.error is above 0 is never ' +
-      'saved, and neither is a website run that does not follow the hosts it declares.',
-    'Errors carry on two layers. Tool-level failures return CallToolResult with isError: true plus a textual ' +
-      'message; the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error ' +
-      'envelopes at HTTP 200 (-32099 rate-limit breach at either limiter, ' +
-      `-32022 with data.supported listing ${SPEC_REVISION} when the disabled legacy lane rejects a request) or at ` +
-      'HTTP 400 (-32700 malformed JSON with id null, -32600 invalid batch, -32020 header mismatch, and -32022 with ' +
-      'data.requested for an unsupported version claim) or at HTTP 403 (-32000 with id null for a non-localhost ' +
-      'Origin header or an unserved Host; send no Origin header). The 406 Accept-header rejection is the one ' +
-      'transport error that bypasses the JSON-RPC envelope.',
-    `Rate limits are split. ${READ_LIMIT_REQUESTS} requests per ${READ_LIMIT_WINDOW_SECONDS} seconds per IP gate ` +
-      `every call (MCP_LIMITER). ${AUDIT_LIMIT_REQUESTS} fresh audits per ${AUDIT_LIMIT_WINDOW_MINUTES} minutes per ` +
-      'IP gate score_cli cache-miss audits only (MCP_AUDIT_LIMITER). audit_website has its own budget: a per-IP ' +
-      `burst limiter (WEB_AUDIT_LIMITER_IP) plus ${WEB_AUDIT_HOURLY_REQUESTS} fresh audits per 60 minutes per IP, ` +
-      'no anon fallback. All keyed on ' +
-      'cf-connecting-ip; the read tier falls back to a shared anon bucket, the audit tiers reject on missing IP ' +
-      'rather than consuming a shared bucket. Four of the five kill switches let the operator disable the whole ' +
-      'surface (MCP_ENABLED), only the cost-bearing CLI audit tool (MCP_LIVE_SCORING_ENABLED), the website audit ' +
-      '(WEB_AUDIT_ENABLED), or only the following of declared hosts (WEB_AUDIT_FOLLOW_ENABLED) without a deploy; ' +
-      'the fifth (MCP_LEGACY_ENABLED) surfaces as the -32022 legacy reject above.',
-    FOLLOW_DISCLOSURE,
-    `Spec revision is pinned to ${SPEC_REVISION}; the ${SEP_1649_CARD_PATH} server card advertises the same value, and the ` +
-      'two are bumped in lockstep when the SDK is upgraded.',
-    `Connect now at ${siteUrl}/mcp (no authentication). GET ${siteUrl}/mcp returns 405; the endpoint description is ${siteUrl}/mcp-docs. Full recipes remain at ${docsUrl}.`,
+    'anc.dev scores CLI tools, websites, and the MCP servers websites declare against the agent-native standard: ' +
+      'eight principles for software that AI agents operate. Search these tools when asked how well a CLI or a ' +
+      'website works for agents, for its agent-readiness score or fixes, or what the principles and spec require. ' +
+      `No authentication. Full guide: ${siteUrl}/mcp-skill.md.`,
+    'Read the cache first; it costs no audit. get_scorecard (a CLI) and get_website_audit (a website) return ' +
+      '{ found: false, next_tool } on a miss. Only then run a metered audit: ' +
+      `score_cli (${AUDIT_LIMIT_REQUESTS} fresh audits per ${AUDIT_LIMIT_WINDOW_MINUTES} minutes per IP) or ` +
+      `audit_website (${WEB_AUDIT_HOURLY_REQUESTS} fresh audits per ${AUDIT_LIMIT_WINDOW_MINUTES} minutes per IP). ` +
+      'Browse with list_tools, search_tools, get_tool, and list_website_audits; read the standard with ' +
+      'list_principles, get_principle, list_spec_sections, and get_spec_section; get_web_remediation returns the ' +
+      'fix for a failed website check.',
+    FOLLOW_DISCLOSURE_SHORT,
+    `${TOOL_COUNT} tools and ${RESOURCE_TOTAL} resources (anc://registry plus 4 templates); full schemas are on ` +
+      'tools/list and resources/templates/list.',
+    'Scorecard tools return one envelope { kind, tier, target, scorecard_url, markdown_url, json_url, freshness, ' +
+      'spec_version, scorecard }, the JSON json_url serves; web scorecard fields are at ' +
+      `${siteUrl}/web-scorecard-schema. Check isError first: a cache miss is isError: false with next_tool, not a ` +
+      'failure.',
+    `Every call shares ${READ_LIMIT_REQUESTS} requests per ${READ_LIMIT_WINDOW_SECONDS} seconds per IP; a breach ` +
+      `returns JSON-RPC -32099. Spec revision ${SPEC_REVISION}. Connect now at ${siteUrl}/mcp.`,
   ].join(' ');
 }
 
