@@ -100,11 +100,11 @@ export async function resolveSite(input: ResolveSiteInput): Promise<SiteResoluti
   }
 
   const first = await firstHop;
-  const sibling = await within(siblingRoot, input.siblingWaitMs);
+  const requestedLandsOnSibling = redirectTarget(first, requestedBase) === siblingHost;
+  const sibling = await within(siblingRoot, requestedLandsOnSibling ? 0 : input.siblingWaitMs);
   const requestedStatus = first.status;
   const siblingStatus = sibling?.status ?? null;
 
-  const requestedLandsOnSibling = redirectTarget(first, requestedBase) === siblingHost;
   const siblingLandsOnRequested = sibling !== null && redirectTarget(sibling, siblingBase) === typed.host;
   const folded = requestedLandsOnSibling || siblingLandsOnRequested;
 

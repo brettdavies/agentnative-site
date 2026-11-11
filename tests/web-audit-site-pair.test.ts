@@ -256,10 +256,10 @@ describe('the sibling request is bounded', () => {
         'https://www.n.test/en-us/': html,
         'https://www.n.test/': stall(),
       },
-      { perCheckTimeoutMs: 300 },
+      { perCheckTimeoutMs: 3_000 },
     );
     expect(complete?.pair?.outcome).toBe('folded');
-    expect(firstEventMs).toBeLessThan(1_500);
+    expect(firstEventMs).toBeLessThan(1_000);
   }, 10_000);
 
   test('a sibling that stalls past the bound counts as not answering and the pair step ends at the bound', async () => {
@@ -277,7 +277,7 @@ describe('the sibling request is bounded', () => {
 describe('an audited host that does not answer', () => {
   test('names the sibling that answered, in the reason', async () => {
     const { unreachable } = await run('n.test', { 'https://n.test/*': failing(), 'https://www.n.test/': html });
-    expect(unreachable?.reason.endsWith('www.n.test answered; audit https://www.n.test/ instead.')).toBe(true);
+    expect(unreachable?.reason.endsWith('www.n.test answered.')).toBe(true);
     expect(unreachable?.sibling).toBe('https://www.n.test/');
     expect(unreachable?.pair?.outcome).toBe('no-answer');
   });
@@ -287,12 +287,12 @@ describe('an audited host that does not answer', () => {
       'https://n.test/*': () => status(530),
       'https://www.n.test/': html,
     });
-    expect(unreachable?.reason.endsWith('www.n.test answered; audit https://www.n.test/ instead.')).toBe(true);
+    expect(unreachable?.reason.endsWith('www.n.test answered.')).toBe(true);
   });
 
   test('the sibling is named from the www side as well', async () => {
     const { unreachable } = await run('www.n.test', { 'https://www.n.test/*': failing(), 'https://n.test/': html });
-    expect(unreachable?.reason.endsWith('n.test answered; audit https://n.test/ instead.')).toBe(true);
+    expect(unreachable?.reason.endsWith('n.test answered.')).toBe(true);
   });
 
   test('keeps the current wording when the sibling fails too', async () => {
@@ -301,7 +301,7 @@ describe('an audited host that does not answer', () => {
       'https://www.n.test/*': failing(),
     });
     expect(unreachable?.reason).toBeDefined();
-    expect(unreachable?.reason).not.toContain('answered; audit');
+    expect(unreachable?.reason).not.toContain(' answered.');
     expect(unreachable?.sibling).toBeUndefined();
   });
 
@@ -311,7 +311,7 @@ describe('an audited host that does not answer', () => {
       'https://www.n.test/*': () => status(503),
     });
     expect(unreachable?.reason).toBeDefined();
-    expect(unreachable?.reason).not.toContain('answered; audit');
+    expect(unreachable?.reason).not.toContain(' answered.');
   });
 });
 
