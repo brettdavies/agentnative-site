@@ -151,3 +151,61 @@ export function readDeclaredHosts(value: unknown): DeclaredHostEntry[] | null {
 export function readRegistryFingerprint(value: unknown): string | null {
   return isRegistryFingerprintPrefix(value) ? value : null;
 }
+
+/** The hosts a stored scorecard records as one site, bare first; empty when it records none. */
+export function readSiteHosts(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((host): host is string => typeof host === 'string' && host.length > 0)
+    : [];
+}
+
+type HostFields = { hosts?: unknown; host?: unknown };
+
+/** Worst first: the outcome a row keeps when two of its hosts read as one. */
+const HOST_OUTCOME_RANK = ['broken', 'noncompliant', 'absent', 'error', 'pass', 'n_a', 'skip'];
+
+function outcomeRank(entry: Record<string, unknown>): number {
+  const rank = HOST_OUTCOME_RANK.indexOf(String(entry.status));
+  return rank === -1 ? HOST_OUTCOME_RANK.length : rank;
+}
+
+/**
+ * The row with every host of the site read as the audited host: a row whose
+ * evidence came from the other host of a folded pair was read from the
+ * audited site's own documents. Hosts outside the site are left as recorded;
+ * when two of a row's hosts become one, the worse outcome stays.
+ */
+export function rowAtAuditedHost<R extends HostFields>(
+  row: R,
+  entryHost: string | null,
+  siteHosts: readonly string[],
+): R {
+  if (entryHost === null || siteHosts.length === 0) return row;
+  const onSite = (host: string): boolean => host !== entryHost && siteHosts.includes(host);
+  let changed = false;
+  let hosts: unknown = row.hosts;
+  if (Array.isArray(row.hosts)) {
+    const merged: unknown[] = [];
+    for (const entry of row.hosts) {
+      if (!isRecord(entry) || typeof entry.host !== 'string' || !onSite(entry.host)) {
+        const at = merged.findIndex((kept) => isRecord(kept) && isRecord(entry) && kept.host === entry.host);
+        if (at === -1 || !isRecord(entry)) merged.push(entry);
+        else merged[at] = outcomeRank(entry) < outcomeRank(merged[at] as Record<string, unknown>) ? entry : merged[at];
+        continue;
+      }
+      changed = true;
+      const moved = { ...entry, host: entryHost };
+      const at = merged.findIndex((kept) => isRecord(kept) && kept.host === entryHost);
+      if (at === -1) merged.push(moved);
+      else merged[at] = outcomeRank(moved) < outcomeRank(merged[at] as Record<string, unknown>) ? moved : merged[at];
+    }
+    hosts = merged;
+  }
+  let host: unknown = row.host;
+  if (typeof row.host === 'string' && onSite(row.host)) {
+    host = entryHost;
+    changed = true;
+  }
+  if (!changed) return row;
+  return { ...row, hosts, ...(host !== undefined ? { host } : {}) };
+}

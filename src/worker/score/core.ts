@@ -16,6 +16,7 @@ import {
   buildRegistryEnvelope,
   type RegistryEntryLike,
 } from '../../shared/audit-envelope';
+import { completeEvent, type TerminalEvent } from '../../shared/audit-events';
 import { scorePath, targetOfSpec } from '../../shared/audit-routes';
 import { SPEC_VERSION } from '../spec-version.gen';
 import type { CacheEnv } from './cache';
@@ -38,7 +39,7 @@ import {
   lookupRegistry,
   type RegistryIndex,
 } from './registry-lookup';
-import { CTA, type ScoreError } from './response-shape';
+import { CTA, type ScoreError, toAuditError } from './response-shape';
 import { type ValidatedInput, validateInput } from './validate';
 
 export type CliCoreEnv = OrchestrateEnv & CacheEnv;
@@ -59,6 +60,16 @@ export function validateCliInput(raw: string, indexes: CliIndexes): ValidatedInp
 /** True for a `/tree/<branch>` URL or an `owner/repo@branch`; such a target is a snapshot and never serves from cache. */
 export function isBranchScoped(validated: CliValidated): boolean {
   return validated.kind === 'github-url' && typeof validated.branch === 'string';
+}
+
+/**
+ * The result target a branch run is known by from the moment it is accepted;
+ * null for every other input, whose result target waits for the spec.
+ */
+export function branchResultTarget(validated: CliValidated): string | null {
+  return validated.kind === 'github-url' && validated.branch
+    ? `${validated.owner}/${validated.repo}@${validated.branch}`
+    : null;
 }
 
 export type CliTier =
@@ -294,7 +305,7 @@ function envelopeFor(
   scorecard: unknown,
   ancVersion: string,
   toolVersion: string,
-  input: RunCliAuditInput,
+  input: OutcomeInput,
   sourceSha?: string,
 ): AuditEnvelope {
   return cliRunEnvelope({
@@ -314,7 +325,10 @@ function toolVersionOf(scorecard: unknown): string {
   return typeof version === 'string' ? version : '';
 }
 
-function outcomeOf(result: RunFreshResult, input: RunCliAuditInput): CliRunOutcome {
+type OutcomeInput = Pick<RunCliAuditInput, 'indexes' | 'origin'>;
+
+/** One fresh run's result as the lane's outcome: an envelope, or a bounce carrying the shared error. */
+export function outcomeOf(result: RunFreshResult, input: OutcomeInput): CliRunOutcome {
   switch (result.kind) {
     case 'cache_post_hit': {
       const envelope = envelopeFor(
@@ -401,6 +415,17 @@ function outcomeOf(result: RunFreshResult, input: RunCliAuditInput): CliRunOutco
         },
       };
   }
+}
+
+/**
+ * The terminal line a run appends to its job, which every caller attached to
+ * the run is answered from. A run that produced no result line failed after it
+ * started and is an error; a rejection ahead of the run bounces.
+ */
+export function terminalEventOf(outcome: CliRunOutcome): TerminalEvent {
+  if (outcome.kind !== 'bounce') return completeEvent(outcome.envelope);
+  const type = outcome.error.code === 'incomplete_response_contract' ? 'error' : 'bounce';
+  return { type, ...toAuditError(outcome.error) };
 }
 
 // An unsupported package manager the union names is `install_unsupported`;

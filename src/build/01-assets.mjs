@@ -73,6 +73,11 @@ export async function copyAssets({ repoRoot, distDir }) {
   // 6. robots.txt.
   await copyBinary(join(repoRoot, 'public/robots.txt'), join(distDir, 'robots.txt'));
 
+  // IndexNow host-verification key file: the protocol fetches <key>.txt from
+  // the host root and compares its body to the key, so the bytes ship as-is.
+  const indexNowKeyFile = 'db83285bafcf4c99982c98f1041db7be.txt';
+  await copyBinary(join(repoRoot, 'public', indexNowKeyFile), join(distDir, indexNowKeyFile));
+
   // 7. Client JS.
   const themeJs = await bundleClient(join(repoRoot, 'src/client/theme.ts'), join(distDir, 'js/theme.js'));
   const surfaceJs = await bundleClient(join(repoRoot, 'src/client/surface.ts'), join(distDir, 'js/surface.js'));

@@ -43,6 +43,11 @@ and breaks ties by the global score. A present-but-broken surface costs more tha
 agents. A surface that works while violating a spec detail reads `noncompliant` and earns partial credit, so showing an
 imperfect capability always beats withdrawing it.
 
+A bare host and its `www.` host are one site when the first redirect from either root lands on the other: the audit
+checks that first, probes the host the redirect lands on, and stores one scorecard under the bare host. The scorecard's
+`site_hosts` lists both hosts, `target_url` is the origin the checks ran at, and `tool.url` is the bare host's origin.
+`/score/www.<domain>` answers a 301 to `/score/<domain>`. A `www.` host with no such redirect is its own site.
+
 ## From an agent: websites
 
 An MCP client can run the audit without the form. The [anc.dev MCP server](/mcp-docs) exposes four web tools:
@@ -51,7 +56,8 @@ An MCP client can run the audit without the form. The [anc.dev MCP server](/mcp-
   row carries inline remediation with a copy-paste prompt. By default the audit also contacts the hosts the site
   declares (its MCP server, its API host), at most 4 per audit and about 30 audits per hour per declared registrable
   domain; `follow_declarations: false` audits only the site and returns a result that is never saved or listed.
-- `get_website_audit(url)`: read a cached scorecard without re-running.
+- `get_website_audit(url)`: read a cached scorecard without re-running. A `www.` host whose bare host records the fold
+  reads the bare host's scorecard.
 - `list_website_audits(view?)`: the web leaderboard, curated by default.
 - `get_web_remediation(check_id, evidence?, host?)`: the canonical fix for any check, with a ready-to-paste prompt. Pass
   the failing row's evidence and its `remediation.host` (omitted when null) and they are appended to the prompt as a

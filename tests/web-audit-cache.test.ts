@@ -16,6 +16,7 @@ import {
   patchStoredPublicListing,
   put,
   putAggregate,
+  remove,
   WEB_ALL_BOARD_DISPLAY_MAX_AGE_MS,
   WEB_AUDIT_STALE_AFTER_MS,
   type WebAggregateEntry,
@@ -1212,5 +1213,116 @@ describe('HIT-min tag purge', () => {
       await flushHitMinPurge();
     });
     expect(calls).toEqual([]);
+  });
+});
+
+describe('a folded site in the cache', () => {
+  const FOLD = ['a.test', 'www.a.test'];
+  const HASH_A = 'a'.repeat(64);
+  const HASH_B = 'b'.repeat(64);
+  const NOW = Date.parse('2026-11-10T00:00:00Z');
+
+  function listed(hash: string, domain: string, ageMs: number, overrides: Record<string, string> = {}) {
+    return {
+      key: `audits/web/${hash}/${SPEC_VERSION}.json`,
+      customMetadata: {
+        domain,
+        name: domain,
+        score_pct: '80',
+        relative: '80',
+        global: '70',
+        public_listing: 'true',
+        scored_at: new Date(NOW - ageMs).toISOString(),
+        ...overrides,
+      },
+    };
+  }
+
+  async function domainsListed(entries: ReturnType<typeof listed>[], excludeDomains: string[] = []): Promise<string[]> {
+    const { env } = makeR2Stub({ listPages: [entries] });
+    const got = await listAllWebAudits(env, {
+      specVersion: SPEC_VERSION,
+      excludeDomains: new Set(excludeDomains),
+      now: NOW,
+    });
+    return got.map((e) => e.domain);
+  }
+
+  test('put mirrors site_hosts into the board metadata, and writes none for a scorecard without it', async () => {
+    const { env, putOptions } = makeR2Stub();
+    const folded = 'https://a.test/';
+    await put(env, folded, { ...sampleScorecard('https://www.a.test/'), site_hosts: FOLD }, SPEC_VERSION);
+    const plain = 'https://plain.test/';
+    await put(env, plain, sampleScorecard(plain), SPEC_VERSION);
+    expect(putOptions.get(await keyFor(folded, SPEC_VERSION))?.customMetadata?.site_hosts).toBe('a.test www.a.test');
+    expect(putOptions.get(await keyFor(plain, SPEC_VERSION))?.customMetadata).not.toHaveProperty('site_hosts');
+  });
+
+  test('a listing-only patch keeps site_hosts in the metadata', async () => {
+    const { env, putOptions } = makeR2Stub();
+    const url = 'https://a.test/';
+    const scorecard = { ...sampleScorecard('https://www.a.test/'), site_hosts: FOLD };
+    await put(env, url, scorecard, SPEC_VERSION);
+    const cached = await get(env, await keyFor(url, SPEC_VERSION));
+    if (cached === null) throw new Error('nothing stored');
+    await patchStoredPublicListing(env, cached, true);
+    expect(putOptions.get(await keyFor(url, SPEC_VERSION))?.customMetadata?.site_hosts).toBe('a.test www.a.test');
+  });
+
+  test('a listing holds the www row beside a folded row only when no row names it', async () => {
+    const www = listed(HASH_B, 'www.a.test', 60_000);
+    expect(await domainsListed([www, listed(HASH_A, 'a.test', 60_000, { site_hosts: 'a.test www.a.test' })])).toEqual([
+      'a.test',
+    ]);
+    expect(await domainsListed([www, listed(HASH_A, 'a.test', 60_000)])).toEqual(['www.a.test', 'a.test']);
+  });
+
+  test('a row never drops the host that carries the fold', async () => {
+    expect(await domainsListed([listed(HASH_A, 'a.test', 60_000, { site_hosts: 'a.test www.a.test' })])).toEqual([
+      'a.test',
+    ]);
+  });
+
+  test('an excluded or aged-out folded row still hides the leftover www row', async () => {
+    const www = listed(HASH_B, 'www.a.test', 60_000);
+    const folded = (ageMs: number) => listed(HASH_A, 'a.test', ageMs, { site_hosts: 'a.test www.a.test' });
+    expect(await domainsListed([folded(60_000), www], ['a.test'])).toEqual([]);
+    expect(await domainsListed([folded(WEB_ALL_BOARD_DISPLAY_MAX_AGE_MS + 60_000), www])).toEqual([]);
+  });
+
+  test('the guard sees a folded row on a later page than the leftover row', async () => {
+    const { env } = makeR2Stub({
+      listPages: [
+        [listed(HASH_B, 'www.a.test', 60_000)],
+        [listed(HASH_A, 'a.test', 60_000, { site_hosts: 'a.test www.a.test' })],
+      ],
+    });
+    const got = await listAllWebAudits(env, { specVersion: SPEC_VERSION, excludeDomains: new Set(), now: NOW });
+    expect(got.map((e) => e.domain)).toEqual(['a.test']);
+  });
+
+  test('remove deletes the audit stored for a target at a spec version and no other', async () => {
+    const { env, deletedKeys, store } = makeR2Stub();
+    await put(env, 'https://www.a.test/', sampleScorecard('https://www.a.test/'), SPEC_VERSION);
+    await put(env, 'https://www.a.test/', sampleScorecard('https://www.a.test/'), '0.0.1');
+    expect(await remove(env, 'https://www.a.test/', SPEC_VERSION)).toBe(true);
+    expect(deletedKeys).toEqual([await keyFor('https://www.a.test/', SPEC_VERSION)]);
+    expect(store.has(await keyFor('https://www.a.test/', '0.0.1'))).toBe(true);
+  });
+
+  test('remove never throws: a failed delete logs under web-cache.delete and resolves false', async () => {
+    const { env } = makeR2Stub();
+    (env.SCORE_CACHE as { delete: R2Bucket['delete'] }).delete = (async () => {
+      throw new Error('r2_delete_failed');
+    }) as R2Bucket['delete'];
+    const capture = captureLogs();
+    try {
+      expect(await remove(env, 'https://www.a.test/', SPEC_VERSION)).toBe(false);
+    } finally {
+      capture.restore();
+    }
+    expect(capture.records.map((r) => r.record)).toEqual([
+      expect.objectContaining({ scope: 'web-cache.delete', error: 'r2_delete_failed' }),
+    ]);
   });
 });

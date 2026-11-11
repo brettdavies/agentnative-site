@@ -88,6 +88,8 @@ const CARD_DOCUMENT_TIMEOUT_MS = 3_000;
 export interface FollowInput {
   /** The audited origin, scheme + host + trailing slash. */
   base: string;
+  /** The origins that make up the audited site, when the site is more than `base`. */
+  siteOrigins?: readonly string[];
   enabled: boolean;
   /** A card already named an endpoint on the audited origin, which no declared host can displace. */
   entryEndpointDeclared: boolean;
@@ -189,7 +191,9 @@ export function openFollow(input: FollowInput): FollowSession {
       : { kind: 'mcp-endpoint', url: resolveUrl(fetched.url, named), source: declaration.url };
     return {
       entry: trailEntry(declaration, { final_url: finalUrl, outcome: 'followed' }),
-      named: [primary, ...otherRemotes(card, declaration.url, fetched.url)].filter((d) => declaresHost(d, input.base)),
+      named: [primary, ...otherRemotes(card, declaration.url, fetched.url)].filter((d) =>
+        declaresHost(d, input.base, input.siteOrigins),
+      ),
       card: retainedCard(fetched.url, fetched.response),
     };
   };
@@ -252,9 +256,9 @@ export function openFollow(input: FollowInput): FollowSession {
   };
 
   const settleBatch = async (batch: readonly McpDeclaration[]): Promise<void> => {
-    const declared = unique(batch.filter((declaration) => declaresHost(declaration, input.base))).filter(
-      (declaration) => !walked.has(declarationKey(declaration)),
-    );
+    const declared = unique(
+      batch.filter((declaration) => declaresHost(declaration, input.base, input.siteOrigins)),
+    ).filter((declaration) => !walked.has(declarationKey(declaration)));
     const firstEndpoint = declared.findIndex(
       (declaration) => declaration.kind === 'mcp-endpoint' && settledUpfront(declaration, input) === null,
     );
@@ -287,7 +291,9 @@ export function openFollow(input: FollowInput): FollowSession {
       // The audited site's own MCP endpoint displaces only other MCP endpoints, never an API host.
       const upfront = (declaration: ApiDeclaration) =>
         settledUpfront(declaration, { enabled: input.enabled, entryEndpointDeclared: false });
-      const declared = unique(declarations.filter((declaration) => declaresHost(declaration, input.base)));
+      const declared = unique(
+        declarations.filter((declaration) => declaresHost(declaration, input.base, input.siteOrigins)),
+      );
       settled = settled.then(() =>
         timed(async () => {
           api = await settleApiDeclarations(requests, declared, upfront);

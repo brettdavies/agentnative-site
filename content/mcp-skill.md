@@ -183,7 +183,10 @@ never saved, binary or branch-scoped: `scorecard_url`, `markdown_url`, `json_url
 call runs a fresh, metered audit.
 
 The tools are symmetric: `get_scorecard` returns `found: true` exactly when `score_cli` returns `audited: false` on the
-same input. The cost difference (registry/cache lookup vs container run) is the only reason to choose between them.
+same input. The cost difference (registry/cache lookup vs container run) is the only reason to choose between them. The
+one exception is the operator's disabled answer (see [When things fail](#when-things-fail)): while live scoring is off,
+`score_cli` returns `audited: false` for every input, and a `get_scorecard` miss after it means no scorecard exists yet.
+Do not call `score_cli` again for that input until live scoring is back.
 
 ## Audit a website
 
@@ -194,7 +197,9 @@ upgraded, so it names the same record as the bare host.
 
 - `get_website_audit` (cheap read): pass a `url`; returns `{ found: true, ...envelope }` with `kind: "web"` on a cache
   hit, `{ found: false, in_progress: true, started_at }` while an audit for that host is already running, or
-  `{ found: false, next_tool: "audit_website" }` on a miss.
+  `{ found: false, next_tool: "audit_website" }` on a miss. A read of a `www.<domain>` host that cannot reach the
+  `<domain>` record returns `isError: true` with `cache_unavailable`; retry in 30 seconds, because the scorecard has not
+  been removed.
 - `audit_website` (metered fresh audit): runs a fresh audit and returns a single terminal envelope. There are no
   progress notifications: the server runs stateless per-request. A cached result younger than one minute is returned
   without re-running. Gated by `WEB_AUDIT_ENABLED` + `WEB_AUDIT_LIMITER_IP` (30 per hour per IP, no anon fallback).
@@ -210,6 +215,13 @@ upgraded, so it names the same record as the bare host.
 ```jsonc
 // tools/call audit_website { "url": "anc.dev" }
 ```
+
+**Bare and `www.` hosts.** A bare host and its `www.` host are one site when the first redirect from either root lands
+on the other. An audit checks that first, probes the host the redirect lands on, and stores one scorecard under the bare
+host: `target` and `scorecard_url` name the bare host, `scorecard.target_url` is the origin the checks ran at, and
+`scorecard.tool.url` is the bare host's origin. The envelope's own `target_url` carries the same value as `scorecard.target_url`. `get_website_audit` for `www.<domain>` reads that scorecard when it
+records the fold, and `list_website_audits` lists the site once. A `www.` host with no such redirect is its own site, and
+a miss on it may mean the pair has not been audited since folds were recorded.
 
 **Declared hosts.** By default a website audit also contacts third-party hosts the site declares. An MCP server named in
 the site's server card receives GET requests for the documents that could confirm it (a card at
@@ -239,8 +251,11 @@ every non-passing row. `get_web_remediation` is for a check id you do not alread
 
 A read also carries where each row's evidence came from and what the audit could not run:
 
-- `host`: the host a row's evidence came from, when there is exactly one; a row that recorded none reads as the audited
-  host ([results](/web-scorecard-schema#results)).
+- `site_hosts`: on a site whose bare or `www.` host redirects to the other, both hosts, bare first; `target` and
+  `scorecard_url` name the bare host and `target_url` is where the checks ran
+  ([top-level fields](/web-scorecard-schema#top-level-fields)).
+- `host`: the host a row's evidence came from, when there is exactly one; a row that recorded none reads as the host the
+  checks ran at (`target_url`'s host) ([results](/web-scorecard-schema#results)).
 - `hosts[]`: every host a row's evidence came from, as `{ host }`, with each one's own `status` and `na_reason` on a row
   over several hosts ([results](/web-scorecard-schema#results)).
 - `access_remedy`: on a row the public audit could not run, why it could not
@@ -433,8 +448,8 @@ Two error layers. The discriminator is whether the JSON-RPC envelope itself succ
 }]}
 
 // score_cli when live-scoring is disabled by the operator
-// isError: false — read tier still works
-{ "audited": false, "message": "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard." }
+// isError: false — read tier still works; a get_scorecard miss after this means no scorecard exists yet
+{ "audited": false, "message": "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard.", "next_tool": "get_scorecard" }
 
 // any tool when MCP_LIMITER trips
 { "isError": true, "content": [{
@@ -460,8 +475,10 @@ container-run cost is non-trivial and a shared anon bucket would be a DoS vector
 layers (CF binding burst gate + KV-backed per-hour window); both surface as `-32099` on breach.
 
 Read-tier breach is recoverable by waiting out the 60-second window. Audit-tier breach needs an hour-bucket window to
-roll. Both ceilings are pre-data placeholders sized from parity with sister deployments and will be tuned with
-`mcp.request` log volume.
+roll. A `-32099` from `score_cli` or `audit_website` whose message reads
+`Several audits started at once from this address` is not the ceiling: the hour still has room, and the call can be
+retried after 2 seconds. Both ceilings are pre-data placeholders sized from parity with sister deployments and will be
+tuned with `mcp.request` log volume.
 
 ## Wire-level reference
 
@@ -479,9 +496,11 @@ the build.
 
 **Tool metadata.** Every `tools/list` entry carries a `title` (a short display name) alongside `description` and
 `inputSchema`, plus an `annotations` object describing the tool's posture. The eleven read tools carry `readOnlyHint:
-true`. The two tools that run fresh work, `score_cli` and `audit_website`, carry `readOnlyHint: false` with
-`destructiveHint: false`, `idempotentHint: false`, and `openWorldHint: true`, because they reach external systems and
-write cache and leaderboard state. Annotations are hints for client UX and consent prompts, not a security boundary.
+true`, `destructiveHint: false`, and `openWorldHint: false`, because they return anc's own data without altering any
+record a client can read, and they send no request to an outside host. The two tools that run fresh work, `score_cli`
+and `audit_website`, carry `readOnlyHint: false` with `destructiveHint: false`, `idempotentHint: false`, and
+`openWorldHint: true`, because they reach external systems and write cache and leaderboard state. Annotations are hints
+for client UX and consent prompts, not a security boundary.
 
 **Accept-header negotiation.** Server picks between `application/json` and `text/event-stream`. JSON wins ties; q-values
 resolve unequal preferences. Absent or `*/*` Accept → JSON. Only a request that accepts neither MIME type returns `406`.

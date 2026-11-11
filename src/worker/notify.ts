@@ -41,7 +41,6 @@ export async function notifyFailure(
   const dedupeKey = `alert:${alert.key}`;
   try {
     if (env.SCORE_KV && (await env.SCORE_KV.get(dedupeKey)) !== null) return 'deduped';
-    await env.SCORE_KV?.put(dedupeKey, '1', { expirationTtl: DEDUPE_TTL_SECONDS });
   } catch {
     // A KV failure falls through to sending: a duplicate email beats a
     // silently dropped alert.
@@ -53,7 +52,6 @@ export async function notifyFailure(
       subject: alert.subject,
       text: alert.text,
     });
-    return 'sent';
   } catch (err) {
     emitLog(
       { scope: 'notify.send_failed' },
@@ -62,4 +60,12 @@ export async function notifyFailure(
     );
     return 'send_failed';
   }
+  // Marked only after the send lands, so a failed send leaves the next
+  // alert for this key free to go out.
+  try {
+    await env.SCORE_KV?.put(dedupeKey, '1', { expirationTtl: DEDUPE_TTL_SECONDS });
+  } catch {
+    // The email went out; a lost mark costs at most a duplicate.
+  }
+  return 'sent';
 }

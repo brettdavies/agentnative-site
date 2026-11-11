@@ -26,6 +26,7 @@ import {
   type Route,
   redirect,
   requestsTo,
+  requestsToOtherHosts,
   router,
   row,
   type Seen,
@@ -1033,7 +1034,7 @@ describe("follow: the audited site's own endpoint redirecting off its origin", (
       { source: '/mcp', endpoint: OWN, probed: 'initialize' },
     ]);
     expect(row(scorecard, 'mcp-initialize')).toMatchObject({ status: 'pass', host: 'example.com' });
-    expect(seen.filter((r) => new URL(r.url).host !== 'example.com' && !r.url.includes('dns'))).toEqual([]);
+    expect(requestsToOtherHosts(seen)).toEqual([]);
   });
 
   test('where a common path redirects is recorded not followed once another common path answers, and nothing is sent there', async () => {
@@ -1132,7 +1133,7 @@ describe("follow: the audited site's own endpoint redirecting off its origin", (
     expect(endpointRedirects('/llms.txt', true, 'HEAD')).toEqual({});
   });
 
-  test('an apex whose root and endpoint both redirect to www confirms nothing there: the www endpoint is a declaration, receives no POST, and its rows name it', async () => {
+  test('an apex whose root redirects to www folds into one site: its endpoint at www is its own, probed, and declares no host', async () => {
     const WWW = 'https://www.example.com/mcp';
     const seen: Seen[] = [];
     const { scorecard } = await audit(
@@ -1140,22 +1141,16 @@ describe("follow: the audited site's own endpoint redirecting off its origin", (
         {
           [`GET ${TARGET}`]: () => redirect('https://www.example.com/', 301),
           'GET https://www.example.com/': () => html(),
-          [`POST ${OWN}`]: () => redirect(WWW, 301),
+          [`POST ${WWW}`]: () => initializeResult(),
         },
         seen,
       ),
     );
-    expect(scorecard.mcp_endpoint).toBeNull();
-    expect(scorecard.declared_hosts).toEqual([
-      { surface: '/mcp', kind: 'mcp-endpoint', url: WWW, host: 'www.example.com', outcome: 'reciprocity-refused' },
-    ]);
-    expect(wireProbesTo(seen, 'www.example.com')).toEqual([]);
-    for (const id of ['mcp-initialize', 'mcp-cors-preflight']) {
-      expect({ id, row: row(scorecard, id) }).toMatchObject({
-        id,
-        row: { status: 'n_a', na_reason: 'reciprocity-refused', host: 'www.example.com' },
-      });
-    }
+    expect(scorecard.site_hosts).toEqual(['example.com', 'www.example.com']);
+    expect(scorecard.mcp_endpoint).toBe(WWW);
+    expect(scorecard.declared_hosts).toEqual([]);
+    expect(wireProbesTo(seen, 'www.example.com').length).toBeGreaterThan(0);
+    expect(row(scorecard, 'mcp-initialize')).toMatchObject({ status: 'pass', host: 'www.example.com' });
   });
 
   test("redirect targets settle after the declarations discovery read, under the slice's own host cap", async () => {
@@ -1351,7 +1346,7 @@ describe('follow: hosts that are never requested', () => {
   test('with the follow flag false no off-origin request is made and the rows read follow-disabled', async () => {
     const seen: Seen[] = [];
     const { scorecard } = await audit(router(siteDeclaring(ENDPOINT), seen), { followDeclarations: false });
-    expect(seen.filter((r) => new URL(r.url).host !== 'example.com' && !r.url.includes('dns'))).toEqual([]);
+    expect(requestsToOtherHosts(seen)).toEqual([]);
     expect(scorecard.follow_declarations).toBe(false);
     expect(scorecard.declared_hosts?.[0]).toMatchObject({ outcome: 'not-followed', reason: 'follow-disabled' });
     expect(row(scorecard, 'mcp-initialize')).toMatchObject({ status: 'n_a', na_reason: 'follow-disabled' });
@@ -1680,7 +1675,7 @@ describe('follow: sequencing and determinism', () => {
       events.push(event.type);
     }
     expect(events).toContain('unreachable');
-    expect(seen.filter((r) => new URL(r.url).host !== 'example.com' && !r.url.includes('dns'))).toEqual([]);
+    expect(requestsToOtherHosts(seen)).toEqual([]);
   });
 });
 

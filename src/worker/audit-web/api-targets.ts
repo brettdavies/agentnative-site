@@ -9,12 +9,12 @@
 // never scores above declaring nothing.
 
 import { type CatalogAnchor, isApiAnchor } from './api-catalog';
-import { sameOrigin } from './discovery-documents';
 import { type DeclaredHostReason, declaredHostReason } from './endpoint-of-record';
 import type { ApiFollowResult } from './follow-api';
 import type { Fetched } from './follow-requests';
 import { declarationKey, type TrailEntry } from './follow-trail';
 import type { PlaintextReason } from './handlers/shared';
+import { onSite } from './site-origins';
 
 /**
  * An OpenAPI description the catalog declares, by its declared URL: one
@@ -88,12 +88,13 @@ export function apiTargets(
   base: string,
   anchors: readonly CatalogAnchor[],
   follow: ApiFollowResult,
+  siteOrigins?: readonly string[],
 ): ApiTargets | null {
   const api = anchors.filter(isApiAnchor);
   if (api.length === 0) return null;
   const settled = new Map(follow.entries.map((entry) => [declarationKey(entry), entry]));
   const reach = (kind: 'api-anchor' | 'api-description', url: string): Reach => {
-    if (sameOrigin(url, base)) return 'audited-origin';
+    if (onSite(url, base, siteOrigins)) return 'audited-origin';
     const entry = settled.get(declarationKey({ kind, url }));
     if (entry === undefined) return 'omit';
     if (entry.outcome === 'followed') return 'evaluate';
@@ -111,7 +112,7 @@ export function apiTargets(
     }
     const origin = originOf(anchor.url);
     if (origin === null) continue;
-    const group = origins.get(origin) ?? { declared: !sameOrigin(anchor.url, base), reaches: [], anchors: [] };
+    const group = origins.get(origin) ?? { declared: !onSite(anchor.url, base, siteOrigins), reaches: [], anchors: [] };
     group.reaches.push(reach('api-anchor', anchor.url));
     group.anchors.push({ url: anchor.url, description: declared });
     origins.set(origin, group);

@@ -32,6 +32,7 @@ export type LogScope =
   | 'web-audit.error'
   | 'web-audit.run'
   | 'web-backfill.trigger'
+  | 'web-cache.delete'
   | 'web-cache.get'
   | 'web-cache.getAggregate'
   | 'web-cache.listAllWebAudits'

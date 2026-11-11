@@ -60,7 +60,7 @@ export function registerWebRemediationTool(server: McpServer, env: WebRemediatio
               'the delimited block as a Host line.',
           ),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async ({ check_id, evidence, host }) => {
       let catalog: WebRemediationCatalog;

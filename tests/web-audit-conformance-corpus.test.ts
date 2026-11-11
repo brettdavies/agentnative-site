@@ -127,6 +127,59 @@ describe('web-audit conformance corpus', () => {
     }
   });
 
+  // The fold is part of the port's contract: which name the scorecard carries, where the checks ran, and which hosts
+  // the record answers for.
+  test('each pair golden records the site name, the origin audited, and the folded hosts', () => {
+    const APEX = ['example.com', 'www.example.com'];
+    const expected: Record<string, { name: string; target_url: string; site_hosts: string[] | null } | 'unreachable'> =
+      {
+        'pair-apex-folds-to-www': { name: 'example.com', target_url: 'https://www.example.com/', site_hosts: APEX },
+        'pair-www-folds-to-apex': { name: 'example.com', target_url: 'https://example.com/', site_hosts: APEX },
+        'pair-sibling-redirects-to-audited-host': {
+          name: 'example.com',
+          target_url: 'https://example.com/',
+          site_hosts: APEX,
+        },
+        'pair-fold-post-redirect-across-pair': {
+          name: 'example.com',
+          target_url: 'https://www.example.com/',
+          site_hosts: APEX,
+        },
+        'pair-third-host-redirect': { name: 'example.com', target_url: 'https://example.com/', site_hosts: null },
+        'pair-both-roots-answer': { name: 'example.com', target_url: 'https://example.com/', site_hosts: null },
+        'pair-www-audited-while-apex-unreachable': {
+          name: 'www.example.com',
+          target_url: 'https://www.example.com/',
+          site_hosts: null,
+        },
+        'pair-apex-unreachable-www-answers': 'unreachable',
+      };
+    expect(
+      Object.keys(SCENARIOS)
+        .filter((name) => name.startsWith('pair-'))
+        .sort(),
+    ).toEqual(Object.keys(expected).sort());
+    for (const [name, want] of Object.entries(expected)) {
+      const golden = JSON.parse(readFileSync(join(SCENARIOS_DIR, name, 'scorecard.json'), 'utf8')) as
+        | WebScorecard
+        | { unreachable: string };
+      if (want === 'unreachable') {
+        expect({ name, reason: 'unreachable' in golden ? golden.unreachable : null }).toEqual({
+          name,
+          reason: expect.stringContaining('www.example.com answered.'),
+        });
+        continue;
+      }
+      if ('unreachable' in golden) throw new Error(`${name} ended unreachable`);
+      expect({
+        name,
+        tool: golden.tool.name,
+        target_url: golden.target_url,
+        site_hosts: golden.site_hosts ?? null,
+      }).toEqual({ name, tool: want.name, target_url: want.target_url, site_hosts: want.site_hosts });
+    }
+  });
+
   test('two generations produce identical bytes (determinism)', async () => {
     const first = await generateCorpus(registry);
     const second = await generateCorpus(registry);

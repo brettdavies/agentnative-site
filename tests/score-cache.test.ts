@@ -12,7 +12,15 @@
 // than its coupling.
 
 import { describe, expect, test } from 'bun:test';
-import { type CachedScorecard, type CacheEnv, get, keyFor, put } from '../src/worker/score/cache';
+import {
+  type CachedScorecard,
+  type CacheEnv,
+  CliCacheUnavailableError,
+  get,
+  getForRequest,
+  keyFor,
+  put,
+} from '../src/worker/score/cache';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 // ---------------------------------------------------------------------------
@@ -23,14 +31,22 @@ type StubOpts = {
   throwOnGet?: boolean;
   throwOnPut?: boolean;
   throwOnDelete?: boolean;
+  /** The first N reads throw, then reads succeed. */
+  failGetTimes?: number;
   // Override get() to return a raw value (used to inject corrupted
   // payloads that wouldn't go through put()'s validation).
   prefill?: Record<string, unknown>;
 };
 
-function makeR2Stub(opts: StubOpts = {}): { env: CacheEnv; store: Map<string, string>; deletedKeys: string[] } {
+function makeR2Stub(opts: StubOpts = {}): {
+  env: CacheEnv;
+  store: Map<string, string>;
+  deletedKeys: string[];
+  getCalls: string[];
+} {
   const store = new Map<string, string>();
   const deletedKeys: string[] = [];
+  const getCalls: string[] = [];
   if (opts.prefill) {
     for (const [k, v] of Object.entries(opts.prefill)) {
       store.set(k, typeof v === 'string' ? v : JSON.stringify(v));
@@ -39,7 +55,8 @@ function makeR2Stub(opts: StubOpts = {}): { env: CacheEnv; store: Map<string, st
   const env: CacheEnv = {
     SCORE_CACHE: {
       async get(key: string) {
-        if (opts.throwOnGet) throw new Error('r2_get_failed');
+        getCalls.push(key);
+        if (opts.throwOnGet || getCalls.length <= (opts.failGetTimes ?? 0)) throw new Error('r2_get_failed');
         const raw = store.get(key);
         if (raw === undefined) return null;
         // R2's `get(key)` returns an R2ObjectBody. The minimum surface
@@ -64,7 +81,7 @@ function makeR2Stub(opts: StubOpts = {}): { env: CacheEnv; store: Map<string, st
       },
     } as unknown as R2Bucket,
   };
-  return { env, store, deletedKeys };
+  return { env, store, deletedKeys, getCalls };
 }
 
 // ---------------------------------------------------------------------------
@@ -148,6 +165,32 @@ describe('cache.get', () => {
     const { env } = makeR2Stub({ prefill: { [key]: corrupted }, throwOnDelete: true });
     // Still returns null without surfacing the delete error.
     expect(await get(env, key)).toBeNull();
+  });
+});
+
+// A page that answers a reader must not call a record it could not read a
+// record that does not exist: the reader is told to audit a tool already audited.
+describe('cache.getForRequest', () => {
+  const record = { spec_version: SPEC_VERSION, anc_version: ANC_VERSION, tool_version: '1.0.0', scorecard: {} };
+
+  test('a transient read is retried and the record comes back', async () => {
+    const key = keyFor('rg', SPEC_VERSION);
+    const { env, getCalls } = makeR2Stub({ prefill: { [key]: record }, failGetTimes: 2 });
+    expect(await getForRequest(env, key)).toMatchObject({ tool_version: '1.0.0' });
+    expect(getCalls.length).toBe(3);
+  });
+
+  test('a read that never succeeds is reported as unavailable, and the record is left in place', async () => {
+    const key = keyFor('rg', SPEC_VERSION);
+    const { env, deletedKeys } = makeR2Stub({ prefill: { [key]: record }, throwOnGet: true });
+    await expect(getForRequest(env, key)).rejects.toBeInstanceOf(CliCacheUnavailableError);
+    expect(deletedKeys).toEqual([]);
+  });
+
+  test('a key that holds nothing is a miss, read once', async () => {
+    const { env, getCalls } = makeR2Stub();
+    expect(await getForRequest(env, keyFor('rg', SPEC_VERSION))).toBeNull();
+    expect(getCalls.length).toBe(1);
   });
 });
 

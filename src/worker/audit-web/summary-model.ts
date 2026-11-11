@@ -16,8 +16,10 @@ import {
   readDeclaredHosts,
   readFollowState,
   readRegistryFingerprint,
+  readSiteHosts,
   recordedHostOf,
   recordedHostsOf,
+  rowAtAuditedHost,
   rowHostOf,
   rowHostOutcomes,
   rowHostsOf,
@@ -59,6 +61,7 @@ export type WebScorecardRow = {
 export type WebScorecardShape = {
   spec_version?: string;
   target_url?: string;
+  site_hosts?: unknown;
   mcp_endpoint?: unknown;
   tool?: { name?: string; url?: string };
   mcp_discovery?: unknown;
@@ -175,11 +178,14 @@ function summaryRow(
 export function webSummaryModel(input: WebSummaryModelInput): WebSummaryModel {
   const sc = input.scorecard;
   const catalog = input.remediation ?? {};
-  const rows = sc.results ?? [];
+  const stored = sc.results ?? [];
   const { relative, global: globalScore } = scoresOf(sc);
   const lanes = input.registry?.mcp_lanes ?? {};
   const placement = lanePlacement(input.registry);
   const entryHost = entryHostOf(sc.target_url) ?? input.domain;
+  const siteHosts = readSiteHosts(sc.site_hosts);
+  const rows = stored.map((row) => rowAtAuditedHost(row, entryHost, siteHosts));
+  const siteName = sc.tool?.name ?? input.domain;
   const follow = readFollowState(sc.follow_declarations);
   const trail = readDeclaredHosts(sc.declared_hosts);
   const trailInput = { trail, discovery: sc.mcp_discovery, domain: input.domain };
@@ -203,6 +209,7 @@ export function webSummaryModel(input: WebSummaryModelInput): WebSummaryModel {
   return {
     name: input.name ?? sc.tool?.name ?? input.domain,
     targetUrl: sc.tool?.url ?? input.targetUrl,
+    auditedAt: siteHosts.length > 0 && entryHost.toLowerCase() !== siteName.toLowerCase() ? entryHost : null,
     relative,
     global: globalScore,
     counts: countsOf(rows),

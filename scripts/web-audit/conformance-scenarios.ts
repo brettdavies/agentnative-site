@@ -40,6 +40,36 @@ const REFUSED = failure('TypeError: connection refused');
 const NOT_FOUND = html('<html><body><h1>Not found</h1><p>No such page.</p></body></html>', {}, 404);
 const SERVER_ERROR = html('<html><body><h1>Internal error</h1></body></html>', {}, 500);
 
+// The sibling root every run requests once, answering without a redirect; a scenario that names every request lists it.
+const SIBLING_ROOT = 'https://www.example.com/';
+const sibling404 = (): Exchange => ({ request: { method: 'GET', url: SIBLING_ROOT }, response: NOT_FOUND });
+
+const WWW_ORIGIN = 'https://www.example.com';
+const getAt = (url: string, response: ExchangeResponse): Exchange => ({ request: { method: 'GET', url }, response });
+const postAt = (url: string, response: ExchangeResponse, match: PostMatch = {}): Exchange => ({
+  request: { method: 'POST', url, ...match },
+  response,
+});
+
+// Request headers stay as written: the CORS probe sends a fixed Origin that is not the audited origin.
+const movedTo = (origin: string, exchanges: Exchange[]): Exchange[] => {
+  const move = (value: string): string => value.split('https://example.com').join(origin);
+  return exchanges.map(({ request, response }) => ({
+    request: { ...request, url: move(request.url) },
+    response:
+      'error' in response
+        ? response
+        : {
+            ...response,
+            headers: Object.fromEntries(Object.entries(response.headers).map(([k, v]) => [k, move(v)])),
+            body: move(response.body),
+          },
+  }));
+};
+
+const mcpSiteOn = (origin: string): Exchange[] =>
+  movedTo(origin, [...baseline(), ...cardSurface(), ...dualStackMcp({ cors: 'full' })]);
+
 const rpcResult = (result: unknown, extra: Record<string, string> = {}): ExchangeResponse =>
   json({ jsonrpc: '2.0', id: 1, result }, 200, extra);
 const rpcError = (code: number, status = 200, data?: Record<string, unknown>): ExchangeResponse =>
@@ -577,7 +607,7 @@ const HUGE_TOOLS = { tools: Array.from({ length: 1200 }, (_, i) => ({ name: `too
 
 export const SCENARIOS: Record<string, Scenario> = {
   // ---- whole runs -----------------------------------------------------------
-  'run-all-pass': scenario('every surface answers as the registry wants it to', ALL_IDS, fullSite(), {
+  'run-all-pass': scenario('every surface answers as the registry wants it to', ALL_IDS, [...fullSite(), sibling404()], {
     allow_unmatched: false,
   }),
   'run-healthy': scenario(
@@ -627,13 +657,13 @@ export const SCENARIOS: Record<string, Scenario> = {
   'run-site-type-api': scenario(
     'the full site declared as an API: content-only checks are `n_a` at the type filter',
     ['llms-full-txt', 'llms-txt-scoped', 'llms-full-txt-scoped', 'openapi', 'json-errors'],
-    fullSite(),
+    [...fullSite(), sibling404()],
     { site_type: 'api', allow_unmatched: false },
   ),
   'run-site-type-content': scenario(
     'the full site declared as content: API-only checks are `n_a` at the type filter, MCP still applies on discovery',
     ['openapi', 'json-schemas', 'api-catalog', 'json-errors', 'rate-limit-headers', 'llms-full-txt', 'mcp-initialize'],
-    fullSite(),
+    [...fullSite(), sibling404()],
     { site_type: 'content', allow_unmatched: false },
   ),
   'run-redirects': scenario(
@@ -657,7 +687,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     ],
   ),
   'run-document-redirects-to-http': scenario(
-    'the audited site answers /llms.txt and its API catalog with a redirect to the same path over http, where each would answer: neither hop is taken, and each document reads as missing (llms.txt absent, the optional API catalog n_a), its evidence naming the redirect to http',
+    'the audited site answers /llms.txt and its API catalog with a redirect to the same path over http, where each would answer: neither hop is taken, and each document reads as missing (llms.txt absent, the optional API catalog `n_a`), its evidence naming the redirect to http',
     ['llms-txt', 'api-catalog'],
     [
       ...baseline(),
@@ -670,7 +700,7 @@ export const SCENARIOS: Record<string, Scenario> = {
   'run-root-redirects-to-http': scenario(
     'every https request, the root included, redirects to the http root, which would answer: the run ends unreachable after the root request alone, and nothing is requested over http',
     ['agent-ua-reachable', 'content-without-js'],
-    [get('/', redirect('http://example.com/')), get('http://example.com/', html(rootHtml()))],
+    [get('/', redirect('http://example.com/')), get('http://example.com/', html(rootHtml())), sibling404()],
     { allow_unmatched: false },
   ),
   'run-body-over-cap': scenario(
@@ -688,6 +718,65 @@ export const SCENARIOS: Record<string, Scenario> = {
       get(API_PROBE_PATH, json({ error: 'not_found', padding: 'x'.repeat(70_000) }, 404)),
     ],
   ),
+
+  // ---- pair resolution --------------------------------------------------------
+  'pair-apex-folds-to-www': {
+    ...scenario(
+      'the bare host redirects its root to the `www.` host, which serves the site and its MCP endpoint: the pair is one site named by the bare host, audited at the `www.` host, and no declared host names the `www.` host',
+      ['mcp-initialize', 'mcp-tools-list', 'mcp-server-card'],
+      [getAt(BASE, redirect(`${WWW_ORIGIN}/`)), ...mcpSiteOn(WWW_ORIGIN)],
+    ),
+  },
+  'pair-www-folds-to-apex': {
+    ...scenario(
+      'the `www.` host redirects its root to the bare host, and the audit starts there: the pair is one site named by the bare host, audited at the bare host',
+      ['mcp-initialize', 'mcp-tools-list', 'mcp-server-card'],
+      [getAt(SIBLING_ROOT, redirect(BASE)), ...mcpSiteOn('https://example.com')],
+    ),
+    target: SIBLING_ROOT,
+  },
+  'pair-sibling-redirects-to-audited-host': scenario(
+    'the audited bare host serves its root and the `www.` host redirects to it: the pair is one site, and the sibling observation alone folds it',
+    ['mcp-initialize', 'mcp-server-card'],
+    [getAt(SIBLING_ROOT, redirect(BASE)), ...mcpSiteOn('https://example.com')],
+  ),
+  'pair-apex-unreachable-www-answers': scenario(
+    'the bare host gives no answer and the `www.` host answers its root without a redirect: the audit ends unreachable and names the `www.` host as the one that answered',
+    ['agent-ua-reachable'],
+    [get('/', REFUSED), getAt(SIBLING_ROOT, html(rootHtml()))],
+    { unmatched: REFUSED },
+  ),
+  'pair-www-audited-while-apex-unreachable': {
+    ...scenario(
+      'the audit starts at the `www.` host while the bare host gives no answer: the `www.` host is its own site, stored under its own name, with no fold recorded',
+      ['agent-ua-reachable', 'root-meta-description'],
+      [get('/', REFUSED), getAt(SIBLING_ROOT, html(rootHtml()))],
+    ),
+    target: SIBLING_ROOT,
+  },
+  'pair-third-host-redirect': scenario(
+    'the bare host redirects its root to an unrelated host while the `www.` host does not redirect: no redirect lands on the other host of the pair, so the audit covers the bare host alone',
+    ['agent-ua-reachable', 'root-meta-description'],
+    [get('/', redirect('https://example.net/')), getAt('https://example.net/', html(rootHtml())), sibling404()],
+  ),
+  'pair-both-roots-answer': scenario(
+    'both roots answer with a page and neither redirects: the two hosts are two sites, and the `www.` host is requested as any other host would be',
+    ['agent-ua-reachable', 'root-meta-description'],
+    [...baseline(), getAt(SIBLING_ROOT, html(rootHtml()))],
+  ),
+  'pair-fold-post-redirect-across-pair': {
+    ...scenario(
+      'the bare host folds into the `www.` host, and the `www.` MCP endpoint answers the discovery POST with a redirect to the same path on the bare host: the hop stays on the site, so discovery records the `www.` endpoint it requested, the lane probes read the bare-host answers, and no declared host is recorded',
+      ['mcp-initialize', 'mcp-tools-list'],
+      [
+        getAt(BASE, redirect(`${WWW_ORIGIN}/`)),
+        getAt(`${WWW_ORIGIN}/`, html(rootHtml())),
+        postAt(`${WWW_ORIGIN}${MCP_PATH}`, res(307, { location: u(MCP_PATH) }, '')),
+        ...cardSurface(),
+        ...dualStackMcp({ cors: 'full' }),
+      ],
+    ),
+  },
 
   // ---- http handler ----------------------------------------------------------
   'http-llms-txt-pass': scenario('a 200 llms.txt with a link index passes and retains its body', ['llms-txt'], [
@@ -740,7 +829,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     ],
   ),
   'http-get-fast-fail-markdown-broken': scenario(
-    'a GET with Accept text/event-stream that returns 200 markdown is broken',
+    'a GET with Accept text/event-stream that returns 200 with a markdown body is broken',
     ['mcp-get-fast-fail'],
     [
       ...baseline(),
@@ -1092,7 +1181,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     ],
   ),
   'mcp-www-authenticate': scenario(
-    'an endpoint that answers legacy POSTs with a 401 whose challenge names no metadata, while root RFC 9728 metadata names it: it requires sign-in, so the legacy session rows, the resources rows, and every row a 401 answers read auth-required, and the challenge satisfies the mcp-auth antecedent; its modern lane refuses server/discover with a method-not-found and no 401, an answer a token would not change, so the modern session rows read absent as they do on an open server',
+    'an endpoint that answers legacy POSTs with a 401 whose challenge names no metadata, while root RFC 9728 metadata names it: it requires signing in, so the legacy session rows, the resources rows, and every row a 401 answers read auth-required, and the challenge satisfies the mcp-auth antecedent; its modern lane refuses server/discover with a method-not-found and no 401, an answer a token would not change, so the modern session rows read absent as they do on an open server',
     ['mcp-initialize', 'mcp-server-discover', 'mcp-auth-challenge', 'oauth-protected-resource', 'auth-md'],
     [
       ...baseline(),
@@ -1145,7 +1234,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     ...noModernLane(),
     ...legacyMcp(),
   ]),
-  'mcp-card-no-endpoint-field': scenario('a card without an endpoint field that names its server in serverInfo is SEP-1649-shaped and passes the card check with the superseded advisory, while discovery falls through to initialize', ['mcp-server-card', 'mcp-initialize'], [
+  'mcp-card-no-endpoint-field': scenario('a card without an endpoint field that names its server in `serverInfo` is SEP-1649-shaped and passes the card check with the superseded advisory, while discovery falls through to initialize', ['mcp-server-card', 'mcp-initialize'], [
     ...baseline(),
     get(CARD_PATH, json({ name: 'example', serverInfo: { name: 'example' } })),
     ...mcpEdges(),
@@ -1155,7 +1244,7 @@ export const SCENARIOS: Record<string, Scenario> = {
 
   // ---- discovery order: SEP-2127 catalog, card suffix, SEP-1649 --------------
   'discovery-catalog-card': scenario(
-    'an AI catalog entry names a SEP-2127 card on the audited origin; its streamable-http remote is the endpoint, so no common path is POSTed, and the card passes the card check',
+    'an AI catalog entry names a SEP-2127 card on the audited origin; its streamable-http remote is the endpoint, so no common path receives a POST, and the card passes the card check',
     ['ai-catalog', 'mcp-initialize', 'mcp-server-card'],
     [
       ...baseline(),
@@ -1215,7 +1304,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     ],
   ),
   'discovery-legacy-card': scenario(
-    'a SEP-1649 card at the well-known path names the endpoint in transport.url; no common path is POSTed and the card suffix answers 404',
+    'a SEP-1649 card at the well-known path names the endpoint in transport.url; no common path receives a POST and the card suffix answers 404',
     ['mcp-server-card', 'mcp-initialize'],
     [
       ...baseline(),
@@ -1460,7 +1549,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     ],
   ),
   'auth-later-401': scenario(
-    "the audited site's /mcp serves initialize without a token and refuses server/discover with a method-not-found, while every other request it reads a token for draws a 401 naming same-host RFC 9728 metadata that names it: no handshake asked for sign-in, so the endpoint presents the open design and the sign-in rows are n_a, and each later row whose 401 that metadata backs reads auth-required rather than broken",
+    "the audited site's /mcp serves initialize without a token and refuses server/discover with a method-not-found, while every other request it reads a token for draws a 401 naming same-host RFC 9728 metadata that names it: no handshake asked for sign-in, so the endpoint presents the open design and the sign-in rows are `n_a`, and each later row whose 401 that metadata backs reads auth-required rather than broken",
     ['mcp-capabilities', 'mcp-tools-list', 'mcp-resources-list', 'mcp-unknown-tool', 'mcp-accept-json', 'mcp-auth-enforced'],
     [
       ...baseline(),

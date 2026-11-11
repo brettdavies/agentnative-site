@@ -37,7 +37,7 @@ export function registerRegistryTools(server: McpServer, catalog: Catalog): void
         'Return summaries of every scored CLI in the anc.dev registry. Each entry carries slug, name, binary, install ' +
         'command, version (when a scorecard has been committed), score_pct (percentage pass rate of the latest audit), ' +
         'scorecard_url (path under anc.dev), and audit_profile (when the tool opts out of the default profile).',
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async () => textContent(catalog.registry.map(summary)),
   );
@@ -52,7 +52,7 @@ export function registerRegistryTools(server: McpServer, catalog: Catalog): void
         'Look-not-found returns isError: false with a typed { found: false, message } body because absence is data, ' +
         'not failure.',
       inputSchema: { slug: z.string().describe('The CLI slug, e.g. "ripgrep" or "curl".') },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async ({ slug }) => {
       const entry = catalog.registry.find((e) => e.slug === slug);
@@ -90,7 +90,7 @@ export function registerRegistryTools(server: McpServer, catalog: Catalog): void
           .optional()
           .describe('Reserved for a future per-principle filter; no-op today.'),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async ({ score_min, score_max, audit_profile }) => {
       const matches = catalog.registry.filter((entry) => {

@@ -76,7 +76,7 @@ export function registerScorecardReadTool(server: McpServer, _catalog: Catalog, 
         install: z.string().optional().describe('Full install command, e.g. "brew install ripgrep".'),
         github_url: z.string().optional().describe('GitHub URL (https://github.com/owner/repo, branch URLs accepted).'),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async (args) => {
       const origin = siteOrigin();

@@ -145,7 +145,7 @@ export function resetWebAuditRegistryCacheForTests(): void {
  * changes the follow policy without touching the registry still reflows the
  * curated seeds; raise it with any such change.
  */
-export const FOLLOW_POLICY_VERSION = 1;
+export const FOLLOW_POLICY_VERSION = 2;
 
 /**
  * Registry fields no stored scorecard depends on.

@@ -10,14 +10,15 @@
 // metadata on the audited host names it.
 
 import { type ProbeResponse, parseJsonRpc } from './assert';
-import { type McpDeclaration, sameOrigin } from './discovery-documents';
+import type { McpDeclaration } from './discovery-documents';
 import { legacyInitializeBody, legacyProbeHeaders, modernProbeBody, modernProbeHeaders } from './handlers/mcp';
 import type { EvidenceItem } from './handlers/types';
 import type { ChallengedPath } from './mcp-auth';
+import { onSite } from './site-origins';
 import { type AuditFetchOptions, type GuardedFetchInit, guardedFetch, REDIRECT_STATUSES } from './ssrf';
 
-/** Where a POST answer redirected off the audited origin, as the URL a hop would request, or null. */
-function offOriginRedirect(url: string, resp: ProbeResponse): string | null {
+/** Where a POST answer redirected off the audited site, as the URL a hop would request, or null. */
+function offSiteRedirect(url: string, resp: ProbeResponse, siteOrigins: readonly string[] | undefined): string | null {
   const location = resp.headers.location;
   if (resp.status === null || !REDIRECT_STATUSES.has(resp.status) || location === undefined) return null;
   let target: string;
@@ -26,7 +27,7 @@ function offOriginRedirect(url: string, resp: ProbeResponse): string | null {
   } catch {
     return null;
   }
-  return sameOrigin(target, url) ? null : target;
+  return onSite(target, url, siteOrigins) ? null : target;
 }
 
 type PostProbing = {
@@ -70,7 +71,7 @@ export async function probeCommonPaths(
   const items: EvidenceItem[] = [];
   const redirected: McpDeclaration[] = [];
   const miss = (candidate: (typeof candidates)[number], resp: ProbeResponse, probed: string, why: string): void => {
-    const target = offOriginRedirect(candidate.url, resp);
+    const target = offSiteRedirect(candidate.url, resp, fetchOptions?.siteOrigins);
     if (target === null) {
       items.push({ source: candidate.path, status: resp.status, probed: `${probed} (${why})` });
       return;

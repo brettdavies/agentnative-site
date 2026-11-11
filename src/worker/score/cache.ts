@@ -68,6 +68,52 @@ export async function get(env: CacheEnv, key: string): Promise<CachedScorecard |
     emitLog({ scope: 'cache.get' }, { key, error: errMsg(err) });
     return null;
   }
+  return recordOf(env, key, obj);
+}
+
+/**
+ * A read R2 could not answer, which is not a key holding nothing. A page that
+ * reports the two alike tells a reader that a tool has never been audited and
+ * invites a fresh audit of one already stored.
+ */
+export class CliCacheUnavailableError extends Error {
+  constructor(
+    readonly key: string,
+    cause: unknown,
+  ) {
+    super(`cli cache unreadable for ${key}: ${errMsg(cause)}`);
+    this.name = 'CliCacheUnavailableError';
+  }
+}
+
+// R2 answers an internal error with "please try again". Only the fetch
+// retries; a parse or shape failure is conclusive.
+const GET_BACKOFF_MS = [50, 200] as const;
+
+/**
+ * The strict read, for a path that answers a reader. Throws
+ * `CliCacheUnavailableError` once R2 has failed every attempt, so the caller
+ * can say the record could not be read instead of claiming it does not exist.
+ */
+export async function getForRequest(env: CacheEnv, key: string): Promise<CachedScorecard | null> {
+  let last: unknown;
+  for (let attempt = 0; attempt <= GET_BACKOFF_MS.length; attempt++) {
+    let obj: R2ObjectBody | null;
+    try {
+      obj = await env.SCORE_CACHE.get(key);
+    } catch (err) {
+      last = err;
+      const backoff = GET_BACKOFF_MS[attempt];
+      if (backoff !== undefined) await new Promise((r) => setTimeout(r, backoff));
+      continue;
+    }
+    return recordOf(env, key, obj);
+  }
+  emitLog({ scope: 'cache.get' }, { key, error: errMsg(last), attempts: GET_BACKOFF_MS.length + 1 });
+  throw new CliCacheUnavailableError(key, last);
+}
+
+async function recordOf(env: CacheEnv, key: string, obj: R2ObjectBody | null): Promise<CachedScorecard | null> {
   if (obj === null) return null;
 
   let raw: unknown;

@@ -66,7 +66,8 @@ function categoryPill(category: SummaryCategory): CategoryPill {
 function scoreNoteHtml(model: WebSummaryModel): string {
   const clause = model.hostsClause === null ? '' : richHtml(model.hostsClause);
   const notRun = model.notRunNote === null ? '' : ` ${richHtml(model.notRunNote)}`;
-  return `<p class="result-score__note">${escHtml(RELATIVE_SUBLABEL)}${clause}; global measures it against a maximally agent-ready site. Website <a href="${escHtml(model.targetUrl)}" referrerpolicy="no-referrer-when-downgrade">${escHtml(model.targetUrl)}</a>.${notRun}</p>`;
+  const auditedAt = model.auditedAt === null ? '' : ` (audited at ${escHtml(model.auditedAt)})`;
+  return `<p class="result-score__note">${escHtml(RELATIVE_SUBLABEL)}${clause}; global measures it against a maximally agent-ready site. Website <a href="${escHtml(model.targetUrl)}" referrerpolicy="no-referrer-when-downgrade">${escHtml(model.targetUrl)}</a>${auditedAt}.${notRun}</p>`;
 }
 
 function categoryHtml(category: SummaryCategory, index: number): string {
