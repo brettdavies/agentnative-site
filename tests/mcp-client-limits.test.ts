@@ -214,6 +214,7 @@ function windowFailures(
   origin: string,
 ): string[] {
   if (limits.length === 0) return [`${subject} at ${origin}: no limit record applies`];
+  if (needle.length === 0) return [`${subject} at ${origin}: the text to place is empty`];
   const start = text.indexOf(needle);
   if (start === -1) return [`${subject} at ${origin}: the text to place, ${shown(needle)}, is absent`];
   const prefix = text.slice(0, start + needle.length);

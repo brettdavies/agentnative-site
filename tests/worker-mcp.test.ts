@@ -238,8 +238,9 @@ describe('MCP instructions string (drift gate per KTD-8)', () => {
     expect(instructions).toContain('tools/list');
     expect(instructions).toContain('resources/templates/list');
     const skill = await readFile(join(import.meta.dir, '..', 'content/mcp-skill.md'), 'utf8');
-    expect(skill.replace(/\s+/g, ' ')).toContain('application/json');
-    expect(skill.replace(/\s+/g, ' ')).toContain('text/event-stream');
+    expect(skill.replace(/\s+/g, ' ')).toContain(
+      '**Accept-header negotiation.** Server picks between `application/json` and `text/event-stream`. JSON wins ties',
+    );
   });
 
   test('instructions say which tools browse the CLI registry and which lists the web leaderboard', async () => {

@@ -1893,6 +1893,7 @@ describe('audit_website discloses third-party probing', () => {
     );
     expect(description).toContain("following lengthens an audit's wall time");
     expect(description).toContain('capped at about 30 audits per hour per declared registrable domain');
+    expect(description).toContain("an audit past that cap leaves that domain's hosts unprobed");
     expect(description).toContain(
       'when the site has a saved scorecard from the last 24 hours that audit is returned without replacing it, with no scorecard_url, markdown_url, or json_url',
     );
@@ -1930,6 +1931,9 @@ describe('audit_website discloses third-party probing', () => {
       expect(description).toContain(field);
     }
     expect(description).toContain('isError: false with audited: false');
+    expect(description).toContain(
+      "freshness.cached (false for a fresh run's result, including a run this call attached to)",
+    );
     expect(description).toContain('isError: true with a JSON-RPC -32099 error in the text');
     expect(description).toContain('read get_website_audit');
   });

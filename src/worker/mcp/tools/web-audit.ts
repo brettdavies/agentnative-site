@@ -229,9 +229,10 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         'notifications; get_website_audit reads the cache without running an audit. ' +
         `${FOLLOW_DISCLOSURE_SHORT} ` +
         'A result under 1 minute old is returned without re-running, and a cached result is still served as-is when ' +
-        'the audit is disabled. Results carry freshness.cached (false only when this call ran the audit), ' +
-        'freshness.scored_at (when it ran, null on a legacy entry), and freshness.refresh_after (when the 1-minute ' +
-        'reuse window ends: eligibility, not a promise a fresh audit will run). When WEB_AUDIT_ENABLED or ' +
+        "the audit is disabled. Results carry freshness.cached (false for a fresh run's result, including a run " +
+        'this call attached to), freshness.scored_at (when it ran, null on a legacy entry), and ' +
+        'freshness.refresh_after (when the 1-minute reuse window ends: eligibility, not a promise a fresh audit ' +
+        'will run). When WEB_AUDIT_ENABLED or ' +
         'MCP_ENABLED is not "true" the answer is isError: false with audited: false: the cached result if one ' +
         'exists, otherwise a message that points at get_website_audit. A per-IP burst limit and 30 fresh audits per ' +
         '60 minutes per IP apply; a breach, or a request without cf-connecting-ip, returns isError: true with a ' +
