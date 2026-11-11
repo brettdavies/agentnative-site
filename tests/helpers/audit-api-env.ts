@@ -228,6 +228,23 @@ export function makeCtx(): ExecutionContext & { _promises: Promise<unknown>[] } 
 
 export type Deps = AuditApiDeps;
 
+// A context whose purge RPC records every tag batch the run queued.
+export function purgeCtx(): ReturnType<typeof makeCtx> & { purged: string[][] } {
+  const purged: string[][] = [];
+  const ctx = makeCtx();
+  return Object.assign(ctx, {
+    purged,
+    exports: {
+      Cached: {
+        async purgeHitMinTags(tags: string[]) {
+          purged.push(tags);
+          return { success: true, errors: [] };
+        },
+      },
+    },
+  });
+}
+
 export function post(
   body: Record<string, unknown> | string,
   opts: { ip?: string | null; accept?: string; contentType?: string; query?: string; cookie?: string } = {},

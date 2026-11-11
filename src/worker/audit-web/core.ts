@@ -28,7 +28,6 @@ import {
   type CachedWebAudit,
   get as cacheGet,
   put as cachePut,
-  canonicalTargetOf,
   isStale,
   keyFor,
   patchStoredPublicListing,
@@ -53,10 +52,12 @@ import {
 import { loadWebAuditRegistry, type WebAuditRegistry, type WebSiteType, withRegistryFingerprint } from './registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remediation';
 import type { EngineResult, WebScorecard } from './scorecard';
-import { validatePublicUrl } from './ssrf';
+import type { PairReport } from './site-pair';
+import { planSiteRecord, settleSiteRecord } from './site-record';
 import type { WebScorecardShape } from './summary-model';
 import { buildWebSummaryBody } from './summary-render';
 import type { TransientReason } from './summary-transient';
+import type { WebTarget } from './web-target';
 
 export interface WebCoreEnv extends AuditLogEnv, NotifyEnv, FollowSwitchEnv, DomainBudgetEnv, OgVideoEnv {
   ASSETS: Fetcher;
@@ -64,44 +65,33 @@ export interface WebCoreEnv extends AuditLogEnv, NotifyEnv, FollowSwitchEnv, Dom
   SCORE_KV?: KVNamespace;
 }
 
-export type WebTarget = {
-  /** The host the result route serves, with a non-default port. */
-  host: string;
-  /** The canonical `https://<host>/` origin the cache is keyed by. */
-  canonical: string;
-};
-
-/**
- * The website lane's server-side target: the shared classifier's host,
- * fixed to the https scheme, then the SSRF gate on that origin before any
- * cache read. A refused origin returns the gate's reason.
- */
-export function prepareWebTarget(host: string): { ok: true; target: WebTarget } | { ok: false; reason: string } {
-  let url: URL;
-  try {
-    url = new URL(`https://${host}/`);
-  } catch {
-    return { ok: false, reason: 'invalid host' };
-  }
-  const canonical = canonicalTargetOf(url);
-  const validation = validatePublicUrl(canonical);
-  if (!validation.ok) return { ok: false, reason: validation.reason };
-  return { ok: true, target: { host: url.host, canonical } };
-}
+export { prepareWebTarget, type WebTarget } from './web-target';
 
 export type WebTier =
   | { kind: 'serve'; cached: CachedWebAudit; fresh: boolean }
   | { kind: 'patch'; write: Extract<PublicListingWrite, { path: 'patch' }>; cached: CachedWebAudit }
   | { kind: 'audit'; cached: CachedWebAudit | null; listing: boolean; write: PublicListingWrite };
 
-/** The target's stored audit, or null when none was ever saved. */
-async function readStoredWebAudit(env: WebCoreEnv, target: WebTarget): Promise<CachedWebAudit | null> {
-  return cacheGet(env, await keyFor(target.canonical, SPEC_VERSION));
+/**
+ * The target's stored audit, or null when none was ever saved. `known` is a
+ * read the caller already made of this target: a record, a miss, or undefined
+ * when it made none.
+ */
+async function readStoredWebAudit(
+  env: WebCoreEnv,
+  target: WebTarget,
+  known?: CachedWebAudit | null,
+): Promise<CachedWebAudit | null> {
+  return known !== undefined ? known : cacheGet(env, await keyFor(target.canonical, SPEC_VERSION));
 }
 
 /** The listing a run that saves nothing carries: the target's stored choice, unlisted when it has none. */
-export async function readStandingListing(env: WebCoreEnv, target: WebTarget): Promise<boolean> {
-  return standingPublicListing(await readStoredWebAudit(env, target));
+export async function readStandingListing(
+  env: WebCoreEnv,
+  target: WebTarget,
+  known?: CachedWebAudit | null,
+): Promise<boolean> {
+  return standingPublicListing(await readStoredWebAudit(env, target, known));
 }
 
 /**
@@ -114,8 +104,9 @@ export async function readWebTier(
   env: WebCoreEnv,
   target: WebTarget,
   publicListing: boolean | undefined,
+  known?: CachedWebAudit | null,
 ): Promise<WebTier> {
-  const cached = await readStoredWebAudit(env, target);
+  const cached = await readStoredWebAudit(env, target, known);
   const write = decidePublicListingWrite({ explicit: publicListing, cached });
   const fresh = cached !== null && !isStale(cached.scored_at, WEB_AUDIT_STALE_AFTER_MS);
   if (cached && fresh && write.path === 'serve-cached') return { kind: 'serve', cached, fresh: true };
@@ -223,9 +214,15 @@ export async function meterWebAuditFlip(
 
 export type RunWebAuditInput = {
   env: WebCoreEnv;
+  /** The site the request named, which keys admission and the job; the scorecard is stored under the site the audit finds. */
   target: WebTarget;
+  /** The host the audit starts at, when the request typed a different host than `target`. */
+  requested?: WebTarget;
   siteType: WebSiteType | null;
+  /** The listing resolved against `target`'s stored record. */
   listing: boolean;
+  /** The caller's explicit listing choice; undefined for a blank request. */
+  explicitListing?: boolean;
   /**
    * The caller's follow choice; the operator's switch can still turn
    * following off. A caller that opts out gets a result that is never saved.
@@ -268,8 +265,10 @@ function checkEvent(result: EngineResult, siteHosts: readonly string[]): AuditEv
  */
 export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerator<AuditEvent> {
   const { env, target } = input;
+  const requested = input.requested ?? target;
   let scorecard: WebScorecard | null = null;
   let complete = false;
+  let pair: PairReport | null = null;
   let refusals: Readonly<Record<string, DomainRefusal>> = {};
   let siteHosts: readonly string[] = [];
   const followDeclarations = effectiveFollow(env, input.followDeclarations);
@@ -277,7 +276,7 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
     const registry = await loadWebAuditRegistry(env);
     for await (const event of instrumentAuditEvents(
       runWebAudit({
-        url: target.canonical,
+        url: requested.canonical,
         registry,
         siteType: input.siteType,
         publicListing: input.listing,
@@ -287,7 +286,7 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
         fetchOptions: input.probeFetch ? { fetchImpl: input.probeFetch } : undefined,
       }),
       env,
-      { target: target.canonical, surface: input.surface, followDeclarations },
+      { target: requested.canonical, surface: input.surface, followDeclarations },
     )) {
       if (event.type === 'discovery') {
         siteHosts = event.siteHosts ?? [];
@@ -307,6 +306,7 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
       } else if (event.type === 'complete') {
         scorecard = event.scorecard;
         complete = event.complete;
+        pair = event.pair ?? null;
         refusals = event.follow.budgetRefusals;
       }
     }
@@ -316,37 +316,48 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
     const scoredAt = complete && scorecard ? new Date().toISOString() : null;
     if (scorecard && scoredAt) {
       const stamped = await withRegistryFingerprint(scorecard, registry);
-      const held = input.followDeclarations ? await heldRun(env, target, stamped, input.listing, refusals) : null;
+      const site = await planSiteRecord(env, {
+        target,
+        requested,
+        pair,
+        scorecard: stamped,
+        explicit: input.explicitListing,
+        listing: input.listing,
+      });
+      const held = input.followDeclarations
+        ? await heldRun(env, site.target, site.scorecard, site.listing, refusals)
+        : null;
       const transient: TransientReason | undefined = input.followDeclarations ? held?.reason : { kind: 'opt-out' };
       if (!transient) {
-        const wrote = await cachePut(env, target.canonical, stamped, SPEC_VERSION, scoredAt);
+        const wrote = await cachePut(env, site.target.canonical, site.scorecard, SPEC_VERSION, scoredAt);
         if (wrote) {
-          queueHitMinPurge([webTag(), webDomainTag(target.host)]);
-          queueAfterHitMinPurge(`render:${target.host}`, () => requestRender(env, target.host));
+          await settleSiteRecord(env, site);
+          queueHitMinPurge([webTag(), webDomainTag(site.target.host), ...site.alsoPurge.map(webDomainTag)]);
+          queueAfterHitMinPurge(`render:${site.target.host}`, () => requestRender(env, site.target.host));
         }
-        await rebuildAggregatesIfSeeded(env, target.host, SPEC_VERSION);
+        await rebuildAggregatesIfSeeded(env, site.target.host, SPEC_VERSION);
       }
       const record: CachedWebAudit = {
         spec_version: SPEC_VERSION,
-        target_url: target.canonical,
-        scorecard: held ? scorecardWithPublicListing(stamped, held.listing) : stamped,
+        target_url: site.target.canonical,
+        scorecard: held ? scorecardWithPublicListing(site.scorecard, held.listing) : site.scorecard,
         scored_at: scoredAt,
       };
       yield {
         type: 'complete',
-        ...(await webEnvelope(env, { tier: 'live', host: target.host, record, origin: input.origin, transient })),
+        ...(await webEnvelope(env, { tier: 'live', host: site.target.host, record, origin: input.origin, transient })),
       };
       return;
     }
     yield { type: 'incomplete', scorecard };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    logAuditError(target.canonical, input.surface, err);
+    logAuditError(requested.canonical, input.surface, err);
     yield { type: 'error', error: { code: 'unreachable', message, cta: CTA_RETRY } };
     await notifyFailure(env, {
       key: `web-audit-${input.surface}`,
       subject: `web-audit ${input.surface} task failed`,
-      text: `The ${input.surface} audit task threw for ${target.canonical}: ${message}`,
+      text: `The ${input.surface} audit task threw for ${requested.canonical}: ${message}`,
     });
   }
 }

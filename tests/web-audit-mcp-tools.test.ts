@@ -2182,3 +2182,158 @@ describe('provenance reaches every reader of a stored website result', () => {
     expect(md).toContain('- server card: `mcp.example.net` (`http://mcp.example.net/mcp`), not followed: not https\n');
   });
 });
+
+describe('web MCP tools: a host and its www sibling', () => {
+  const IP = '203.0.113.71';
+  const FOLD = ['cnn.com', 'www.cnn.com'];
+
+  const foldedRecord = (staleMs = 0) => ({
+    spec_version: SPEC_VERSION,
+    target_url: 'https://cnn.com/',
+    scored_at: new Date(Date.now() - staleMs).toISOString(),
+    scorecard: {
+      target_url: 'https://www.cnn.com/',
+      tool: { name: 'cnn.com', url: 'https://cnn.com/' },
+      site_hosts: FOLD,
+      badge: { score_pct: 70 },
+    },
+  });
+
+  // A bucket that records every read and refuses the keys in `unreadable`.
+  function watchedBucket(store: Map<string, string>, unreadable: string[] = []) {
+    const gets: string[] = [];
+    const bucket = makeBucket(store);
+    const get = bucket.get.bind(bucket);
+    bucket.get = (async (key: string) => {
+      gets.push(key);
+      if (unreadable.includes(key)) throw new Error('get: We encountered an internal error. Please try again. (10001)');
+      return get(key);
+    }) as R2Bucket['get'];
+    return { bucket, gets };
+  }
+
+  async function withStore(prefill: Record<string, unknown>, unreadable: string[] = [], opts: WebEnvOpts = {}) {
+    const env = await makeEnv(opts);
+    const store = new Map<string, string>();
+    for (const [key, value] of Object.entries(prefill)) store.set(key, JSON.stringify(value));
+    const watched = watchedBucket(store, unreadable);
+    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = watched.bucket;
+    return { env, store, gets: watched.gets };
+  }
+
+  async function underFetch<T>(fetchImpl: typeof fetch, run: () => Promise<T>): Promise<T> {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchImpl;
+    try {
+      return await run();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  test('get_website_audit for the www host of a folded site answers with the site', async () => {
+    const { env } = await withStore({ [await keyFor('https://cnn.com/', SPEC_VERSION)]: foldedRecord() });
+    const body = jsonContent(await callTool(env, 'get_website_audit', { url: 'https://www.cnn.com/' }));
+    expect(body).toMatchObject({
+      found: true,
+      target: 'cnn.com',
+      scorecard_url: 'https://anc.dev/score/cnn.com',
+      target_url: 'https://www.cnn.com/',
+    });
+  });
+
+  test('get_website_audit for a www host nothing records names the www host in its miss', async () => {
+    const { env } = await withStore({});
+    const body = jsonContent(await callTool(env, 'get_website_audit', { url: 'www.x.test' }));
+    expect(body).toMatchObject({ found: false, next_tool: 'audit_website' });
+    expect(String(body.message)).toContain('www.x.test');
+  });
+
+  test('get_website_audit reads the www record for a bare record that records no fold', async () => {
+    const own = {
+      spec_version: SPEC_VERSION,
+      target_url: 'https://www.x.test/',
+      scorecard: { badge: { score_pct: 55 } },
+    };
+    const bare = { ...foldedRecord(), target_url: 'https://x.test/', scorecard: { badge: { score_pct: 40 } } };
+    const { env } = await withStore({
+      [await keyFor('https://x.test/', SPEC_VERSION)]: bare,
+      [await keyFor('https://www.x.test/', SPEC_VERSION)]: own,
+    });
+    const body = jsonContent(await callTool(env, 'get_website_audit', { url: 'www.x.test' }));
+    expect(body).toMatchObject({ found: true, target: 'www.x.test' });
+  });
+
+  test('get_website_audit with an unreadable record of the bare host is an error, and the www record is never read', async () => {
+    const bareKey = await keyFor('https://cnn.com/', SPEC_VERSION);
+    const wwwKey = await keyFor('https://www.cnn.com/', SPEC_VERSION);
+    const { env, gets } = await withStore({ [bareKey]: foldedRecord(), [wwwKey]: foldedRecord() }, [bareKey]);
+    const res = await callTool(env, 'get_website_audit', { url: 'www.cnn.com' });
+    expect(res.result?.isError).toBe(true);
+    expect(res.result?.content?.[0]?.text).toBe(
+      'cache_unavailable: the stored scorecard for cnn.com could not be read right now; it has not been removed. Retry get_website_audit in 30 seconds.',
+    );
+    expect(gets).not.toContain(wwwKey);
+  });
+
+  test('audit_website for the www host of a fresh folded site serves the site from cache', async () => {
+    const { env, gets } = await withStore({ [await keyFor('https://cnn.com/', SPEC_VERSION)]: foldedRecord() });
+    const body = jsonContent(await callTool(env, 'audit_website', { url: 'www.cnn.com' }, IP));
+    expect(body).toMatchObject({ audited: false, source: 'cache', target: 'cnn.com' });
+    expect(gets).not.toContain(await keyFor('https://www.cnn.com/', SPEC_VERSION));
+  });
+
+  test('audit_website for a www host with an unreadable bare record audits, folds, and writes the bare host', async () => {
+    const bareKey = await keyFor('https://a.test/', SPEC_VERSION);
+    const wwwKey = await keyFor('https://www.a.test/', SPEC_VERSION);
+    const { env, store } = await withStore(
+      {
+        [wwwKey]: {
+          ...foldedRecord(10 * 60_000),
+          target_url: 'https://www.a.test/',
+          scorecard: { badge: { score_pct: 40 } },
+        },
+      },
+      [bareKey],
+      {
+        minimalRegistry: true,
+      },
+    );
+    const body = jsonContent(
+      await underFetch(
+        router(
+          {
+            'GET https://www.a.test/': () =>
+              new Response(null, { status: 301, headers: { location: 'https://a.test/' } }),
+            'GET https://a.test/': () => html(),
+          },
+          [],
+        ),
+        () => callTool(env, 'audit_website', { url: 'www.a.test' }, IP),
+      ),
+    );
+    expect(body).toMatchObject({ audited: true, target: 'a.test' });
+    const written = JSON.parse(store.get(bareKey) as string) as { scorecard: { site_hosts?: string[] } };
+    expect(written.scorecard.site_hosts).toEqual(['a.test', 'www.a.test']);
+    expect(store.has(wwwKey)).toBe(false);
+  });
+
+  test('audit_website with follow_declarations false for a www host that folds answers with the site and saves nothing', async () => {
+    const { env, store } = await withStore({}, [], { minimalRegistry: true });
+    const body = jsonContent(
+      await underFetch(
+        router(
+          {
+            'GET https://www.a.test/': () =>
+              new Response(null, { status: 301, headers: { location: 'https://a.test/' } }),
+            'GET https://a.test/': () => html(),
+          },
+          [],
+        ),
+        () => callTool(env, 'audit_website', { url: 'www.a.test', follow_declarations: false }, IP),
+      ),
+    );
+    expect(body).toMatchObject({ audited: true, target: 'a.test', scorecard_url: null });
+    expect(store.size).toBe(0);
+  });
+});

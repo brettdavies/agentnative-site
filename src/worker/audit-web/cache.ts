@@ -18,6 +18,7 @@
 
 import { type AuditFreshness, freshnessFor, WEB_AUDIT_STALE_AFTER_MS } from '../../shared/audit-envelope';
 import { emitLog, type LogScope } from '../telemetry/log';
+import { readSiteHosts } from './provenance';
 import { isRegistryFingerprintPrefix } from './registry';
 import type { WebVantage } from './scorecard';
 
@@ -291,6 +292,23 @@ export async function put(
 }
 
 /**
+ * Delete the stored audit for a target at a spec version. A missing object is
+ * a success. Never throws: a failure logs under `web-cache.delete` and
+ * resolves false, so a caller whose write already landed can leave the record
+ * for the next audit to remove.
+ */
+export async function remove(env: WebCacheEnv, url: string, specVersion: string): Promise<boolean> {
+  const key = await keyFor(url, specVersion);
+  try {
+    await env.SCORE_CACHE.delete(key);
+    return true;
+  } catch (err) {
+    emitLog({ scope: 'web-cache.delete' }, { key, error: errMsg(err) });
+    return false;
+  }
+}
+
+/**
  * A shallow copy of a stored scorecard with `public_listing` set to `value`.
  * Shared by the preserving writer and both inbound surfaces so the object
  * persisted to R2 and the one echoed back in a patch response can never take
@@ -315,7 +333,26 @@ export async function patchStoredPublicListing(
   cached: CachedWebAudit,
   value: boolean,
 ): Promise<boolean> {
-  const scorecard = scorecardWithPublicListing(cached.scorecard, value);
+  return patchStoredScorecard(
+    env,
+    cached,
+    scorecardWithPublicListing(cached.scorecard, value),
+    'web-cache.patchStoredPublicListing',
+  );
+}
+
+/**
+ * Rewrite a stored audit around a changed scorecard, with `scored_at` carried
+ * forward from the stored entry (only an entry that never carried a stamp
+ * gets one now) and the board metadata derived from the new scorecard. Never
+ * throws: a write failure logs under `scope` and resolves false.
+ */
+export async function patchStoredScorecard(
+  env: WebCacheEnv,
+  cached: CachedWebAudit,
+  scorecard: unknown,
+  scope: LogScope,
+): Promise<boolean> {
   const payload = {
     spec_version: cached.spec_version,
     target_url: cached.target_url,
@@ -323,7 +360,7 @@ export async function patchStoredPublicListing(
     scored_at: cached.scored_at ?? new Date().toISOString(),
   };
   const key = await keyFor(cached.target_url, cached.spec_version);
-  return writeAuditObject(env, key, payload, 'web-cache.patchStoredPublicListing');
+  return writeAuditObject(env, key, payload, scope);
 }
 
 /**
@@ -359,6 +396,7 @@ function boardMetadataOf(targetUrl: string, scorecard: unknown, scoredAt: string
     score?: { relative?: unknown; global?: unknown };
     public_listing?: unknown;
     registry_fingerprint?: unknown;
+    site_hosts?: unknown;
   } | null;
   const domain = new URL(targetUrl).host;
   const toolName = sc?.tool?.name;
@@ -377,6 +415,8 @@ function boardMetadataOf(targetUrl: string, scorecard: unknown, scoredAt: string
       ? sc.registry_fingerprint
       : UNKNOWN_REGISTRY,
   };
+  const siteHosts = readSiteHosts(sc?.site_hosts);
+  if (siteHosts.length > 0) meta.site_hosts = siteHosts.join(' ');
   if (typeof sc?.score_pct === 'number') meta.score_pct = String(sc.score_pct);
   if (typeof sc?.score?.relative === 'number') meta.relative = String(sc.score.relative);
   if (typeof sc?.score?.global === 'number') meta.global = String(sc.score.global);
@@ -412,11 +452,16 @@ export type ListAllWebAuditsOpts = {
  * metadata alone. Skips aggregate keys, other spec versions, excluded
  * (seeded/curated) domains, entries past the display window, and entries
  * whose metadata is missing or unparseable (pre-metadata writes self-heal
- * on their next audit). Best-effort like the rest of this module: a list
- * failure logs and returns what was collected, never throws.
+ * on their next audit). A host that a folded site's `site_hosts` names is
+ * dropped, collected from every object before the excluded-domain and
+ * display-age filters run, so a leftover record of the folded-in host stays off
+ * the listing whatever happens to the site's own row. Best-effort like the
+ * rest of this module: a list failure logs and returns what was collected,
+ * never throws.
  */
 export async function listAllWebAudits(env: WebCacheEnv, opts: ListAllWebAuditsOpts): Promise<WebListedAudit[]> {
-  const out: WebListedAudit[] = [];
+  const entries: WebListedAudit[] = [];
+  const foldedAway = new Set<string>();
   const maxAgeMs = opts.maxAgeMs ?? WEB_ALL_BOARD_DISPLAY_MAX_AGE_MS;
   const now = opts.now ?? Date.now();
   let cursor: string | undefined;
@@ -425,18 +470,31 @@ export async function listAllWebAudits(env: WebCacheEnv, opts: ListAllWebAuditsO
       const page = await env.SCORE_CACHE.list({ prefix: 'audits/web/', include: ['customMetadata'], cursor });
       for (const obj of page.objects) {
         if (!isPerDomainAuditKey(obj.key, opts.specVersion)) continue;
+        for (const host of foldedHostsOf(obj.customMetadata)) foldedAway.add(host);
         const entry = parseListedMetadata(obj.customMetadata);
-        if (!entry) continue;
-        if (opts.excludeDomains.has(entry.domain)) continue;
-        if (isStale(entry.scored_at, maxAgeMs, now)) continue;
-        out.push(entry);
+        if (entry) entries.push(entry);
       }
       cursor = page.truncated ? page.cursor : undefined;
     } while (cursor);
   } catch (err) {
     emitLog({ scope: 'web-cache.listAllWebAudits' }, { error: errMsg(err) });
   }
-  return out;
+  return entries.filter(
+    (entry) =>
+      !foldedAway.has(entry.domain) &&
+      !opts.excludeDomains.has(entry.domain) &&
+      !isStale(entry.scored_at, maxAgeMs, now),
+  );
+}
+
+/**
+ * The hosts a folded site's record folds into the site: every host its
+ * `site_hosts` metadata names but its own domain. A host here has no record of
+ * its own to list, whether or not its leftover record was deleted.
+ */
+function foldedHostsOf(meta: Record<string, string> | undefined): string[] {
+  if (!meta?.site_hosts) return [];
+  return meta.site_hosts.split(' ').filter((host) => host.length > 0 && host !== meta.domain);
 }
 
 /**

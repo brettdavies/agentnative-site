@@ -80,11 +80,11 @@ import {
   readWebTier,
   runWebAuditStream,
   type WebCoreEnv,
-  type WebTarget,
   webEnvelope,
 } from '../audit-web/core';
 import { flushHitMinPurge, runWithHitMinPurge } from '../audit-web/hit-min-purge';
 import type { WebSiteType } from '../audit-web/registry';
+import { resolveWebTarget, type WebResolution } from '../audit-web/web-target';
 import {
   type CliCoreEnv,
   type CliIndexes,
@@ -453,9 +453,10 @@ async function handleWeb(
     row.outcome = 'error_invalid_target';
     return errorResponse(400, auditErrorFor('invalid_target', { cta: CTA_INPUT, details: prepared.reason }));
   }
-  const target = prepared.target;
-  if (!parsed.followDeclarations) return handleTransientWeb(common, classified.target, target);
-  const tier = await readWebTier(env, target, parsed.publicListing);
+  const resolution = await resolveWebTarget(env, prepared.target, 'tolerant');
+  const { target } = resolution;
+  if (!parsed.followDeclarations) return handleTransientWeb(common, classified.target, resolution);
+  const tier = await readWebTier(env, target, parsed.publicListing, resolution.stored);
 
   if (tier.kind === 'serve') {
     row.tier = 'cache';
@@ -466,7 +467,7 @@ async function handleWeb(
   // An explicit listing choice is its own request: attaching would answer it
   // with a run that carries someone else's listing decision, and the opt-in
   // the caller asked for would never be written.
-  const inFlight = parsed.publicListing === undefined ? await readInFlight(env, 'web', classified.target) : null;
+  const inFlight = parsed.publicListing === undefined ? await readInFlight(env, 'web', target.host) : null;
   if (inFlight) {
     return attach(common, 'web', classified.target, inFlight);
   }
@@ -515,7 +516,7 @@ async function handleWeb(
   const listing = tier.listing;
 
   const startedAt = new Date().toISOString();
-  const job = await claimJob(env, 'web', classified.target, startedAt);
+  const job = await claimJob(env, 'web', target.host, startedAt);
   if (job.kind === 'running' && parsed.publicListing === undefined) {
     return attach(common, 'web', classified.target, { started_at: job.started_at, job: job.name }, cookie);
   }
@@ -526,8 +527,10 @@ async function handleWeb(
   const events = runWebAuditStream({
     env,
     target,
+    requested: resolution.requested,
     siteType: parsed.siteType,
     listing,
+    explicitListing: parsed.publicListing,
     followDeclarations: true,
     origin,
     probeFetch: common.deps.probeFetch,
@@ -542,9 +545,10 @@ async function handleWeb(
 // followed request could join, and with audits disabled it gets the
 // disabled error rather than the stored result. It writes nothing, so it may
 // not change the listing either; it carries the stored choice.
-async function handleTransientWeb(common: Common, input: string, target: WebTarget): Promise<Response> {
+async function handleTransientWeb(common: Common, input: string, resolution: WebResolution): Promise<Response> {
   const { env, row, parsed, origin } = common;
-  const listing = await readStandingListing(env, target);
+  const { target } = resolution;
+  const listing = await readStandingListing(env, target, resolution.stored);
   if (parsed.publicListing !== undefined && parsed.publicListing !== listing) {
     row.outcome = 'error_listing_requires_follow';
     return errorResponse(
@@ -566,6 +570,7 @@ async function handleTransientWeb(common: Common, input: string, target: WebTarg
   const events = runWebAuditStream({
     env,
     target,
+    requested: resolution.requested,
     siteType: parsed.siteType,
     listing,
     followDeclarations: false,

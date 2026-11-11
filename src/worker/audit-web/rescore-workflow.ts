@@ -39,6 +39,9 @@ import { readRegistryFingerprint } from './provenance';
 import { fingerprintPrefix, loadWebAuditRegistry, registryFingerprint, withRegistryFingerprint } from './registry';
 import type { WebScorecard } from './scorecard';
 import { isSeededDomain, loadWebSeed, type WebSeedEntry } from './seed';
+import type { PairReport } from './site-pair';
+import { planSiteRecord, settleSiteRecord } from './site-record';
+import { targetOfHost } from './web-target';
 
 // The Workflow shares the Worker's bindings; SCORE_KV is optional so the
 // registry-change gate degrades to plain staleness batching when it is
@@ -65,7 +68,13 @@ export type RescoreStep = Pick<WorkflowStep, 'do'>;
  * it: each retry would audit the site again and charge every other domain
  * it declares, inside an hour whose refusal cannot change.
  */
-export type RescoreAuditOutcome = { kind: 'saved' } | { kind: 'deferred'; cause: 'domain-budget' };
+export type RescoreAuditOutcome =
+  | {
+      kind: 'saved';
+      /** Domains besides the seed whose pages the save changed, such as the www host of a folded seed. */
+      alsoPurge?: readonly string[];
+    }
+  | { kind: 'deferred'; cause: 'domain-budget' };
 
 export interface RescoreDeps {
   /** Audits one canonical target to completion and caches it; throws on failure. */
@@ -150,6 +159,7 @@ export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string):
   const followDeclarations = effectiveFollow(env, true);
   let scorecard: WebScorecard | null = null;
   let complete = false;
+  let pair: PairReport | null = null;
   for await (const event of instrumentAuditEvents(
     runWebAudit({
       url: targetUrl,
@@ -167,6 +177,7 @@ export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string):
     if (event.type === 'complete') {
       scorecard = event.scorecard;
       complete = event.complete;
+      pair = event.pair ?? null;
     } else if (event.type === 'unreachable') {
       throw new Error(`target unreachable for ${targetUrl}: ${event.reason}`);
     }
@@ -175,9 +186,20 @@ export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string):
     throw new Error(`audit did not complete within the deadline for ${targetUrl}`);
   }
   const stamped = await withRegistryFingerprint(scorecard, registry);
-  if ((await domainBudgetHold(env, targetUrl, stamped)) !== null) return { kind: 'deferred', cause: 'domain-budget' };
-  await cachePut(env, targetUrl, stamped, SPEC_VERSION);
-  return { kind: 'saved' };
+  const requested = targetOfHost(new URL(targetUrl).host);
+  const site = await planSiteRecord(env, {
+    target: requested,
+    requested,
+    pair,
+    scorecard: stamped,
+    explicit: publicListing,
+    listing: publicListing,
+  });
+  if ((await domainBudgetHold(env, site.target.canonical, site.scorecard)) !== null) {
+    return { kind: 'deferred', cause: 'domain-budget' };
+  }
+  if (await cachePut(env, site.target.canonical, site.scorecard, SPEC_VERSION)) await settleSiteRecord(env, site);
+  return { kind: 'saved', ...(site.alsoPurge.length > 0 ? { alsoPurge: site.alsoPurge } : {}) };
 }
 
 async function currentRegistryFingerprint(env: WebRescoreEnv): Promise<string> {
@@ -297,7 +319,7 @@ export async function runWebRescore(
           continue;
         }
         audited.push(domain);
-        cycleAudited.push(domain);
+        cycleAudited.push(domain, ...(outcome.alsoPurge ?? []));
         if (ogVideoEnabled(env)) await step.do(`render:${domain}`, async () => requestRender(env, domain));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

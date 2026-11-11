@@ -23,7 +23,7 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { TerminalEvent } from '../../../shared/audit-events';
-import { leaderboardPath, scorePath } from '../../../shared/audit-routes';
+import { leaderboardPath, scorePath, sitePairOf } from '../../../shared/audit-routes';
 import { awaitInFlightTerminal, type InFlightEnv, readInFlight } from '../../audit/inflight';
 import type { AuditLogEnv } from '../../audit-web/audit-log';
 import {
@@ -38,6 +38,7 @@ import {
   patchStoredPublicListing,
   scorecardWithPublicListing,
   WEB_AUDIT_STALE_AFTER_MS,
+  WebCacheUnavailableError,
 } from '../../audit-web/cache';
 import { prepareWebTarget, type WebTarget, webEnvelope } from '../../audit-web/core';
 import type { DomainBudgetEnv } from '../../audit-web/domain-budget';
@@ -52,6 +53,7 @@ import {
   standingPublicListing,
 } from '../../audit-web/public-listing';
 import { boardExcludeDomains } from '../../audit-web/seed';
+import { resolveWebTarget, type WebResolution } from '../../audit-web/web-target';
 import type { NotifyEnv } from '../../notify';
 import { SPEC_VERSION } from '../../spec-version.gen';
 import { getMcpRequest } from '../request-context';
@@ -140,9 +142,18 @@ function siteTarget(url: string): { ok: true; target: WebTarget } | { ok: false;
   return prepareWebTarget(parsed.host);
 }
 
-/** The site's stored audit at its https key; null on a miss. */
-async function readCachedAudit(env: WebAuditToolsEnv, target: WebTarget): Promise<CachedWebAudit | null> {
-  return cacheGet(env, await keyFor(target.canonical, SPEC_VERSION));
+/** The site's stored audit at its https key, which the resolution may already have read; null on a miss. */
+async function readCachedAudit(env: WebAuditToolsEnv, resolution: WebResolution): Promise<CachedWebAudit | null> {
+  if (resolution.stored !== undefined) return resolution.stored;
+  return cacheGet(env, await keyFor(resolution.target.canonical, SPEC_VERSION));
+}
+
+/** The answer when the record that names a `www.` host's site could not be read; the host's own record is never read in its place. */
+function cacheUnavailable(host: string) {
+  const site = sitePairOf(host)?.apex ?? host;
+  return isError(
+    `cache_unavailable: the stored scorecard for ${site} could not be read right now; it has not been removed. Retry get_website_audit in 30 seconds.`,
+  );
 }
 
 export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv): void {
@@ -174,8 +185,15 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       const siteUrl = siteOrigin();
       const site = siteTarget(url);
       if (!site.ok) return isError(site.reason);
-      const domain = site.target.host;
-      const hit = await readCachedAudit(env, site.target);
+      let resolution: WebResolution;
+      try {
+        resolution = await resolveWebTarget(env, site.target, 'strict');
+      } catch (err) {
+        if (err instanceof WebCacheUnavailableError) return cacheUnavailable(site.target.host);
+        throw err;
+      }
+      const domain = resolution.target.host;
+      const hit = await readCachedAudit(env, resolution);
       if (hit) {
         const envelope = await webEnvelope(env, { tier: 'cache', host: domain, record: hit, origin: siteUrl });
         return textContent({ found: true, ...envelope });
@@ -252,7 +270,8 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       const siteUrl = siteOrigin();
       const site = siteTarget(url);
       if (!site.ok) return isError(site.reason);
-      const target = site.target;
+      const resolution = await resolveWebTarget(env, site.target, 'tolerant');
+      const target = resolution.target;
       const domain = target.host;
       // A run that does not follow declared hosts is never saved, so no
       // stored scorecard answers it, it joins no run, and it may not change
@@ -264,7 +283,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       // A hit older than the staleness threshold falls through to the
       // fresh path (still behind every gate below) so a re-run refreshes
       // the board.
-      const cached = await readCachedAudit(env, target);
+      const cached = await readCachedAudit(env, resolution);
       // Resolve the opt-in flag against the stored entry once. A fresh hit
       // only short-circuits when the request asks for no flag change; an
       // explicit, differing public_listing falls through the full gate stack
@@ -344,6 +363,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       if (optedOut) {
         const run = await hostWebAudit(env, {
           target,
+          requested: resolution.requested,
           siteType: site_type ?? null,
           listing: standingPublicListing(cached),
           followDeclarations: false,
@@ -390,8 +410,10 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       // caller that arrives mid-run attaches to it.
       const run = await hostWebAudit(env, {
         target,
+        requested: resolution.requested,
         siteType: site_type ?? null,
         listing: resolveAuditListing(listingWrite, public_listing, cached),
+        explicitListing: public_listing,
         followDeclarations: true,
         origin: siteUrl,
         attach: public_listing === undefined,

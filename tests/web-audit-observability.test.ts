@@ -157,6 +157,34 @@ describe('instrumentAuditEvents', () => {
     }
   });
 
+  test('the run summary records the pair outcome and the status each root answered, on a complete and an unreachable run', async () => {
+    const logs = captureLogs();
+    try {
+      const run = (event: AuditEvent) =>
+        collect(
+          instrumentAuditEvents(eventsOf([event]), {}, { target: 'x', surface: 'stream', followDeclarations: true }),
+        );
+      await run({
+        ...COMPLETE_EVENT,
+        pair: { outcome: 'folded', requestedStatus: 301, siblingStatus: 200 },
+      } as AuditEvent);
+      await run({
+        type: 'unreachable',
+        reason: 'silence',
+        pair: { outcome: 'no-answer', requestedStatus: null, siblingStatus: 503 },
+      });
+      await run(COMPLETE_EVENT);
+      const summaries = logs.records.map((r) => r.record).filter((l) => l.scope === 'web-audit.run');
+      expect(summaries.map((l) => [l.pair_outcome, l.pair_requested_status, l.pair_sibling_status])).toEqual([
+        ['folded', 301, 200],
+        ['no-answer', null, 503],
+        [undefined, undefined, undefined],
+      ]);
+    } finally {
+      logs.restore();
+    }
+  });
+
   test('an unreachable terminal is reported in the summary', async () => {
     const logs = captureLogs();
     try {

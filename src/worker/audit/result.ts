@@ -53,6 +53,7 @@ import {
   scoreJsonPath,
   scoreMarkdownPath,
   scorePath,
+  sitePairOf,
   splitRepresentation,
   suggestTargets,
 } from '../../shared/audit-routes';
@@ -64,7 +65,6 @@ import { buildScorecardBody, buildScorecardMarkdown } from '../../shared/scoreca
 import { CANONICAL_SITE_URL } from '../../shared/site-url';
 import { detectResultPreference } from '../accept';
 import {
-  canonicalTargetOf,
   getAggregate,
   WebCacheUnavailableError,
   getForRequest as webCacheGet,
@@ -81,6 +81,7 @@ import type { WebSummaryInput } from '../audit-web/summary-input';
 import { buildWebSummaryMarkdown } from '../audit-web/summary-markdown';
 import { scoresOf, type WebScorecardShape } from '../audit-web/summary-model';
 import { buildWebSummaryBody } from '../audit-web/summary-render';
+import { resolveWebTarget, targetOfHost } from '../audit-web/web-target';
 import { applyHeaders, type CacheClassSpec, resultCacheClass } from '../headers';
 import { curatedCardOf, pageClip, withOgVideo } from '../og/page-clip';
 import type { OgVideoEnv } from '../og/render-request';
@@ -151,6 +152,17 @@ function methodDenied(request: Request): Response | null {
 
 function redirect(location: string): Response {
   return new Response(null, { status: 301, headers: { Location: location, ...REDIRECT_HEADERS } });
+}
+
+/**
+ * A `www.<a>` request for a folded site: the same representation of the
+ * site's own page. The answer carries the `www.<a>` page tag in the HIT-min
+ * class, so a dropped fold purges it and a browser revalidates it every time;
+ * the JSON representation carries the CORS header every JSON answer does.
+ */
+function foldRedirect(ctx: RenderContext, name: string): Response {
+  const location = pathFor(name, ctx.served.representation);
+  return finish(ctx, new Response(null, { status: 301, headers: { Location: location } }), ctx.representation);
 }
 
 /** Strip a trailing `.html` and trailing slashes so host-shaped paths never reach the assets binding's rewriting. */
@@ -246,16 +258,18 @@ type RenderContext = {
 };
 
 async function serveWeb(ctx: RenderContext, host: string): Promise<Response> {
-  const inFlight = await inFlightResponse(ctx, 'web', host);
-  if (inFlight) return inFlight;
-  const canonical = canonicalTargetOf(new URL(`https://${host}/`));
+  const requested = targetOfHost(host);
   let record: Awaited<ReturnType<typeof webCacheGet>>;
   try {
-    record = await webCacheGet(ctx.env, await webKeyFor(canonical, SPEC_VERSION));
+    const resolution = await resolveWebTarget(ctx.env, requested, 'strict');
+    if (resolution.target.host !== host) return foldRedirect(ctx, resolution.target.host);
+    const inFlight = await inFlightResponse(ctx, 'web', host);
+    if (inFlight) return inFlight;
+    record = await webCacheGet(ctx.env, await webKeyFor(requested.canonical, SPEC_VERSION));
   } catch (err) {
     // A read that failed is not an audit that never ran. Saying "no audit
     // exists" here retires a URL the sitemap and the board both advertise.
-    if (err instanceof WebCacheUnavailableError) return cacheUnavailable(ctx, host);
+    if (err instanceof WebCacheUnavailableError) return cacheUnavailable(ctx, sitePairOf(host)?.apex ?? host);
     throw err;
   }
   if (!record) return missing(ctx, host, 'web');

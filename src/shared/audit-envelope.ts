@@ -305,6 +305,12 @@ export function transientWebEnvelope(envelope: AuditEnvelope, summaryHtml: strin
   return { ...envelope, ...NO_URLS, summary_html: summaryHtml };
 }
 
+/** The origin a website scorecard's checks ran against, which differs from its record's key URL on a folded site. */
+function auditedOriginOf(scorecard: unknown): string | undefined {
+  const value = (scorecard as { target_url?: unknown } | null | undefined)?.target_url;
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
 /** A live or cached website result. */
 export function buildWebEnvelope(input: WebEnvelopeInput): AuditEnvelope {
   const { record, origin, target } = input;
@@ -317,7 +323,7 @@ export function buildWebEnvelope(input: WebEnvelopeInput): AuditEnvelope {
     freshness: freshnessFor('web', cached, record.scored_at),
     spec_version: record.spec_version,
     scorecard: record.scorecard,
-    target_url: record.target_url,
+    target_url: auditedOriginOf(record.scorecard) ?? record.target_url,
   };
   const pct = scorePctOf(record.scorecard);
   if (pct !== undefined) envelope.score_pct = pct;
