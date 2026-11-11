@@ -441,3 +441,4 @@ Each plan-review finding and what the plan does with it. `eng` is `/plan-eng-rev
 - 2026-11-11: `/plan-devex-review` round 1 started on `ac30f61`.
 - 2026-11-11: `/plan-devex-review` round 1 ended: DONE_WITH_CONCERNS, 2 P1, 5 P2, 6 P3; all folded in (Review decisions).
 - 2026-11-11: `/plan-eng-review` round 1 ended: no P0 or P1, 4 P2, 9 P3; all folded in (Review decisions).
+- 2026-11-11: `/compound-engineering:ce-doc-review` round 1 started on `78f52c3`.
