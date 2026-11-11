@@ -219,9 +219,9 @@ upgraded, so it names the same record as the bare host.
 **Bare and `www.` hosts.** A bare host and its `www.` host are one site when the first redirect from either root lands
 on the other. An audit checks that first, probes the host the redirect lands on, and stores one scorecard under the bare
 host: `target` and `scorecard_url` name the bare host, `scorecard.target_url` is the origin the checks ran at, and
-`scorecard.tool.url` is the bare host's origin. `get_website_audit` for `www.<domain>` reads that scorecard when it
+`scorecard.tool.url` is the bare host's origin. The envelope's own `target_url` carries the same value as `scorecard.target_url`. `get_website_audit` for `www.<domain>` reads that scorecard when it
 records the fold, and `list_website_audits` lists the site once. A `www.` host with no such redirect is its own site, and
-a miss on it may mean the pair has not been audited since the fold was recorded.
+a miss on it may mean the pair has not been audited since folds were recorded.
 
 **Declared hosts.** By default a website audit also contacts third-party hosts the site declares. An MCP server named in
 the site's server card receives GET requests for the documents that could confirm it (a card at

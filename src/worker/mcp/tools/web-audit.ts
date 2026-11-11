@@ -163,8 +163,8 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       title: 'Get a cached website audit',
       description:
         'Read a cached website agent-readiness scorecard by URL without re-running the audit. Returns isError:false for ' +
-        'every outcome but one: isError:true with cache_unavailable when a www.<domain> read cannot reach the ' +
-        '<domain> record. A hit returns { found:true, ...envelope } carrying kind, tier, target, scorecard_url, ' +
+        'a hit, a target already being audited, and a miss, and isError:true for an invalid or refused url and with ' +
+        'cache_unavailable when a www.<domain> read cannot reach the <domain> record. A hit returns { found:true, ...envelope } carrying kind, tier, target, scorecard_url, ' +
         'markdown_url, json_url, freshness and the scorecard, the same envelope the result page serves at its ' +
         'json_url; a target already being audited returns { found:false, in_progress:true, started_at }; a miss ' +
         'returns { found:false, next_tool:"audit_website" }. freshness.cached is always true on a hit; ' +
@@ -180,7 +180,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
               'http:// URL reads the https record. www.<domain> reads the <domain> scorecard when that scorecard ' +
               'records that one of the two hosts redirects to the other (its site_hosts lists both); target and ' +
               'scorecard_url then name <domain>. Otherwise www.<domain> is its own site, and a miss there may mean ' +
-              'the pair has not been audited since the fold was recorded.',
+              'the pair has not been audited since folds were recorded.',
           ),
       },
       annotations: { readOnlyHint: true },

@@ -2206,7 +2206,7 @@ describe('web MCP tools: a host and its www sibling', () => {
     expect(readUrl).toContain(
       'www.<domain> reads the <domain> scorecard when that scorecard records that one of the two hosts redirects to the other (its site_hosts lists both); target and scorecard_url then name <domain>',
     );
-    expect(readUrl).toContain('a miss there may mean the pair has not been audited since the fold was recorded');
+    expect(readUrl).toContain('a miss there may mean the pair has not been audited since folds were recorded');
     const auditUrl = named('audit_website')?.inputSchema.properties.url?.description ?? '';
     expect(auditUrl).toContain(
       'The audit first checks whether <domain> or www.<domain> redirects to the other. If one does, they are one site named <domain>',
@@ -2219,10 +2219,10 @@ describe('web MCP tools: a host and its www sibling', () => {
     );
   });
 
-  test('get_website_audit names the one isError:true outcome, cache_unavailable', async () => {
+  test('get_website_audit names its isError:true outcomes, invalid or refused url and cache_unavailable', async () => {
     const description = (await listedTools()).find((t) => t.name === 'get_website_audit')?.description ?? '';
     expect(description).toContain(
-      'Returns isError:false for every outcome but one: isError:true with cache_unavailable when a www.<domain> read cannot reach the <domain> record.',
+      'a hit, a target already being audited, and a miss, and isError:true for an invalid or refused url and with cache_unavailable when a www.<domain> read cannot reach the <domain> record.',
     );
     expect(description).not.toContain('Returns isError:false for every outcome:');
   });

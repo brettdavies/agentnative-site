@@ -162,7 +162,11 @@ function redirect(location: string): Response {
  */
 function foldRedirect(ctx: RenderContext, name: string): Response {
   const location = pathFor(name, ctx.served.representation);
-  return finish(ctx, new Response(null, { status: 301, headers: { Location: location } }), ctx.representation);
+  const headed = finish(ctx, new Response(null, { status: 301, headers: { Location: location } }), ctx.representation);
+  // The answer has no body, and its alternates would point at pages that redirect again.
+  headed.headers.delete('Link');
+  headed.headers.delete('Content-Type');
+  return headed;
 }
 
 /** Strip a trailing `.html` and trailing slashes so host-shaped paths never reach the assets binding's rewriting. */

@@ -1433,6 +1433,24 @@ describe('a www host that a recorded fold names', () => {
     }
   });
 
+  test('each redirect has no body, so it carries no alternate-representation Link and no Content-Type', async () => {
+    const env = await foldedEnv();
+    for (const path of ['/score/www.cnn.com', '/score/www.cnn.com/md', '/score/www.cnn.com/json']) {
+      const res = await route(path, env);
+      expect({
+        path,
+        status: res.status,
+        link: res.headers.get('link'),
+        type: res.headers.get('content-type'),
+      }).toEqual({
+        path,
+        status: 301,
+        link: null,
+        type: null,
+      });
+    }
+  });
+
   test('the site itself is served from its record, and the record names where the checks ran', async () => {
     const env = await foldedEnv();
     const res = await route('/score/cnn.com/json', env);
