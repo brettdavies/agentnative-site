@@ -302,4 +302,47 @@ describe('notifyFailure', () => {
       logs.restore();
     }
   });
+
+  test('a dedupe write that throws after a send still answers sent', async () => {
+    const env = {
+      EMAIL: { send: async () => ({}) },
+      ALERT_EMAIL_FROM: 'alerts@example.com',
+      ALERT_EMAIL_TO: 'ops@example.com',
+      SCORE_KV: {
+        get: async () => null,
+        put: () => {
+          throw new Error('KV PUT failed: 429 Too Many Requests');
+        },
+      } as unknown as KVNamespace,
+    };
+    expect(await notifyFailure(env, alert)).toBe('sent');
+  });
+
+  test('a failed send leaves the alert unsent, so the next alert for its key is sent', async () => {
+    const logs = captureLogs();
+    try {
+      const sent: SentMessage[] = [];
+      let refuseNext = true;
+      const env = {
+        EMAIL: {
+          send: async (m: SentMessage) => {
+            if (refuseNext) {
+              refuseNext = false;
+              throw new Error('email service unavailable');
+            }
+            sent.push(m);
+            return {};
+          },
+        },
+        ALERT_EMAIL_FROM: 'alerts@example.com',
+        ALERT_EMAIL_TO: 'ops@example.com',
+        SCORE_KV: fakeKv(),
+      };
+      expect(await notifyFailure(env, alert)).toBe('send_failed');
+      expect(await notifyFailure(env, alert)).toBe('sent');
+      expect(sent.length).toBe(1);
+    } finally {
+      logs.restore();
+    }
+  });
 });
