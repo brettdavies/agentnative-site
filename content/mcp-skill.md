@@ -463,8 +463,10 @@ container-run cost is non-trivial and a shared anon bucket would be a DoS vector
 layers (CF binding burst gate + KV-backed per-hour window); both surface as `-32099` on breach.
 
 Read-tier breach is recoverable by waiting out the 60-second window. Audit-tier breach needs an hour-bucket window to
-roll. Both ceilings are pre-data placeholders sized from parity with sister deployments and will be tuned with
-`mcp.request` log volume.
+roll. A `-32099` from `score_cli` or `audit_website` whose message reads
+`Several audits started at once from this address` is not the ceiling: the hour still has room, and the call can be
+retried after 2 seconds. Both ceilings are pre-data placeholders sized from parity with sister deployments and will be
+tuned with `mcp.request` log volume.
 
 ## Wire-level reference
 

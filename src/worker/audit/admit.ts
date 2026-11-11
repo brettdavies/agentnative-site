@@ -22,10 +22,14 @@
 // names never reach the body: `detail` is the server-side field the
 // request row logs.
 
-import { type AuditErrorObject, auditErrorFor, CTA_RETRY } from '../../shared/audit-events';
+import { type AuditErrorObject, auditError, auditErrorFor, CTA_RETRY } from '../../shared/audit-events';
 import type { Lane } from '../../shared/audit-routes';
 import { sha256Hex } from '../audit-web/cache';
-import { consumeLaneHourlyBudget } from '../audit-web/limiter';
+import {
+  consumeLaneHourlyBudget,
+  HOURLY_CONTENTION_MESSAGE,
+  HOURLY_CONTENTION_RETRY_AFTER_SECONDS,
+} from '../audit-web/limiter';
 import { isScoringDisabled } from '../score/kill-switch';
 import { CTA } from '../score/response-shape';
 import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from '../score/session';
@@ -179,7 +183,18 @@ export async function admitTransact(input: AdmitInput): Promise<Admission> {
     if (!session.success) return limited();
     const perIp = await ipLimiter.limit({ key: ip });
     if (!perIp.success) return limited();
-    if (!(await consumeLaneHourlyBudget(env.SCORE_KV, lane, ip))) return limited();
+    const hourly = await consumeLaneHourlyBudget(env.SCORE_KV, lane, ip);
+    if (hourly === 'full') return limited();
+    if (hourly === 'contended') {
+      return deny(
+        429,
+        auditError('rate_limited', HOURLY_CONTENTION_MESSAGE, {
+          cta: CTA_RETRY,
+          retry_after: HOURLY_CONTENTION_RETRY_AFTER_SECONDS,
+        }),
+        { retryAfter: HOURLY_CONTENTION_RETRY_AFTER_SECONDS, setCookie },
+      );
+    }
   } catch (err) {
     return misconfigured(`limiter failed: ${err instanceof Error ? err.message : String(err)}`, setCookie);
   }

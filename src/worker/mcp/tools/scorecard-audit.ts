@@ -45,7 +45,7 @@ import { z } from 'zod';
 import type { TerminalEvent } from '../../../shared/audit-events';
 import { normalizeTarget } from '../../../shared/audit-routes';
 import { awaitInFlightTerminal, type InFlightEnv } from '../../audit/inflight';
-import { consumeHourlyBucketBudget } from '../../audit-web/limiter';
+import { consumeHourlyBucketBudget, HOURLY_CONTENTION_MESSAGE } from '../../audit-web/limiter';
 import { type CliCoreEnv, cliRunEnvelope, readCliTier } from '../../score/core';
 import { isScoringDisabled } from '../../score/kill-switch';
 import { loadHintsIndex, type OrchestrateEnv, runFreshOnly } from '../../score/orchestrate';
@@ -282,9 +282,11 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
       // is 60 seconds; this layer enforces the plan's "5 per 60 minutes"
       // ceiling.
       if (env.SCORE_KV) {
-        if (!(await consumeHourlyBucketBudget(env.SCORE_KV, 'mcp_audit', ipString, HOURLY_AUDIT_CEILING))) {
+        const hourly = await consumeHourlyBucketBudget(env.SCORE_KV, 'mcp_audit', ipString, HOURLY_AUDIT_CEILING);
+        if (hourly === 'full') {
           return jsonRpcError32099('audit rate limit exceeded — fresh audits limited to 5 per hour per source.');
         }
+        if (hourly === 'contended') return jsonRpcError32099(HOURLY_CONTENTION_MESSAGE);
       }
 
       // Step 7: orchestrate.runFreshOnly — resolveSpec + DO dispatch.

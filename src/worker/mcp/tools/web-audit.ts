@@ -44,7 +44,7 @@ import type { DomainBudgetEnv } from '../../audit-web/domain-budget';
 import { FOLLOW_DISCLOSURE } from '../../audit-web/follow-disclosure';
 import type { FollowSwitchEnv } from '../../audit-web/follow-switch';
 import { queueHitMinPurge, webTag } from '../../audit-web/hit-min-purge';
-import { consumeWebAuditHourlyBudget } from '../../audit-web/limiter';
+import { consumeWebAuditHourlyBudget, HOURLY_CONTENTION_MESSAGE } from '../../audit-web/limiter';
 import {
   decidePublicListingWrite,
   enforcePublicListingFlipLimit,
@@ -335,8 +335,10 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
 
       // Hourly window (shared with the webapp route).
       if (env.SCORE_KV) {
-        const ok = await consumeWebAuditHourlyBudget(env.SCORE_KV, ipString);
-        if (!ok) return jsonRpcError32099('audit rate limit exceeded — 30 fresh audits per hour per source.');
+        const hourly = await consumeWebAuditHourlyBudget(env.SCORE_KV, ipString);
+        if (hourly === 'full')
+          return jsonRpcError32099('audit rate limit exceeded — 30 fresh audits per hour per source.');
+        if (hourly === 'contended') return jsonRpcError32099(HOURLY_CONTENTION_MESSAGE);
       }
 
       if (optedOut) {

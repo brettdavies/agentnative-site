@@ -20,6 +20,23 @@ const HOURLY_KV_TTL_SECONDS = 7200;
 // write is retried once, after that interval, against a fresh read.
 const KV_SAME_KEY_WRITE_INTERVAL_MS = 1_100;
 
+// The text Workers KV throws for that refusal. Every other write failure is
+// an outage, not contention, and propagates.
+const KV_SAME_KEY_WRITE_REFUSAL = 'KV PUT failed: 429';
+
+/** The retry a contended window answers with, on every surface, in place of the hourly ceiling's. */
+export const HOURLY_CONTENTION_RETRY_AFTER_SECONDS = 2;
+/** The message a contended window answers with, on every surface, in place of the hourly ceiling's. */
+export const HOURLY_CONTENTION_MESSAGE = `Several audits started at once from this address. Try again in ${HOURLY_CONTENTION_RETRY_AFTER_SECONDS} seconds.`;
+
+/**
+ * One take on an hourly window: `taken` counted this audit, `full` is the
+ * ceiling, and `contended` means KV refused the counter write twice because
+ * other audits wrote the same key inside a second, with the window below
+ * its ceiling.
+ */
+export type HourlyTake = 'taken' | 'full' | 'contended';
+
 // Per-domain flip ceiling for flag-changing writes (opt-in/opt-out). Sized
 // well above a legitimate owner's correction rate — opt in, then change your
 // mind a couple of times — but far below what rapid listing-flip griefing
@@ -64,45 +81,42 @@ async function readHourlyBucket(
 /**
  * Fixed-hour KV counter behind every hourly budget: read the current
  * bucket count, refuse at the ceiling, otherwise increment under the
- * shared TTL. The key is `<prefix>:<id>:<hour bucket>`. A write KV refuses
- * twice answers as the ceiling: an audit the window did not count is never
- * admitted.
+ * shared TTL. The key is `<prefix>:<id>:<hour bucket>`. An audit the
+ * window did not count is never admitted: a write KV refuses as a same-key
+ * write is retried once and then answers `contended`, and any other write
+ * failure throws.
  */
 export async function consumeHourlyBucketBudget(
   kv: KVNamespace,
   prefix: string,
   id: string,
   ceiling: number,
-): Promise<boolean> {
+): Promise<HourlyTake> {
   const first = await takeHourlyUnit(kv, prefix, id, ceiling);
-  if (first !== 'refused') return first === 'taken';
+  if (first !== 'contended') return first;
   await new Promise((resolve) => setTimeout(resolve, KV_SAME_KEY_WRITE_INTERVAL_MS));
-  return (await takeHourlyUnit(kv, prefix, id, ceiling)) === 'taken';
+  return takeHourlyUnit(kv, prefix, id, ceiling);
 }
 
-async function takeHourlyUnit(
-  kv: KVNamespace,
-  prefix: string,
-  id: string,
-  ceiling: number,
-): Promise<'taken' | 'full' | 'refused'> {
+async function takeHourlyUnit(kv: KVNamespace, prefix: string, id: string, ceiling: number): Promise<HourlyTake> {
   const take = await readHourlyBucket(kv, prefix, id, ceiling);
   if (take === null) return 'full';
   try {
     await take();
     return 'taken';
-  } catch {
-    return 'refused';
+  } catch (err) {
+    if (err instanceof Error && err.message.includes(KV_SAME_KEY_WRITE_REFUSAL)) return 'contended';
+    throw err;
   }
 }
 
-/** Consume one unit of `lane`'s hourly budget for `ip`. Returns false when exhausted. */
-export async function consumeLaneHourlyBudget(kv: KVNamespace, lane: Lane, ip: string): Promise<boolean> {
+/** Consume one unit of `lane`'s hourly budget for `ip`. */
+export async function consumeLaneHourlyBudget(kv: KVNamespace, lane: Lane, ip: string): Promise<HourlyTake> {
   return consumeHourlyBucketBudget(kv, `audit:${lane}`, ip, HOURLY_AUDIT_CEILING);
 }
 
-/** The web lane's hourly budget for `ip`. Returns false when exhausted. */
-export async function consumeWebAuditHourlyBudget(kv: KVNamespace, ip: string): Promise<boolean> {
+/** The web lane's hourly budget for `ip`. */
+export async function consumeWebAuditHourlyBudget(kv: KVNamespace, ip: string): Promise<HourlyTake> {
   return consumeLaneHourlyBudget(kv, 'web', ip);
 }
 
@@ -113,7 +127,7 @@ export async function consumeWebAuditHourlyBudget(kv: KVNamespace, ip: string): 
  * and flips across different domains stay independent.
  */
 export async function consumeWebAuditFlipBudget(kv: KVNamespace, domainHash: string): Promise<boolean> {
-  return consumeHourlyBucketBudget(kv, 'web_audit_flip', domainHash, FLIP_CEILING);
+  return (await consumeHourlyBucketBudget(kv, 'web_audit_flip', domainHash, FLIP_CEILING)) === 'taken';
 }
 
 /**
