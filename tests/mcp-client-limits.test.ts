@@ -2,7 +2,7 @@
 // src/worker/mcp/client-limits.ts, and a guard that reads the strings the
 // server sends and fails when one breaks a recorded limit.
 
-import { describe, expect, test } from 'bun:test';
+import { beforeAll, describe, expect, test } from 'bun:test';
 import { compareVersions } from '../src/build/scorecards.mjs';
 import {
   budgetLimits,
@@ -13,6 +13,16 @@ import {
   type MetadataSurface,
   measure,
 } from '../src/worker/mcp/client-limits';
+import { MCP_ALLOWED_HOSTNAMES, type McpEnv } from '../src/worker/mcp/server';
+import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+import {
+  modernServerDiscoverBody,
+  modernServerDiscoverHeaders,
+  modernToolsListBody,
+  modernToolsListHeaders,
+} from './helpers/mcp-modern';
+import { mcpInitialize, mcpRpcExpect200, resetMcpTestState } from './helpers/mcp-rpc';
+import { EXPECTED_TOOL_NAMES } from './helpers/mcp-tools';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -116,5 +126,148 @@ describe('limit selectors', () => {
       expect(limit.appliesTo).toContain('tool-description-tool-search');
     }
     expect(leadLimits('tool-description-upfront')).toEqual([]);
+  });
+});
+
+const NEXT_STEP =
+  'Next step: shorten it, or move a fact it carries to content/mcp-skill.md; the limits and their sources are in src/worker/mcp/client-limits.ts';
+
+const TOOL_DESCRIPTION_SURFACES: readonly MetadataSurface[] = [
+  'tool-description-upfront',
+  'tool-description-tool-search',
+];
+
+// The Host check strips the port, and a port of 65535 is the longest an origin can carry.
+const ORIGINS = MCP_ALLOWED_HOSTNAMES.map((host) => `https://${host}:65535`);
+
+interface Served {
+  initializeInstructions: string;
+  discoverInstructions: string;
+  tools: Array<{ name: string; description: string }>;
+}
+
+function minimalEnv(): McpEnv {
+  const catalog = {
+    generated_at: '2026-01-01T00:00:00.000Z',
+    spec_version: SPEC_VERSION,
+    registry: [],
+    principles: [],
+    spec_sections: [],
+  };
+  return {
+    ASSETS: {
+      fetch(req: Request) {
+        const found = new URL(req.url).pathname === '/_internal/mcp-catalog.json';
+        return Promise.resolve(found ? Response.json(catalog) : new Response('not found', { status: 404 }));
+      },
+    } as unknown as Fetcher,
+  } as McpEnv;
+}
+
+async function readServed(origin: string): Promise<Served> {
+  resetMcpTestState();
+  const env = minimalEnv();
+  const opts = { origin };
+  const init = await mcpInitialize(env, opts);
+  const discover = await mcpRpcExpect200(env, modernServerDiscoverBody(), modernServerDiscoverHeaders(), opts);
+  const list = await mcpRpcExpect200(env, modernToolsListBody(), modernToolsListHeaders(), opts);
+  return {
+    initializeInstructions: init.result?.instructions ?? '',
+    discoverInstructions: discover.result?.instructions ?? '',
+    tools: (list.result?.tools ?? []).map((tool) => ({ name: tool.name, description: tool.description ?? '' })),
+  };
+}
+
+function breach(subject: string, origin: string, what: string, limit: ClientLimit, measured: number): string {
+  return `${subject} at ${origin}: ${what} breaks ${limit.id} (${limit.client}): ${measured} ${limit.unit}, limit ${limit.value}`;
+}
+
+function assertNoFailures(failures: readonly string[]): void {
+  if (failures.length > 0) throw new Error(`${failures.join('\n')}\n${NEXT_STEP}`);
+}
+
+function budgetFailures(subject: string, text: string, surfaces: readonly MetadataSurface[], origin: string): string[] {
+  const limits = new Map(surfaces.flatMap((surface) => budgetLimits(surface)).map((limit) => [limit.id, limit]));
+  return [...limits.values()]
+    .filter((limit) => measure(text, limit.unit) > limit.value)
+    .map((limit) => breach(subject, origin, 'the whole string', limit, measure(text, limit.unit)));
+}
+
+function windowFailures(
+  subject: string,
+  text: string,
+  needle: string,
+  limits: readonly ClientLimit[],
+  origin: string,
+): string[] {
+  const start = text.indexOf(needle);
+  if (start === -1) return [`${subject} at ${origin}: the text to place, ${JSON.stringify(needle)}, is absent`];
+  const prefix = text.slice(0, start + needle.length);
+  return limits
+    .filter((limit) => measure(prefix, limit.unit) > limit.value)
+    .map((limit) =>
+      breach(subject, origin, `the end of ${JSON.stringify(needle)}`, limit, measure(prefix, limit.unit)),
+    );
+}
+
+function orderFailures(subject: string, text: string, needles: readonly string[], origin: string): string[] {
+  const positions = needles.map((needle) => text.indexOf(needle));
+  const absent = needles.filter((_, i) => positions[i] === -1);
+  if (absent.length > 0) return [`${subject} at ${origin}: absent: ${absent.map((n) => JSON.stringify(n)).join(', ')}`];
+  const inOrder = positions.every((position, i) => i === 0 || position > positions[i - 1]);
+  return inOrder
+    ? []
+    : [`${subject} at ${origin}: out of order: ${needles.map((n) => JSON.stringify(n)).join(' before ')}`];
+}
+
+function purposeSentence(text: string): string {
+  const end = text.search(/\.\s/);
+  return end === -1 ? '' : text.slice(0, end + 1);
+}
+
+describe.each(ORIGINS)('served metadata at %s', (origin) => {
+  let served: Served;
+  beforeAll(async () => {
+    served = await readServed(origin);
+  });
+
+  test('the answers are real: every tool, a description each, and one instructions string from both handshakes', () => {
+    expect(served.tools.map((tool) => tool.name)).toEqual([...EXPECTED_TOOL_NAMES]);
+    for (const tool of served.tools) expect(tool.description.length).toBeGreaterThan(0);
+    expect(served.initializeInstructions.length).toBeGreaterThan(0);
+    expect(served.discoverInstructions).toBe(served.initializeInstructions);
+  });
+
+  test('the instructions fit every budget limit', () => {
+    assertNoFailures(
+      budgetFailures('the server instructions', served.initializeInstructions, ['server-instructions'], origin),
+    );
+  });
+
+  test('every tool description fits every budget limit on both load paths', () => {
+    const failures = served.tools.flatMap((tool) =>
+      budgetFailures(`the ${tool.name} description`, tool.description, TOOL_DESCRIPTION_SURFACES, origin),
+    );
+    assertNoFailures(failures);
+  });
+
+  test('the purpose sentence and the guide pointer end inside every lead and critical-window limit', () => {
+    const text = served.initializeInstructions;
+    const limits = [...leadLimits('server-instructions'), ...criticalLimits('server-instructions')];
+    assertNoFailures([
+      ...windowFailures('the server instructions', text, purposeSentence(text), limits, origin),
+      ...windowFailures('the server instructions', text, `${origin}/mcp-skill.md`, limits, origin),
+    ]);
+  });
+
+  test('the guide comes before the cached reads, and the cached reads before the metered audits', () => {
+    assertNoFailures(
+      orderFailures(
+        'the server instructions',
+        served.initializeInstructions,
+        [`${origin}/mcp-skill.md`, 'get_scorecard', 'score_cli'],
+        origin,
+      ),
+    );
   });
 });
