@@ -395,10 +395,10 @@ Full prose lives in `/auth.md` under **CORS posture**. Do not add CORS to `POST 
 
 ## Live-scoring kill switch interplay
 
-`MCP_LIVE_SCORING_ENABLED` shares a name and semantic with the live-scoring kill switch used by the human form on `/`.
-They are separate secrets (one gates the MCP tool, the other gates `/api/score`), but they target the same underlying
-cost (container audit pool). When both are flipped off, no live audits run from any surface; cached scorecards remain
-available everywhere.
+`scoring_disabled`, a key in `SCORE_KV`, is the switch that stops every live CLI audit on its own: the browser form on
+`/`, direct calls to `/api/score`, and the `score_cli` tool. While it is set, `score_cli` gives the same answer it gives
+with `MCP_LIVE_SCORING_ENABLED` off. `MCP_LIVE_SCORING_ENABLED` is the MCP-only switch: it stops `score_cli` and leaves
+`/api/score` running. Cached scorecards remain available everywhere under either switch.
 
-When flipping for cost reasons, flip both unless you have a specific reason to keep one surface alive. When flipping for
-an MCP-specific issue (a bug in the `score_cli` tool, an abuse pattern via MCP), flip only the MCP one.
+When flipping for cost reasons, set `scoring_disabled`. When flipping for an MCP-specific issue (a bug in the
+`score_cli` tool, an abuse pattern via MCP), flip only `MCP_LIVE_SCORING_ENABLED`.

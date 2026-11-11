@@ -434,7 +434,7 @@ Two error layers. The discriminator is whether the JSON-RPC envelope itself succ
 
 // score_cli when live-scoring is disabled by the operator
 // isError: false — read tier still works
-{ "audited": false, "message": "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard." }
+{ "audited": false, "message": "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard.", "next_tool": "get_scorecard" }
 
 // any tool when MCP_LIMITER trips
 { "isError": true, "content": [{
