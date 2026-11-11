@@ -14,6 +14,7 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { isLegacyRequest } from '@modelcontextprotocol/server';
 import {
+  API_WEB_AUDIT_VERSION_PATH,
   isAuditPath,
   isLeaderboardPath,
   isScorePath as isResultPath,
@@ -57,6 +58,7 @@ import {
   type WebRescoreTriggerEnv,
 } from './audit-web/rescore-trigger';
 import type { WebRescoreWorkflowBinding } from './audit-web/rescore-workflow';
+import { handleWebAuditVersion } from './audit-web/version-signal';
 import { canonicalHostRedirect } from './canonical-host';
 import { DISCOVERY_CORS_HEADERS } from './discovery-cors';
 import { applyHeaders, isRepresentationPinned } from './headers';
@@ -510,6 +512,10 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   // hook). Bounded per call; the operator re-runs until it writes zero.
   if (pathname === '/api/web-audit-backfill') {
     return handleWebBackfill(request, env as WebBackfillTriggerEnv, ctx);
+  }
+
+  if (pathname === API_WEB_AUDIT_VERSION_PATH) {
+    return handleWebAuditVersion(request, env);
   }
 
   // SEP-1649 server card, superseded by the SEP-2127 card below: the

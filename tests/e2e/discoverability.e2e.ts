@@ -13,6 +13,7 @@
 
 import { expect, test } from '@playwright/test';
 import { MCP_DISCOVERY_DOCUMENTS } from '../../src/shared/mcp-discovery';
+import { SPEC_VERSION } from '../../src/worker/spec-version.gen';
 import { EXPECTED_TOOL_NAMES } from '../helpers/mcp-tools';
 
 const STAGING_BASE = process.env.ANC_STAGING_BASE_URL;
@@ -167,6 +168,33 @@ test.describe('staging /llms.txt', () => {
     const positions = MCP_DISCOVERY_DOCUMENTS.map((d) => section.indexOf(`- [${d.label}](${STAGING_BASE}${d.path})`));
     expect(positions.every((index) => index >= 0)).toBe(true);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
+  });
+});
+
+// A client treats any failure of this signal as no signal, so no consumer
+// reports a broken deploy. This checks staging's value; the deploy jobs and the
+// sweep run scripts/smoke-web-audit-version.sh against each environment.
+test.describe('staging web-audit version signal', () => {
+  const VERSION_SIGNAL = '/api/web-audit/version';
+
+  test('GET serves the three fields as noindexed JSON', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}${VERSION_SIGNAL}`, { headers: ACCESS_HEADERS });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toBe('application/json; charset=utf-8');
+    expect(res.headers()['x-robots-tag']).toBe('noindex');
+    expect(res.headers()['cache-control']).toBe('public, max-age=300, stale-while-revalidate=60');
+    const body = (await res.json()) as Record<string, string>;
+    expect(Object.keys(body).sort()).toEqual(['registry_fingerprint', 'spec_version', 'web_schema_version']);
+    expect(body.registry_fingerprint).toMatch(/^[0-9a-f]{12}$/);
+    expect(body.spec_version).toBe(SPEC_VERSION);
+    expect(body.web_schema_version).toMatch(/^\d+\.\d+$/);
+  });
+
+  test('HEAD answers 200 with no body', async ({ request }) => {
+    const res = await request.fetch(`${STAGING_BASE}${VERSION_SIGNAL}`, { method: 'HEAD', headers: ACCESS_HEADERS });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toBe('application/json; charset=utf-8');
+    expect(await res.text()).toBe('');
   });
 });
 

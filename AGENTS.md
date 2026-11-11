@@ -22,12 +22,12 @@ The scope for v0 is decided and lives in:
   relevant `p<n>-*.md` spec file first. Do not edit the spec to match the site; propagate in the other direction,
   deliberately.
 - `src/data/spec/`: vendored snapshot of `brettdavies/agentnative` (the canonical spec repo) at a pinned tag. Contains
-  `VERSION` (the spec version this snapshot is at; exported as `SPEC_VERSION` from `src/build/util.mjs`, reference /
-  diff target only, NOT used for any user-visible surface), `CHANGELOG.md`, and `principles/p*-*.md` (machine-readable
-  frontmatter, diff target only, NOT consumed by site rendering). Refreshed via `scripts/sync-spec.sh` (remote-first;
-  auto-picks the latest v* tag). The site copy in `content/principles/` and the vendored spec at
-  `src/data/spec/principles/` coexist intentionally, because they serve different audiences (humans vs machines) and
-  their reconciliation is a deliberate editorial act, not a derivation.
+  `VERSION` (the spec version this snapshot is at; exported as `SPEC_VERSION` from `src/build/util.mjs`, a reference /
+  diff target rendered on no page, and a data field on `/api/score` and `/api/web-audit/version`), `CHANGELOG.md`, and
+  `principles/p*-*.md` (machine-readable frontmatter, diff target only, NOT consumed by site rendering). Refreshed via
+  `scripts/sync-spec.sh` (remote-first; auto-picks the latest v* tag). The site copy in `content/principles/` and the
+  vendored spec at `src/data/spec/principles/` coexist intentionally, because they serve different audiences (humans vs
+  machines) and their reconciliation is a deliberate editorial act, not a derivation.
 - `content/principles/VERSION`: the spec version the site's PROSE has been **reconciled to**. Exported as
   `SITE_SPEC_VERSION` from `src/build/util.mjs` and rendered in the site footer. Bumped MANUALLY by the contributor who
   reconciles `content/principles/p*-*.md` after a `sync-spec.sh` run, because bumping before reconciliation lies to
@@ -59,6 +59,9 @@ anchors, and semantic HTML. Keep this framing in every decision.
 - `/skill.json`: canonical machine-primary skill manifest. Same data, agent-readable. `Content-Type: application/json`,
   `X-Robots-Tag: noindex`. Both `/skill` and `/skill.json` derive from `src/data/skill/skill.json` at build time; full
   surface contract in `DESIGN.md` §3.9
+- `/api/web-audit/version`: JSON signal (GET and HEAD) a client with a vendored web-audit contract compares against:
+  `spec_version`, `registry_fingerprint` (the 12-character prefix scorecards record), `web_schema_version`. Fixed for a
+  given Worker version; HIT-1d, `X-Robots-Tag: noindex`, no `.md` twin
 - `content/*.md`: markdown source of truth for every page (principle files, check, about, index)
 - Cloudflare Worker: routes requests. `.md` suffix OR `Accept: text/markdown` returns raw markdown source; otherwise
   returns HTML rendered from the same markdown via CommonMark

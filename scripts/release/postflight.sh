@@ -25,8 +25,8 @@
 #   deploy     deploy.yml on the env's branch (dev for staging, main for prod):
 #              conclusion=success
 #   container  Env container app state is `ready`
-#   pages      `<env-url>/`, `/scorecards`, `/api/score` registry-hit all return
-#              expected
+#   pages      `<env-url>/`, `/scorecards`, `/api/score` registry-hit,
+#              `/api/web-audit/version` all return expected
 #   retired    every path the funnel retired answers 404 with no redirect,
 #              except the published inbound links, which 301 to a pinned
 #              destination. Run after the zone purge, or a cached pre-cut
@@ -343,6 +343,20 @@ gate_pages() {
   else
     gate_fail "${ENV_URL}/api/score registry hit" "tier=$tier scorecard_url=$scorecard_url spec=$spec_v"
   fi
+
+  # A missing token and the smoke's exit 2 (a target it will not send credentials
+  # to) say nothing about the surface, so neither may read as a broken one.
+  if [[ "$ENV_AUTH_NEEDED" -eq 1 && -z "$CF_CONFIG" ]]; then
+    gate_skip "${ENV_URL}/api/web-audit/version" "no CF Access token staged"
+    return 0
+  fi
+  local signal_output signal_status=0
+  signal_output=$(SMOKE_RETRIES=2 "$REPO_ROOT/scripts/smoke-web-audit-version.sh" "$ENV_URL" 2>&1) || signal_status=$?
+  case "$signal_status" in
+    0) gate_pass "${ENV_URL}/api/web-audit/version serves the version signal" ;;
+    2) gate_skip "${ENV_URL}/api/web-audit/version" "$signal_output" ;;
+    *) gate_fail "${ENV_URL}/api/web-audit/version" "$signal_output" ;;
+  esac
 }
 
 # Gate: retired -------------------------------------------------------------
