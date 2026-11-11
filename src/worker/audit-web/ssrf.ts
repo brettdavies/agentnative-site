@@ -31,6 +31,7 @@
 import { AUDIT_USER_AGENT } from '../../shared/user-agents';
 import type { ProbeResponse } from './assert';
 import { answerOf, bodyOf, failedHop, type HopContext, isRedirect, type RequestMemo, takeHop } from './request-hop';
+import { sameSiteOrigin } from './site-origins';
 
 export { REDIRECT_STATUSES } from './request-hop';
 
@@ -75,6 +76,12 @@ export type GuardedFetchOptions = {
    * Location); `'refuse'` makes it a failure naming its target.
    */
   crossOriginRedirects?: 'return' | 'refuse';
+  /**
+   * The origins that make up the audited site. A hop between two of them
+   * keeps the origin for `crossOriginRedirects`; a hop to or from any other
+   * origin leaves it, and every hop is validated as a public destination.
+   */
+  siteOrigins?: readonly string[];
   /** Injection point for tests; production uses global fetch. */
   fetchImpl?: typeof fetch;
   /** The audit's request memo: an identical request reads the answer already received. */
@@ -82,7 +89,7 @@ export type GuardedFetchOptions = {
 };
 
 /** The fetch options an audit hands every probe: the caller's transport plus the audit's request memo. */
-export type AuditFetchOptions = Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects' | 'memo'>;
+export type AuditFetchOptions = Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects' | 'memo' | 'siteOrigins'>;
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_MAX_REDIRECTS = 4;
@@ -380,7 +387,8 @@ export async function guardedFetch(
         } catch {
           return fail(`blocked: unparseable redirect target ${redirect}`);
         }
-        const offOrigin = opts.crossOriginRedirects !== undefined && next.origin !== origin;
+        const offOrigin =
+          opts.crossOriginRedirects !== undefined && !sameSiteOrigin(next.origin, origin, opts.siteOrigins);
         if (offOrigin && opts.crossOriginRedirects === 'refuse') {
           return fail(`redirect refused: ${answer.status} to ${redirect}`);
         }

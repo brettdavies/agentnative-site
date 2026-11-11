@@ -9,6 +9,7 @@
 import type { NaReason } from '../../../shared/web-audit-findings';
 import { NO_PLAINTEXT_REQUEST } from '../../../shared/web-audit-result-line';
 import type { ProbeResponse } from '../assert';
+import { onSite } from '../site-origins';
 import type { GuardedFetchOptions } from '../ssrf';
 import type { EvidenceItem, ProbeOutcome, ProbeStatus } from './types';
 
@@ -182,12 +183,15 @@ function isRecoveryPath(pathname: string): boolean {
 
 /**
  * True when markdown contains at least one href that resolves to a
- * same-origin sitemap.xml, llms.txt, or /docs recovery surface.
+ * same-site sitemap.xml, llms.txt, or /docs recovery surface.
  */
-export function sameOriginRecoveryLink(body: string, base: string): { ok: boolean; why: string } {
-  let origin: string;
+export function sameOriginRecoveryLink(
+  body: string,
+  base: string,
+  siteOrigins?: readonly string[],
+): { ok: boolean; why: string } {
   try {
-    origin = new URL(base).origin;
+    new URL(base);
   } catch {
     return { ok: false, why: 'unparseable audit origin' };
   }
@@ -198,7 +202,7 @@ export function sameOriginRecoveryLink(body: string, base: string): { ok: boolea
     } catch {
       continue;
     }
-    if (url.origin !== origin) continue;
+    if (!onSite(url.toString(), base, siteOrigins)) continue;
     if (isRecoveryPath(url.pathname)) {
       return { ok: true, why: `same-origin recovery ${url.pathname}` };
     }

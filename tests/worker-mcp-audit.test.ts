@@ -14,10 +14,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { AuditEvent } from '../src/shared/audit-events';
 import type { AuditJob } from '../src/worker/audit/job';
 import type { McpEnv } from '../src/worker/mcp/server';
+import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
 import { _resetHintsIndexCache } from '../src/worker/score/orchestrate';
 import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 import { fakeJobNamespace } from './helpers/audit-job-state';
+import { memoryKv } from './helpers/domain-budget-fakes';
 import { getJsonToolContent, mcpInitialize, mcpRpc, resetMcpTestState } from './helpers/mcp-rpc';
 
 const FIXTURE_CATALOG = {
@@ -210,6 +212,9 @@ function makeEnv(opts: MakeEnvOpts = {}): {
         kvStub.putCalls += 1;
         kvStub.store.set(key, value);
       },
+      async delete(key: string) {
+        kvStub.store.delete(key);
+      },
     } as unknown as KVNamespace,
     MCP_LIVE_SCORING_ENABLED: liveScoringEnabled ? 'true' : 'false',
     MCP_CACHE_BYPASS_ALLOWED: opts.cacheBypassAllowed,
@@ -264,12 +269,14 @@ beforeEach(() => {
   resetMcpTestState();
   _resetRegistryIndexCache();
   _resetHintsIndexCache();
+  _resetKillSwitchCache();
 });
 
 afterEach(() => {
   resetMcpTestState();
   _resetRegistryIndexCache();
   _resetHintsIndexCache();
+  _resetKillSwitchCache();
 });
 
 async function callGetScorecard(env: McpEnv, args: Record<string, unknown>): Promise<JsonRpcResult> {
@@ -365,15 +372,49 @@ describe('get_scorecard: the shared envelope', () => {
 });
 
 describe('score_cli: MCP_LIVE_SCORING_ENABLED kill switch', () => {
-  test('disabled returns isError: false + audited: false + disabled message; downstream never runs', async () => {
+  test('disabled returns isError: false, audited: false, next_tool get_scorecard; downstream never runs', async () => {
     const { env, doSpy, kv } = makeEnv({ liveScoringEnabled: false });
     const result = await callScoreCli(env, { slug: 'curl' }, '198.51.100.7');
     expect(result.result?.isError).toBeFalsy();
-    const body = getJsonContent(result) as { audited: boolean; message: string };
-    expect(body.audited).toBe(false);
-    expect(body.message.toLowerCase()).toContain('disabled');
+    expect(getJsonContent(result)).toEqual({
+      audited: false,
+      message:
+        'live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard.',
+      next_tool: 'get_scorecard',
+    });
     expect(doSpy.calls.length).toBe(0);
     expect(kv.getCalls).toBe(0);
+  });
+});
+
+describe('score_cli: SCORE_KV scoring_disabled kill switch', () => {
+  test('scoring_disabled on runs no container audit and answers as the MCP live-scoring switch does', async () => {
+    const offEnv = makeEnv({ liveScoringEnabled: false }).env;
+    const switchedOff = getJsonContent(
+      await callScoreCli(offEnv, { install: 'npm install -g newcli' }, '198.51.100.7'),
+    );
+
+    const kv: KvStub = { store: new Map([['scoring_disabled', 'true']]), getCalls: 0, putCalls: 0 };
+    const { env, doSpy } = makeEnv({ kv });
+    const result = await callScoreCli(env, { install: 'npm install -g newcli' }, '198.51.100.7');
+
+    expect(result.result?.isError).toBeFalsy();
+    expect(getJsonContent(result)).toEqual(switchedOff);
+    expect(doSpy.calls.length).toBe(0);
+    expect(kv.store.size).toBe(1);
+  });
+});
+
+describe('score_cli: the hourly window under one write per key per second', () => {
+  test('two score_cli audits from one IP inside one second both run', async () => {
+    const { env, doSpy } = makeEnv();
+    const log: string[] = [];
+    env.SCORE_KV = memoryKv(log, { sameKeyWriteClock: () => Date.now() });
+    await callScoreCli(env, { install: 'npm install -g newcli' }, '198.51.100.7');
+    const second = await callScoreCli(env, { install: 'npm install -g othercli' }, '198.51.100.7');
+    expect(second.result?.isError).toBeFalsy();
+    expect(doSpy.calls.length).toBe(2);
+    expect(log.filter((line) => line.startsWith('kv:put mcp_audit:')).length).toBe(2);
   });
 });
 
@@ -556,8 +597,8 @@ describe('score_cli: KV-backed per-hour window', () => {
     const { env, doSpy } = makeEnv({ auditLimiter: audit, kv });
     const result = await callScoreCli(env, { install: 'npm install -g newlib2' }, ip);
     expect(result.result?.isError).toBeFalsy();
-    expect(kv.putCalls).toBe(1);
     const bucket = Math.floor(Date.now() / 3_600_000);
+    expect([...kv.store.keys()]).toEqual([`mcp_audit:${ip}:${bucket}`]);
     const stored = kv.store.get(`mcp_audit:${ip}:${bucket}`);
     expect(stored).toBe('1');
     expect(doSpy.calls.length).toBe(1);
@@ -780,5 +821,96 @@ describe('score_cli: a run already in flight', () => {
     expect(result.result?.isError).toBe(true);
     expect(getJsonContent(result)).toMatchObject({ error: 'chain_no_resolve', stage: 'attached' });
     expect(doSpy.calls.length).toBe(0);
+  });
+
+  // Two calls for one input must share one container run: the second is
+  // answered from the first run's result, whichever gate it reaches first.
+  function gatedScore(env: McpEnv): { release: () => void } {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const inner = env.SCORE as DurableObjectNamespace;
+    env.SCORE = {
+      idFromName: (name: string) => inner.idFromName(name),
+      get: (id: DurableObjectId) => ({
+        async fetch(req: Request): Promise<Response> {
+          const res = await inner.get(id).fetch(req);
+          await gate;
+          return res;
+        },
+      }),
+    } as unknown as DurableObjectNamespace;
+    return { release };
+  }
+
+  test('two calls for one input while the first is running dispatch one container run', async () => {
+    const jobs = fakeJobNamespace();
+    const kv: KvStub = { store: new Map(), getCalls: 0, putCalls: 0 };
+    const { env, doSpy } = makeEnv({ jobs, kv });
+    const { release } = gatedScore(env);
+    const first = callScoreCli(env, { install: 'npm install -g newcli' }, '198.51.100.7');
+    await new Promise((r) => setTimeout(r, 50));
+    const flagsDuringRun = [...kv.store.keys()].filter((k) => k.startsWith('inflight:')).sort();
+    const second = callScoreCli(env, { install: 'npm install -g newcli' }, '198.51.100.8');
+    await new Promise((r) => setTimeout(r, 50));
+    release();
+    const [a, b] = await Promise.all([first, second]);
+    expect({
+      containerRuns: doSpy.calls.length,
+      flagsDuringRun,
+      flagsAfter: [...kv.store.keys()].filter((k) => k.startsWith('inflight:')),
+    }).toEqual({
+      containerRuns: 1,
+      flagsDuringRun: ['inflight:cli:newcli', 'inflight:cli:npm install -g newcli'],
+      flagsAfter: [],
+    });
+    expect(getJsonContent(a)).toMatchObject({ audited: true, source: 'fresh-audit' });
+    expect(getJsonContent(b)).toMatchObject({
+      audited: true,
+      attached: true,
+      scorecard_url: 'https://anc.dev/score/newcli',
+    });
+  });
+
+  test('a job another run holds is awaited, not run again, when its flag is not yet visible', async () => {
+    const jobs = fakeJobNamespace();
+    const job = jobs.get(jobs.idFromName('cli:npm install -g newcli'));
+    const claim = await job.claim(AT, 90_000);
+    if (!claim.claimed) throw new Error('expected a fresh claim');
+    await job.append(claim.run, { type: 'accepted', lane: 'cli', target: 'npm install -g newcli', started_at: AT });
+    const { env, doSpy } = makeEnv({ jobs });
+    setTimeout(() => void job.append(claim.run, complete), 20);
+    const result = await callScoreCli(env, { install: 'npm install -g newcli' }, '198.51.100.7');
+    expect(doSpy.calls.length).toBe(0);
+    expect(getJsonContent(result)).toMatchObject({
+      audited: true,
+      attached: true,
+      scorecard_url: 'https://anc.dev/score/newcli',
+    });
+  });
+
+  test('a run that fails ends its job with the failure, so the caller attached to it is answered', async () => {
+    const jobs = fakeJobNamespace();
+    const kv: KvStub = { store: new Map(), getCalls: 0, putCalls: 0 };
+    const { env, doSpy } = makeEnv({
+      jobs,
+      kv,
+      doResponse: new Response(JSON.stringify({ error: 'chain_resolved_install_failed', details: 'apt not on path' }), {
+        status: 200,
+      }),
+    });
+    const { release } = gatedScore(env);
+    const first = callScoreCli(env, { install: 'npm install -g errlib' }, '198.51.100.7');
+    await new Promise((r) => setTimeout(r, 50));
+    const second = callScoreCli(env, { install: 'npm install -g errlib' }, '198.51.100.8');
+    await new Promise((r) => setTimeout(r, 50));
+    release();
+    const [a, b] = await Promise.all([first, second]);
+    expect(doSpy.calls.length).toBe(1);
+    expect(a.result?.isError).toBe(true);
+    expect(b.result?.isError).toBe(true);
+    expect(getJsonContent(b)).toMatchObject({ error: 'chain_resolved_install_failed', stage: 'attached' });
+    expect([...kv.store.keys()].filter((k) => k.startsWith('inflight:'))).toEqual([]);
   });
 });

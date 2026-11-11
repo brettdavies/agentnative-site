@@ -6,6 +6,7 @@
 // not fetch; the retained llms.txt body is the only twin signal.
 
 import type { WebCheck } from '../registry';
+import { onSite } from '../site-origins';
 import { AUDIT_PROBE_MAX_BODY_BYTES, guardedFetch, validatePublicUrl } from '../ssrf';
 import { markdownHrefs, remainingDeadlineMs, timeoutMsFor } from './shared';
 import type { HandlerContext, ProbeOutcome } from './types';
@@ -34,8 +35,7 @@ function floorMet(html: string): { ok: boolean; why: string[] } {
   return { ok: hasH1 && text.length >= MIN_VISIBLE_CHARS, why };
 }
 
-function contentHrefs(llmsBody: string, base: string): string[] {
-  const origin = new URL(base).origin;
+function contentHrefs(llmsBody: string, base: string, siteOrigins?: readonly string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const raw of markdownHrefs(llmsBody)) {
@@ -45,7 +45,7 @@ function contentHrefs(llmsBody: string, base: string): string[] {
     } catch {
       continue;
     }
-    if (url.origin !== origin) continue;
+    if (!onSite(url.toString(), base, siteOrigins)) continue;
     const path = url.pathname.replace(/\/$/, '') || '/';
     if (INDEX_PATHS.has(url.pathname) || INDEX_PATHS.has(path)) continue;
     if (url.pathname === '/' || path === '') continue;
@@ -94,7 +94,7 @@ export async function runContentWithoutJs(check: WebCheck, ctx: HandlerContext):
     };
   }
 
-  const hrefs = contentHrefs(llmsBody, ctx.base).slice(0, MAX_TWIN_PROBES);
+  const hrefs = contentHrefs(llmsBody, ctx.base, ctx.fetchOptions?.siteOrigins).slice(0, MAX_TWIN_PROBES);
   const evidence: ProbeOutcome['evidence'] = [{ url: ctx.base, status: root.status, ok: false, why: floor.why }];
   for (const href of hrefs) {
     const slice = remainingDeadlineMs(deadlineAt);

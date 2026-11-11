@@ -7,6 +7,7 @@
 
 import type { ApiHostTarget } from '../api-targets';
 import { isTemplatedUrl } from '../discovery-documents';
+import { onSite, sameSiteOrigin } from '../site-origins';
 import { validatePublicUrl } from '../ssrf';
 
 export const API_HYGIENE_FALLBACK_PATH = '/anc-web-audit-no-such-api';
@@ -66,7 +67,7 @@ function parseSpec(openapiBody: string): Record<string, unknown> | null {
   }
 }
 
-function probeUnder(spec: Record<string, unknown> | null, base: string): ProbeUrl {
+function probeUnder(spec: Record<string, unknown> | null, base: string, siteOrigins?: readonly string[]): ProbeUrl {
   const fallback: ProbeUrl = { url: underBase(base, API_HYGIENE_FALLBACK_PATH), source: 'fallback' };
   if (spec === null) return fallback;
   const ops = operationsFrom(spec);
@@ -77,7 +78,7 @@ function probeUnder(spec: Record<string, unknown> | null, base: string): ProbeUr
   const validation = validatePublicUrl(url);
   if (!validation.ok) return fallback;
   try {
-    if (new URL(url).origin !== new URL(base).origin) return fallback;
+    if (!onSite(url, base, siteOrigins)) return fallback;
   } catch {
     return fallback;
   }
@@ -85,30 +86,43 @@ function probeUnder(spec: Record<string, unknown> | null, base: string): ProbeUr
 }
 
 /** Pure: pick the single GET URL both hygiene checks share. */
-export function deriveApiProbeUrl(openapiBody: string, base: string): ProbeUrl {
-  return probeUnder(parseSpec(openapiBody), base);
+export function deriveApiProbeUrl(openapiBody: string, base: string, siteOrigins?: readonly string[]): ProbeUrl {
+  return probeUnder(parseSpec(openapiBody), base, siteOrigins);
 }
 
 /** The description's first server URL, resolved against where it is served, when it is a plain URL on `origin`. */
-function serverBase(spec: Record<string, unknown> | null, description: string, origin: string): string | null {
+function serverBase(
+  spec: Record<string, unknown> | null,
+  description: string,
+  origin: string,
+  siteOrigins?: readonly string[],
+): string | null {
   const servers = spec?.servers;
   const url = Array.isArray(servers) ? asRecord(servers[0])?.url : undefined;
   if (typeof url !== 'string' || isTemplatedUrl(url)) return null;
   try {
     const resolved = new URL(url, description);
-    return resolved.origin === origin ? resolved.toString() : null;
+    return sameSiteOrigin(resolved.origin, origin, siteOrigins) ? resolved.toString() : null;
   } catch {
     return null;
   }
 }
 
 /** The first probe URL an anchor's description on the host yields, else the nonsense path under the first anchor's base. */
-export function deriveHostProbeUrl(target: ApiHostTarget, bodies: ReadonlyMap<string, string>): ProbeUrl {
+export function deriveHostProbeUrl(
+  target: ApiHostTarget,
+  bodies: ReadonlyMap<string, string>,
+  siteOrigins?: readonly string[],
+): ProbeUrl {
   let fallback: ProbeUrl | null = null;
   for (const anchor of target.anchors) {
     const spec = parseSpec(bodies.get(anchor.description) ?? '');
     const anchorBase = isTemplatedUrl(anchor.url) ? `${target.origin}/` : anchor.url;
-    const derived = probeUnder(spec, serverBase(spec, anchor.description, target.origin) ?? anchorBase);
+    const derived = probeUnder(
+      spec,
+      serverBase(spec, anchor.description, target.origin, siteOrigins) ?? anchorBase,
+      siteOrigins,
+    );
     if (derived.source !== 'fallback') return derived;
     fallback ??= derived;
   }

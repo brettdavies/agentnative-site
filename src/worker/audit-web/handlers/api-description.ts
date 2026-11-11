@@ -14,8 +14,8 @@
 
 import type { ApiDescriptionTarget } from '../api-targets';
 import type { ProbeResponse } from '../assert';
-import { sameOrigin } from '../discovery-documents';
 import type { WebCheck } from '../registry';
+import { onSite } from '../site-origins';
 import { guardedFetch, OPENAPI_MAX_BODY_BYTES } from '../ssrf';
 import { assessResponse, classifyMiss, type HttpWith, runHttp } from './http';
 import { aggregateTargets, plaintextItem, type TargetOutcome, timeoutMsFor } from './shared';
@@ -40,10 +40,22 @@ function descriptionShaped(response: ProbeResponse): boolean {
   return DESCRIPTION_TYPE_RE.test(type) || JSON_OBJECT_START_RE.test(response.body);
 }
 
-function assessDescription(url: string, response: ProbeResponse, w: HttpWith, base: string) {
-  const whole = assessResponse(url, response, w, base);
+function assessDescription(
+  url: string,
+  response: ProbeResponse,
+  w: HttpWith,
+  base: string,
+  siteOrigins?: readonly string[],
+) {
+  const whole = assessResponse(url, response, w, base, siteOrigins);
   if (whole.ok || response.truncated !== true || !descriptionShaped(response)) return whole;
-  const unmarked = assessResponse(url, response, { ...w, expect: { ...w.expect, body_regex: undefined } }, base);
+  const unmarked = assessResponse(
+    url,
+    response,
+    { ...w, expect: { ...w.expect, body_regex: undefined } },
+    base,
+    siteOrigins,
+  );
   if (!unmarked.ok) return whole;
   return { ok: true, item: { ...unmarked.item, why: [...unmarked.item.why, READ_IN_PART_WHY] } };
 }
@@ -77,9 +89,13 @@ async function probeOne(
             { ...ctx.fetchOptions, timeoutMs, maxBodyBytes: OPENAPI_MAX_BODY_BYTES },
           ),
         };
-  const { ok, item } = assessDescription(read.url, read.response, w, ctx.base);
+  const { ok, item } = assessDescription(read.url, read.response, w, ctx.base, ctx.fetchOptions?.siteOrigins);
   const evidence: EvidenceItem[] = [
-    { ...item, description: target.url, ...(sameOrigin(read.url, ctx.base) ? {} : { off_origin: true }) },
+    {
+      ...item,
+      description: target.url,
+      ...(onSite(read.url, ctx.base, ctx.fetchOptions?.siteOrigins) ? {} : { off_origin: true }),
+    },
   ];
   return { status: ok ? 'pass' : classifyMiss(read.response, w.expect ?? {}, w.timeout !== undefined), evidence };
 }

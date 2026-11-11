@@ -35,7 +35,7 @@ export function registerSpecTools(server: McpServer, catalog: Catalog): void {
         'Return the table of contents for the vendored agentnative spec at the current spec_version. Each entry carries ' +
         'slug, title, level (1 for top-level files, 2 for sub-folder files such as principles/p*.md), and parent_slug ' +
         '(null for top-level sections).',
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async () => textContent({ spec_version: catalog.spec_version, sections: catalog.spec_sections.map(tocEntry) }),
   );
@@ -50,7 +50,7 @@ export function registerSpecTools(server: McpServer, catalog: Catalog): void {
       inputSchema: {
         slug: z.string().describe('The section slug, e.g. "p1-non-interactive-by-default" or "scoring".'),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async ({ slug }) => {
       const section = catalog.spec_sections.find((s) => s.slug === slug);

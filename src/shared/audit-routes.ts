@@ -208,6 +208,34 @@ function isWebHostname(hostname: string): boolean {
   return DOMAIN_RE.test(hostname);
 }
 
+/** The two hosts of one site name: the bare host and its `www.` sibling, each with the port the host carried. */
+export type SitePair = { apex: string; www: string };
+
+const WWW_LABEL = 'www.';
+
+function isDottedDomain(name: string): boolean {
+  return name.includes('.') && DOMAIN_RE.test(name) && !IPV4_RE.test(name);
+}
+
+/**
+ * The www/bare pair a website host belongs to, or null for a host with none:
+ * localhost, an IP literal, or anything that is not a dotted domain name.
+ * `www.<a>` pairs as (`<a>`, `www.<a>`) when `<a>` is itself a dotted domain;
+ * any other host pairs as (host, `www.` + host). The apex need not be a
+ * registrable domain: `docs.stripe.com` is the apex of its own pair.
+ */
+export function sitePairOf(host: string): SitePair | null {
+  const lowered = host.toLowerCase();
+  if (lowered.startsWith('[')) return null;
+  const portAt = lowered.lastIndexOf(':');
+  const name = portAt === -1 ? lowered : lowered.slice(0, portAt);
+  const port = portAt === -1 ? '' : lowered.slice(portAt);
+  if (!isDottedDomain(name)) return null;
+  const bare =
+    name.startsWith(WWW_LABEL) && isDottedDomain(name.slice(WWW_LABEL.length)) ? name.slice(WWW_LABEL.length) : name;
+  return { apex: `${bare}${port}`, www: `${WWW_LABEL}${bare}${port}` };
+}
+
 /** The website target (host with a non-default port) for a parsed URL, or null when it is not one. */
 function webHostOf(url: URL): string | null {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;

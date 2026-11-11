@@ -18,7 +18,12 @@ import {
   keyFor as webKeyFor,
 } from '../audit-web/cache';
 import { loadWebSeed } from '../audit-web/seed';
-import { get as cliCacheGet, keyFor as cliKeyFor } from '../score/cache';
+import {
+  type CachedScorecard,
+  CliCacheUnavailableError,
+  getForRequest as cliCacheGet,
+  keyFor as cliKeyFor,
+} from '../score/cache';
 import { readCuratedEnvelope } from '../score/core';
 import { loadRegistryIndex, type RegistryEntry, type RegistryIndex } from '../score/registry-lookup';
 import { SPEC_VERSION } from '../spec-version.gen';
@@ -101,7 +106,13 @@ async function loadCli(env: ScoreOgEnv, target: string): Promise<ScoreOgSubject>
 }
 
 async function loadCachedCli(env: ScoreOgEnv, target: string, registry: RegistryIndex | null): Promise<ScoreOgSubject> {
-  const record = await cliCacheGet(env, cliKeyFor(target, SPEC_VERSION));
+  let record: CachedScorecard | null;
+  try {
+    record = await cliCacheGet(env, cliKeyFor(target, SPEC_VERSION));
+  } catch (err) {
+    if (err instanceof CliCacheUnavailableError) return { status: 'unavailable' };
+    throw err;
+  }
   const entry = registry ? entryFor(registry, target) : undefined;
   const pages = httpsPage(entry?.url);
   if (!record) {

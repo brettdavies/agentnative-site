@@ -717,6 +717,7 @@ const DOCUMENTED_TOP_LEVEL = [
   'vantage',
   'follow_declarations',
   'declared_hosts',
+  'site_hosts',
   'registry_fingerprint',
   'summary',
   'coverage_summary',
@@ -729,7 +730,7 @@ const DOCUMENTED_TOP_LEVEL = [
 // Documented and optional: an engine build that evaluated no declared host
 // records no follow state and no trail, and the registry fingerprint is never
 // the engine's to set, so a fresh build carries none of the three.
-const OPTIONAL_TOP_LEVEL = ['follow_declarations', 'declared_hosts', 'registry_fingerprint'];
+const OPTIONAL_TOP_LEVEL = ['follow_declarations', 'declared_hosts', 'site_hosts', 'registry_fingerprint'];
 
 // The web scorecard schema doc (content/web-scorecard-schema.md) is the
 // published contract. Pin an engine-produced scorecard to the documented
@@ -847,6 +848,51 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
     expect(produced.results.filter((r) => r.unprobed === true).length).toBe(1);
     expect(produced.results.filter((r) => r.status === 'noncompliant').length).toBe(1);
     expect(produced.results.filter((r) => r.host === 'example.com').length).toBe(4);
+  });
+
+  test('a folded apex-to-www scorecard names the bare host, records where the checks ran, and lists both hosts', () => {
+    const folded = buildWebScorecard(ENGINE_ROWS, {
+      ...BASE_META,
+      targetUrl: 'https://www.example.com/',
+      domain: 'example.com',
+      siteHosts: ['example.com', 'www.example.com'],
+    });
+    expect(folded.tool).toEqual({ name: 'example.com', url: 'https://example.com/' });
+    expect(folded.target_url).toBe('https://www.example.com/');
+    expect(folded.site_hosts).toEqual(['example.com', 'www.example.com']);
+    expect(folded.schema_version).toBe('0.5');
+  });
+
+  test('a folded www-to-apex scorecard has target_url equal to tool.url and still lists both hosts', () => {
+    const folded = buildWebScorecard(ENGINE_ROWS, {
+      ...BASE_META,
+      targetUrl: 'https://example.com/',
+      domain: 'example.com',
+      siteHosts: ['example.com', 'www.example.com'],
+    });
+    expect(folded.target_url).toBe(folded.tool.url);
+    expect(folded.site_hosts).toEqual(['example.com', 'www.example.com']);
+  });
+
+  test('an unfolded www scorecard names the www host and carries no site_hosts key', () => {
+    const unfolded = buildWebScorecard(ENGINE_ROWS, {
+      ...BASE_META,
+      targetUrl: 'https://www.example.com/',
+      domain: 'www.example.com',
+    });
+    expect(unfolded.tool).toEqual({ name: 'www.example.com', url: 'https://www.example.com/' });
+    expect('site_hosts' in unfolded).toBe(false);
+    expect(Object.keys(unfolded).sort()).toEqual(Object.keys(produced).sort());
+  });
+
+  test('a port rides on the site name and its URL', () => {
+    const folded = buildWebScorecard(ENGINE_ROWS, {
+      ...BASE_META,
+      targetUrl: 'https://www.example.com:8443/',
+      domain: 'example.com:8443',
+      siteHosts: ['example.com:8443', 'www.example.com:8443'],
+    });
+    expect(folded.tool).toEqual({ name: 'example.com:8443', url: 'https://example.com:8443/' });
   });
 
   test('a scorecard missing a documented required field fails conformance loudly', () => {

@@ -28,6 +28,22 @@ export function modernToolsListBody(id = 10) {
   };
 }
 
+export function modernServerDiscoverBody(id = 9) {
+  return {
+    jsonrpc: '2.0' as const,
+    id,
+    method: 'server/discover',
+    params: { ...MODERN_META },
+  };
+}
+
+export function modernServerDiscoverHeaders(): Record<string, string> {
+  return {
+    'MCP-Protocol-Version': MODERN_PROTOCOL,
+    'Mcp-Method': 'server/discover',
+  };
+}
+
 export function modernToolCallBody(name: string, args: Record<string, unknown>, id = 11) {
   return {
     jsonrpc: '2.0' as const,

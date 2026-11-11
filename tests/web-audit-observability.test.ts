@@ -157,6 +157,34 @@ describe('instrumentAuditEvents', () => {
     }
   });
 
+  test('the run summary records the pair outcome and the status each root answered, on a complete and an unreachable run', async () => {
+    const logs = captureLogs();
+    try {
+      const run = (event: AuditEvent) =>
+        collect(
+          instrumentAuditEvents(eventsOf([event]), {}, { target: 'x', surface: 'stream', followDeclarations: true }),
+        );
+      await run({
+        ...COMPLETE_EVENT,
+        pair: { outcome: 'folded', requestedStatus: 301, siblingStatus: 200 },
+      } as AuditEvent);
+      await run({
+        type: 'unreachable',
+        reason: 'silence',
+        pair: { outcome: 'no-answer', requestedStatus: null, siblingStatus: 503 },
+      });
+      await run(COMPLETE_EVENT);
+      const summaries = logs.records.map((r) => r.record).filter((l) => l.scope === 'web-audit.run');
+      expect(summaries.map((l) => [l.pair_outcome, l.pair_requested_status, l.pair_sibling_status])).toEqual([
+        ['folded', 301, 200],
+        ['no-answer', null, 503],
+        [undefined, undefined, undefined],
+      ]);
+    } finally {
+      logs.restore();
+    }
+  });
+
   test('an unreachable terminal is reported in the summary', async () => {
     const logs = captureLogs();
     try {
@@ -298,6 +326,49 @@ describe('notifyFailure', () => {
       expect(await notifyFailure(env, alert)).toBe('send_failed');
       const failed = logs.records.find((r) => r.record.scope === 'notify.send_failed');
       expect(failed?.level).toBe('error');
+    } finally {
+      logs.restore();
+    }
+  });
+
+  test('a dedupe write that throws after a send still answers sent', async () => {
+    const env = {
+      EMAIL: { send: async () => ({}) },
+      ALERT_EMAIL_FROM: 'alerts@example.com',
+      ALERT_EMAIL_TO: 'ops@example.com',
+      SCORE_KV: {
+        get: async () => null,
+        put: () => {
+          throw new Error('KV PUT failed: 429 Too Many Requests');
+        },
+      } as unknown as KVNamespace,
+    };
+    expect(await notifyFailure(env, alert)).toBe('sent');
+  });
+
+  test('a failed send leaves the alert unsent, so the next alert for its key is sent', async () => {
+    const logs = captureLogs();
+    try {
+      const sent: SentMessage[] = [];
+      let refuseNext = true;
+      const env = {
+        EMAIL: {
+          send: async (m: SentMessage) => {
+            if (refuseNext) {
+              refuseNext = false;
+              throw new Error('email service unavailable');
+            }
+            sent.push(m);
+            return {};
+          },
+        },
+        ALERT_EMAIL_FROM: 'alerts@example.com',
+        ALERT_EMAIL_TO: 'ops@example.com',
+        SCORE_KV: fakeKv(),
+      };
+      expect(await notifyFailure(env, alert)).toBe('send_failed');
+      expect(await notifyFailure(env, alert)).toBe('sent');
+      expect(sent.length).toBe(1);
     } finally {
       logs.restore();
     }

@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { type AdmitEnv, admitTransact, clientIpKey } from '../src/worker/audit/admit';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
 import { type VerifyResult, verifyTurnstile } from '../src/worker/score/turnstile';
+import { memoryKv } from './helpers/domain-budget-fakes';
 
 type Calls = string[];
 
@@ -374,5 +375,61 @@ describe('admitTransact: review pins', () => {
       );
       expect(typeof r.detail).toBe('string');
     }
+  });
+});
+
+describe('admitTransact: the hourly window under one write per key per second', () => {
+  const admit = (env: AdmitEnv) =>
+    admitTransact({
+      lane: 'web',
+      request: req(),
+      token: 'x',
+      target: 'anc.dev',
+      env,
+      deps: { turnstileFetch: siteverify('pass') },
+    });
+
+  test('two audits from one IP inside one second are both admitted and both counted', async () => {
+    const log: string[] = [];
+    const env = makeEnv([], { SCORE_KV: memoryKv(log, { sameKeyWriteClock: () => Date.now() }) });
+    const first = await admit(env);
+    const second = await admit(env);
+    expect({ first: first.ok, second: second.ok }).toEqual({ first: true, second: true });
+    expect(log.filter((line) => line.startsWith('kv:put ')).length).toBe(2);
+  });
+
+  test('a counter write KV refuses twice answers as a rate limit', async () => {
+    const env = makeEnv([], { SCORE_KV: memoryKv([], { sameKeyWriteClock: () => 0 }) });
+    expect((await admit(env)).ok).toBe(true);
+    expect(await admit(env)).toMatchObject({ ok: false, status: 429, error: { code: 'rate_limited' } });
+  });
+
+  test('a third audit from one IP started with two others answers as contention, not as the hourly ceiling', async () => {
+    const env = makeEnv([], { SCORE_KV: memoryKv([], { sameKeyWriteClock: () => Date.now() }) });
+    const answers = await Promise.all([admit(env), admit(env), admit(env)]);
+    const refused = answers.filter((a) => !a.ok);
+    expect({ admitted: answers.length - refused.length, refused: refused.length }).toEqual({ admitted: 2, refused: 1 });
+    expect(refused[0]).toMatchObject({
+      status: 429,
+      retryAfter: 2,
+      error: {
+        code: 'rate_limited',
+        message: 'Several audits started at once from this address. Try again in 2 seconds.',
+        retry_after: 2,
+      },
+    });
+  });
+
+  test('a counter write KV fails for any reason but its per-key limit answers as a misconfigured service', async () => {
+    const { kv } = makeKv();
+    kv.put = async () => {
+      throw new Error('KV PUT failed: 500 Internal Server Error');
+    };
+    expect(await admit(makeEnv([], { SCORE_KV: kv }))).toMatchObject({
+      ok: false,
+      status: 500,
+      error: { code: 'service_misconfigured' },
+      detail: 'limiter failed: KV PUT failed: 500 Internal Server Error',
+    });
   });
 });
