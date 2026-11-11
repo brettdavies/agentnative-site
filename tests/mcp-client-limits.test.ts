@@ -302,12 +302,12 @@ describe.each(ORIGINS)('served metadata at %s', (origin) => {
     ]);
   });
 
-  test('in the instructions score_cli comes before the short disclosure, which comes before the shared limit', () => {
+  test('in the instructions the metered quotas come before the shared limit, which comes before the short disclosure', () => {
     assertNoFailures(
       orderFailures(
         'the server instructions',
         served.initializeInstructions,
-        ['score_cli', FOLLOW_DISCLOSURE_SHORT, 'Every call shares'],
+        ['score_cli', 'Every call shares', FOLLOW_DISCLOSURE_SHORT],
         origin,
       ),
     );
