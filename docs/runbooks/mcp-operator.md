@@ -18,7 +18,7 @@ environment, and the flip verb follows the shape.
 | Flag                       | Binding shape                                       | Scope                                     | Falsy behavior                                                                                                                                                                                                                          |
 | -------------------------- | --------------------------------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `MCP_ENABLED`              | secret, both environments                           | the entire `/mcp` branch                  | `503 Service Unavailable` with `Retry-After: 3600` and a one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error. Discoverability siblings stay live.                                                  |
-| `MCP_LIVE_SCORING_ENABLED` | secret, both environments                           | only the `score_cli` tool                 | `score_cli` returns `isError: false` with `audited: false, message: "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard"`. Read tier stays alive.                                 |
+| `MCP_LIVE_SCORING_ENABLED` | secret, both environments                           | only the `score_cli` tool                 | `score_cli` returns `isError: false` with `audited: false, message: "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard", next_tool: "get_scorecard"`. `SCORE_KV` `scoring_disabled` gives the same answer. Read tier stays alive. |
 | `MCP_LEGACY_ENABLED`       | committed var `"true"`, top-level and `env.staging` | legacy `initialize` lane                  | When `'false'`, shell logs `legacy_rejected` with `error_code: -32022` and returns JSON-RPC `-32022` (`data.supported: ["2026-07-28"]`) before SDK dispatch. Modern lane unaffected.                                                    |
 | `WEB_AUDIT_FOLLOW_ENABLED` | var `"true"` on `env.staging`, secret in production | following declared hosts, every web audit | Audits keep running on the site's own origin. The stored scorecard records `follow_declarations: false`, and rows that need a declared host read `n_a` with reason `follow-disabled`. Re-audits save with following off; see the decision flow. |
 
@@ -46,9 +46,11 @@ Decision flow:
 - **Security issue, schema bug, or abuse pattern at the dispatch layer** → flip `MCP_ENABLED` to take the whole endpoint
   offline. Use this when continuing to serve any tool would be a liability.
 - **Cost-level emergency (audit budget overrun, container pool saturation, R2 throttling on the cache write path)** →
-  flip `MCP_LIVE_SCORING_ENABLED` only. The seven catalog tools and `get_scorecard` keep serving cached scorecards;
-  agents that were about to call `score_cli` get a typed "disabled" response and route themselves back to
-  `get_scorecard`.
+  set `scoring_disabled` in `SCORE_KV`, which stops every live CLI audit, `score_cli` included (see
+  [Live-scoring kill switch interplay](#live-scoring-kill-switch-interplay)). To stop only the MCP audit path and leave
+  `/api/score` running, flip `MCP_LIVE_SCORING_ENABLED` instead. Either way the catalog tools and `get_scorecard` keep
+  serving cached scorecards; agents that were about to call `score_cli` get a typed "disabled" response with
+  `next_tool: "get_scorecard"` and route themselves back to it.
 - **A declared host objects to being probed, or the follow phase misbehaves** → flip `WEB_AUDIT_FOLLOW_ENABLED` to
   `false`. Audits keep running and scoring each site's own origin. A stored scorecard keeps the follow state it was
   scored with until it is re-audited, but while following is off every re-audit saves as not followed: the next board
@@ -395,10 +397,12 @@ Full prose lives in `/auth.md` under **CORS posture**. Do not add CORS to `POST 
 
 ## Live-scoring kill switch interplay
 
-`MCP_LIVE_SCORING_ENABLED` shares a name and semantic with the live-scoring kill switch used by the human form on `/`.
-They are separate secrets (one gates the MCP tool, the other gates `/api/score`), but they target the same underlying
-cost (container audit pool). When both are flipped off, no live audits run from any surface; cached scorecards remain
-available everywhere.
+`scoring_disabled`, a key in `SCORE_KV`, is the switch that stops every live CLI audit on its own: the browser form on
+`/`, direct calls to `/api/score`, and the `score_cli` tool. While it is set, `score_cli` gives the same answer it gives
+with `MCP_LIVE_SCORING_ENABLED` off. `MCP_LIVE_SCORING_ENABLED` is the MCP-only switch: it stops `score_cli` and leaves
+`/api/score` running. Cached scorecards remain available everywhere under either switch.
 
-When flipping for cost reasons, flip both unless you have a specific reason to keep one surface alive. When flipping for
-an MCP-specific issue (a bug in the `score_cli` tool, an abuse pattern via MCP), flip only the MCP one.
+When flipping for cost reasons, set `scoring_disabled`; the commands, and the up-to-90-second propagation (a 30-second
+in-isolate cache plus the time KV takes to carry a change to every location), are in
+[Cost guardrails](../../RELEASES.md#cost-guardrails). When flipping for an MCP-specific issue (a bug in the `score_cli`
+tool, an abuse pattern via MCP), flip only `MCP_LIVE_SCORING_ENABLED`.

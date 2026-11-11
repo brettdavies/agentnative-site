@@ -183,7 +183,10 @@ never saved, binary or branch-scoped: `scorecard_url`, `markdown_url`, `json_url
 call runs a fresh, metered audit.
 
 The tools are symmetric: `get_scorecard` returns `found: true` exactly when `score_cli` returns `audited: false` on the
-same input. The cost difference (registry/cache lookup vs container run) is the only reason to choose between them.
+same input. The cost difference (registry/cache lookup vs container run) is the only reason to choose between them. The
+one exception is the operator's disabled answer (see [When things fail](#when-things-fail)): while live scoring is off,
+`score_cli` returns `audited: false` for every input, and a `get_scorecard` miss after it means no scorecard exists yet.
+Do not call `score_cli` again for that input until live scoring is back.
 
 ## Audit a website
 
@@ -433,8 +436,8 @@ Two error layers. The discriminator is whether the JSON-RPC envelope itself succ
 }]}
 
 // score_cli when live-scoring is disabled by the operator
-// isError: false — read tier still works
-{ "audited": false, "message": "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard." }
+// isError: false — read tier still works; a get_scorecard miss after this means no scorecard exists yet
+{ "audited": false, "message": "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard.", "next_tool": "get_scorecard" }
 
 // any tool when MCP_LIMITER trips
 { "isError": true, "content": [{

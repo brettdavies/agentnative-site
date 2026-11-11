@@ -5,10 +5,13 @@
 // cannot drift on cache semantics, DO dispatch, or the envelope they hand
 // back. Every scorecard-bearing answer here is that one envelope. The flow:
 //
-//   1. MCP_LIVE_SCORING_ENABLED kill switch. When falsy, returns
-//      isError: false with content { audited: false, message: "...
-//      disabled by the operator..." }. The read tier stays alive on
-//      get_scorecard so the cached scorecards remain available.
+//   1. Kill switches: MCP_LIVE_SCORING_ENABLED, then SCORE_KV
+//      `scoring_disabled`, the switch that stops every live CLI audit.
+//      Either one off returns isError: false with content
+//      { audited: false, message: "...disabled by the operator...",
+//      next_tool: "get_scorecard" }.
+//      The read tier stays alive on get_scorecard so the cached
+//      scorecards remain available.
 //   2. validateInput on the raw input. Rejection returns isError: true
 //      with the validator's typed error envelope (security gate).
 //   3. readCliTier first. Curated and cached hits return isError: false
@@ -42,6 +45,7 @@ import type { TerminalEvent } from '../../../shared/audit-events';
 import { normalizeTarget } from '../../../shared/audit-routes';
 import { awaitInFlightTerminal, type InFlightEnv } from '../../audit/inflight';
 import { type CliCoreEnv, cliRunEnvelope, readCliTier } from '../../score/core';
+import { isScoringDisabled } from '../../score/kill-switch';
 import { loadHintsIndex, type OrchestrateEnv, runFreshOnly } from '../../score/orchestrate';
 import { type DiscoveryHintsIndex, loadRegistryIndex, type RegistryIndex } from '../../score/registry-lookup';
 import { validateInput } from '../../score/validate';
@@ -155,7 +159,9 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
         'gated by MCP_AUDIT_LIMITER (5 per 60-second burst) AND a KV-backed per-hour window (5 audits per 60 minutes ' +
         'per IP — the plan ceiling that the CF binding alone cannot express). No anon fallback at the audit tier: a ' +
         'request without cf-connecting-ip returns -32099 immediately. Disabled when MCP_LIVE_SCORING_ENABLED is not ' +
-        '"true" — the read tier on get_scorecard stays alive serving cached scorecards. A fresh audit whose ' +
+        '"true" or the operator sets scoring_disabled: the answer is then isError: false with audited: false and ' +
+        'next_tool: get_scorecard, and the read tier on get_scorecard stays alive serving cached scorecards. A fresh ' +
+        'audit whose ' +
         'scorecard reports summary.error above 0 is returned but not saved: its URLs and freshness.refresh_after ' +
         'are null, and the next call runs a fresh audit.',
       inputSchema: {
@@ -176,13 +182,17 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
     },
     async (args, extra) => {
       const siteUrl = siteOrigin();
-      // Step 1: MCP_LIVE_SCORING_ENABLED kill switch.
-      if (env.MCP_LIVE_SCORING_ENABLED !== 'true') {
+      // Step 1: kill switches.
+      if (
+        env.MCP_LIVE_SCORING_ENABLED !== 'true' ||
+        (env.SCORE_KV !== undefined && (await isScoringDisabled({ SCORE_KV: env.SCORE_KV })))
+      ) {
         return textContent({
           audited: false,
           message:
             'live scoring is currently disabled by the operator; cached scorecards remain available via ' +
             'get_scorecard.',
+          next_tool: 'get_scorecard',
         });
       }
 

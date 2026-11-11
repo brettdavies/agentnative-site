@@ -921,7 +921,7 @@ wrangler secret put MCP_ENABLED                  # enter `false` when prompted
 # Re-enable.
 wrangler secret put MCP_ENABLED                  # enter `true` when prompted
 
-# Disable only the cost-bearing tool (cost emergency); reads stay live.
+# Disable only score_cli (MCP-only); reads stay live.
 wrangler secret put MCP_LIVE_SCORING_ENABLED     # enter `false`
 wrangler secret put MCP_LIVE_SCORING_ENABLED     # enter `true` to restore
 ```
@@ -929,8 +929,10 @@ wrangler secret put MCP_LIVE_SCORING_ENABLED     # enter `true` to restore
 Both are env-scoped: pass `--env staging` to flip staging only, and omit `--env` entirely for production, which is the
 top-level config with no `env.production` block. Propagation is bounded by the secret-read TTL on the next request to a
 fresh isolate; warm isolates pick up the new value when the underlying env mapping refreshes. Recovery from a
-surface-level emergency uses `MCP_ENABLED`; recovery from a cost-level emergency uses `MCP_LIVE_SCORING_ENABLED` and
-keeps the read tier serving cached scorecards.
+surface-level emergency uses `MCP_ENABLED`. A cost-level emergency uses `scoring_disabled` (see
+[Cost guardrails](#cost-guardrails)), the `SCORE_KV` switch that stops every live CLI audit, `score_cli` included;
+`MCP_LIVE_SCORING_ENABLED` is the MCP-only switch that stops `score_cli` and leaves `/api/score` running. Both keep the
+read tier serving cached scorecards.
 
 `OG_VIDEO_ENABLED` stops every og:video render request (audit hooks and the curated pass) without a deploy; pages keep
 naming the clips that exist. It is a secret on the site Worker in both environments, read as `=== 'true'`, so unset is
