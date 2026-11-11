@@ -182,6 +182,21 @@ describe('POST /api/score: a folded pair is stored as one site', () => {
     expect(await h.storedRecord('a.test')).not.toBeNull();
   });
 
+  test('a folded write leaves the www record stored for another spec version', async () => {
+    const h = await harness({
+      routes: {
+        'GET https://a.test/': () => redirect('https://www.a.test/', 301),
+        'GET https://www.a.test/': () => html(),
+      },
+      records: { 'www.a.test': stored('www.a.test') },
+    });
+    const olderKey = await webKeyFor('https://www.a.test/', '0.0.1');
+    await h.env.SCORE_CACHE.put(olderKey, JSON.stringify(stored('www.a.test')));
+    await h.audit({ target: 'a.test' });
+    expect(h.deleted).toEqual([await keyOf('www.a.test')]);
+    expect(await h.env.SCORE_CACHE.get(olderKey)).not.toBeNull();
+  });
+
   test('a folded audit whose bare-host write fails deletes no record', async () => {
     const h = await harness({
       routes: {
