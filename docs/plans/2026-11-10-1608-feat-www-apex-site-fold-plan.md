@@ -4,7 +4,7 @@ execution: code
 product_contract_source: ce-plan-bootstrap
 title: "Fold www and apex into one site at the start of every web audit - Plan"
 type: feat
-status: proposed
+status: active
 date: 2026-11-10
 topic: www-apex-site-fold
 ---
