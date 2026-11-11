@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.1794439906-g7cd7f26] - 2026-11-11
+
+### Added
+
+- Web audits treat `www.<domain>` and `<domain>` as one site when either redirects to the other; the scorecard is stored and shown under `<domain>`, `/score/www.<domain>` answers 301, scorecards gain an optional `site_hosts` field, and the unreachable error names a `www.` or bare host that answered. by @brettdavies in [#557](https://github.com/brettdavies/agentnative-site/pull/557)
+- Add the site's IndexNow key file at the root. by @brettdavies in [#565](https://github.com/brettdavies/agentnative-site/pull/565)
+
+### Fixed
+
+- Fix `score_cli` starting a live container audit while the `scoring_disabled` kill switch is on; it now answers as it does with live scoring disabled. by @brettdavies in [#552](https://github.com/brettdavies/agentnative-site/pull/552)
+- Fix `score_cli`'s live-scoring-disabled answer to carry `next_tool: "get_scorecard"`, as documented.
+- Fix a second audit from the same IP within one second failing with `service_misconfigured` (browser and API) or a raw storage error (`score_cli`); the counter write retries once, and a third audit started at the same moment is told to retry in 2 seconds instead of being told the hourly limit is spent. by @brettdavies in [#553](https://github.com/brettdavies/agentnative-site/pull/553)
+- Fix a board rebuild dropping a site from the web leaderboard when its stored record could not be read; the site keeps its existing row. by @brettdavies in [#555](https://github.com/brettdavies/agentnative-site/pull/555)
+- Fix a failed operator alert email suppressing the next alert for the same failure for an hour. by @brettdavies in [#556](https://github.com/brettdavies/agentnative-site/pull/556)
+- Fix the `/mcp` `tools/list` response so each of the eleven read tools declares `destructiveHint: false` and `openWorldHint: false` beside `readOnlyHint: true`, giving every tool all three behavior hints as booleans. by @brettdavies in [#558](https://github.com/brettdavies/agentnative-site/pull/558)
+- Fix a CLI scorecard page answering 404 "No audit exists" when its stored record could not be read; it now answers 503 with `Retry-After`, and so does its social card. by @brettdavies in [#559](https://github.com/brettdavies/agentnative-site/pull/559)
+- Fix two `score_cli` calls for the same input running two container audits; the second call now waits for the first run and is answered from its result. by @brettdavies in [#560](https://github.com/brettdavies/agentnative-site/pull/560)
+- The MCP server instructions now fit the 4,096 characters Claude Code delivers whole, and lead with what the server is for, the guide link, which tool to call first, and what a website audit sends to third-party hosts. The `audit_website` description carries the short third-party disclosure, and its `follow_declarations` parameter carries the full one. by @brettdavies in [#563](https://github.com/brettdavies/agentnative-site/pull/563)
+- Fix the `/mcp` server instructions to lead with the purpose, the cache-first sequence with both metered-audit quotas, and the shared 60-per-60-seconds limit, and drop the result-shape paragraph. by @brettdavies in [#564](https://github.com/brettdavies/agentnative-site/pull/564)
+
+### Documentation
+
+- Document `scoring_disabled` as the switch that stops every live CLI audit, with `MCP_LIVE_SCORING_ENABLED` as the MCP-only switch. by @brettdavies in [#552](https://github.com/brettdavies/agentnative-site/pull/552)
+
+**Full Changelog**: [v0.0.1794364986-ga6ad604...v0.0.1794439906-g7cd7f26](https://github.com/brettdavies/agentnative-site/compare/v0.0.1794364986-ga6ad604...v0.0.1794439906-g7cd7f26)
+
 ## [0.0.1794364986-ga6ad604] - 2026-11-11
 
 ### Fixed
