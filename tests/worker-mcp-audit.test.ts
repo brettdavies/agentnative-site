@@ -401,6 +401,30 @@ describe('score_cli: SCORE_KV scoring_disabled kill switch', () => {
   });
 });
 
+describe('score_cli: the hourly window under one write per key per second', () => {
+  test('two score_cli audits from one IP inside one second both run', async () => {
+    const { env, doSpy } = makeEnv();
+    const store = new Map<string, string>();
+    const lastWrite = new Map<string, number>();
+    env.SCORE_KV = {
+      async get(key: string) {
+        return store.get(key) ?? null;
+      },
+      async put(key: string, value: string) {
+        const last = lastWrite.get(key);
+        if (last !== undefined && Date.now() - last < 1000) throw new Error('KV PUT failed: 429 Too Many Requests');
+        lastWrite.set(key, Date.now());
+        store.set(key, value);
+      },
+    } as unknown as KVNamespace;
+    await callScoreCli(env, { install: 'npm install -g newcli' }, '198.51.100.7');
+    const second = await callScoreCli(env, { install: 'npm install -g othercli' }, '198.51.100.7');
+    expect(second.result?.isError).toBeFalsy();
+    expect(doSpy.calls.length).toBe(2);
+    expect([...store.values()]).toEqual(['2']);
+  });
+});
+
 describe('score_cli: lookupOnly cache-state outcomes', () => {
   test('curated slug returns audited: false + source: registry + next_tool: get_scorecard', async () => {
     const { env, doSpy } = makeEnv();

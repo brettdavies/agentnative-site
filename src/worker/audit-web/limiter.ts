@@ -3,16 +3,22 @@
 //
 // The transact endpoint, the /api/audit-web streaming route, and the
 // audit_website MCP tool all consume the web lane's budget, so a caller
-// can't get one ceiling via one surface and another via the next. Mirrors
-// consumeHourlyBudget in scorecard-audit.ts: the CF rate-limit binding
-// enforces the per-60s burst floor; this layer enforces the hourly ceiling
-// the binding can't express (its max period is 60 seconds).
+// can't get one ceiling via one surface and another via the next. The
+// score_cli tool's own window (`mcp_audit:<ip>:<hour>`) runs on the same
+// counter. The CF rate-limit binding enforces the per-60s burst floor;
+// this layer enforces the hourly ceiling the binding can't express (its
+// max period is 60 seconds).
 
 import type { Lane } from '../../shared/audit-routes';
 
 const HOUR_MS = 3_600_000;
 const HOURLY_AUDIT_CEILING = 30;
 const HOURLY_KV_TTL_SECONDS = 7200;
+
+// Workers KV refuses a second write to one key inside a second, which two
+// audits from one caller reach when they start together. A refused counter
+// write is retried once, after that interval, against a fresh read.
+const KV_SAME_KEY_WRITE_INTERVAL_MS = 1_100;
 
 // Per-domain flip ceiling for flag-changing writes (opt-in/opt-out). Sized
 // well above a legitimate owner's correction rate — opt in, then change your
@@ -58,7 +64,9 @@ async function readHourlyBucket(
 /**
  * Fixed-hour KV counter behind every hourly budget: read the current
  * bucket count, refuse at the ceiling, otherwise increment under the
- * shared TTL. The key is `<prefix>:<id>:<hour bucket>`.
+ * shared TTL. The key is `<prefix>:<id>:<hour bucket>`. A write KV refuses
+ * twice answers as the ceiling: an audit the window did not count is never
+ * admitted.
  */
 export async function consumeHourlyBucketBudget(
   kv: KVNamespace,
@@ -66,10 +74,26 @@ export async function consumeHourlyBucketBudget(
   id: string,
   ceiling: number,
 ): Promise<boolean> {
+  const first = await takeHourlyUnit(kv, prefix, id, ceiling);
+  if (first !== 'refused') return first === 'taken';
+  await new Promise((resolve) => setTimeout(resolve, KV_SAME_KEY_WRITE_INTERVAL_MS));
+  return (await takeHourlyUnit(kv, prefix, id, ceiling)) === 'taken';
+}
+
+async function takeHourlyUnit(
+  kv: KVNamespace,
+  prefix: string,
+  id: string,
+  ceiling: number,
+): Promise<'taken' | 'full' | 'refused'> {
   const take = await readHourlyBucket(kv, prefix, id, ceiling);
-  if (take === null) return false;
-  await take();
-  return true;
+  if (take === null) return 'full';
+  try {
+    await take();
+    return 'taken';
+  } catch {
+    return 'refused';
+  }
 }
 
 /** Consume one unit of `lane`'s hourly budget for `ip`. Returns false when exhausted. */
