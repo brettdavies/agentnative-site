@@ -40,6 +40,36 @@ const REFUSED = failure('TypeError: connection refused');
 const NOT_FOUND = html('<html><body><h1>Not found</h1><p>No such page.</p></body></html>', {}, 404);
 const SERVER_ERROR = html('<html><body><h1>Internal error</h1></body></html>', {}, 500);
 
+// The sibling root every run requests once, answering without a redirect; a scenario that names every request lists it.
+const SIBLING_ROOT = 'https://www.example.com/';
+const sibling404 = (): Exchange => ({ request: { method: 'GET', url: SIBLING_ROOT }, response: NOT_FOUND });
+
+const WWW_ORIGIN = 'https://www.example.com';
+const getAt = (url: string, response: ExchangeResponse): Exchange => ({ request: { method: 'GET', url }, response });
+const postAt = (url: string, response: ExchangeResponse, match: PostMatch = {}): Exchange => ({
+  request: { method: 'POST', url, ...match },
+  response,
+});
+
+// Request headers stay as written: the CORS probe sends a fixed Origin that is not the audited origin.
+const movedTo = (origin: string, exchanges: Exchange[]): Exchange[] => {
+  const move = (value: string): string => value.split('https://example.com').join(origin);
+  return exchanges.map(({ request, response }) => ({
+    request: { ...request, url: move(request.url) },
+    response:
+      'error' in response
+        ? response
+        : {
+            ...response,
+            headers: Object.fromEntries(Object.entries(response.headers).map(([k, v]) => [k, move(v)])),
+            body: move(response.body),
+          },
+  }));
+};
+
+const mcpSiteOn = (origin: string): Exchange[] =>
+  movedTo(origin, [...baseline(), ...cardSurface(), ...dualStackMcp({ cors: 'full' })]);
+
 const rpcResult = (result: unknown, extra: Record<string, string> = {}): ExchangeResponse =>
   json({ jsonrpc: '2.0', id: 1, result }, 200, extra);
 const rpcError = (code: number, status = 200, data?: Record<string, unknown>): ExchangeResponse =>
@@ -577,7 +607,7 @@ const HUGE_TOOLS = { tools: Array.from({ length: 1200 }, (_, i) => ({ name: `too
 
 export const SCENARIOS: Record<string, Scenario> = {
   // ---- whole runs -----------------------------------------------------------
-  'run-all-pass': scenario('every surface answers as the registry wants it to', ALL_IDS, fullSite(), {
+  'run-all-pass': scenario('every surface answers as the registry wants it to', ALL_IDS, [...fullSite(), sibling404()], {
     allow_unmatched: false,
   }),
   'run-healthy': scenario(
@@ -627,13 +657,13 @@ export const SCENARIOS: Record<string, Scenario> = {
   'run-site-type-api': scenario(
     'the full site declared as an API: content-only checks are `n_a` at the type filter',
     ['llms-full-txt', 'llms-txt-scoped', 'llms-full-txt-scoped', 'openapi', 'json-errors'],
-    fullSite(),
+    [...fullSite(), sibling404()],
     { site_type: 'api', allow_unmatched: false },
   ),
   'run-site-type-content': scenario(
     'the full site declared as content: API-only checks are `n_a` at the type filter, MCP still applies on discovery',
     ['openapi', 'json-schemas', 'api-catalog', 'json-errors', 'rate-limit-headers', 'llms-full-txt', 'mcp-initialize'],
-    fullSite(),
+    [...fullSite(), sibling404()],
     { site_type: 'content', allow_unmatched: false },
   ),
   'run-redirects': scenario(
@@ -670,7 +700,7 @@ export const SCENARIOS: Record<string, Scenario> = {
   'run-root-redirects-to-http': scenario(
     'every https request, the root included, redirects to the http root, which would answer: the run ends unreachable after the root request alone, and nothing is requested over http',
     ['agent-ua-reachable', 'content-without-js'],
-    [get('/', redirect('http://example.com/')), get('http://example.com/', html(rootHtml()))],
+    [get('/', redirect('http://example.com/')), get('http://example.com/', html(rootHtml())), sibling404()],
     { allow_unmatched: false },
   ),
   'run-body-over-cap': scenario(
@@ -688,6 +718,65 @@ export const SCENARIOS: Record<string, Scenario> = {
       get(API_PROBE_PATH, json({ error: 'not_found', padding: 'x'.repeat(70_000) }, 404)),
     ],
   ),
+
+  // ---- pair resolution --------------------------------------------------------
+  'pair-apex-folds-to-www': {
+    ...scenario(
+      'the bare host redirects its root to the www host, which serves the site and its MCP endpoint: the pair is one site named by the bare host, audited at www, and no declared host names www',
+      ['mcp-initialize', 'mcp-tools-list', 'mcp-server-card'],
+      [getAt(BASE, redirect(`${WWW_ORIGIN}/`)), ...mcpSiteOn(WWW_ORIGIN)],
+    ),
+  },
+  'pair-www-folds-to-apex': {
+    ...scenario(
+      'the www host redirects its root to the bare host, and the audit starts at www: the pair is one site named by the bare host, audited at the bare host',
+      ['mcp-initialize', 'mcp-tools-list', 'mcp-server-card'],
+      [getAt(SIBLING_ROOT, redirect(BASE)), ...mcpSiteOn('https://example.com')],
+    ),
+    target: SIBLING_ROOT,
+  },
+  'pair-sibling-redirects-to-audited-host': scenario(
+    'the audited bare host serves its root and the www host redirects to it: the pair is one site, and the sibling observation alone folds it',
+    ['mcp-initialize', 'mcp-server-card'],
+    [getAt(SIBLING_ROOT, redirect(BASE)), ...mcpSiteOn('https://example.com')],
+  ),
+  'pair-apex-unreachable-www-answers': scenario(
+    'the bare host gives no answer and the www host answers its root without a redirect: the audit ends unreachable and names the www host as the one that answered',
+    ['agent-ua-reachable'],
+    [get('/', REFUSED), getAt(SIBLING_ROOT, html(rootHtml()))],
+    { unmatched: REFUSED },
+  ),
+  'pair-www-audited-while-apex-unreachable': {
+    ...scenario(
+      'the audit starts at the www host while the bare host gives no answer: the www host is its own site, stored under its own name, with no fold recorded',
+      ['agent-ua-reachable', 'root-meta-description'],
+      [get('/', REFUSED), getAt(SIBLING_ROOT, html(rootHtml()))],
+    ),
+    target: SIBLING_ROOT,
+  },
+  'pair-third-host-redirect': scenario(
+    'the bare host redirects its root to an unrelated host while the www host does not redirect: no redirect lands on the other host of the pair, so the audit covers the bare host alone',
+    ['agent-ua-reachable', 'root-meta-description'],
+    [get('/', redirect('https://example.net/')), getAt('https://example.net/', html(rootHtml())), sibling404()],
+  ),
+  'pair-both-roots-answer': scenario(
+    'both roots answer with a page and neither redirects: the two hosts are two sites, and the www host is requested as any other host would be',
+    ['agent-ua-reachable', 'root-meta-description'],
+    [...baseline(), getAt(SIBLING_ROOT, html(rootHtml()))],
+  ),
+  'pair-fold-post-redirect-across-pair': {
+    ...scenario(
+      'the bare host folds into www, and the www MCP endpoint answers the discovery POST with a redirect to the same path on the bare host: the hop stays on the site, so discovery records the www endpoint it requested, the lane probes read the bare-host answers, and no declared host is recorded',
+      ['mcp-initialize', 'mcp-tools-list'],
+      [
+        getAt(BASE, redirect(`${WWW_ORIGIN}/`)),
+        getAt(`${WWW_ORIGIN}/`, html(rootHtml())),
+        postAt(`${WWW_ORIGIN}${MCP_PATH}`, res(307, { location: u(MCP_PATH) }, '')),
+        ...cardSurface(),
+        ...dualStackMcp({ cors: 'full' }),
+      ],
+    ),
+  },
 
   // ---- http handler ----------------------------------------------------------
   'http-llms-txt-pass': scenario('a 200 llms.txt with a link index passes and retains its body', ['llms-txt'], [

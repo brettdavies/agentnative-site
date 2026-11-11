@@ -507,6 +507,15 @@ document on that endpoint's origin (a registry path written with \`{mcp_origin}\
 endpoint's scheme, host, and port). The GET an API anchor host off the audited origin receives takes only hops that
 keep the scheme, host, and port, and a redirect to another origin is its answer.
 
+Every run of a bare host or its \`www.\` sibling also requests the other host's root with a GET that takes no redirect,
+so the strict scenarios list that request as an exchange. When either root's first redirect (the request is made over
+\`https\`) lands on the other host of the pair, the two hosts are one site: the scorecard's \`tool.name\` is the bare host,
+\`target_url\` is the origin the checks ran at, and \`site_hosts\` lists the bare host then the \`www.\` host. Every path
+the run requests, the discovery documents and the MCP endpoint included, is then requested at the \`target_url\` origin,
+and a redirect between the two hosts of a folded site is a hop that stays on the site. A pair that does not fold records
+no \`site_hosts\`, and the sibling's answer plays no further part in the run. A run whose host gives no answer at all
+ends unreachable, and when the sibling's root answered, the reason names that host.
+
 ## scorecard.json
 
 The engine's terminal scorecard as \`JSON.stringify(scorecard, null, 2)\` plus a trailing newline, with one
