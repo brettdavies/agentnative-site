@@ -55,6 +55,7 @@ import {
   claimJob,
   type InFlightEnv,
   InFlightFlags,
+  RELAY_DEADLINE_SECONDS,
 } from '../../audit/inflight';
 import { consumeHourlyBucketBudget, HOURLY_CONTENTION_MESSAGE } from '../../audit-web/limiter';
 import {
@@ -349,6 +350,9 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
         ...auditErrorFor('incomplete_response_contract', { cta: CTA_RETRY }),
       };
       let result: RunFreshResult;
+      // The job's claim lapses at the relay deadline. A read that outlived it
+      // would end a run the job no longer holds and clear a newer run's flags.
+      const deadline = AbortSignal.timeout(RELAY_DEADLINE_SECONDS * 1000);
       try {
         result = await runFreshOnly(validated, env, hintsIndex, {
           specVersion: SPEC_VERSION,
@@ -358,8 +362,20 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
             if (spec.pm !== 'git-clone') await flags.mark(targetOfSpec(spec));
           },
           onPhase: (line) => writer?.append({ type: 'phase', phase: line.phase, at: line.at }),
+          signal: deadline,
         });
         terminal = terminalEventOf(outcomeOf(result, { indexes, origin: siteUrl }));
+      } catch (err) {
+        if (deadline.aborted) {
+          terminal = {
+            type: 'error',
+            ...auditErrorFor('timeout', {
+              cta: CTA_RETRY,
+              details: 'The relay deadline passed before the run answered.',
+            }),
+          };
+        }
+        throw err;
       } finally {
         writer?.append(terminal);
         await writer?.settled();
