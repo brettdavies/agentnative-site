@@ -332,7 +332,7 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 1. Before `readDiscoveryDocuments`, resolve the pair from the audited host's root fetch (first hop recorded) and the other host's root (one request, redirects not followed), in parallel.
 2. Apply KTD3 and the first HTD flowchart; return the pair outcome (folded, unfolded, or no answer), the probe origin, the site's origin set, and the site name.
 3. Of what `normalizeBase(input.url)` returns, `base` and the root response come from the probe origin, and `readDiscoveryDocuments` reads from it; `domain` (the scorecard's `tool.name`) and `host` come from the site name. The handler context's `host`, which only `dns-doh` reads, stays the site name (the apex on a fold), because a redirect says nothing about where DNS records live. Hand the origin set to the U4 predicate and to `fetchOptions`, and carry the site name to the scorecard build (U5).
-4. When the probe origin did not answer and the sibling's root answered (not a timeout, a transport failure, a 429, or a 5xx) without redirecting to the audited host, the unreachable reason ends `www.a.test answered; audit https://www.a.test/ instead.` with the sibling's host and origin, and the core's `cta` reads `Audit https://www.a.test/ instead.` Otherwise the reason and `cta` keep their current wording.
+4. When the probe origin did not answer and the sibling's root answered (not a timeout, a transport failure, a 429, or a 5xx) without redirecting to the audited host, the unreachable reason ends `www.a.test answered.` with the sibling's host, the event carries the sibling's origin, and the core's `cta` reads `Audit https://www.a.test/ instead.` Otherwise the reason and `cta` keep their current wording.
 5. The pair resolution reads no follow switch and draws no domain-budget unit (KTD8).
 6. The audit's existing `web-audit.run` log record (`src/worker/audit-web/audit-log.ts`) carries the pair outcome (folded, unfolded, or no answer) and the first-hop status of each root, so a site that did not fold can be diagnosed from the logs.
 
@@ -347,7 +347,7 @@ Which field carries which host after a fold of `cnn.com` (KTD6):
 - Audit of `n.test` whose root redirects to `https://www.n.test/en-us/`: folded, probe origin `https://www.n.test/`.
 - Covers AE3. Audit of `www.n.test` whose root redirects to `https://n.test/`, which redirects to `https://third.test/`: folded, name `n.test`, and the root response is the one followed to `third.test`.
 - Audit of `n.test` whose root redirects to `https://third.test/` while `www.n.test`'s root answers 404: not folded, name `n.test`.
-- Covers AE4. Audit of `n.test` that gets a transport failure or a 530 while `www.n.test` answers 200: not folded, unreachable, and the reason ends `www.n.test answered; audit https://www.n.test/ instead.`
+- Covers AE4. Audit of `n.test` that gets a transport failure or a 530 while `www.n.test` answers 200: not folded, unreachable, and the reason ends `www.n.test answered.` and the `cta` reads `Audit https://www.n.test/ instead.`
 - Audit of `n.test` that gets a transport failure while `www.n.test` also fails: unreachable with the current wording.
 - An apex-to-www fold of `n.test` queries `_index._agents.n.test` in the DNS-AID check.
 - Covers AE4. Audit of `www.n.test` answering 200 while `n.test` fails: not folded, name `www.n.test`, probe origin `https://www.n.test/`.

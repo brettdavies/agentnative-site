@@ -1821,7 +1821,7 @@ describe('audit_website with follow_declarations false', () => {
 describe('audit_website: a followed fresh run that fails', () => {
   const IP = '203.0.113.61';
 
-  async function failedCall(opts: WebEnvOpts, answer: () => Response) {
+  async function failedCall(opts: WebEnvOpts, answer: (url: string) => Response) {
     const env = await makeEnv({ minimalRegistry: true, followSwitch: 'true', ...opts });
     const originalFetch = globalThis.fetch;
     globalThis.fetch = stubFetch(answer);
@@ -1840,6 +1840,18 @@ describe('audit_website: a followed fresh run that fails', () => {
       'the audit failed; nothing was cached. https://example.com/ did not answer any probe (every response was a Cloudflare edge error',
     );
     expect(text).toEndWith(' Check the address and try again.');
+  });
+
+  test('an unreachable target whose www sibling answered names the sibling once, in the closing instruction', async () => {
+    const res = await failedCall({}, (url) =>
+      new URL(url).host === 'www.example.com'
+        ? new Response('<html></html>', { status: 200, headers: { 'content-type': 'text/html' } })
+        : new Response('', { status: 530 }),
+    );
+    expect(res.result?.isError).toBe(true);
+    const text = res.result?.content?.[0]?.text ?? '';
+    expect(text).toContain(' www.example.com answered. Audit https://www.example.com/ instead.');
+    expect(text.split('https://www.example.com/').length - 1).toBe(1);
   });
 
   test('an engine that throws says the audit failed, gives the error as a sentence, and ends by asking to retry', async () => {

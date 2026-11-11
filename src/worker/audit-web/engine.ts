@@ -470,8 +470,7 @@ async function* auditWith(input: RunWebAuditInput, memo: RequestMemo): AsyncGene
   if (!rootFromTarget && discovery.endpoint === null && !anyTargetResponse) {
     const onlyEdgeErrors =
       root !== null || discovery.evidence.some((e) => typeof e.status === 'number' && isEdgeErrorStatus(e.status));
-    const siblingHint =
-      site.sibling === null ? '' : ` ${new URL(site.sibling).host} answered; audit ${site.sibling} instead.`;
+    const siblingHint = site.sibling === null ? '' : ` ${new URL(site.sibling).host} answered.`;
     yield {
       type: 'unreachable',
       reason:

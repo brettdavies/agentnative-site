@@ -166,7 +166,7 @@ describe('web-audit conformance corpus', () => {
       if (want === 'unreachable') {
         expect({ name, reason: 'unreachable' in golden ? golden.unreachable : null }).toEqual({
           name,
-          reason: expect.stringContaining('www.example.com answered; audit https://www.example.com/ instead.'),
+          reason: expect.stringContaining('www.example.com answered.'),
         });
         continue;
       }
