@@ -199,7 +199,9 @@ function limitsAcross(
 }
 
 function budgetFailures(subject: string, text: string, surfaces: readonly MetadataSurface[], origin: string): string[] {
-  return limitsAcross(budgetLimits, surfaces)
+  const limits = limitsAcross(budgetLimits, surfaces);
+  if (limits.length === 0) return [`${subject} at ${origin}: no budget limit applies to ${surfaces.join(', ')}`];
+  return limits
     .filter((limit) => measure(text, limit.unit) > limit.value)
     .map((limit) => breach(subject, origin, 'the whole string', limit, measure(text, limit.unit)));
 }
@@ -211,6 +213,7 @@ function windowFailures(
   limits: readonly ClientLimit[],
   origin: string,
 ): string[] {
+  if (limits.length === 0) return [`${subject} at ${origin}: no limit record applies`];
   const start = text.indexOf(needle);
   if (start === -1) return [`${subject} at ${origin}: the text to place, ${shown(needle)}, is absent`];
   const prefix = text.slice(0, start + needle.length);
