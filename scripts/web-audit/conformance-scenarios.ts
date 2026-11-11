@@ -194,7 +194,7 @@ const SERVER_CARD = {
   mcp_endpoint: 'https://example.com/mcp',
   documentation: 'https://example.com/mcp-skill.md',
 };
-const SERVER_CARD_WITH_AUTH = { ...SERVER_CARD, authentication: { type: 'oauth2' } };
+const SERVER_CARD_WITH_AUTH = { ...SERVER_CARD, authentication: { required: true, schemes: ['oauth2'] } };
 const CARD_PATH = '/.well-known/mcp/server-card.json';
 const CARD_ALIASES = ['/.well-known/mcp', '/.well-known/mcp.json', '/mcp.json'];
 const CARD_SUFFIX_PATH = `${MCP_PATH}/server-card`;

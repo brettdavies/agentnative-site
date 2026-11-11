@@ -375,9 +375,9 @@ permanently redirect to that path.
 ### Discovery surface
 
 Any machine-readable endpoint that lets an agent find and use the MCP endpoint without reading the HTML site: the MCP
-server card and the AI catalog that lists it, the OAuth metadata, the JWKS, the RFC 9727 api-catalog, the agent-skills
-index, and the AI-signal lines in `robots.txt` / `ai.txt`. The family is served by the Worker and is the agent-facing
-twin of the human navigation; every entry points at the same MCP endpoint, so drift between them breaks discoverability.
+server card and the AI catalog that lists it, the RFC 9727 api-catalog, the agent-skills index, and the AI-signal lines
+in `robots.txt` / `ai.txt`. The family is served by the Worker and is the agent-facing twin of the human navigation;
+every entry points at the same MCP endpoint, so drift between them breaks discoverability.
 DNS-AID is the DNS-layer counterpart, discoverable before any HTTP fetch.
 
 ### DNS-AID
