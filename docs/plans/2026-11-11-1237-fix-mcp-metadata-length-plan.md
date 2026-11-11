@@ -4,7 +4,7 @@ execution: code
 product_contract_source: ce-plan-bootstrap
 title: "Fit the MCP server instructions and tool descriptions inside client truncation limits - Plan"
 type: fix
-status: proposed
+status: active
 date: 2026-11-11
 topic: mcp-metadata-length
 ---
