@@ -16,6 +16,7 @@ import { _resetResultCaches, handleResultRoute, type ResultEnv } from '../src/wo
 import { resolveBoardEntries, type WebBoardEnv } from '../src/worker/audit-web/board';
 import { keyFor, WEB_AUDIT_STALE_AFTER_MS } from '../src/worker/audit-web/cache';
 import type { DomainBudgetEnv } from '../src/worker/audit-web/domain-budget';
+import { FOLLOW_DISCLOSURE, FOLLOW_DISCLOSURE_SHORT } from '../src/worker/audit-web/follow-disclosure';
 import { flushHitMinPurge, runWithHitMinPurge } from '../src/worker/audit-web/hit-min-purge';
 import { enforcePublicListingFlipLimit } from '../src/worker/audit-web/public-listing';
 import {
@@ -1864,14 +1865,24 @@ describe('audit_website: a followed fresh run that fails', () => {
 });
 
 describe('audit_website discloses third-party probing', () => {
-  test('the description names the caps, tells MCP wire probes from API anchor GETs, and offers the opt-out', async () => {
+  type ToolEntry = {
+    name: string;
+    description: string;
+    inputSchema: { properties: Record<string, { type?: string; description?: string }> };
+  };
+
+  async function auditWebsite(): Promise<ToolEntry | undefined> {
     const env = await makeEnv();
     const { body } = await mcpRpc(env, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
-    const tools = body.result?.tools as
-      | Array<{ name: string; description: string; inputSchema: { properties: Record<string, { type?: string }> } }>
-      | undefined;
-    const tool = tools?.find((t) => t.name === 'audit_website');
-    const description = tool?.description ?? '';
+    return (body.result?.tools as ToolEntry[] | undefined)?.find((t) => t.name === 'audit_website');
+  }
+
+  test('the follow_declarations parameter carries the full disclosure: caps, probe split, opt-out, and the unsaved result', async () => {
+    const tool = await auditWebsite();
+    const parameter = tool?.inputSchema.properties.follow_declarations;
+    const description = parameter?.description ?? '';
+    expect(parameter?.type).toBe('boolean');
+    expect(description).toContain(FOLLOW_DISCLOSURE);
     expect(description).toContain('also contacts third-party hosts the site declares');
     expect(description).toContain(
       "wire-probed (JSON-RPC POSTs, a CORS preflight) only after one of those documents on the endpoint's own host names the endpoint",
@@ -1882,11 +1893,56 @@ describe('audit_website discloses third-party probing', () => {
     );
     expect(description).toContain("following lengthens an audit's wall time");
     expect(description).toContain('capped at about 30 audits per hour per declared registrable domain');
+    expect(description).toContain("an audit past that cap leaves that domain's hosts unprobed");
     expect(description).toContain(
       'when the site has a saved scorecard from the last 24 hours that audit is returned without replacing it, with no scorecard_url, markdown_url, or json_url',
     );
+    expect(description).toContain('anc sends no plaintext request');
     expect(description).toContain('WEB_AUDIT_FOLLOW_ENABLED');
-    expect(tool?.inputSchema.properties.follow_declarations?.type).toBe('boolean');
+  });
+
+  test('the follow_declarations parameter still says what it is and what false changes', async () => {
+    const description = (await auditWebsite())?.inputSchema.properties.follow_declarations?.description ?? '';
+    expect(description.startsWith('Follow the hosts the site declares')).toBe(true);
+    expect(description).toContain('By default (follow_declarations true)');
+    expect(description).toContain(
+      "With false the result is also never listed and never joined to another caller's run, and it carries no scorecard_url, markdown_url, or json_url",
+    );
+    expect(description).toContain('a public_listing that differs from the stored choice is rejected');
+  });
+
+  test('the follow_declarations parameter states each fact once where the two pieces join', async () => {
+    const description = (await auditWebsite())?.inputSchema.properties.follow_declarations?.description ?? '';
+    expect(description).not.toContain('defaults to true');
+    expect(description).not.toContain('transient');
+  });
+
+  test('the audit_website description carries the short disclosure and not the full one', async () => {
+    const description = (await auditWebsite())?.description ?? '';
+    expect(description).toContain(FOLLOW_DISCLOSURE_SHORT);
+    expect(description).not.toContain(FOLLOW_DISCLOSURE);
+    expect(description).toContain('MCP_ENABLED');
+    expect(description).not.toContain('\u2014');
+  });
+
+  test('the audit_website description names the freshness fields and what each refusal looks like', async () => {
+    const description = (await auditWebsite())?.description ?? '';
+    for (const field of ['freshness.cached', 'freshness.scored_at', 'freshness.refresh_after']) {
+      expect(description).toContain(field);
+    }
+    expect(description).toContain('isError: false with audited: false');
+    expect(description).toContain(
+      "freshness.cached (false for a fresh run's result, including a run this call attached to)",
+    );
+    expect(description).toContain('isError: true with a JSON-RPC -32099 error in the text');
+    expect(description).toContain('read get_website_audit');
+  });
+
+  test('the short disclosure states the caps, the wire probes, and the opt-out in fixed text', () => {
+    expect(FOLLOW_DISCLOSURE_SHORT).toContain('at most 4 hosts per audit');
+    expect(FOLLOW_DISCLOSURE_SHORT).toContain('about 30 audits per hour per declared domain across all callers');
+    expect(FOLLOW_DISCLOSURE_SHORT).toContain('JSON-RPC POSTs');
+    expect(FOLLOW_DISCLOSURE_SHORT).toContain('follow_declarations: false audits only the site');
   });
 });
 
@@ -2237,16 +2293,6 @@ describe('web MCP tools: a host and its www sibling', () => {
       'a hit, a target already being audited, and a miss, and isError:true for an invalid or refused url and with cache_unavailable when a www.<domain> read cannot reach the <domain> record.',
     );
     expect(description).not.toContain('Returns isError:false for every outcome:');
-  });
-
-  test('the session instructions carry the fold clause, both halves', async () => {
-    const env = await makeEnv();
-    const init = await mcpInitialize(env);
-    const instructions = (init.result as { instructions?: string } | undefined)?.instructions ?? '';
-    expect(instructions).toContain(
-      'A bare host and its www host are one site, named by the bare host, when one redirects to the other',
-    );
-    expect(instructions).toContain('a www. host with no such redirect is its own site');
   });
 
   const foldedRecord = (staleMs = 0) => ({

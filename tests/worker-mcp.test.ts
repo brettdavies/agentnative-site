@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { FOLLOW_SLICE_MS } from '../src/worker/audit-web/follow';
-import { FOLLOW_DISCLOSURE } from '../src/worker/audit-web/follow-disclosure';
+import { FOLLOW_DISCLOSURE, FOLLOW_DISCLOSURE_SHORT } from '../src/worker/audit-web/follow-disclosure';
 import { MAX_FOLLOW_REQUESTS, MAX_FOLLOWED_HOSTS } from '../src/worker/audit-web/follow-requests';
 import { DECLARED_DOMAIN_HOURLY_CEILING } from '../src/worker/audit-web/limiter';
 import type { McpEnv } from '../src/worker/mcp/server';
@@ -231,32 +231,32 @@ describe('MCP instructions string (drift gate per KTD-8)', () => {
     expect(instructions).toContain('Connect now at https://anc.dev/mcp');
   });
 
-  test('instructions surfaces protocol identifiers (MIME types + RPC method names)', async () => {
+  test('instructions point at the schema listings, and the guide carries the Accept negotiation MIME types', async () => {
     const env = makeEnv();
     const result = await initialize(env);
     const instructions = result.result?.instructions ?? '';
-    expect(instructions).toContain('application/json');
-    expect(instructions).toContain('text/event-stream');
     expect(instructions).toContain('tools/list');
     expect(instructions).toContain('resources/templates/list');
+    const skill = await readFile(join(import.meta.dir, '..', 'content/mcp-skill.md'), 'utf8');
+    expect(skill.replace(/\s+/g, ' ')).toContain(
+      '**Accept-header negotiation.** Server picks between `application/json` and `text/event-stream`. JSON wins ties',
+    );
   });
 
-  test('instructions disclose third-party probing with the follow caps, word for word as the tool does', async () => {
+  test('instructions say which tools browse the CLI registry and which lists the web leaderboard', async () => {
+    const result = await initialize(makeEnv());
+    const instructions = result.result?.instructions ?? '';
+    expect(instructions).toContain(
+      'Browse the CLI registry with list_tools, search_tools, and get_tool, and the web leaderboard with list_website_audits',
+    );
+  });
+
+  test('instructions disclose third-party probing in the short form, and only the parameter carries the full one', async () => {
     const env = makeEnv();
     const result = await initialize(env);
     const instructions = result.result?.instructions ?? '';
-    expect(instructions).toContain(FOLLOW_DISCLOSURE);
-    expect(instructions).toContain(
-      'at most 4 off-origin hosts with at most 12 follow-phase document requests inside a 6-second follow window',
-    );
-    expect(instructions).toContain("following lengthens an audit's wall time");
-    expect(instructions).toContain(
-      "following is also capped at about 30 audits per hour per declared registrable domain; an audit past that cap leaves that domain's hosts unprobed",
-    );
-    expect(instructions).toContain(
-      'when the site has a saved scorecard from the last 24 hours that audit is returned without replacing it, with no scorecard_url, markdown_url, or json_url',
-    );
-    expect(instructions).toContain('only the following of declared hosts (WEB_AUDIT_FOLLOW_ENABLED)');
+    expect(instructions).toContain(FOLLOW_DISCLOSURE_SHORT);
+    expect(instructions).not.toContain(FOLLOW_DISCLOSURE);
   });
 
   test('the published docs state the follow caps the engine and the declared-domain budget enforce', async () => {
@@ -275,11 +275,16 @@ describe('MCP instructions string (drift gate per KTD-8)', () => {
     expect(await flat('content/_audit-web.md')).toContain(perDomain);
   });
 
-  test('the disclosure and the client skill say anc sends no plaintext request', async () => {
+  test('the follow_declarations parameter and the client skill say anc sends no plaintext request', async () => {
     const sentence =
       'anc sends no plaintext request: an http URL, declared or linked, and any redirect to http, is never requested.';
-    const result = await initialize(makeEnv());
-    expect(result.result?.instructions ?? '').toContain(sentence);
+    const listed = await rpc(makeEnv(), { jsonrpc: '2.0', id: 2, method: 'tools/list' });
+    const followDeclarations = (
+      listed.result?.tools?.find((t) => t.name === 'audit_website')?.inputSchema as
+        | { properties?: Record<string, { description?: string }> }
+        | undefined
+    )?.properties?.follow_declarations;
+    expect(followDeclarations?.description ?? '').toContain(sentence);
     const skill = await readFile(join(import.meta.dir, '..', 'content/mcp-skill.md'), 'utf8');
     expect(skill.replace(/\s+/g, ' ')).toContain(sentence);
   });
@@ -293,14 +298,14 @@ describe('MCP instructions string (drift gate per KTD-8)', () => {
     }
   });
 
-  test('instructions names both rate-limit bindings + both kill switches', async () => {
-    const env = makeEnv();
-    const result = await initialize(env);
-    const instructions = result.result?.instructions ?? '';
-    expect(instructions).toContain('MCP_LIMITER');
-    expect(instructions).toContain('MCP_AUDIT_LIMITER');
-    expect(instructions).toContain('MCP_ENABLED');
-    expect(instructions).toContain('MCP_LIVE_SCORING_ENABLED');
+  test('the guide names both rate-limit bindings, and the audit tools name their kill switches', async () => {
+    const skill = await readFile(join(import.meta.dir, '..', 'content/mcp-skill.md'), 'utf8');
+    expect(skill).toContain('MCP_LIMITER');
+    expect(skill).toContain('MCP_AUDIT_LIMITER');
+    const listed = await rpc(makeEnv(), { jsonrpc: '2.0', id: 2, method: 'tools/list' });
+    const description = (name: string) => listed.result?.tools?.find((t) => t.name === name)?.description ?? '';
+    expect(description('audit_website')).toContain('MCP_ENABLED');
+    expect(description('score_cli')).toContain('MCP_LIVE_SCORING_ENABLED');
   });
 });
 

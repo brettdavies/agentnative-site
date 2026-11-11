@@ -4,7 +4,7 @@ execution: code
 product_contract_source: ce-plan-bootstrap
 title: "Fit the MCP server instructions and tool descriptions inside client truncation limits - Plan"
 type: fix
-status: proposed
+status: active
 date: 2026-11-11
 topic: mcp-metadata-length
 ---
@@ -403,3 +403,8 @@ Order of work: U1, U5, U2, U3, U4. U5 comes second so it is observed failing on 
 - 2026-11-11: `/plan-devex-review` round 1 ended on 5a47b76: 0 P0, 0 P1, 6 P2, 9 P3. All folded in except naming the tool-registry check: this repo's public text does not name it, the record says its quote is reported, and Claude Code's 2,048-character records hold the same critical window. Its four questions were settled from the plan's evidence. The short form moves to paragraph 3 and names the JSON-RPC POSTs. The no-progress clause stays in `audit_website`. A record refresh runs on each `SPEC_REVISION` bump and on any report of a cut.
 - 2026-11-11: `/compound-engineering:ce-doc-review` round 1 ended on 5a47b76: 0 P0, 0 P1, 7 P2, 8 P3. All folded in. Its finding 5 replaced the planned kill-switch paragraph in the guide with pins on the tool descriptions that already name the switches, because AGENTS.md keeps operator material in the unpublished runbook. Its D3 and D1 wording findings closed with the owner's answers, and the three scope cuts it rejected stay out.
 - 2026-11-11: owner decisions folded in: D1, 4,096 characters for the whole string with the critical items inside the 2,048 records; D2, the short form in the instructions and the `audit_website` description and the full form in the `follow_declarations` parameter description.
+- 2026-11-11: implementation of U1 to U5 pushed as PR #563 (draft) at c092602.
+- 2026-11-11: `ce-code-review` round 1 started at c092602 (Opus, effort high).
+- 2026-11-11: `/devex-review` round 1 started at c092602 (Opus, effort high, local Worker only).
+- 2026-11-11: `/devex-review` round 1 ended at 8828429: 0 P0, 0 P1, 1 P2, 8 P3. Fixed: the `audit_website` description names the `freshness.` paths and both refusal shapes, the `follow_declarations` text states each fact once, the short disclosure's cap sentence reads as a cap across callers, the lead says "Use these tools", the browse line names the registry and the leaderboard, and the envelope sentence reads straight. Not changed: an `in_progress` sentence in the instructions (the string would pass 2,048 bytes at `https://anc.dev`, and the read-tool descriptions and the guide carry it), `Connect now at` (pinned), and text outside this change (older tool descriptions, the guide's rate-limit table).
+- 2026-11-11: `ce-code-review` round 1 ended at 8828429, before the rebase onto 25f9006: 0 P0, 0 P1, 1 P2, 1 P3. Fixed: the over-cap clause of the full disclosure is pinned on the `follow_declarations` parameter, and the `audit_website` description says `freshness.cached` is also false for a run this call attached to. Its two test-gap notes are closed: an empty text to place fails the guard, and the media-type pin names the Accept-negotiation paragraph. Not built: a refresh step in the runbooks' revision-bump checklists, exporting the hourly audit ceiling so the description follows it, a record for parameter descriptions, and a note in the KTD6 table that `MCP_LEGACY_ENABLED` is named on no published surface (its effect is in the guide).
