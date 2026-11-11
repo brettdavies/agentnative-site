@@ -62,6 +62,10 @@ export async function notifyFailure(
   }
   // Marked only after the send lands, so a failed send leaves the next
   // alert for this key free to go out.
-  await env.SCORE_KV?.put(dedupeKey, '1', { expirationTtl: DEDUPE_TTL_SECONDS }).catch(() => {});
+  try {
+    await env.SCORE_KV?.put(dedupeKey, '1', { expirationTtl: DEDUPE_TTL_SECONDS });
+  } catch {
+    // The email went out; a lost mark costs at most a duplicate.
+  }
   return 'sent';
 }

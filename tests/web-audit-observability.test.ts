@@ -303,6 +303,21 @@ describe('notifyFailure', () => {
     }
   });
 
+  test('a dedupe write that throws after a send still answers sent', async () => {
+    const env = {
+      EMAIL: { send: async () => ({}) },
+      ALERT_EMAIL_FROM: 'alerts@example.com',
+      ALERT_EMAIL_TO: 'ops@example.com',
+      SCORE_KV: {
+        get: async () => null,
+        put: () => {
+          throw new Error('KV PUT failed: 429 Too Many Requests');
+        },
+      } as unknown as KVNamespace,
+    };
+    expect(await notifyFailure(env, alert)).toBe('sent');
+  });
+
   test('a failed send leaves the alert unsent, so the next alert for its key is sent', async () => {
     const logs = captureLogs();
     try {
