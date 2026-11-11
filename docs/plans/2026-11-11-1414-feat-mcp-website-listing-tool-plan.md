@@ -68,7 +68,7 @@ Separating the write opens a race that the combination hid. While a stored audit
 
 **Surfaces**
 
-- R14. Every surface that states the tool count or enumerates the tools states 14 and names the new tool: the server instructions, the build's `registered_tool_names`, `content/mcp-skill.md`, `content/_audit-web.md`, AGENTS.md, the release smoke and its runbooks, and the test pins (U4, U5).
+- R14. Every surface that states the tool count or enumerates the tools states 14 and names the new tool: the server instructions (which name it once the instructions trim has merged; until then they state the count only, per the stop conditions), the build's `registered_tool_names`, `content/mcp-skill.md`, `content/_audit-web.md`, AGENTS.md, the release smoke and its runbooks, and the test pins (U4, U5).
 - R15. Every surface that tells an agent how a listing changes points at the new tool, and none says `audit_website` takes `public_listing` (U5).
 - R16. The browser path is unchanged: the form's listing checkbox, the `public_listing` field of `POST /api/score`, its `listing_requires_follow` refusal, and its listing patch.
 
@@ -101,7 +101,7 @@ The new tool's answer in each state. "Spends" lists the units taken beyond `MCP_
 | AE1 | invalid url, a scheme other than http(s), or a host the SSRF gate refuses | the reason text | true | nothing | nothing |
 | AE2 | the site's record, or for `www.<domain>` the `<domain>` record, cannot be read | `cache_unavailable: ...; nothing was changed. Retry set_website_listing in 30 seconds.` | true | nothing | nothing |
 | AE3 | curated site | `{ changed: false, curated: true, target, public_listing: true, board_url, scorecard_url, message }` | false | nothing | nothing |
-| AE4 | no stored audit | `{ changed: false, found: false, next_tool: "audit_website", message }`; while an audit of the site runs it adds `in_progress: true, started_at`, and the message reads "an audit of <domain> is running; call audit_website with the same url to wait for its result, then call set_website_listing again." | false | nothing | nothing |
+| AE4 | no stored audit | `{ changed: false, found: false, next_tool: "audit_website", message }` | false | nothing | nothing |
 | AE5 | stored audit with no `scored_at` | `{ changed: false, found: true, next_tool: "audit_website", message }` | false | nothing | nothing |
 | AE6 | value equals the standing listing | the AE12 shape with `changed: false` | false | nothing | nothing |
 | AE7 | `WEB_AUDIT_ENABLED` not `"true"` | `{ changed: false, disabled: true, target, public_listing: <standing>, message }`, the message saying the operator has switched listing changes off and nothing was changed | false | nothing | nothing |
@@ -116,17 +116,18 @@ The new tool's answer in each state. "Spends" lists the units taken beyond `MCP_
 
 ### Scope Boundaries
 
-- Not changed: the browser path (R16), the rescore and the reflow (they derive the listing from the seed and pass it as an explicit choice), and the backfill.
+- Not changed: the browser path's surface and answers (R16). Its blank-request save takes the save-time listing (R13), and its listing patch re-reads after the gates (R17). Also not changed: the rescore and the reflow (they derive the listing from the seed and pass it as an explicit choice), and the backfill.
 - Not changed: the board predicate (`isBoardListable`), the board's display window, and the purge scope of a listing write. The write purges the board tag, as today's patch does. Neither per-site page renders the flag.
 - Not changed: the WebMCP page tools. None mirrors `audit_website` or writes the listing. `get_page_state` reads the browser form's checkbox, which stays.
 - Not changed: `CONCEPTS.md`. Its "Public listing" entry stays accurate.
 - Not changed: the discovery cards and the AI catalog. Neither lists tools; the served cards carry only `capabilities.tools.listChanged: false`, read from `https://anc.dev/mcp/server-card` and `/.well-known/mcp/server-card.json` on 2026-11-11.
 - Considered and not built: refusing a listing change while an audit of the site is in flight. The in-flight flag is a dedup hint on eventually consistent KV that `src/worker/audit/inflight.ts` declares "never a gate". It would refuse a change made right after `audit_website` returned, because the deleted flag can still read as present. KTD6 closes the race at the write instead. A report of a reverted change after KTD6 ships would reopen this.
-- Considered and not built: a structured log record per listing change. Today's MCP patch writes none either, and the `mcp.request` line already records each call's outcome. A report of listing churn on one domain that the request log cannot explain would change this.
+- Considered and not built: a structured log record per listing change. Today a listing change that re-audits leaves its audit's record naming the target, while the listing-only patch writes none. After the split no listing change names its domain in the logs, and the `mcp.request` line records only each call's tool and outcome. The `/cso` review weighs this with the shared flip budget (Risks). A report of listing churn on one domain that the request log cannot explain would change this.
+- Considered and not built: an in-progress hint on AE4. While an audit of the site runs, the agent's next call is still `audit_website` with the same url, which attaches to that run, so the hint would add a KV read and a message variant without changing what the agent does.
 - Considered and not built: returning the whole scorecard envelope from the new tool. `get_website_audit` serves it, and the tool's answer carries `scorecard_url`.
 - Considered and not built: an R2 `onlyIf` etag check on the listing write, which would make it a true compare-and-swap. KTD12's re-read leaves one GET-to-PUT gap, in milliseconds, and the swap needs the shared strict reader to return the etag. A report of a listing change replacing a newer audit after KTD12 ships would change this.
 - Considered and not built: a retry time in the hourly-window refusal (AE9). Its text is shared with `audit_website`, so adding the time changes that tool's output as well.
-- Not changed: the input schemas of the other eleven tools. Making them strict is a separate consistency choice that D1 does not need.
+- Not changed: the input schemas of the other twelve tools. Making them strict is a separate consistency choice that D1 does not need.
 
 ### Findings on the other twelve tools
 
@@ -154,10 +155,10 @@ Each tool was checked against the same guideline for a second state-changing ope
   - `readOnlyHint: false`. A change rewrites the stored R2 object, both its body and its board metadata, and takes KV counter units.
   - `destructiveHint: true`. The spec reserves `false` for a tool that "performs only additive updates". This tool overwrites the stored choice in place, keeps no prior value, and can take a site off a public board. A client that asks before a destructive call then asks before this one, which fits R8. `audit_website` keeps `false` by an owner decision about its fold delete, which moves data into the bare record rather than replacing a choice.
   - `idempotentHint: true`. A repeat call with the same arguments finds the value already stored, writes nothing, and spends nothing (R4).
-  - `openWorldHint: false`. Every callee reaches only anc's own bindings: R2 reads and the one put (`getForRequest`, `patchStoredScorecard`), KV (`readInFlight`, the hourly window, the flip budget), the rate-limit binding, the asset binding (`loadWebSeed`), and the purge RPC to anc's own cached entrypoint. `prepareWebTarget` validates synchronously, with no DNS lookup. No callee calls `fetch` to an outside host. The leaf check follows `docs/solutions/conventions/audit-every-callee-before-declaring-mcp-tool-behavior-hints.md`.
+  - `openWorldHint: false`. Every callee reaches only anc's own bindings: R2 reads and the one put (`getForRequest`, `patchStoredScorecard`), KV (the hourly window, the flip budget), the rate-limit binding, the asset binding (`loadWebSeed`), and the purge RPC to anc's own cached entrypoint. `prepareWebTarget` validates synchronously, with no DNS lookup. No callee calls `fetch` to an outside host. The leaf check follows `docs/solutions/conventions/audit-every-callee-before-declaring-mcp-tool-behavior-hints.md`.
 - KTD4. **Reads first, gates only for a change.** Order: validate the url, resolve the target strictly, check the seed, read the record strictly, answer a miss or a missing stamp, answer a no-op, then apply the gates in the R6 order and write. Every answer before the gates costs what `get_website_audit` costs. The record read uses `getForRequest`, so an R2 failure answers AE2 rather than a miss that would send the agent to run a needless audit. A seed that fails to load counts as not curated. A write on a seeded domain has no board effect and the next rescore resets it, so that fallback cannot list or unlist anything. A KV counter that throws on a failure other than contention fails the call before the put, so a throw anywhere before the write leaves nothing written (AE13).
 - KTD5. **`audit_website` takes a strict input object** (D3, recommended option). Its schema becomes a `z.strictObject` with an `error` callback that, for an `unrecognized_keys` issue naming `public_listing`, returns the message in U2. The SDK's `validateToolInput` turns the failure into `isError: true` with "Input validation error: Invalid arguments for tool audit_website: ..." before the handler runs, so nothing is spent. A zod 4.6.7 probe in the SDK's input mode (`io: 'input'`) confirmed the custom message on `public_listing` and the default message on another unknown key. It also showed that the strict object adds `additionalProperties: false` to the emitted JSON Schema, which today's raw shape does not carry. A call that sends `public_listing` and another unknown key shows only the custom message. The new tool takes a strict object too, so its two-argument contract (R2) is enforced, not just advertised.
-- KTD6. **`planSiteRecord` takes the listing from the stored record when the request carries no explicit choice** (R13). For `explicit === undefined`, the listing written is the one on the record being replaced, read when the save is planned, and `input.listing` applies only when no record exists then. The folded-pair branch already reads the bare host's record at save time; the plain, no-answer, and unfolded-pair branches gain the same read, at one R2 GET per blank save. Every branch applies the listing to the saved scorecard through `withListing`, not only to `SiteRecord.listing`: the engine stamps the body with the start-time listing, the body is what `cachePut` saves, and the board metadata derives from the body. The read uses the tolerant reader the folded branch uses, so an R2 failure there falls back to `input.listing` and a finished audit still saves. An explicit choice (the browser form, the rescore's seed-derived value) is written as given. The window left is the time between that read and the put, in milliseconds, against an audit-length window today.
+- KTD6. **`planSiteRecord` takes the listing from the stored record when the request carries no explicit choice** (R13). For `explicit === undefined`, the listing written is the one on the record being replaced, read when the save is planned, and `input.listing` applies only when no record exists then. One case differs: when the unfolded-pair branch saves a `www.` host that the request resolved to its bare host through a recorded fold, `input.listing` is the bare host's listing, so that save takes the `www.` host's own stored listing and is unlisted when that record is missing or its read fails, never `input.listing`. The existing fold test that saves `www.a.test` as its own site unlisted beside a listed `a.test` pins this, as R10's first-audit rule requires. The folded-pair branch already reads the bare host's record at save time; the plain, no-answer, and unfolded-pair branches gain the same read, at one R2 GET per blank save. Every branch applies the listing to the saved scorecard through `withListing`, not only to `SiteRecord.listing`: the engine stamps the body with the start-time listing, the body is what `cachePut` saves, and the board metadata derives from the body. The read uses the tolerant reader the folded branch uses, so an R2 failure there falls back to `input.listing` and a finished audit still saves. An explicit choice (the browser form, the rescore's seed-derived value) is written as given. The window left is the time between that read and the put, in milliseconds, against an audit-length window today.
 - KTD7. **Answers follow the server's existing conventions.** Cache and store states, the no-op, the curated site, and the kill switch answer `isError: false` with data. A refused source or limit answers `isError: true` with `-32099` text, through the same helper and messages `audit_website` uses. A failed read or write answers `isError: true` with a retry. The result helpers, the `-32099` messages, `siteTarget`, and the `cache_unavailable` text move to a sibling module, `src/worker/mcp/tools/web-tool-results.ts`, which both web tool modules import, so neither tool module reaches into the other. `cacheUnavailable` takes the tool to retry, since its text names `get_website_audit` today.
 - KTD8. **Description and parameter text, as served at `https://anc.dev`.** Numbers come from constants: `HOURLY_AUDIT_CEILING` and `FLIP_CEILING` become exports of `limiter.ts`, the 30 days derive from `WEB_ALL_BOARD_DISPLAY_MAX_AGE_MS`, and the board path comes from `leaderboardPath({ lane: 'web', view: 'all' })`. The description is 1,078 bytes, all ASCII, with no origin interpolated. It names only `WEB_AUDIT_ENABLED`, because with `MCP_ENABLED` off no call reaches the tool. The purpose sentence ends at character 119 and the explicit-request sentence at 229, inside #563's 2,048-byte window and its 4,096-character budget.
   - Description: "Opt a website in to or out of the public website leaderboard at /scorecards?lane=web&view=all, and change nothing else. Call it only when the user explicitly asks to list or unlist a site; audit_website never changes the listing. The site needs a stored audit: on a miss the answer is { changed: false, found: false, next_tool: "audit_website" }. Sending the value already stored writes nothing and spends nothing. A change rewrites only the stored listing, keeping the scorecard and its scored_at, and spends the per-IP burst limit, one of the 30 fresh audits per 60 minutes per IP that audit_website also draws on, and one of 5 listing changes per hour per site across all callers; a breach, or a request without cf-connecting-ip, returns isError: true with a JSON-RPC -32099 error in the text. anc does not check who owns the site. A curated site is always listed and is not changed. The leaderboard shows an opted-in site while its scorecard is under 30 days old. When WEB_AUDIT_ENABLED is not "true" nothing is written, and the answer is isError: false with changed: false."
@@ -167,7 +168,7 @@ Each tool was checked against the same guideline for a second state-changing ope
 - KTD9. **The `audit_website` text.** One sentence goes directly after `FOLLOW_DISCLOSURE_SHORT`, which keeps #563's placement test true: "An audit never changes the site's leaderboard listing: a first audit saves the site unlisted, and later audits keep the stored choice; set_website_listing changes it." The description grows from 1,476 to 1,643 bytes on #563 as merged (`aa0537d`). The `follow_declarations` description ends at "...and it carries no scorecard_url, markdown_url, or json_url."
 - KTD10. **The server instructions name the new tool once, in the browse line,** after the instructions trim lands. That line is the instructions' routing index. One clause goes after `list_website_audits;` and keeps the pinned prefix "Browse the CLI registry with list_tools, search_tools, and get_tool, and the web leaderboard with list_website_audits" whole: "change a site's leaderboard listing with set_website_listing, only when the user asks;". The count reads 14 and the shared limit stays in paragraph 2. Measured on the trim's text, which the coordinating session holds until the trim's PR opens: 1,717 bytes at `https://anc.dev` and 1,811 at the longest origin (`https://agentnative-site-staging.brettdavies.workers.dev:65535`), against 1,630 and 1,724 without the change. The clause ends at 1,388 and 1,435, after the short disclosure (1,182 and 1,229). The trim is required: on #563's merged text the clause gives 2,062 and 2,203 (stop conditions).
 - KTD11. **The test pins take one annotation map per tool.** `NON_READ_TOOL_NAMES` in `tests/helpers/mcp-tools.ts` encodes two shapes, and the new tool is a third (a write with no outside host). It becomes `EXPECTED_TOOL_ANNOTATIONS`, a record from tool name to the exact hints object, read by `tests/worker-mcp.test.ts` and `tests/e2e/mcp.e2e.ts`.
-- KTD12. **The listing write re-reads the record after its gates** (R17). `patchWebListing` spends the flip unit, then re-reads the record at the target's key with the tolerant reader and patches over what it read, not over the record the caller read before the gates. A record that is gone or unreadable at the re-read answers `patch_failed` with nothing written (AE11). A record that already holds the value is not written again. The gap left is one GET to one PUT, in milliseconds, against the 50 ms to about 2.5 s the gates can take. The browser patch gets the same re-read through the shared function, and none of its answers change.
+- KTD12. **The listing write re-reads the record after its gates** (R17). `patchWebListing` spends the flip unit, then re-reads the record at the target's key with the tolerant reader and patches over what it read, not over the record the caller read before the gates. A record that is gone or unreadable at the re-read answers `patch_failed` with nothing written (AE11). A record that already holds the value is not written again, and that call answers the AE12 shape with `changed: false` while its burst, hourly, and flip units stay spent; the R4 no-op that spends nothing is the comparison before the gates. The gap left is one GET to one PUT, in milliseconds, against the 50 ms to about 2.5 s the gates can take. The browser patch gets the same re-read through the shared function, and none of its answers change.
 
 ### High-Level Technical Design
 
@@ -194,6 +195,7 @@ flowchart TB
   I -->|passed| J[patchWebListing: flip budget, re-read, put]
   J -->|flip spent| R10[AE10 -32099]
   J -->|gone or put failed| R11[AE11 patch_failed]
+  J -->|already set at re-read| R13[AE12 shape, changed false, units spent]
   J -->|written| R12[AE12 changed true]
 ```
 
@@ -266,9 +268,9 @@ sequenceDiagram
   - Create `src/worker/mcp/tools/web-listing.ts`.
   - Create `src/worker/mcp/tools/web-tool-results.ts` (KTD7).
   - Modify `src/worker/mcp/tools/index.ts` (registration after `registerWebAuditTools`), `src/worker/audit-web/limiter.ts` (export `HOURLY_AUDIT_CEILING` and `FLIP_CEILING`), `src/worker/mcp/tools/web-audit.ts` (imports the moved helpers), `src/worker/audit-web/core.ts` (`patchWebListing`'s signature and re-read, KTD2 and KTD12), and `src/worker/audit/api.ts` (its call site).
-  - Test `tests/web-audit-mcp-tools.test.ts`. This seam drives the real MCP handler with in-memory R2, KV, and limiter fakes, so it catches gate order and stored bytes. It misses the deployed bindings, which the staging e2e covers.
+  - Test `tests/web-listing-mcp-tool.test.ts`, or `tests/web-audit-mcp-tools.test.ts` (Deferred to Implementation). This seam drives the real MCP handler with in-memory R2, KV, and limiter fakes, so it catches gate order and stored bytes. It misses the deployed bindings, which the staging e2e covers.
 - **Approach:**
-  1. Resolve and read as KTD4 orders, reusing `siteTarget`, `resolveWebTarget(..., 'strict')`, `getForRequest`, `isSeededDomain`, and `readInFlight` (AE4's `in_progress`).
+  1. Resolve and read as KTD4 orders, reusing `siteTarget`, `resolveWebTarget(..., 'strict')`, `getForRequest`, and `isSeededDomain`.
   2. Compare the request against `standingPublicListing` (KTD2).
   3. Apply the gates in the R6 order, with the same calls and messages as the `audit_website` handler.
   4. Write through `patchWebListing(env, target, value)`, mapping `flip_rate_limited` to AE10 (its time from `hourWindowEndsAt`) and `patch_failed` to AE11.
@@ -279,7 +281,7 @@ sequenceDiagram
   - Covers AE12. A record 31 days old, request `true`: written, `listed_until` is in the past, and the answer carries `next_tool: "audit_website"`.
   - Covers AE6. Request equal to the stored value: `changed: false`, the store is untouched, and the burst limiter, the hourly window, and the flip budget each record zero takes.
   - Covers AE6. A record with no flag key, request `false`: no write.
-  - Covers AE4. No record: `found: false` and `next_tool: "audit_website"`, with nothing written or spent. With an in-flight flag present, the answer also carries `in_progress: true` and `started_at`, and the message tells the agent to wait on `audit_website`.
+  - Covers AE4. No record: `found: false` and `next_tool: "audit_website"`, with nothing written or spent.
   - Covers AE5. A record without `scored_at`: `found: true`, `next_tool: "audit_website"`, and no write.
   - Covers AE3. A seeded domain: `curated: true` and no write or spend.
   - `www.example.com` with the fold recorded on `example.com`: the `example.com` record changes and `target` is `example.com`. A `www.` host with no fold and no record of its own answers AE4.
@@ -335,7 +337,7 @@ sequenceDiagram
 - **Files:**
   - Modify `src/worker/audit-web/site-record.ts`.
   - Test `tests/web-audit-site-fold-api.test.ts` for `planSiteRecord` (a direct call catches the planned listing but not the bytes `runWebAuditStream` saves), and `tests/web-audit-mcp-tools.test.ts` for the end-to-end save.
-- **Approach:** in `planSiteRecord`, resolve the listing for `explicit === undefined` from the record being replaced, read with the tolerant reader when the save is planned, on every branch, and apply it to the scorecard with `withListing` (KTD6). The folded branch keeps its read order (the bare host, then the `www.` host, then unlisted).
+- **Approach:** in `planSiteRecord`, resolve the listing for `explicit === undefined` from the record being replaced, read with the tolerant reader when the save is planned, on every branch, and apply it to the scorecard with `withListing` (KTD6). The folded branch keeps its read order (the bare host, then the `www.` host, then unlisted). The unfolded-pair save of a `www.` host whose request resolved to the bare host falls back to unlisted, not `input.listing` (KTD6).
 - **Execution note:** test-first. Record the first scenario's failure against the unchanged `planSiteRecord` before the fix.
 - **Test scenarios:**
   - `planSiteRecord` with `listing: true`, no explicit choice, and the store holding the same site unlisted: the planned listing and `site.scorecard.public_listing` are both `false`.
@@ -344,6 +346,7 @@ sequenceDiagram
   - The no-answer branch with the fold recorded: the planned listing and the scorecard carry the stored listing.
   - The save-time read fails: the planned listing is `input.listing`, and the save still lands.
   - The existing folded-pair listing scenarios pass unchanged.
+  - A blank audit of `www.<domain>` with the fold recorded on a bare host stored listed, where both roots answer with no redirect: the `www.` record is saved unlisted, and the existing "stores www.a.test as its own site and ends the recorded fold" test passes unchanged.
   - End to end: a stale record stored listed, then a blank `audit_website` whose stubbed fetch rewrites the stored record to unlisted on its first request. The saved scorecard and its board metadata read unlisted.
   - The rescore of a seeded domain still saves it listed.
 - **Verification:** the first scenario's pre-fix failure is quoted in the PR, and all pass after.
@@ -362,7 +365,7 @@ sequenceDiagram
 - **Test scenarios:**
   - `tools/list` returns the 14 names in order, with titles and exact hints from the KTD11 map, on both protocol eras.
   - `tests/build-mcp-catalog.test.ts`: `registered_tool_names` equals the served names.
-  - The instructions contain "14 tools" and the KTD10 clause, and #563's order tests still pass.
+  - The instructions contain "14 tools", and #563's order tests still pass. Once the instructions trim has merged, they also contain the KTD10 clause; under the stop condition for a trim that has not merged, that assertion lands with the clause.
 - **Verification:** `bun test` passes, and `scripts/release/mcp-smoke.sh --core-only` against the local Worker reports 14 tools.
 
 ### U5. Published and operator prose
@@ -400,6 +403,7 @@ sequenceDiagram
 
 - R1 to R17 hold, each covered by a U1 to U4 scenario, the local Worker run, or the U5 check.
 - D2 to D5 carry the owner's answers, and the code matches them.
+- When the instructions trim has not merged by the build, this PR states the count only, and the KTD10 clause and its assertion follow once the trim merges.
 - The PR's `## Changelog` reads: "Added: the `set_website_listing` MCP tool, which opts a site in to or out of the public website leaderboard and does nothing else." and "Changed: `audit_website` no longer accepts `public_listing`; a call that sends it is refused with a pointer to `set_website_listing`, and an audit never changes a site's listing." and "Changed: `audit_website` refuses any argument it does not declare, where it ignored one before."
 - No code from abandoned approaches remains in the diff, and no scratch file is left in the tree.
 
@@ -422,14 +426,19 @@ Each plan-review finding and what the plan does with it. `eng` is `/plan-eng-rev
 - eng F13 (P3): accepted; KTD10's offsets are corrected.
 - eng OQ5, one PR: kept. The race U3 closes only opens when U1 lands.
 - eng OQ6, the test file: in Deferred to Implementation, with the new file preferred.
-- devex F2 (P1) and OQ1, how AE7 signals a refused change: option (a), `isError: false` with `disabled: true`. It follows the kill-switch-as-data convention in AGENTS.md and the plan's own `curated` and `in_progress` flags.
+- devex F2 (P1) and OQ1, how AE7 signals a refused change: option (a), `isError: false` with `disabled: true`. It follows the kill-switch-as-data convention in AGENTS.md and the plan's own `curated` flag.
 - devex F3 and F4 (P2): accepted into the Assumptions and the U2 refusal text.
 - devex F5 (P2): accepted into AE10, with the time from `hourWindowEndsAt`.
 - devex F6 and F7 (P2): accepted into U5.
 - devex F8 (P3): accepted. The description and AE7 drop `MCP_ENABLED`, and KTD8's size is 1,078 bytes.
 - devex F10 (P3): accepted into AE11, with the `patch_failed` token from `src/shared/audit-events.ts`.
 - devex F11 (P3): accepted as AE13, a KTD4 sentence, and a U1 scenario.
-- devex F12 and F13 (P3): accepted into AE4 and Risks.
+- devex F12 (P3), the in-progress message on AE4: AE4 carries no in-progress hint (Scope Boundaries), which settles the doc review's AE4 decision too.
+- devex F13 (P3): accepted into Risks.
+- doc review, applied fixes: the `www.` save under a recorded fold falls back to unlisted, not to the bare host's listing (KTD6, U3; evidence: the final branch of `planSiteRecord` writes `input.explicit ?? false` there today), and a re-read that finds the value already stored answers `changed: false` with its units spent (KTD12 and the flowchart).
+- doc review, proposed fixes: both applied. R14, U4, and the Definition of Done follow the stop condition for a trim that has not merged, and the browser-path line in Scope Boundaries names R13 and R17.
+- doc review, FYIs: "eleven" is now "twelve", U1 names the preferred test file, and the log-record rationale in Scope Boundaries is corrected.
+- doc review, residual concern: a save-time read that fails falls back to the start-time listing (KTD6). This is accepted, as with eng F10, because a finished audit must still save.
 - Out of scope, sent to the coordinating session: `docs/designs/webmcp-page-collaboration.md` lists a WebMCP `set_public_listing` page tool that is no longer registered.
 
 ---
@@ -442,3 +451,4 @@ Each plan-review finding and what the plan does with it. `eng` is `/plan-eng-rev
 - 2026-11-11: `/plan-devex-review` round 1 ended: DONE_WITH_CONCERNS, 2 P1, 5 P2, 6 P3; all folded in (Review decisions).
 - 2026-11-11: `/plan-eng-review` round 1 ended: no P0 or P1, 4 P2, 9 P3; all folded in (Review decisions).
 - 2026-11-11: `/compound-engineering:ce-doc-review` round 1 started on `78f52c3`.
+- 2026-11-11: `/compound-engineering:ce-doc-review` round 1 ended: 2 fixes applied, 2 proposed fixes and 1 decision settled, 3 FYIs folded in (Review decisions).
