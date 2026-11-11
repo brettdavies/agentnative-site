@@ -231,7 +231,7 @@ sequenceDiagram
 
 - #563 merged as `aa0537d`, identical in every measured file to the `27ba6e3` head the measurements ran on. The instructions-trim follow-up merges before this build starts; the stop conditions cover the case where it has not.
 - Few callers send `public_listing` to `audit_website`. Nothing measures this, since the request log carries no tool arguments.
-- Clients cache the modern `tools/list` for up to an hour (`ttlMs` 3,600,000, `src/worker/mcp/server.ts`), and the server declares `listChanged: false`. A client holding the 13-tool list after deploy can still call the new tool by name at the protocol level, but a host that gives its model only listed tools cannot until it reconnects. The D3 refusal names the new tool and says to reconnect.
+- Clients cache the modern `tools/list` for up to an hour (`ttlMs` 3,600,000, `src/worker/mcp/server.ts`), and nothing sends a list-changed notification when a deploy changes the tool list. The handshake advertises the SDK default `listChanged: true` for `tools: {}` (`src/worker/mcp/server.ts`), while the static discovery cards declare `listChanged: false`. A client holding the 13-tool list after deploy can still call the new tool by name at the protocol level, but a host that gives its model only listed tools cannot until it reconnects. The D3 refusal names the new tool and says to reconnect.
 
 ### Risks & Dependencies
 
