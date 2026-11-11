@@ -135,6 +135,8 @@ type Overrides = Partial<{
   assets: Record<string, string>;
   failRegistry: boolean;
   failCacheGet: boolean;
+  /** Cache keys whose read throws; every other key reads normally. */
+  failCacheKeys: string[];
   aggregate: unknown;
   sitekey: string;
   seed: unknown[];
@@ -204,6 +206,9 @@ async function makeEnv(overrides: Overrides = {}): Promise<TestEnv> {
     SCORE_CACHE: {
       async get(key: string) {
         r2Gets.push(key);
+        if (overrides.failCacheKeys?.includes(key)) {
+          throw new Error('get: We encountered an internal error. Please try again. (10001)');
+        }
         if (overrides.failCacheGet && key !== aggregateKey) {
           throw new Error('get: We encountered an internal error. Please try again. (10001)');
         }
@@ -1462,10 +1467,22 @@ describe('a www host that a recorded fold names', () => {
         status: 503,
         retry: '30',
       });
-      expect(await res.text()).toContain('cnn.com');
+      expect(await res.text()).toContain('The scorecard for cnn.com could not be read');
     }
     const wwwKey = await webKeyFor('https://www.cnn.com/', SPEC_VERSION);
     expect(env._r2Gets).not.toContain(wwwKey);
+  });
+
+  test('an unreadable record of www.cnn.com, when the record of cnn.com records no fold, names www.cnn.com in the 503', async () => {
+    const env = await makeEnv({
+      cache: { [await webKeyFor('https://cnn.com/', SPEC_VERSION)]: { ...FOLDED, scorecard: WEB_RECORD.scorecard } },
+      failCacheKeys: [await webKeyFor('https://www.cnn.com/', SPEC_VERSION)],
+    });
+    for (const path of ['/score/www.cnn.com', '/score/www.cnn.com/md', '/score/www.cnn.com/json']) {
+      const res = await route(path, env);
+      expect({ path, status: res.status }).toEqual({ path, status: 503 });
+      expect(await res.text()).toContain('The scorecard for www.cnn.com could not be read');
+    }
   });
 
   test('a run in flight for cnn.com answers the redirected JSON request with 202', async () => {

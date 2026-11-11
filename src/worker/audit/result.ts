@@ -81,7 +81,7 @@ import type { WebSummaryInput } from '../audit-web/summary-input';
 import { buildWebSummaryMarkdown } from '../audit-web/summary-markdown';
 import { scoresOf, type WebScorecardShape } from '../audit-web/summary-model';
 import { buildWebSummaryBody } from '../audit-web/summary-render';
-import { resolveWebTarget, targetOfHost } from '../audit-web/web-target';
+import { resolveWebTarget, targetOfHost, type WebResolution } from '../audit-web/web-target';
 import { applyHeaders, type CacheClassSpec, resultCacheClass } from '../headers';
 import { curatedCardOf, pageClip, withOgVideo } from '../og/page-clip';
 import type { OgVideoEnv } from '../og/render-request';
@@ -259,17 +259,24 @@ type RenderContext = {
 
 async function serveWeb(ctx: RenderContext, host: string): Promise<Response> {
   const requested = targetOfHost(host);
+  let resolution: WebResolution;
+  try {
+    resolution = await resolveWebTarget(ctx.env, requested, 'strict');
+  } catch (err) {
+    // A read that failed is not an audit that never ran. Saying "no audit
+    // exists" here retires a URL the sitemap and the board both advertise.
+    // The resolver reads the bare host's record, so that is the one that failed.
+    if (err instanceof WebCacheUnavailableError) return cacheUnavailable(ctx, sitePairOf(host)?.apex ?? host);
+    throw err;
+  }
+  if (resolution.target.host !== host) return foldRedirect(ctx, resolution.target.host);
   let record: Awaited<ReturnType<typeof webCacheGet>>;
   try {
-    const resolution = await resolveWebTarget(ctx.env, requested, 'strict');
-    if (resolution.target.host !== host) return foldRedirect(ctx, resolution.target.host);
     const inFlight = await inFlightResponse(ctx, 'web', host);
     if (inFlight) return inFlight;
     record = await webCacheGet(ctx.env, await webKeyFor(requested.canonical, SPEC_VERSION));
   } catch (err) {
-    // A read that failed is not an audit that never ran. Saying "no audit
-    // exists" here retires a URL the sitemap and the board both advertise.
-    if (err instanceof WebCacheUnavailableError) return cacheUnavailable(ctx, sitePairOf(host)?.apex ?? host);
+    if (err instanceof WebCacheUnavailableError) return cacheUnavailable(ctx, host);
     throw err;
   }
   if (!record) return missing(ctx, host, 'web');
