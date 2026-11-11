@@ -59,7 +59,6 @@ import {
   auditError,
   auditErrorFor,
   CTA_RETRY,
-  completeEvent,
   isTerminalEvent,
 } from '../../shared/audit-events';
 import {
@@ -86,6 +85,7 @@ import { flushHitMinPurge, runWithHitMinPurge } from '../audit-web/hit-min-purge
 import type { WebSiteType } from '../audit-web/registry';
 import { resolveWebTarget, type WebResolution } from '../audit-web/web-target';
 import {
+  branchResultTarget,
   type CliCoreEnv,
   type CliIndexes,
   type CliValidated,
@@ -93,6 +93,7 @@ import {
   loadCliIndexes,
   readCliTier,
   runCliAudit,
+  terminalEventOf,
   validateCliInput,
 } from '../score/core';
 import { CTA, type ScoreError, toAuditError } from '../score/response-shape';
@@ -657,11 +658,8 @@ async function handleCli(
   row.tier = 'live';
   const writer = job.kind === 'claimed' ? job.writer : null;
   const flags = new InFlightFlags(env, 'cli', startedAt, writer?.name ?? null, job.kind !== 'running');
-  const branchTarget =
-    branch && validated.kind === 'github-url' && validated.branch
-      ? [`${validated.owner}/${validated.repo}@${validated.branch}`]
-      : [];
-  await flags.mark(classified.target, ...branchTarget);
+  const branchTarget = branchResultTarget(validated);
+  await flags.mark(classified.target, ...(branchTarget ? [branchTarget] : []));
   const events = runCliStream({
     common,
     validated,
@@ -746,10 +744,7 @@ async function* runCliStream(input: {
   if (outcome.kind === 'bounce') {
     common.row.tier = outcome.tier;
     cli.tier = outcome.tier;
-    // A run that produced no result line failed after it started; a
-    // rejection ahead of the run bounces.
-    const type = outcome.error.code === 'incomplete_response_contract' ? 'error' : 'bounce';
-    yield { type, ...toAuditError(outcome.error) };
+    yield terminalEventOf(outcome);
     return;
   }
   common.row.tier = outcome.kind;
@@ -763,7 +758,7 @@ async function* runCliStream(input: {
     cli.install_ms = outcome.installMs;
     cli.anc_audit_ms = outcome.ancAuditMs;
   }
-  yield completeEvent(outcome.envelope);
+  yield terminalEventOf(outcome);
 }
 
 // ---------------------------------------------------------------------------
