@@ -375,3 +375,5 @@ sequenceDiagram
 ## Review log
 
 - 2026-11-11: plan written.
+- 2026-11-11: `/plan-eng-review` round 1 started on `ac30f61`.
+- 2026-11-11: `/plan-devex-review` round 1 started on `ac30f61`.
