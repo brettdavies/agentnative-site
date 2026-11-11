@@ -26,8 +26,9 @@
 //      returns isError: true with the -32099 envelope.
 //   6. KV-backed per-hour window via SCORE_KV. The plan calls for "5
 //      audits per 60 minutes per IP" but the CF binding's max period is
-//      60 seconds, so this layer enforces the hourly ceiling explicitly.
-//      Key shape: `mcp_audit:<ip>:<hour_bucket>` where hour_bucket =
+//      60 seconds, so this layer enforces the hourly ceiling explicitly,
+//      on the shared counter in audit-web/limiter.ts. Key shape:
+//      `mcp_audit:<ip>:<hour_bucket>` where hour_bucket =
 //      floor(now / 3,600,000). TTL 7200 seconds so the bucket survives
 //      the window plus a one-hour grace. There's a small TOCTOU window
 //      between read and write but it's bounded by the burst gate above;
@@ -44,6 +45,7 @@ import { z } from 'zod';
 import type { TerminalEvent } from '../../../shared/audit-events';
 import { normalizeTarget } from '../../../shared/audit-routes';
 import { awaitInFlightTerminal, type InFlightEnv } from '../../audit/inflight';
+import { consumeHourlyBucketBudget, HOURLY_CONTENTION_MESSAGE } from '../../audit-web/limiter';
 import { type CliCoreEnv, cliRunEnvelope, readCliTier } from '../../score/core';
 import { isScoringDisabled } from '../../score/kill-switch';
 import { loadHintsIndex, type OrchestrateEnv, runFreshOnly } from '../../score/orchestrate';
@@ -68,9 +70,7 @@ export interface ScorecardAuditEnv extends OrchestrateEnv, CliCoreEnv, InFlightE
   MCP_CACHE_BYPASS_ALLOWED?: string;
 }
 
-const HOUR_MS = 3_600_000;
 const HOURLY_AUDIT_CEILING = 5;
-const HOURLY_KV_TTL_SECONDS = 7200;
 
 function textContent(value: unknown) {
   return {
@@ -130,21 +130,6 @@ function attachedResult(terminal: TerminalEvent) {
     content: [{ type: 'text' as const, text: JSON.stringify({ ...failure, stage: 'attached' }, null, 2) }],
     isError: true,
   };
-}
-
-async function consumeHourlyBudget(
-  kv: KVNamespace,
-  ip: string,
-): Promise<{ ok: true; remaining: number } | { ok: false; current: number }> {
-  const bucket = Math.floor(Date.now() / HOUR_MS);
-  const key = `mcp_audit:${ip}:${bucket}`;
-  const currentRaw = await kv.get(key);
-  const current = currentRaw ? Number.parseInt(currentRaw, 10) : 0;
-  if (Number.isNaN(current) || current >= HOURLY_AUDIT_CEILING) {
-    return { ok: false, current: Number.isNaN(current) ? HOURLY_AUDIT_CEILING : current };
-  }
-  await kv.put(key, String(current + 1), { expirationTtl: HOURLY_KV_TTL_SECONDS });
-  return { ok: true, remaining: HOURLY_AUDIT_CEILING - (current + 1) };
 }
 
 export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog, env: ScorecardAuditEnv): void {
@@ -297,10 +282,11 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
       // is 60 seconds; this layer enforces the plan's "5 per 60 minutes"
       // ceiling.
       if (env.SCORE_KV) {
-        const budget = await consumeHourlyBudget(env.SCORE_KV, ipString);
-        if (!budget.ok) {
+        const hourly = await consumeHourlyBucketBudget(env.SCORE_KV, 'mcp_audit', ipString, HOURLY_AUDIT_CEILING);
+        if (hourly === 'full') {
           return jsonRpcError32099('audit rate limit exceeded — fresh audits limited to 5 per hour per source.');
         }
+        if (hourly === 'contended') return jsonRpcError32099(HOURLY_CONTENTION_MESSAGE);
       }
 
       // Step 7: orchestrate.runFreshOnly — resolveSpec + DO dispatch.
