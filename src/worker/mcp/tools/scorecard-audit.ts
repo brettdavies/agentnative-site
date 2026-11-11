@@ -8,7 +8,8 @@
 //   1. Kill switches: MCP_LIVE_SCORING_ENABLED, then SCORE_KV
 //      `scoring_disabled`, the switch that stops every live CLI audit.
 //      Either one off returns isError: false with content
-//      { audited: false, message: "...disabled by the operator..." }.
+//      { audited: false, message: "...disabled by the operator...",
+//      next_tool: "get_scorecard" }.
 //      The read tier stays alive on get_scorecard so the cached
 //      scorecards remain available.
 //   2. validateInput on the raw input. Rejection returns isError: true
@@ -189,6 +190,7 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
           message:
             'live scoring is currently disabled by the operator; cached scorecards remain available via ' +
             'get_scorecard.',
+          next_tool: 'get_scorecard',
         });
       }
 

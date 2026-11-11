@@ -366,13 +366,16 @@ describe('get_scorecard: the shared envelope', () => {
 });
 
 describe('score_cli: MCP_LIVE_SCORING_ENABLED kill switch', () => {
-  test('disabled returns isError: false + audited: false + disabled message; downstream never runs', async () => {
+  test('disabled returns isError: false, audited: false, next_tool get_scorecard; downstream never runs', async () => {
     const { env, doSpy, kv } = makeEnv({ liveScoringEnabled: false });
     const result = await callScoreCli(env, { slug: 'curl' }, '198.51.100.7');
     expect(result.result?.isError).toBeFalsy();
-    const body = getJsonContent(result) as { audited: boolean; message: string };
-    expect(body.audited).toBe(false);
-    expect(body.message.toLowerCase()).toContain('disabled');
+    expect(getJsonContent(result)).toEqual({
+      audited: false,
+      message:
+        'live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard.',
+      next_tool: 'get_scorecard',
+    });
     expect(doSpy.calls.length).toBe(0);
     expect(kv.getCalls).toBe(0);
   });
