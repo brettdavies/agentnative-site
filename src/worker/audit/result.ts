@@ -85,7 +85,13 @@ import { resolveWebTarget, targetOfHost, type WebResolution } from '../audit-web
 import { applyHeaders, type CacheClassSpec, resultCacheClass } from '../headers';
 import { curatedCardOf, pageClip, withOgVideo } from '../og/page-clip';
 import type { OgVideoEnv } from '../og/render-request';
-import { type CachedInstall, get as cliCacheGet, keyFor as cliKeyFor } from '../score/cache';
+import {
+  type CachedInstall,
+  type CachedScorecard,
+  CliCacheUnavailableError,
+  getForRequest as cliCacheGet,
+  keyFor as cliKeyFor,
+} from '../score/cache';
 import { readCuratedEnvelope } from '../score/core';
 import { loadRegistryIndex, type RegistryIndex } from '../score/registry-lookup';
 import { loadShellTemplate, substituteShell } from '../shell-template';
@@ -361,8 +367,8 @@ async function serveBranch(ctx: RenderContext, target: string, branch: string): 
   const inFlight = await inFlightResponse(ctx, 'cli', target);
   if (inFlight) return inFlight;
   const registry = await registryOrNull(ctx.env);
-  const record = await cliCacheGet(ctx.env, cliKeyFor(target, SPEC_VERSION));
-  if (!record) return missing(ctx, target, 'cli');
+  const record = await readCliRecord(ctx, target);
+  if (record instanceof Response) return record;
   const sourceSha = (record as { source_sha?: unknown }).source_sha;
   const envelope = buildCliEnvelope({
     tier: 'cache',
@@ -406,8 +412,8 @@ async function serveCli(ctx: RenderContext, target: string): Promise<Response> {
 
   const inFlight = await inFlightResponse(ctx, 'cli', target);
   if (inFlight) return inFlight;
-  const record = await cliCacheGet(ctx.env, cliKeyFor(target, SPEC_VERSION));
-  if (!record) return missing(ctx, target, 'cli');
+  const record = await readCliRecord(ctx, target);
+  if (record instanceof Response) return record;
   const envelope = buildCliEnvelope({ tier: 'cache', target, record, registry, origin: ctx.origin });
   const date = shortDate(cliScoredAt(record));
   const version = record.tool_version ? `v${escHtml(record.tool_version)}` : '';
@@ -421,6 +427,18 @@ async function serveCli(ctx: RenderContext, target: string): Promise<Response> {
     linked: true,
     control: { kind: 'refresh', target, lane: 'cli' },
   });
+}
+
+/** The stored CLI record, or the response for one that is missing or could not be read. */
+async function readCliRecord(ctx: RenderContext, target: string): Promise<CachedScorecard | Response> {
+  let record: CachedScorecard | null;
+  try {
+    record = await cliCacheGet(ctx.env, cliKeyFor(target, SPEC_VERSION));
+  } catch (err) {
+    if (err instanceof CliCacheUnavailableError) return cacheUnavailable(ctx, target);
+    throw err;
+  }
+  return record ?? missing(ctx, target, 'cli');
 }
 
 /** The same field that decides whether the page offers the badge embed. */
