@@ -114,6 +114,17 @@ describe('scorecard OG route: canonical keys', () => {
     expect(res.headers.get('retry-after')).toBe('30');
   });
 
+  test('an unreadable live or branch CLI record is a 503 with retry-after, not a 404', async () => {
+    for (const target of ['ouch', 'o/r@feature']) {
+      const res = await serve(siteEnv({ failReads: true }), `/og/score/${target}/${STALE_KEY}.png`);
+      expect({ target, status: res.status, retry: res.headers.get('retry-after') }).toEqual({
+        target,
+        status: 503,
+        retry: '30',
+      });
+    }
+  });
+
   test('POST is rejected', async () => {
     expect((await serve(siteEnv(), `/og/score/anc.dev/${WEB_KEY}.png`, 'POST')).status).toBe(405);
   });

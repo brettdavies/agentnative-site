@@ -380,6 +380,25 @@ describe('curated slugs (registry first)', () => {
     const web = await route('/score/anc.dev', env);
     expect(web.status).toBe(200);
   });
+
+  test('an unreadable live or branch CLI record answers 503 with Retry-After, not 404, in all three representations', async () => {
+    const env = await seededEnv({
+      failCacheKeys: [cliKeyFor('ouch', SPEC_VERSION), cliKeyFor('o/r@feature', SPEC_VERSION)],
+    });
+    for (const target of ['ouch', 'o/r@feature']) {
+      for (const path of [`/score/${target}`, `/score/${target}/md`, `/score/${target}/json`]) {
+        const res = await route(path, env);
+        const text = await res.text();
+        expect({ path, status: res.status, retry: res.headers.get('retry-after') }).toEqual({
+          path,
+          status: 503,
+          retry: '30',
+        });
+        expect(text).not.toContain('No audit exists');
+        expect(text).toContain(target);
+      }
+    }
+  });
 });
 
 describe('live and branch records', () => {
