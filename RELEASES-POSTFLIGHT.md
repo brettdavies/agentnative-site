@@ -14,7 +14,8 @@ Same gates run against both environments. Differences the script handles transpa
 - URL: staging Worker (workers.dev) vs `anc.dev` custom domain.
 - Branch the deploy gate watches: `dev` (staging deploy) vs `main` (prod deploy).
 - Container app name: `agentnative-site-staging-sandbox` vs `agentnative-site-sandbox`.
-- Auth: staging is gated by CF Access (service token auto-staged from 1Password); prod is unauthenticated.
+- Auth: staging is gated by CF Access (service token from `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` when both
+  are exported, otherwise auto-staged from 1Password); prod is unauthenticated.
 - Backport: the `main → dev` backport concept applies only to prod (the release branch can land edits on `main` that did
   not round-trip to `dev`); staging deploys from `dev` directly so the gate SKIPs there.
 
@@ -129,10 +130,11 @@ manual recipe below skips the headers; for prod the recipe runs unauthenticated.
   # When staging, also: -H "CF-Access-Client-Id: $CFID" -H "CF-Access-Client-Secret: $CFSEC" (from 1Password)
 
   # Accept: text/html is required — curl's default Accept negotiates markdown on
-  # extensionless URLs (same as the scripted gate_pages() in postflight.sh).
-  curl -fSsL -H 'Accept: text/html' "${ENV_URL}/" | grep -q '<title>' && echo "home: ok"
-  curl -fSsL -H 'Accept: text/html' "${ENV_URL}/scorecards" | grep -q 'leaderboard-table' && echo "leaderboard: ok"
-  curl -fSsL "${ENV_URL}/api/score" -X POST \
+  # extensionless URLs (same as the scripted gate_pages() in postflight.sh). Each
+  # body is captured first: with pipefail set, `curl | grep -q` fails on a healthy page.
+  home=$(curl -fSs -H 'Accept: text/html' "${ENV_URL}/") && grep -q 'hero__title' <<<"$home" && echo "home: ok"
+  board=$(curl -fSs -H 'Accept: text/html' "${ENV_URL}/scorecards") && grep -q 'lrow' <<<"$board" && echo "leaderboard: ok"
+  curl -fSs "${ENV_URL}/api/score" -X POST \
     -H 'Content-Type: application/json' \
     -d '{"target":"ripgrep","turnstile_token":"x"}' \
     | jq '.kind, .tier, .anc_version, .spec_version'
@@ -148,7 +150,7 @@ manual recipe below skips the headers; for prod the recipe runs unauthenticated.
   source:
 
   ```bash
-  curl -fsSL "${ENV_URL}/skill.json" | jq -r '.version'
+  curl -fsS "${ENV_URL}/skill.json" | jq -r '.version'
   jq -r '.version' src/data/skill/skill.json
   # both must match
   ```

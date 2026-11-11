@@ -43,6 +43,11 @@ const LOCKED_SLUGS = [
 ];
 
 describe('regression #1 — anchor slug snapshot (docs/DESIGN.md §3.5 locked list)', () => {
+  test('the homepage carries the marker the release gate and the live sweep read', async () => {
+    const html = await readFile(join(DIST, 'index.html'), 'utf8');
+    expect(html).toContain('hero__title');
+  });
+
   test('homepage links to every principle page', async () => {
     const html = await readFile(join(DIST, 'index.html'), 'utf8');
     for (let n = 1; n <= 8; n++) {

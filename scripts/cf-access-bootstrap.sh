@@ -275,7 +275,7 @@ ensure_policy "Allow CLI service token" "$service_policy_body"
 printf '\n[4] Verify\n'
 unauth_status="$(curl -s -o /dev/null -w '%{http_code}' "https://$APP_DOMAIN/api/score?input=ripgrep")"
 unauth_location="$(curl -s -o /dev/null -w '%{redirect_url}' "https://$APP_DOMAIN/api/score?input=ripgrep")"
-if [ "$unauth_status" = "302" ] && echo "$unauth_location" | grep -q 'cloudflareaccess.com'; then
+if [ "$unauth_status" = "302" ] && grep -q 'cloudflareaccess.com' <<<"$unauth_location"; then
   row "unauth probe" "302 → cloudflareaccess.com (boundary enforced)"
 else
   row "unauth probe" "UNEXPECTED status=$unauth_status (expected 302 to *.cloudflareaccess.com)"

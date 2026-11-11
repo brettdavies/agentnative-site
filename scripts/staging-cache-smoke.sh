@@ -223,7 +223,7 @@ expect_cold_then_warm() {
   if bun x wrangler r2 object get "${STAGING_BUCKET}/${key}" --file /tmp/r2-probe.json --remote >/dev/null 2>&1; then
     local payload_keys
     payload_keys=$("$JQ_BIN" -r 'keys | join(",")' </tmp/r2-probe.json 2>/dev/null || echo "")
-    if echo "$payload_keys" | grep -q "spec_version" && echo "$payload_keys" | grep -q "anc_version" && echo "$payload_keys" | grep -q "tool_version"; then
+    if grep -q "spec_version" <<<"$payload_keys" && grep -q "anc_version" <<<"$payload_keys" && grep -q "tool_version" <<<"$payload_keys"; then
       ok "$label_prefix R2 wrote $key with full payload shape"
     else
       ko "$label_prefix R2 write" "payload shape missing required fields (got: $payload_keys)"
@@ -281,7 +281,7 @@ ZUNAUTH_STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
   "$STAGING_URL/api/score?input=ripgrep")
 ZUNAUTH_LOC=$(curl -s -o /dev/null -w '%{redirect_url}' \
   "$STAGING_URL/api/score?input=ripgrep")
-if [ "$ZUNAUTH_STATUS" = "302" ] && echo "$ZUNAUTH_LOC" | grep -q 'cloudflareaccess.com'; then
+if [ "$ZUNAUTH_STATUS" = "302" ] && grep -q 'cloudflareaccess.com' <<<"$ZUNAUTH_LOC"; then
   ok "Z01 unauth request → 302 to *.cloudflareaccess.com (boundary enforced)"
 else
   ko "Z01 unauth boundary" "expected 302 to *.cloudflareaccess.com; got status=$ZUNAUTH_STATUS location=${ZUNAUTH_LOC:-<empty>}"

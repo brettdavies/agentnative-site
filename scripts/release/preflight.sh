@@ -81,6 +81,11 @@
 # uses --env staging|prod with the same shape.
 
 set -euo pipefail
+{ set +x; } 2>/dev/null
+
+# Unset before the first child starts, so no child's environment holds them. Each gate
+# reads the token from 1Password and gives it only to the child that needs it.
+unset CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 readonly REPO_ROOT
@@ -183,19 +188,16 @@ read_op_field() {
   "$OP_SKILL/read_field.sh" "$1" "$2" 2>/dev/null
 }
 
-# Stages CF Access service-token headers into a curl config file. Caller passes the
-# config path; the function fills it with `header = "..."` lines. Values flow through
-# bash-builtin printf — no argv leak.
+# Holds the CF Access service token in ACCESS_HEADERS as curl config lines, handed to curl
+# through a process substitution, because an EXIT trap cannot clean up a file after a
+# SIGKILL, and config lines never reach argv. An empty config is a no-op.
+ACCESS_HEADERS=""
 stage_cf_access_headers() {
-  local cfg="$1"
-  : >"$cfg"
-  chmod 600 "$cfg"
   local cid csec
   cid=$(read_op_field "$OP_ITEM_TOKEN" client_id) || return 1
   csec=$(read_op_field "$OP_ITEM_TOKEN" client_secret) || return 1
   [[ -n "$cid" && -n "$csec" ]] || return 1
-  printf 'header = "CF-Access-Client-Id: %s"\n' "$cid" >>"$cfg"
-  printf 'header = "CF-Access-Client-Secret: %s"\n' "$csec" >>"$cfg"
+  printf -v ACCESS_HEADERS 'header = "CF-Access-Client-Id: %s"\nheader = "CF-Access-Client-Secret: %s"\n' "$cid" "$csec"
 }
 
 # Gate: drift (delegated to drift.sh) ----------------------------------------
@@ -421,14 +423,14 @@ gate_coord() {
 
   # Staging container pin: baked anc binary vocabulary vs Worker invocation site.
   if have_bin docker; then
-    local worker_cmd
+    local worker_cmd anc_help
     worker_cmd=$(grep -oE 'anc (audit|check)' "$REPO_ROOT/src/worker/score/sandbox-exec.ts" 2>/dev/null \
       | head -1 | awk '{print $2}' || true)
     if [[ -n "$staging_pin" && -n "$worker_cmd" ]]; then
       if docker image inspect "$staging_pin" >/dev/null 2>&1 \
         || docker pull "$staging_pin" >/dev/null 2>&1; then
-        if docker run --rm --entrypoint /usr/local/bin/anc "$staging_pin" --help 2>/dev/null \
-          | grep -qE "^  $worker_cmd "; then
+        if anc_help=$(docker run --rm --entrypoint /usr/local/bin/anc "$staging_pin" --help 2>/dev/null) \
+          && grep -qE "^  $worker_cmd " <<<"$anc_help"; then
           gate_pass "staging container pin baked anc supports '$worker_cmd' (Worker invocation)"
         else
           gate_fail "staging container baked anc vocabulary" \
@@ -539,14 +541,9 @@ gate_do_smoke() {
     fi
   fi
 
-  # Staging mode: stage CF Access headers. Local mode: empty cfg (curl -K
-  # with an empty file is a no-op).
-  local cfg
-  cfg=$(mktemp)
   if [[ "$ENV_AUTH_NEEDED" -eq 1 ]]; then
-    if ! stage_cf_access_headers "$cfg"; then
+    if ! stage_cf_access_headers; then
       gate_skip "live-scoring DO smoke" "could not stage CF Access service token from 1Password ($OP_ITEM_TOKEN)"
-      rm -f "$cfg"
       return
     fi
   fi
@@ -554,10 +551,9 @@ gate_do_smoke() {
   # POST a non-registry github-url and assess.
   local repo body
   repo=$(do_fixture_repo "$BINARY")
-  body=$(curl -fsSL -K "$cfg" -H 'Content-Type: application/json' \
+  body=$(curl -q -fsS -K <(printf '%s' "$ACCESS_HEADERS") -H 'Content-Type: application/json' \
     -d "{\"target\":\"https://github.com/${repo}\",\"turnstile_token\":\"x\"}" \
     "${ENV_URL}/api/score" 2>/dev/null || true)
-  rm -f "$cfg"
 
   if [[ -z "$body" ]]; then
     gate_fail "live-scoring DO smoke" "no response body (network, CF Access, or Worker down?)"
@@ -587,9 +583,15 @@ gate_do_smoke() {
 
 # Thin wrapper around scripts/release/mcp-smoke.sh, which holds the actual
 # gate logic and is shared with postflight.sh. Target picked via $ENV.
-#   - staging: mcp-smoke.sh reads CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET
-#     from the env, which we stage from 1Password.
+#   - staging: mcp-smoke.sh gets the service token from 1Password in its
+#     environment.
 #   - local:   no auth; we verify $ENV_URL reachability before delegating.
+# A prefix on delegate_to_subscript itself would reach its mktemp and rm as well.
+mcp_smoke_with_access() {
+  CF_ACCESS_CLIENT_ID="$cid" CF_ACCESS_CLIENT_SECRET="$csec" \
+    "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$@"
+}
+
 gate_mcp() {
   require_bin curl
 
@@ -619,13 +621,11 @@ gate_mcp() {
       "could not stage CF Access service token from 1Password ($OP_ITEM_TOKEN)"
     return
   fi
-  export CF_ACCESS_CLIENT_ID="$cid"
-  export CF_ACCESS_CLIENT_SECRET="$csec"
 
   # Staging is the canonical release-smoke surface; --full-cache-coverage
   # ensures the live container DO path is exercised every run instead of
   # silently passing on a live-cache short-circuit.
-  delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" \
+  delegate_to_subscript mcp_smoke_with_access "$ENV_URL" \
     --mcp-binary "$MCP_BINARY" --full-cache-coverage
 }
 
@@ -645,19 +645,16 @@ gate_dist() {
     fi
   fi
 
-  local cfg
-  cfg=$(mktemp)
   if [[ "$ENV_AUTH_NEEDED" -eq 1 ]]; then
-    if ! stage_cf_access_headers "$cfg"; then
+    if ! stage_cf_access_headers; then
       gate_skip "all dist gates" "could not stage CF Access service token from 1Password"
-      rm -f "$cfg"
       return
     fi
   fi
 
   # Skill manifest version matches source.
   local served_v src_v
-  served_v=$(curl -fsSL -K "$cfg" "${ENV_URL}/skill.json" 2>/dev/null \
+  served_v=$(curl -q -fsS -K <(printf '%s' "$ACCESS_HEADERS") "${ENV_URL}/skill.json" 2>/dev/null \
     | jq -r '.version // empty' 2>/dev/null || true)
   src_v=$(jq -r '.version' "$REPO_ROOT/src/data/skill/skill.json" 2>/dev/null || true)
   if [[ -n "$served_v" && "$served_v" == "$src_v" ]]; then
@@ -673,7 +670,7 @@ gate_dist() {
   # wrangler dev (host=localhost) does not.
   if [[ "$ENV_AUTH_NEEDED" -eq 1 ]]; then
     local robots
-    robots=$(curl -sSI -K "$cfg" "${ENV_URL}/" 2>/dev/null \
+    robots=$(curl -q -sSI -K <(printf '%s' "$ACCESS_HEADERS") "${ENV_URL}/" 2>/dev/null \
       | grep -i '^x-robots-tag:' | head -1 || true)
     if [[ "$robots" == *"noindex"* ]]; then
       gate_pass "staging Worker emits X-Robots-Tag: noindex on /"
@@ -684,8 +681,6 @@ gate_dist() {
     gate_skip "X-Robots-Tag noindex check" \
       "local mode — the staging-host guard does not fire for localhost"
   fi
-
-  rm -f "$cfg"
 }
 
 # Gate: e2e (live-staging Playwright projects) -------------------------------
@@ -750,7 +745,9 @@ gate_e2e() {
 gate_og_cards() {
   local cid="$1" csec="$2"
 
-  if ! (cd "$REPO_ROOT" && bun x wrangler whoami 2>/dev/null | grep -q 'You are logged in'); then
+  local whoami_out
+  if ! whoami_out=$(cd "$REPO_ROOT" && bun x wrangler whoami 2>/dev/null) \
+    || ! grep -q 'You are logged in' <<<"$whoami_out"; then
     gate_skip "og-cards smoke" "wrangler is not logged in; the smoke deploys a fixture Worker on anc.dev"
     return
   fi

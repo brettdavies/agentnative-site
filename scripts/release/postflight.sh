@@ -72,6 +72,12 @@
 #   - ~/.claude/skills/1password/scripts/read_field.sh (for staging CF Access token)
 
 set -euo pipefail
+{ set +x; } 2>/dev/null
+
+# Captured and unset before the first child starts, so no child's environment holds them.
+ACCESS_ID="${CF_ACCESS_CLIENT_ID:-}"
+ACCESS_SECRET="${CF_ACCESS_CLIENT_SECRET:-}"
+unset CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 readonly REPO_ROOT
@@ -170,44 +176,63 @@ esac
   exit 2
 }
 
-# Auth setup (staging only). Reads the CF Access service token from 1Password
-# and exports CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET into the env. Every
-# curl below uses `-K "$CF_CONFIG"`; mcp-smoke.sh picks up the same env vars
-# directly. Values never reach argv: shell-builtin printf into a mode-600 file
-# consumed via curl's -K flag.
+# Auth setup (staging only). Holds the CF Access service token, from the exported
+# variables or 1Password, in ACCESS_HEADERS as curl config lines. ecurl hands those to
+# curl through a process substitution, because an EXIT trap cannot clean up a file after
+# a SIGKILL, and config lines never reach argv. mcp-smoke.sh gets the values in its
+# environment, from gate_mcp.
 
-CF_CONFIG=""
-maybe_stage_cf_access() {
-  [[ "$ENV_AUTH_NEEDED" -eq 1 ]] || return 0
-  [[ -x "$OP_SKILL/read_field.sh" ]] || {
-    echo "warn: 1Password skill not found at $OP_SKILL; staging gates that need CF Access will SKIP" >&2
-    return 0
-  }
-  local cid csec
-  cid=$("$OP_SKILL/read_field.sh" "$OP_ITEM_TOKEN" client_id 2>/dev/null) || return 0
-  csec=$("$OP_SKILL/read_field.sh" "$OP_ITEM_TOKEN" client_secret 2>/dev/null) || return 0
-  [[ -n "$cid" && -n "$csec" ]] || return 0
+ACCESS_HEADERS=""
+FETCH_BODY=$(mktemp)
+trap 'rm -f "$FETCH_BODY"' EXIT
 
-  export CF_ACCESS_CLIENT_ID="$cid"
-  export CF_ACCESS_CLIENT_SECRET="$csec"
-
-  CF_CONFIG=$(mktemp)
-  chmod 600 "$CF_CONFIG"
-  trap 'rm -f "$CF_CONFIG"' EXIT
-  printf 'header = "CF-Access-Client-Id: %s"\n' "$cid" >>"$CF_CONFIG"
-  printf 'header = "CF-Access-Client-Secret: %s"\n' "$csec" >>"$CF_CONFIG"
+# A local preview sits behind no Access.
+is_local_preview() {
+  [[ "$ENV_URL" =~ ^http://(localhost|127\.0\.0\.1)(:[0-9]+)?(/|$) ]]
 }
 
-# Curl wrapper that attaches CF Access headers when staging.
+maybe_stage_cf_access() {
+  if [[ "$ENV_AUTH_NEEDED" -ne 1 ]]; then
+    # Values exported for staging must not reach a target behind no Access.
+    ACCESS_ID="" ACCESS_SECRET=""
+    return 0
+  fi
+  if [[ -z "$ACCESS_ID" || -z "$ACCESS_SECRET" ]]; then
+    is_local_preview && return 0
+    [[ -x "$OP_SKILL/read_field.sh" ]] || {
+      echo "warn: 1Password skill not found at $OP_SKILL; staging gates that read the site through CF Access fail" >&2
+      return 0
+    }
+    ACCESS_ID=$("$OP_SKILL/read_field.sh" "$OP_ITEM_TOKEN" client_id 2>/dev/null) || return 0
+    ACCESS_SECRET=$("$OP_SKILL/read_field.sh" "$OP_ITEM_TOKEN" client_secret 2>/dev/null) || return 0
+  fi
+  [[ -n "$ACCESS_ID" && -n "$ACCESS_SECRET" ]] || return 0
+  printf -v ACCESS_HEADERS 'header = "CF-Access-Client-Id: %s"\nheader = "CF-Access-Client-Secret: %s"\n' \
+    "$ACCESS_ID" "$ACCESS_SECRET"
+}
+
+# Curl wrapper that attaches CF Access headers when staging. -q comes first because curl
+# otherwise reads .curlrc, whose location option would follow redirects with the secret and
+# whose verbose option would print it.
 ecurl() {
-  if [[ -n "$CF_CONFIG" ]]; then
-    curl -K "$CF_CONFIG" "$@"
+  if [[ -n "$ACCESS_HEADERS" ]]; then
+    curl -q -K <(printf '%s' "$ACCESS_HEADERS") "$@"
   else
-    curl "$@"
+    curl -q "$@"
   fi
 }
 
 # Common helpers ------------------------------------------------------------
+
+# Without the token, staging answers with its Access login redirect, so every row would
+# report the redirect rather than the missing token.
+require_access() {
+  if [[ "$ENV_AUTH_NEEDED" -eq 0 || -n "$ACCESS_HEADERS" ]] || is_local_preview; then
+    return 0
+  fi
+  gate_fail "$ENV_URL $1" "no CF Access service token, exported or from 1Password (OP_SKILL=$OP_SKILL), so staging cannot be read"
+  return 1
+}
 
 resolve_repo() {
   [[ -n "$REPO" ]] && {
@@ -307,41 +332,66 @@ gate_container() {
 
 # Gate: pages ----------------------------------------------------------------
 
+# Fetches into FETCH_BODY with the given curl arguments, setting FETCH_STATUS (curl's
+# exit), FETCH_CODE and FETCH_REDIRECT. To a file because curl truncates a file between
+# retries; on stdout a failed attempt's bytes stay ahead of the next attempt's, so the
+# marker from a dropped transfer would pass the row. --retry-max-time refuses a Retry-After
+# over 30 s, which curl otherwise sleeps through; the site's own 30 s is one wait per row,
+# and a page that recovers in it passes. No -L: curl keeps custom headers across hosts, so
+# following a redirect hands the Access secret to wherever it points.
+# A GET adds --retry-all-errors; a POST goes without, so a permanent error is not re-sent.
+fetch_to() {
+  local out
+  : >"$FETCH_BODY"
+  FETCH_STATUS=0
+  out=$(ecurl -fSs -m 10 --retry 2 --retry-max-time 30 \
+    -o "$FETCH_BODY" -w '%{http_code} %{redirect_url}' "$@") || FETCH_STATUS=$?
+  FETCH_CODE=${out%% *}
+  FETCH_REDIRECT=${out#* }
+}
+
+# The last fetch's outcome, for a row's failure detail.
+fetch_detail() {
+  printf 'HTTP %s%s' "${FETCH_CODE:-none}" "${FETCH_REDIRECT:+ to $FETCH_REDIRECT}"
+}
+
+# One page, checked for its marker. Accept: text/html is explicit because curl's default
+# Accept negotiates text/markdown on extensionless URLs. grep reads the file because
+# under `set -o pipefail` a pipe reports the writer's SIGPIPE when grep -q exits on an
+# early marker, which fails the row on HTML that is fine.
+page_row() {
+  local path=$1 marker=$2 label=$3
+  fetch_to --retry-all-errors -H 'Accept: text/html' "${ENV_URL}${path}"
+  if [[ "$FETCH_STATUS" -ne 0 ]]; then
+    gate_fail "$label" "curl exited $FETCH_STATUS ($(fetch_detail)) fetching ${ENV_URL}${path}"
+  elif [[ "$FETCH_CODE" == "200" ]] && grep -q "$marker" "$FETCH_BODY"; then
+    gate_pass "$label renders (has $marker)"
+  else
+    gate_fail "$label" "did not return HTML with $marker ($(fetch_detail))"
+  fi
+}
+
 gate_pages() {
   header "Distribution surface against $ENV_URL"
   require_bin curl
   require_bin jq
+  require_access pages || return 0
 
-  # Explicit Accept: text/html — curl's default Accept negotiates text/markdown
-  # on extensionless URLs (agent-native content negotiation). Capture the body
-  # before grepping: with `set -o pipefail`, `curl | grep -q` false-fails when
-  # the marker appears early (curl gets SIGPIPE / exit 23) even though HTML is fine.
-  local home_html scorecards_html
-  home_html=$(ecurl -fSsL -m 10 -H 'Accept: text/html' "${ENV_URL}/" 2>/dev/null || true)
-  if printf '%s' "$home_html" | grep -q '<title>'; then
-    gate_pass "${ENV_URL}/ home page renders (has <title>)"
-  else
-    gate_fail "${ENV_URL}/ home page" "did not return HTML with <title>"
-  fi
+  page_row / hero__title "${ENV_URL}/ home page"
+  page_row /scorecards lrow "${ENV_URL}/scorecards"
 
-  scorecards_html=$(ecurl -fSsL -m 10 -H 'Accept: text/html' "${ENV_URL}/scorecards" 2>/dev/null || true)
-  if printf '%s' "$scorecards_html" | grep -q 'lrow'; then
-    gate_pass "${ENV_URL}/scorecards renders (has lrow)"
-  else
-    gate_fail "${ENV_URL}/scorecards" "did not return HTML with lrow"
-  fi
-
-  local body tier scorecard_url spec_v
-  body=$(ecurl -fSsL -m 10 "${ENV_URL}/api/score" -X POST \
+  local tier scorecard_url spec_v
+  fetch_to "${ENV_URL}/api/score" -X POST \
     -H 'Content-Type: application/json' \
-    -d '{"target":"ripgrep","turnstile_token":"x"}' 2>/dev/null || true)
-  tier=$(printf '%s' "$body" | jq -r '.tier // empty' 2>/dev/null || true)
-  scorecard_url=$(printf '%s' "$body" | jq -r '.scorecard_url // empty' 2>/dev/null || true)
-  spec_v=$(printf '%s' "$body" | jq -r '.spec_version // empty' 2>/dev/null || true)
-  if [[ "$tier" == "registry" && "$scorecard_url" == */score/ripgrep && -n "$spec_v" ]]; then
+    -d '{"target":"ripgrep","turnstile_token":"x"}'
+  tier=$(jq -r '.tier // empty' "$FETCH_BODY" 2>/dev/null || true)
+  scorecard_url=$(jq -r '.scorecard_url // empty' "$FETCH_BODY" 2>/dev/null || true)
+  spec_v=$(jq -r '.spec_version // empty' "$FETCH_BODY" 2>/dev/null || true)
+  if [[ "$FETCH_STATUS" -eq 0 && "$FETCH_CODE" == "200" && "$tier" == "registry" && "$scorecard_url" == */score/ripgrep && -n "$spec_v" ]]; then
     gate_pass "${ENV_URL}/api/score registry hit returns tier=registry, $scorecard_url, spec=$spec_v"
   else
-    gate_fail "${ENV_URL}/api/score registry hit" "tier=$tier scorecard_url=$scorecard_url spec=$spec_v"
+    gate_fail "${ENV_URL}/api/score registry hit" \
+      "tier=$tier scorecard_url=$scorecard_url spec=$spec_v (curl exited $FETCH_STATUS, $(fetch_detail))"
   fi
 }
 
@@ -388,6 +438,7 @@ RETIRED_REDIRECTS=(
 gate_retired() {
   header "Retired paths against $ENV_URL"
   require_bin curl
+  require_access retired || return 0
 
   local path out code location entry want
   for path in "${RETIRED_PATHS[@]}"; do
@@ -418,25 +469,41 @@ gate_retired() {
 # Gate: sitemap -------------------------------------------------------------
 # Every URL the sitemap advertises resolves. A retirement that missed an
 # emitter shows up here as a 404 on a page the site still tells crawlers about.
+# The sitemap names the canonical host on every deployment, so an entry on any other
+# host fails, and each entry's path is read from the target: walking the entry itself
+# would test production from a staging run, and send staging's Access credentials there.
+# --retry-max-time sits just under the 30 s Retry-After the site answers with during a
+# storage outage, because a walk of many pages would otherwise wait out each one in turn,
+# and above -m, so an entry that stalls once still gets its retry.
 
 gate_sitemap() {
   header "Sitemap walk against $ENV_URL"
   require_bin curl
+  require_access sitemap || return 0
 
-  local xml locs loc code failures=0 total=0
-  xml=$(ecurl -fSsL -m 20 "${ENV_URL}/sitemap.xml" 2>/dev/null || true)
-  locs=$(printf '%s' "$xml" | grep -oE '<loc>[^<]+</loc>' | sed -E 's#</?loc>##g' || true)
-  if [[ -z "$locs" ]]; then
-    gate_fail "${ENV_URL}/sitemap.xml" "no <loc> entries parsed"
+  local locs loc path code walk_status failures=0 total=0 canonical=${PROD_URL_DEFAULT:-}
+  fetch_to --retry-all-errors -m 20 "${ENV_URL}/sitemap.xml"
+  locs=$(grep -oE '<loc>[^<]+</loc>' "$FETCH_BODY" | sed -E 's#</?loc>##g' || true)
+  if [[ "$FETCH_STATUS" -ne 0 || "$FETCH_CODE" != "200" || -z "$locs" ]]; then
+    gate_fail "${ENV_URL}/sitemap.xml" "no complete list of <loc> entries (curl exited $FETCH_STATUS, $(fetch_detail))"
     return
   fi
   while IFS= read -r loc; do
     [[ -z "$loc" ]] && continue
     total=$((total + 1))
-    code=$(ecurl -sS -m 15 --retry 2 --retry-all-errors -o /dev/null -w '%{http_code}' \
-      -H 'Accept: text/html' "$loc" 2>/dev/null || echo "000")
-    if [[ "$code" != "200" ]]; then
-      gate_fail "sitemap entry $loc" "code=$code"
+    if [[ -n "$canonical" && "$loc" != "$canonical" && "$loc" != "$canonical"/* ]]; then
+      gate_fail "sitemap entry $loc" "names a host other than $canonical"
+      failures=$((failures + 1))
+      continue
+    fi
+    path=${loc#*://}
+    if [[ "$path" == */* ]]; then path=/${path#*/}; else path=/; fi
+    walk_status=0
+    code=$(ecurl -sS -m 15 --retry 2 --retry-all-errors --retry-max-time 29 -o /dev/null -w '%{http_code}' \
+      -H 'Accept: text/html' "${ENV_URL}${path}" 2>/dev/null) || walk_status=$?
+    code=${code:-000}
+    if [[ "$walk_status" -ne 0 || "$code" != "200" ]]; then
+      gate_fail "sitemap entry ${ENV_URL}${path}" "curl exited $walk_status, code=$code"
       failures=$((failures + 1))
     fi
   done <<<"$locs"
@@ -446,11 +513,18 @@ gate_sitemap() {
 }
 
 # Gate: mcp -----------------------------------------------------------------
-# Thin wrapper around scripts/release/mcp-smoke.sh. mcp-smoke.sh reads CF_ACCESS_CLIENT_ID
-# / CF_ACCESS_CLIENT_SECRET from the env, which maybe_stage_cf_access exported
-# above when --env staging.
+# Thin wrapper around scripts/release/mcp-smoke.sh.
+
+# A prefix on delegate_to_subscript itself would reach its mktemp and rm as well. Both
+# values are empty on a target behind no Access, which mcp-smoke.sh reads as no token.
+mcp_smoke_with_access() {
+  CF_ACCESS_CLIENT_ID="$ACCESS_ID" CF_ACCESS_CLIENT_SECRET="$ACCESS_SECRET" \
+    "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$@"
+}
 
 gate_mcp() {
+  require_access mcp || return 0
+
   # mcp-smoke.sh prints its own section header ("Live MCP surface against $BASE_URL"),
   # so we delegate directly without a duplicate header here.
   #
@@ -464,8 +538,7 @@ gate_mcp() {
   if [[ "$ENV" == "staging" ]]; then
     extra+=(--full-cache-coverage)
   fi
-  delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" \
-    --mcp-binary "$MCP_BINARY" "${extra[@]}"
+  delegate_to_subscript mcp_smoke_with_access "$ENV_URL" --mcp-binary "$MCP_BINARY" "${extra[@]}"
 }
 
 # Gate: purge ----------------------------------------------------------------
@@ -474,13 +547,15 @@ gate_purge() {
   header "Skill manifest cache-purge confirmation"
   require_bin curl
   require_bin jq
+  require_access purge || return 0
 
   local served_v src_v
-  served_v=$(ecurl -fsSL -m 10 "${ENV_URL}/skill.json" 2>/dev/null \
-    | jq -r '.version // empty' 2>/dev/null || true)
+  fetch_to --retry-all-errors "${ENV_URL}/skill.json"
+  served_v=$(jq -r '.version // empty' "$FETCH_BODY" 2>/dev/null || true)
   src_v=$(jq -r '.version' "$REPO_ROOT/src/data/skill/skill.json" 2>/dev/null || true)
-  if [[ -z "$served_v" || -z "$src_v" ]]; then
-    gate_skip "skill.json served vs source" "could not read one (served=$served_v source=$src_v)"
+  if [[ "$FETCH_STATUS" -ne 0 || "$FETCH_CODE" != "200" || -z "$served_v" || -z "$src_v" ]]; then
+    gate_fail "skill.json served vs source" \
+      "could not read one (served=$served_v source=$src_v; curl exited $FETCH_STATUS, $(fetch_detail))"
     return
   fi
   if [[ "$served_v" == "$src_v" ]]; then
