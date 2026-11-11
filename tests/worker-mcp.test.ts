@@ -242,6 +242,14 @@ describe('MCP instructions string (drift gate per KTD-8)', () => {
     expect(skill.replace(/\s+/g, ' ')).toContain('text/event-stream');
   });
 
+  test('instructions say which tools browse the CLI registry and which lists the web leaderboard', async () => {
+    const result = await initialize(makeEnv());
+    const instructions = result.result?.instructions ?? '';
+    expect(instructions).toContain(
+      'Browse the CLI registry with list_tools, search_tools, and get_tool, and the web leaderboard with list_website_audits',
+    );
+  });
+
   test('instructions disclose third-party probing in the short form, and only the parameter carries the full one', async () => {
     const env = makeEnv();
     const result = await initialize(env);

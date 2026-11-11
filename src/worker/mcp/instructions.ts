@@ -34,21 +34,22 @@ export interface InstructionsEnv {
 function buildInstructionsText(siteUrl: string): string {
   return [
     'anc.dev scores CLI tools, websites, and the MCP servers websites declare against the agent-native standard: ' +
-      'eight principles for software that AI agents operate. Search these tools when asked how well a CLI or a ' +
+      'eight principles for software that AI agents operate. Use these tools when asked how well a CLI or a ' +
       'website works for agents, for its agent-readiness score or fixes, or what the principles and spec require. ' +
       `No authentication. Full guide: ${siteUrl}/mcp-skill.md.`,
     'Read the cache first; it costs no audit. get_scorecard (a CLI) and get_website_audit (a website) return ' +
       '{ found: false, next_tool } on a miss. Only then run a metered audit: ' +
       `score_cli (${AUDIT_LIMIT_REQUESTS} fresh audits per ${AUDIT_LIMIT_WINDOW_MINUTES} minutes per IP) or ` +
       `audit_website (${WEB_AUDIT_HOURLY_REQUESTS} fresh audits per ${AUDIT_LIMIT_WINDOW_MINUTES} minutes per IP). ` +
-      'Browse with list_tools, search_tools, get_tool, and list_website_audits; read the standard with ' +
+      'Browse the CLI registry with list_tools, search_tools, and get_tool, and the web leaderboard with ' +
+      'list_website_audits; read the standard with ' +
       'list_principles, get_principle, list_spec_sections, and get_spec_section; get_web_remediation returns the ' +
       'fix for a failed website check.',
     FOLLOW_DISCLOSURE_SHORT,
     `${TOOL_COUNT} tools and ${RESOURCE_TOTAL} resources (anc://registry plus 4 templates); full schemas are on ` +
       'tools/list and resources/templates/list.',
     'Scorecard tools return one envelope { kind, tier, target, scorecard_url, markdown_url, json_url, freshness, ' +
-      'spec_version, scorecard }, the JSON json_url serves; web scorecard fields are at ' +
+      'spec_version, scorecard }; json_url serves the same JSON. Web scorecard fields are at ' +
       `${siteUrl}/web-scorecard-schema. Check isError first: a cache miss is isError: false with next_tool, not a ` +
       'failure.',
     `Every call shares ${READ_LIMIT_REQUESTS} requests per ${READ_LIMIT_WINDOW_SECONDS} seconds per IP; a breach ` +

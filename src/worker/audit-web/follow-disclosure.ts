@@ -29,6 +29,7 @@ export const FOLLOW_DISCLOSURE =
 export const FOLLOW_DISCLOSURE_SHORT =
   'By default a website audit also contacts third-party hosts the site declares (its MCP server, its API host), ' +
   'including JSON-RPC POSTs to a declared MCP server once its own documents confirm it. It follows ' +
-  `at most ${MAX_FOLLOWED_HOSTS} hosts per audit and about ${DECLARED_DOMAIN_HOURLY_CEILING} audits per hour per ` +
-  'declared domain; follow_declarations: false audits only the site and returns a result that is never saved. ' +
+  `at most ${MAX_FOLLOWED_HOSTS} hosts per audit, and following is capped at about ` +
+  `${DECLARED_DOMAIN_HOURLY_CEILING} audits per hour per declared domain across all callers; ` +
+  'follow_declarations: false audits only the site and returns a result that is never saved. ' +
   'The follow_declarations parameter describes what each host receives.';

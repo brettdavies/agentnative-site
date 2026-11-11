@@ -1903,11 +1903,17 @@ describe('audit_website discloses third-party probing', () => {
   test('the follow_declarations parameter still says what it is and what false changes', async () => {
     const description = (await auditWebsite())?.inputSchema.properties.follow_declarations?.description ?? '';
     expect(description.startsWith('Follow the hosts the site declares')).toBe(true);
-    expect(description).toContain('defaults to true');
+    expect(description).toContain('By default (follow_declarations true)');
     expect(description).toContain(
-      "With false the result is transient: never cached, never listed, no scorecard_url, markdown_url, or json_url, and never joined to another caller's run",
+      "With false the result is also never listed and never joined to another caller's run, and it carries no scorecard_url, markdown_url, or json_url",
     );
     expect(description).toContain('a public_listing that differs from the stored choice is rejected');
+  });
+
+  test('the follow_declarations parameter states each fact once where the two pieces join', async () => {
+    const description = (await auditWebsite())?.inputSchema.properties.follow_declarations?.description ?? '';
+    expect(description).not.toContain('defaults to true');
+    expect(description).not.toContain('transient');
   });
 
   test('the audit_website description carries the short disclosure and not the full one', async () => {
@@ -1918,9 +1924,19 @@ describe('audit_website discloses third-party probing', () => {
     expect(description).not.toContain('\u2014');
   });
 
+  test('the audit_website description names the freshness fields and what each refusal looks like', async () => {
+    const description = (await auditWebsite())?.description ?? '';
+    for (const field of ['freshness.cached', 'freshness.scored_at', 'freshness.refresh_after']) {
+      expect(description).toContain(field);
+    }
+    expect(description).toContain('isError: false with audited: false');
+    expect(description).toContain('isError: true with a JSON-RPC -32099 error in the text');
+    expect(description).toContain('read get_website_audit');
+  });
+
   test('the short disclosure states the caps, the wire probes, and the opt-out in fixed text', () => {
     expect(FOLLOW_DISCLOSURE_SHORT).toContain('at most 4 hosts per audit');
-    expect(FOLLOW_DISCLOSURE_SHORT).toContain('about 30 audits per hour per declared domain');
+    expect(FOLLOW_DISCLOSURE_SHORT).toContain('about 30 audits per hour per declared domain across all callers');
     expect(FOLLOW_DISCLOSURE_SHORT).toContain('JSON-RPC POSTs');
     expect(FOLLOW_DISCLOSURE_SHORT).toContain('follow_declarations: false audits only the site');
   });

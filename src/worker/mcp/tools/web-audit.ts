@@ -229,10 +229,13 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         'notifications; get_website_audit reads the cache without running an audit. ' +
         `${FOLLOW_DISCLOSURE_SHORT} ` +
         'A result under 1 minute old is returned without re-running, and a cached result is still served as-is when ' +
-        'the audit is disabled. Results carry cached (false only when this call ran the audit), scored_at (when it ' +
-        'ran, null on a legacy entry), and refresh_after (when the 1-minute reuse window ends: eligibility, not a ' +
-        'promise a fresh audit will run). Disabled when WEB_AUDIT_ENABLED or MCP_ENABLED is not "true"; a per-IP ' +
-        'burst limit and 30 fresh audits per 60 minutes per IP apply; a request without cf-connecting-ip returns -32099.',
+        'the audit is disabled. Results carry freshness.cached (false only when this call ran the audit), ' +
+        'freshness.scored_at (when it ran, null on a legacy entry), and freshness.refresh_after (when the 1-minute ' +
+        'reuse window ends: eligibility, not a promise a fresh audit will run). When WEB_AUDIT_ENABLED or ' +
+        'MCP_ENABLED is not "true" the answer is isError: false with audited: false: the cached result if one ' +
+        'exists, otherwise a message that points at get_website_audit. A per-IP burst limit and 30 fresh audits per ' +
+        '60 minutes per IP apply; a breach, or a request without cf-connecting-ip, returns isError: true with a ' +
+        'JSON-RPC -32099 error in the text, so read get_website_audit or retry later.',
       inputSchema: {
         url: z
           .string()
@@ -262,11 +265,11 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
           .boolean()
           .optional()
           .describe(
-            'Follow the hosts the site declares (its MCP server, its API host) and score them with the site; ' +
-              `defaults to true. ${FOLLOW_DISCLOSURE} ` +
-              'With false the result is transient: never cached, never listed, no scorecard_url, markdown_url, or ' +
-              "json_url, and never joined to another caller's run; a public_listing that differs from the stored " +
-              'choice is rejected.',
+            'Follow the hosts the site declares (its MCP server, its API host) and score them with the site. ' +
+              `${FOLLOW_DISCLOSURE} ` +
+              "With false the result is also never listed and never joined to another caller's run, and it carries " +
+              'no scorecard_url, markdown_url, or json_url; a public_listing that differs from the stored choice is ' +
+              'rejected.',
           ),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
