@@ -16,6 +16,7 @@ import { _resetResultCaches, handleResultRoute, type ResultEnv } from '../src/wo
 import { resolveBoardEntries, type WebBoardEnv } from '../src/worker/audit-web/board';
 import { keyFor, WEB_AUDIT_STALE_AFTER_MS } from '../src/worker/audit-web/cache';
 import type { DomainBudgetEnv } from '../src/worker/audit-web/domain-budget';
+import { FOLLOW_DISCLOSURE, FOLLOW_DISCLOSURE_SHORT } from '../src/worker/audit-web/follow-disclosure';
 import { flushHitMinPurge, runWithHitMinPurge } from '../src/worker/audit-web/hit-min-purge';
 import { enforcePublicListingFlipLimit } from '../src/worker/audit-web/public-listing';
 import {
@@ -1864,14 +1865,24 @@ describe('audit_website: a followed fresh run that fails', () => {
 });
 
 describe('audit_website discloses third-party probing', () => {
-  test('the description names the caps, tells MCP wire probes from API anchor GETs, and offers the opt-out', async () => {
+  type ToolEntry = {
+    name: string;
+    description: string;
+    inputSchema: { properties: Record<string, { type?: string; description?: string }> };
+  };
+
+  async function auditWebsite(): Promise<ToolEntry | undefined> {
     const env = await makeEnv();
     const { body } = await mcpRpc(env, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
-    const tools = body.result?.tools as
-      | Array<{ name: string; description: string; inputSchema: { properties: Record<string, { type?: string }> } }>
-      | undefined;
-    const tool = tools?.find((t) => t.name === 'audit_website');
-    const description = tool?.description ?? '';
+    return (body.result?.tools as ToolEntry[] | undefined)?.find((t) => t.name === 'audit_website');
+  }
+
+  test('the follow_declarations parameter carries the full disclosure: caps, probe split, opt-out, and the unsaved result', async () => {
+    const tool = await auditWebsite();
+    const parameter = tool?.inputSchema.properties.follow_declarations;
+    const description = parameter?.description ?? '';
+    expect(parameter?.type).toBe('boolean');
+    expect(description).toContain(FOLLOW_DISCLOSURE);
     expect(description).toContain('also contacts third-party hosts the site declares');
     expect(description).toContain(
       "wire-probed (JSON-RPC POSTs, a CORS preflight) only after one of those documents on the endpoint's own host names the endpoint",
@@ -1885,8 +1896,33 @@ describe('audit_website discloses third-party probing', () => {
     expect(description).toContain(
       'when the site has a saved scorecard from the last 24 hours that audit is returned without replacing it, with no scorecard_url, markdown_url, or json_url',
     );
+    expect(description).toContain('anc sends no plaintext request');
     expect(description).toContain('WEB_AUDIT_FOLLOW_ENABLED');
-    expect(tool?.inputSchema.properties.follow_declarations?.type).toBe('boolean');
+  });
+
+  test('the follow_declarations parameter still says what it is and what false changes', async () => {
+    const description = (await auditWebsite())?.inputSchema.properties.follow_declarations?.description ?? '';
+    expect(description.startsWith('Follow the hosts the site declares')).toBe(true);
+    expect(description).toContain('defaults to true');
+    expect(description).toContain(
+      "With false the result is transient: never cached, never listed, no scorecard_url, markdown_url, or json_url, and never joined to another caller's run",
+    );
+    expect(description).toContain('a public_listing that differs from the stored choice is rejected');
+  });
+
+  test('the audit_website description carries the short disclosure and not the full one', async () => {
+    const description = (await auditWebsite())?.description ?? '';
+    expect(description).toContain(FOLLOW_DISCLOSURE_SHORT);
+    expect(description).not.toContain(FOLLOW_DISCLOSURE);
+    expect(description).toContain('MCP_ENABLED');
+    expect(description).not.toContain('\u2014');
+  });
+
+  test('the short disclosure states the caps, the wire probes, and the opt-out in fixed text', () => {
+    expect(FOLLOW_DISCLOSURE_SHORT).toContain('at most 4 hosts per audit');
+    expect(FOLLOW_DISCLOSURE_SHORT).toContain('about 30 audits per hour per declared domain');
+    expect(FOLLOW_DISCLOSURE_SHORT).toContain('JSON-RPC POSTs');
+    expect(FOLLOW_DISCLOSURE_SHORT).toContain('follow_declarations: false audits only the site');
   });
 });
 

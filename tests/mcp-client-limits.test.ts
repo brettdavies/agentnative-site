@@ -4,6 +4,7 @@
 
 import { beforeAll, describe, expect, test } from 'bun:test';
 import { compareVersions } from '../src/build/scorecards.mjs';
+import { FOLLOW_DISCLOSURE_SHORT } from '../src/worker/audit-web/follow-disclosure';
 import {
   budgetLimits,
   CLIENT_LIMITS,
@@ -178,6 +179,10 @@ async function readServed(origin: string): Promise<Served> {
   };
 }
 
+function shown(needle: string): string {
+  return JSON.stringify(needle.length > 60 ? `${needle.slice(0, 57)}...` : needle);
+}
+
 function breach(subject: string, origin: string, what: string, limit: ClientLimit, measured: number): string {
   return `${subject} at ${origin}: ${what} breaks ${limit.id} (${limit.client}): ${measured} ${limit.unit}, limit ${limit.value}`;
 }
@@ -186,9 +191,15 @@ function assertNoFailures(failures: readonly string[]): void {
   if (failures.length > 0) throw new Error(`${failures.join('\n')}\n${NEXT_STEP}`);
 }
 
+function limitsAcross(
+  select: (surface: MetadataSurface) => ClientLimit[],
+  surfaces: readonly MetadataSurface[],
+): ClientLimit[] {
+  return [...new Map(surfaces.flatMap((surface) => select(surface)).map((limit) => [limit.id, limit])).values()];
+}
+
 function budgetFailures(subject: string, text: string, surfaces: readonly MetadataSurface[], origin: string): string[] {
-  const limits = new Map(surfaces.flatMap((surface) => budgetLimits(surface)).map((limit) => [limit.id, limit]));
-  return [...limits.values()]
+  return limitsAcross(budgetLimits, surfaces)
     .filter((limit) => measure(text, limit.unit) > limit.value)
     .map((limit) => breach(subject, origin, 'the whole string', limit, measure(text, limit.unit)));
 }
@@ -201,23 +212,19 @@ function windowFailures(
   origin: string,
 ): string[] {
   const start = text.indexOf(needle);
-  if (start === -1) return [`${subject} at ${origin}: the text to place, ${JSON.stringify(needle)}, is absent`];
+  if (start === -1) return [`${subject} at ${origin}: the text to place, ${shown(needle)}, is absent`];
   const prefix = text.slice(0, start + needle.length);
   return limits
     .filter((limit) => measure(prefix, limit.unit) > limit.value)
-    .map((limit) =>
-      breach(subject, origin, `the end of ${JSON.stringify(needle)}`, limit, measure(prefix, limit.unit)),
-    );
+    .map((limit) => breach(subject, origin, `the end of ${shown(needle)}`, limit, measure(prefix, limit.unit)));
 }
 
 function orderFailures(subject: string, text: string, needles: readonly string[], origin: string): string[] {
   const positions = needles.map((needle) => text.indexOf(needle));
   const absent = needles.filter((_, i) => positions[i] === -1);
-  if (absent.length > 0) return [`${subject} at ${origin}: absent: ${absent.map((n) => JSON.stringify(n)).join(', ')}`];
+  if (absent.length > 0) return [`${subject} at ${origin}: absent: ${absent.map(shown).join(', ')}`];
   const inOrder = positions.every((position, i) => i === 0 || position > positions[i - 1]);
-  return inOrder
-    ? []
-    : [`${subject} at ${origin}: out of order: ${needles.map((n) => JSON.stringify(n)).join(' before ')}`];
+  return inOrder ? [] : [`${subject} at ${origin}: out of order: ${needles.map(shown).join(' before ')}`];
 }
 
 function purposeSentence(text: string): string {
@@ -269,5 +276,43 @@ describe.each(ORIGINS)('served metadata at %s', (origin) => {
         origin,
       ),
     );
+  });
+
+  test('the short disclosure ends inside every critical-window limit, in the instructions and in audit_website', () => {
+    const auditWebsite = served.tools.find((tool) => tool.name === 'audit_website')?.description ?? '';
+    assertNoFailures([
+      ...windowFailures(
+        'the server instructions',
+        served.initializeInstructions,
+        FOLLOW_DISCLOSURE_SHORT,
+        criticalLimits('server-instructions'),
+        origin,
+      ),
+      ...windowFailures(
+        'the audit_website description',
+        auditWebsite,
+        FOLLOW_DISCLOSURE_SHORT,
+        limitsAcross(criticalLimits, TOOL_DESCRIPTION_SURFACES),
+        origin,
+      ),
+    ]);
+  });
+
+  test('in the instructions score_cli comes before the short disclosure, which comes before the shared limit', () => {
+    assertNoFailures(
+      orderFailures(
+        'the server instructions',
+        served.initializeInstructions,
+        ['score_cli', FOLLOW_DISCLOSURE_SHORT, 'Every call shares'],
+        origin,
+      ),
+    );
+  });
+
+  test('the audit_website description puts the short disclosure directly after its first sentence', () => {
+    const description = served.tools.find((tool) => tool.name === 'audit_website')?.description ?? '';
+    const first = purposeSentence(description);
+    expect(first.length).toBeGreaterThan(0);
+    expect(description.startsWith(`${first} ${FOLLOW_DISCLOSURE_SHORT}`)).toBe(true);
   });
 });

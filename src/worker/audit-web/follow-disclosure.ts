@@ -1,6 +1,9 @@
-// What a default audit sends to the hosts a site declares, stated once so
-// the audit_website tool description and the MCP server instructions
-// disclose the same probes and the same caps the follow slice enforces.
+// What a default audit sends to the hosts a site declares, in two wire forms
+// built from the same cap constants the follow slice enforces. The full form
+// is the follow_declarations parameter description. The short form is the
+// MCP server instructions and the audit_website description: it carries the
+// per-audit host cap and the per-domain hourly cap, and points at the
+// parameter for the rest.
 
 import { FOLLOW_SLICE_MS } from './follow';
 import { MAX_FOLLOW_REQUESTS, MAX_FOLLOWED_HOSTS } from './follow-requests';
@@ -22,3 +25,10 @@ export const FOLLOW_DISCLOSURE =
   'markdown_url, or json_url. ' +
   'follow_declarations false audits only the site and returns a result that is never saved, and the operator can ' +
   'switch following off for every audit (WEB_AUDIT_FOLLOW_ENABLED).';
+
+export const FOLLOW_DISCLOSURE_SHORT =
+  'By default a website audit also contacts third-party hosts the site declares (its MCP server, its API host), ' +
+  'including JSON-RPC POSTs to a declared MCP server once its own documents confirm it. It follows ' +
+  `at most ${MAX_FOLLOWED_HOSTS} hosts per audit and about ${DECLARED_DOMAIN_HOURLY_CEILING} audits per hour per ` +
+  'declared domain; follow_declarations: false audits only the site and returns a result that is never saved. ' +
+  'The follow_declarations parameter describes what each host receives.';

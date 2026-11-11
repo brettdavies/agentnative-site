@@ -42,7 +42,7 @@ import {
 } from '../../audit-web/cache';
 import { prepareWebTarget, type WebTarget, webEnvelope } from '../../audit-web/core';
 import type { DomainBudgetEnv } from '../../audit-web/domain-budget';
-import { FOLLOW_DISCLOSURE } from '../../audit-web/follow-disclosure';
+import { FOLLOW_DISCLOSURE, FOLLOW_DISCLOSURE_SHORT } from '../../audit-web/follow-disclosure';
 import type { FollowSwitchEnv } from '../../audit-web/follow-switch';
 import { queueHitMinPurge, webTag } from '../../audit-web/hit-min-purge';
 import { consumeWebAuditHourlyBudget, HOURLY_CONTENTION_MESSAGE } from '../../audit-web/limiter';
@@ -225,16 +225,14 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
     {
       title: 'Run a live website audit',
       description:
-        'Run a fresh website agent-readiness audit and return the complete scorecard. Returns a single terminal scorecard ' +
-        '(no progress notifications — the server is stateless per-request). A cached result younger than 1 minute is ' +
-        'returned without re-running; an older one re-runs (and is still served as-is when the audit is disabled). ' +
-        'Every scorecard-bearing result carries cached, scored_at, and refresh_after beside the scorecard: cached is ' +
-        'true for a served cache entry or a listing-only patch and false for a result this call produced, scored_at is ' +
-        'when the audit ran (null on a legacy entry, and refresh_after is the earliest time the entry leaves the ' +
-        '1-minute cache-reuse window — eligibility only, not a promise a fresh audit will be available, since kill ' +
-        'switches, rate limits, and service failures still apply. A fresh audit is gated like score_cli: disabled when ' +
-        'WEB_AUDIT_ENABLED or MCP_ENABLED is not "true"; a request without cf-connecting-ip returns -32099 (no anon ' +
-        `fallback); a per-IP burst limiter plus a 30-fresh-audits-per-hour-per-IP window apply. ${FOLLOW_DISCLOSURE}`,
+        'Run a fresh website agent-readiness audit and return one terminal scorecard, with no progress ' +
+        'notifications; get_website_audit reads the cache without running an audit. ' +
+        `${FOLLOW_DISCLOSURE_SHORT} ` +
+        'A result under 1 minute old is returned without re-running, and a cached result is still served as-is when ' +
+        'the audit is disabled. Results carry cached (false only when this call ran the audit), scored_at (when it ' +
+        'ran, null on a legacy entry), and refresh_after (when the 1-minute reuse window ends: eligibility, not a ' +
+        'promise a fresh audit will run). Disabled when WEB_AUDIT_ENABLED or MCP_ENABLED is not "true"; a per-IP ' +
+        'burst limit and 30 fresh audits per 60 minutes per IP apply; a request without cf-connecting-ip returns -32099.',
       inputSchema: {
         url: z
           .string()
@@ -265,9 +263,10 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
           .optional()
           .describe(
             'Follow the hosts the site declares (its MCP server, its API host) and score them with the site; ' +
-              'defaults to true. false audits only the site itself and returns a transient result: never cached, ' +
-              "never listed, no scorecard_url, markdown_url, or json_url, and never joined to another caller's run. " +
-              'With false, a public_listing that differs from the stored choice is rejected.',
+              `defaults to true. ${FOLLOW_DISCLOSURE} ` +
+              'With false the result is transient: never cached, never listed, no scorecard_url, markdown_url, or ' +
+              "json_url, and never joined to another caller's run; a public_listing that differs from the stored " +
+              'choice is rejected.',
           ),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
