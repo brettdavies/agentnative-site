@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { AuditEvent } from '../src/shared/audit-events';
 import type { AuditJob } from '../src/worker/audit/job';
 import type { McpEnv } from '../src/worker/mcp/server';
+import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
 import { _resetHintsIndexCache } from '../src/worker/score/orchestrate';
 import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
@@ -374,6 +375,31 @@ describe('score_cli: MCP_LIVE_SCORING_ENABLED kill switch', () => {
     expect(body.message.toLowerCase()).toContain('disabled');
     expect(doSpy.calls.length).toBe(0);
     expect(kv.getCalls).toBe(0);
+  });
+});
+
+describe('score_cli: SCORE_KV scoring_disabled kill switch', () => {
+  beforeEach(() => {
+    _resetKillSwitchCache();
+  });
+  afterEach(() => {
+    _resetKillSwitchCache();
+  });
+
+  test('scoring_disabled on runs no container audit and answers as the MCP live-scoring switch does', async () => {
+    const offEnv = makeEnv({ liveScoringEnabled: false }).env;
+    const switchedOff = getJsonContent(
+      await callScoreCli(offEnv, { install: 'npm install -g newcli' }, '198.51.100.7'),
+    );
+
+    const kv: KvStub = { store: new Map([['scoring_disabled', 'true']]), getCalls: 0, putCalls: 0 };
+    const { env, doSpy } = makeEnv({ kv });
+    const result = await callScoreCli(env, { install: 'npm install -g newcli' }, '198.51.100.7');
+
+    expect(result.result?.isError).toBeFalsy();
+    expect(getJsonContent(result)).toEqual(switchedOff);
+    expect(doSpy.calls.length).toBe(0);
+    expect(kv.store.size).toBe(1);
   });
 });
 
