@@ -163,7 +163,8 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       title: 'Get a cached website audit',
       description:
         'Read a cached website agent-readiness scorecard by URL without re-running the audit. Returns isError:false for ' +
-        'every outcome: a hit returns { found:true, ...envelope } carrying kind, tier, target, scorecard_url, ' +
+        'every outcome but one: isError:true with cache_unavailable when a www.<domain> read cannot reach the ' +
+        '<domain> record. A hit returns { found:true, ...envelope } carrying kind, tier, target, scorecard_url, ' +
         'markdown_url, json_url, freshness and the scorecard, the same envelope the result page serves at its ' +
         'json_url; a target already being audited returns { found:false, in_progress:true, started_at }; a miss ' +
         'returns { found:false, next_tool:"audit_website" }. freshness.cached is always true on a hit; ' +
@@ -176,7 +177,10 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
           .string()
           .describe(
             'The website URL or bare domain, e.g. "anc.dev" or "https://anc.dev/". Read at its https origin; an ' +
-              'http:// URL reads the https record.',
+              'http:// URL reads the https record. www.<domain> reads the <domain> scorecard when that scorecard ' +
+              'records that one of the two hosts redirects to the other (its site_hosts lists both); target and ' +
+              'scorecard_url then name <domain>. Otherwise www.<domain> is its own site, and a miss there may mean ' +
+              'the pair has not been audited since the fold was recorded.',
           ),
       },
       annotations: { readOnlyHint: true },
@@ -235,7 +239,11 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         url: z
           .string()
           .describe(
-            'The website URL or bare domain to audit; audited at its https origin; an http:// URL is upgraded.',
+            'The website URL or bare domain to audit; audited at its https origin; an http:// URL is upgraded. ' +
+              'The audit first checks whether <domain> or www.<domain> redirects to the other. If one does, they are ' +
+              'one site named <domain>: target and scorecard_url name <domain>, scorecard.target_url is the origin ' +
+              'the checks ran at, and scorecard.site_hosts lists both hosts. A www. host with no such redirect is ' +
+              'audited as its own site.',
           ),
         site_type: z
           .enum(['content', 'api'])
@@ -432,6 +440,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         'Return the website half of the leaderboard (curated + opted-in). Each entry carries domain, url, name, ' +
         'score_pct, and scorecard_url. view "curated" (the default) returns only the curated board; ' +
         `view "all" adds the user-submitted domains that opted in to public listing, bounded to the first ${LIST_ALL_MAX_USER_ROWS}. ` +
+        'A site whose bare or www. host redirects to the other is listed once, under the bare domain. ' +
         'An empty list means the board is mid-rescore; get_website_audit still serves per-domain results.',
       inputSchema: {
         view: z

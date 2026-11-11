@@ -272,6 +272,14 @@ schedule and after each deploy; only one batch runs at a time, so overlapping tr
 double-spending the audit budget. It is what keeps the board's live scores fresh without committing any scorecard
 snapshots. Distinct from an on-demand audit of a single domain, which caches its own result without starting a batch.
 
+### Site fold
+
+A bare host and its `www.` host treated as one audited site because the first redirect from either root lands on the
+other. The audit resolves the pair before it probes, checks the host the redirect lands on, and stores one scorecard
+under the bare host with both hosts in `site_hosts`; `/score/www.<domain>` then answers a 301 to the bare host's page.
+A `www.` host with no such redirect is its own site. Distinct from a declared host, which is a different site the
+audited site names.
+
 ### Declared host
 
 A host the entry site names in one of its own machine-readable surfaces: the MCP server card's remote or transport URL,

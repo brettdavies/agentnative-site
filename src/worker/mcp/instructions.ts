@@ -54,8 +54,9 @@ function buildInstructionsText(siteUrl: string): string {
       'get_website_audit reads a cached web scorecard by URL (miss returns next_tool: audit_website); audit_website ' +
       'runs a fresh audit and returns a single terminal scorecard with no progress notifications (stateless mode); ' +
       'list_website_audits returns the curated web leaderboard; get_web_remediation returns the static fix for a ' +
-      'web-audit check id. Web scorecards carry the score_pct/score/categories/results shape at ' +
-      `${siteUrl}/web-scorecard-schema.`,
+      'web-audit check id. A bare host and its www host are one site, named by the bare host, when one redirects ' +
+      'to the other; a www. host with no such redirect is its own site. Web scorecards carry the ' +
+      `score_pct/score/categories/results shape at ${siteUrl}/web-scorecard-schema.`,
     'Every read and transact tool returns the one result envelope: { kind, tier, target, scorecard_url, ' +
       'markdown_url, json_url, freshness, spec_version, scorecard } plus the lane metadata. The same envelope is ' +
       `what ${siteUrl}${SCORE_PREFIX}<target>/json serves, so a tool result and the page an agent follows it to ` +

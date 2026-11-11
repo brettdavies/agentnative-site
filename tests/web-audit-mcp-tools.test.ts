@@ -2187,6 +2187,56 @@ describe('web MCP tools: a host and its www sibling', () => {
   const IP = '203.0.113.71';
   const FOLD = ['cnn.com', 'www.cnn.com'];
 
+  type ToolList = Array<{
+    name: string;
+    description: string;
+    inputSchema: { properties: Record<string, { description?: string }> };
+  }>;
+
+  async function listedTools(): Promise<ToolList> {
+    const env = await makeEnv();
+    const { body } = await mcpRpc(env, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
+    return (body.result?.tools as ToolList | undefined) ?? [];
+  }
+
+  test('the tool descriptions state the fold: get_website_audit and audit_website on the url, list_website_audits on the tool', async () => {
+    const tools = await listedTools();
+    const named = (name: string) => tools.find((t) => t.name === name);
+    const readUrl = named('get_website_audit')?.inputSchema.properties.url?.description ?? '';
+    expect(readUrl).toContain(
+      'www.<domain> reads the <domain> scorecard when that scorecard records that one of the two hosts redirects to the other (its site_hosts lists both); target and scorecard_url then name <domain>',
+    );
+    expect(readUrl).toContain('a miss there may mean the pair has not been audited since the fold was recorded');
+    const auditUrl = named('audit_website')?.inputSchema.properties.url?.description ?? '';
+    expect(auditUrl).toContain(
+      'The audit first checks whether <domain> or www.<domain> redirects to the other. If one does, they are one site named <domain>',
+    );
+    expect(auditUrl).toContain('scorecard.target_url is the origin the checks ran at');
+    expect(auditUrl).toContain('scorecard.site_hosts lists both hosts');
+    expect(auditUrl).toContain('A www. host with no such redirect is audited as its own site');
+    expect(named('list_website_audits')?.description).toContain(
+      'A site whose bare or www. host redirects to the other is listed once, under the bare domain.',
+    );
+  });
+
+  test('get_website_audit names the one isError:true outcome, cache_unavailable', async () => {
+    const description = (await listedTools()).find((t) => t.name === 'get_website_audit')?.description ?? '';
+    expect(description).toContain(
+      'Returns isError:false for every outcome but one: isError:true with cache_unavailable when a www.<domain> read cannot reach the <domain> record.',
+    );
+    expect(description).not.toContain('Returns isError:false for every outcome:');
+  });
+
+  test('the session instructions carry the fold clause, both halves', async () => {
+    const env = await makeEnv();
+    const init = await mcpInitialize(env);
+    const instructions = (init.result as { instructions?: string } | undefined)?.instructions ?? '';
+    expect(instructions).toContain(
+      'A bare host and its www host are one site, named by the bare host, when one redirects to the other',
+    );
+    expect(instructions).toContain('a www. host with no such redirect is its own site');
+  });
+
   const foldedRecord = (staleMs = 0) => ({
     spec_version: SPEC_VERSION,
     target_url: 'https://cnn.com/',
