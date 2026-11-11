@@ -31,6 +31,10 @@ export function memoryKv(log: string[] = [], options: { sameKeyWriteClock?: () =
       log.push(`kv:put ${key}`);
       store.set(key, value);
     },
+    async delete(key: string) {
+      log.push(`kv:delete ${key}`);
+      store.delete(key);
+    },
   } as unknown as KVNamespace;
 }
 

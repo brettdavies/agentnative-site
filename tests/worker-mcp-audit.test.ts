@@ -212,6 +212,9 @@ function makeEnv(opts: MakeEnvOpts = {}): {
         kvStub.putCalls += 1;
         kvStub.store.set(key, value);
       },
+      async delete(key: string) {
+        kvStub.store.delete(key);
+      },
     } as unknown as KVNamespace,
     MCP_LIVE_SCORING_ENABLED: liveScoringEnabled ? 'true' : 'false',
     MCP_CACHE_BYPASS_ALLOWED: opts.cacheBypassAllowed,
@@ -594,8 +597,8 @@ describe('score_cli: KV-backed per-hour window', () => {
     const { env, doSpy } = makeEnv({ auditLimiter: audit, kv });
     const result = await callScoreCli(env, { install: 'npm install -g newlib2' }, ip);
     expect(result.result?.isError).toBeFalsy();
-    expect(kv.putCalls).toBe(1);
     const bucket = Math.floor(Date.now() / 3_600_000);
+    expect([...kv.store.keys()]).toEqual([`mcp_audit:${ip}:${bucket}`]);
     const stored = kv.store.get(`mcp_audit:${ip}:${bucket}`);
     expect(stored).toBe('1');
     expect(doSpy.calls.length).toBe(1);
@@ -818,5 +821,96 @@ describe('score_cli: a run already in flight', () => {
     expect(result.result?.isError).toBe(true);
     expect(getJsonContent(result)).toMatchObject({ error: 'chain_no_resolve', stage: 'attached' });
     expect(doSpy.calls.length).toBe(0);
+  });
+
+  // Two calls for one input must share one container run: the second is
+  // answered from the first run's result, whichever gate it reaches first.
+  function gatedScore(env: McpEnv): { release: () => void } {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const inner = env.SCORE as DurableObjectNamespace;
+    env.SCORE = {
+      idFromName: (name: string) => inner.idFromName(name),
+      get: (id: DurableObjectId) => ({
+        async fetch(req: Request): Promise<Response> {
+          const res = await inner.get(id).fetch(req);
+          await gate;
+          return res;
+        },
+      }),
+    } as unknown as DurableObjectNamespace;
+    return { release };
+  }
+
+  test('two calls for one input while the first is running dispatch one container run', async () => {
+    const jobs = fakeJobNamespace();
+    const kv: KvStub = { store: new Map(), getCalls: 0, putCalls: 0 };
+    const { env, doSpy } = makeEnv({ jobs, kv });
+    const { release } = gatedScore(env);
+    const first = callScoreCli(env, { install: 'npm install -g newcli' }, '198.51.100.7');
+    await new Promise((r) => setTimeout(r, 50));
+    const flagsDuringRun = [...kv.store.keys()].filter((k) => k.startsWith('inflight:')).sort();
+    const second = callScoreCli(env, { install: 'npm install -g newcli' }, '198.51.100.8');
+    await new Promise((r) => setTimeout(r, 50));
+    release();
+    const [a, b] = await Promise.all([first, second]);
+    expect({
+      containerRuns: doSpy.calls.length,
+      flagsDuringRun,
+      flagsAfter: [...kv.store.keys()].filter((k) => k.startsWith('inflight:')),
+    }).toEqual({
+      containerRuns: 1,
+      flagsDuringRun: ['inflight:cli:newcli', 'inflight:cli:npm install -g newcli'],
+      flagsAfter: [],
+    });
+    expect(getJsonContent(a)).toMatchObject({ audited: true, source: 'fresh-audit' });
+    expect(getJsonContent(b)).toMatchObject({
+      audited: true,
+      attached: true,
+      scorecard_url: 'https://anc.dev/score/newcli',
+    });
+  });
+
+  test('a job another run holds is awaited, not run again, when its flag is not yet visible', async () => {
+    const jobs = fakeJobNamespace();
+    const job = jobs.get(jobs.idFromName('cli:npm install -g newcli'));
+    const claim = await job.claim(AT, 90_000);
+    if (!claim.claimed) throw new Error('expected a fresh claim');
+    await job.append(claim.run, { type: 'accepted', lane: 'cli', target: 'npm install -g newcli', started_at: AT });
+    const { env, doSpy } = makeEnv({ jobs });
+    setTimeout(() => void job.append(claim.run, complete), 20);
+    const result = await callScoreCli(env, { install: 'npm install -g newcli' }, '198.51.100.7');
+    expect(doSpy.calls.length).toBe(0);
+    expect(getJsonContent(result)).toMatchObject({
+      audited: true,
+      attached: true,
+      scorecard_url: 'https://anc.dev/score/newcli',
+    });
+  });
+
+  test('a run that fails ends its job with the failure, so the caller attached to it is answered', async () => {
+    const jobs = fakeJobNamespace();
+    const kv: KvStub = { store: new Map(), getCalls: 0, putCalls: 0 };
+    const { env, doSpy } = makeEnv({
+      jobs,
+      kv,
+      doResponse: new Response(JSON.stringify({ error: 'chain_resolved_install_failed', details: 'apt not on path' }), {
+        status: 200,
+      }),
+    });
+    const { release } = gatedScore(env);
+    const first = callScoreCli(env, { install: 'npm install -g errlib' }, '198.51.100.7');
+    await new Promise((r) => setTimeout(r, 50));
+    const second = callScoreCli(env, { install: 'npm install -g errlib' }, '198.51.100.8');
+    await new Promise((r) => setTimeout(r, 50));
+    release();
+    const [a, b] = await Promise.all([first, second]);
+    expect(doSpy.calls.length).toBe(1);
+    expect(a.result?.isError).toBe(true);
+    expect(b.result?.isError).toBe(true);
+    expect(getJsonContent(b)).toMatchObject({ error: 'chain_resolved_install_failed', stage: 'attached' });
+    expect([...kv.store.keys()].filter((k) => k.startsWith('inflight:'))).toEqual([]);
   });
 });

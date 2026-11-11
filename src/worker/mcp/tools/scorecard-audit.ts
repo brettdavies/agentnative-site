@@ -34,6 +34,11 @@
 //      between read and write but it's bounded by the burst gate above;
 //      worst-case overshoot is a handful of audits per hour, not orders
 //      of magnitude.
+//   6.5 Claim the input's AuditJob and mark its in-flight flags, as the
+//      transact endpoint does. A job another run holds is awaited and
+//      answered from that run's terminal line, so one input runs one
+//      container audit at a time; this run's own terminal line is appended
+//      to its job for every caller attached to it.
 //   7. orchestrate.runFreshOnly. resolveSpec → post-discovery cache →
 //      dispatch to the target's own DO. The DO
 //      writes the cache itself via writeCacheBestEffort; the MCP layer
@@ -42,13 +47,26 @@
 
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
-import type { TerminalEvent } from '../../../shared/audit-events';
-import { normalizeTarget } from '../../../shared/audit-routes';
-import { awaitInFlightTerminal, type InFlightEnv } from '../../audit/inflight';
+import { auditErrorFor, CTA_RETRY, type TerminalEvent } from '../../../shared/audit-events';
+import { normalizeTarget, targetOfSpec } from '../../../shared/audit-routes';
+import {
+  awaitInFlightTerminal,
+  awaitJobTerminal,
+  claimJob,
+  type InFlightEnv,
+  InFlightFlags,
+} from '../../audit/inflight';
 import { consumeHourlyBucketBudget, HOURLY_CONTENTION_MESSAGE } from '../../audit-web/limiter';
-import { type CliCoreEnv, cliRunEnvelope, readCliTier } from '../../score/core';
+import {
+  branchResultTarget,
+  type CliCoreEnv,
+  cliRunEnvelope,
+  outcomeOf,
+  readCliTier,
+  terminalEventOf,
+} from '../../score/core';
 import { isScoringDisabled } from '../../score/kill-switch';
-import { loadHintsIndex, type OrchestrateEnv, runFreshOnly } from '../../score/orchestrate';
+import { loadHintsIndex, type OrchestrateEnv, type RunFreshResult, runFreshOnly } from '../../score/orchestrate';
 import { type DiscoveryHintsIndex, loadRegistryIndex, type RegistryIndex } from '../../score/registry-lookup';
 import { validateInput } from '../../score/validate';
 import { SPEC_VERSION } from '../../spec-version.gen';
@@ -289,6 +307,33 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
         if (hourly === 'contended') return jsonRpcError32099(HOURLY_CONTENTION_MESSAGE);
       }
 
+      // Step 6.5: the job's claim is the single-flight gate. Two calls can
+      // both pass the attach above before either one marks a flag. A cache
+      // bypass runs beside a held job and owns none of its keys.
+      const runKey = inFlightKey(choice.raw);
+      const startedAt = new Date().toISOString();
+      const job = await claimJob(env, 'cli', runKey, startedAt);
+      if (job.kind === 'running' && !bypassCache) {
+        const signal = getMcpRequest()?.signal;
+        const attached = await awaitJobTerminal(env, job.name, signal);
+        if (attached) return attachedResult(attached);
+        if (signal?.aborted) {
+          return jsonRpcError32099('the caller went away while attaching to the audit already in flight.');
+        }
+        return attachedResult({
+          type: 'error',
+          ...auditErrorFor('timeout', {
+            cta: CTA_RETRY,
+            details: 'The audit already in flight for this input did not finish in time.',
+          }),
+        });
+      }
+      const writer = job.kind === 'claimed' ? job.writer : null;
+      const flags = new InFlightFlags(env, 'cli', startedAt, writer?.name ?? null, job.kind !== 'running');
+      writer?.append({ type: 'accepted', lane: 'cli', target: runKey, started_at: startedAt });
+      const branchTarget = branchResultTarget(validated);
+      await flags.mark(runKey, ...(branchTarget ? [branchTarget] : []));
+
       // Step 7: orchestrate.runFreshOnly — resolveSpec + DO dispatch.
       // The DO calls writeCacheBestEffort itself; MCP never writes R2.
       //
@@ -298,11 +343,28 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
       // again does not exercise the DO. Same gating: caller arg + staging-only
       // env binding.
       const inputHash = await sha256Hex(choice.raw);
-      const result = await runFreshOnly(validated, env, hintsIndex, {
-        specVersion: SPEC_VERSION,
-        inputHash,
-        skipCachePost: bypassCache,
-      });
+      // A run that throws still ends its job, so no attached caller waits out the deadline.
+      let terminal: TerminalEvent = {
+        type: 'error',
+        ...auditErrorFor('incomplete_response_contract', { cta: CTA_RETRY }),
+      };
+      let result: RunFreshResult;
+      try {
+        result = await runFreshOnly(validated, env, hintsIndex, {
+          specVersion: SPEC_VERSION,
+          inputHash,
+          skipCachePost: bypassCache,
+          onResolved: async (spec) => {
+            if (spec.pm !== 'git-clone') await flags.mark(targetOfSpec(spec));
+          },
+          onPhase: (line) => writer?.append({ type: 'phase', phase: line.phase, at: line.at }),
+        });
+        terminal = terminalEventOf(outcomeOf(result, { indexes, origin: siteUrl }));
+      } finally {
+        writer?.append(terminal);
+        await writer?.settled();
+        await flags.clear();
+      }
 
       // Step 8: map kind to typed-state response.
       switch (result.kind) {
