@@ -299,6 +299,22 @@ describe('robots.txt Content Signals (built dist/)', () => {
   });
 });
 
+// IndexNow verifies a host by fetching <key>.txt from its root and comparing the
+// body to the key, so a trailing newline or any extra byte fails verification.
+// The key is written out rather than imported: a test that reads the constant
+// it checks cannot notice it changing.
+describe('IndexNow key file (built dist/)', () => {
+  const INDEXNOW_KEY = 'db83285bafcf4c99982c98f1041db7be';
+
+  test('sits at the dist root as exactly the 32 key bytes', async () => {
+    const path = join(DIST_DIR, `${INDEXNOW_KEY}.txt`);
+    expect(existsSync(path)).toBe(true);
+    const bytes = await readFile(path);
+    expect(bytes.length).toBe(32);
+    expect(bytes.equals(Buffer.from(INDEXNOW_KEY, 'utf8'))).toBe(true);
+  });
+});
+
 describe('.well-known/api-catalog (built dist/)', () => {
   test('is a valid RFC 9727 link set with the MCP endpoint as anchor', async () => {
     const raw = await readFile(join(DIST_DIR, '.well-known', 'api-catalog'), 'utf8');
