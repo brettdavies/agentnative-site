@@ -1,5 +1,5 @@
 {
-  "description": "the bare host gives no answer and the www host answers its root without a redirect: the audit ends unreachable and names the www host as the one that answered",
+  "description": "the bare host gives no answer and the `www.` host answers its root without a redirect: the audit ends unreachable and names the `www.` host as the one that answered",
   "covers": [
     "agent-ua-reachable"
   ],

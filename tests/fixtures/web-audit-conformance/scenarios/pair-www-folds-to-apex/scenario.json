@@ -1,5 +1,5 @@
 {
-  "description": "the www host redirects its root to the bare host, and the audit starts at www: the pair is one site named by the bare host, audited at the bare host",
+  "description": "the `www.` host redirects its root to the bare host, and the audit starts there: the pair is one site named by the bare host, audited at the bare host",
   "covers": [
     "mcp-initialize",
     "mcp-tools-list",

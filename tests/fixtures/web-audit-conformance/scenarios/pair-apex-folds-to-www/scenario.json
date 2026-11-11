@@ -1,5 +1,5 @@
 {
-  "description": "the bare host redirects its root to the www host, which serves the site and its MCP endpoint: the pair is one site named by the bare host, audited at www, and no declared host names www",
+  "description": "the bare host redirects its root to the `www.` host, which serves the site and its MCP endpoint: the pair is one site named by the bare host, audited at the `www.` host, and no declared host names the `www.` host",
   "covers": [
     "mcp-initialize",
     "mcp-tools-list",

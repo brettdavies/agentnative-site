@@ -1,5 +1,5 @@
 {
-  "description": "the bare host folds into www, and the www MCP endpoint answers the discovery POST with a redirect to the same path on the bare host: the hop stays on the site, so discovery records the www endpoint it requested, the lane probes read the bare-host answers, and no declared host is recorded",
+  "description": "the bare host folds into the `www.` host, and the `www.` MCP endpoint answers the discovery POST with a redirect to the same path on the bare host: the hop stays on the site, so discovery records the `www.` endpoint it requested, the lane probes read the bare-host answers, and no declared host is recorded",
   "covers": [
     "mcp-initialize",
     "mcp-tools-list"

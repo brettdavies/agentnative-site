@@ -1,5 +1,5 @@
 {
-  "description": "the bare host redirects its root to an unrelated host while the www host does not redirect: no redirect lands on the other host of the pair, so the audit covers the bare host alone",
+  "description": "the bare host redirects its root to an unrelated host while the `www.` host does not redirect: no redirect lands on the other host of the pair, so the audit covers the bare host alone",
   "covers": [
     "agent-ua-reachable",
     "root-meta-description"

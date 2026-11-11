@@ -1,5 +1,5 @@
 {
-  "description": "the audit starts at the www host while the bare host gives no answer: the www host is its own site, stored under its own name, with no fold recorded",
+  "description": "the audit starts at the `www.` host while the bare host gives no answer: the `www.` host is its own site, stored under its own name, with no fold recorded",
   "covers": [
     "agent-ua-reachable",
     "root-meta-description"

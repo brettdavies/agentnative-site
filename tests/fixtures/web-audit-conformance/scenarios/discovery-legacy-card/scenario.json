@@ -1,5 +1,5 @@
 {
-  "description": "a SEP-1649 card at the well-known path names the endpoint in transport.url; no common path is POSTed and the card suffix answers 404",
+  "description": "a SEP-1649 card at the well-known path names the endpoint in transport.url; no common path receives a POST and the card suffix answers 404",
   "covers": [
     "mcp-server-card",
     "mcp-initialize"

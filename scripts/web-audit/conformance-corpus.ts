@@ -498,7 +498,7 @@ always recorded as \`TimeoutError: deadline exceeded\`. Redirects are ordinary e
 header) that the guarded fetch above the seam follows with a new request, except where the engine keeps a probe off
 hosts nothing confirmed. The guarded fetch sends nothing over \`http\`: a request URL on \`http\` never reaches the seam
 and reads as a failure with the error \`not requested: not https\`, and a redirect to \`http\` it would otherwise follow
-is not taken, so the probe's answer is that redirect's status and headers with an empty body and the error \`redirect
+is not taken, so the probe's answer is the status and headers of that redirect with an empty body and the error \`redirect
 refused: <status> to <location>: not https\`. A request to the MCP endpoint on the audited origin (discovery's
 common-path POSTs and every probe of that endpoint) takes only hops that keep the scheme, host, and port: discovery
 records a redirect to another origin with its target and declares the target, and any other probe reads it as a
@@ -545,7 +545,7 @@ was evaluated. The row's own status is the same rule over all its targets.
 
 \`declared_hosts\` holds one entry per URL the target's discovery documents declare off its origin, in declaration
 order (the AI catalog's card entries, the card under the discovered endpoint, then the well-known cards; the endpoints a
-followed card document names come right after that document's entry), then the api-catalog's anchors in linkset order
+followed card document names come right after that document's entry), then the api-catalog's anchors in \`linkset\` order
 (\`api-anchor\`; one with no \`service-desc\` other than an MCP surface reads \`not-followed\` with reason
 \`no-service-desc\`), then the description each API anchor declares (\`api-description\`) in the same order, then the
 targets the common-path POSTs were redirected to off the origin, in probe order and with the redirecting path as

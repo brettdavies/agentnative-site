@@ -1,5 +1,5 @@
 {
-  "description": "both roots answer with a page and neither redirects: the two hosts are two sites, and the www host is requested as any other host would be",
+  "description": "both roots answer with a page and neither redirects: the two hosts are two sites, and the `www.` host is requested as any other host would be",
   "covers": [
     "agent-ua-reachable",
     "root-meta-description"

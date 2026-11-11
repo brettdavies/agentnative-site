@@ -49,11 +49,11 @@ The web scorecard is site-owned. Its `schema_version` is **0.5**, independent of
 | `audience`             | null                | engine  | Always `null` for web targets; the audience classifier is a CLI concept.                                                           |
 | `audit_profile`        | null                | engine  | Always `null` for web targets; audit profiles are a CLI concept.                                                                   |
 | `site_type`            | string \| null      | engine  | The declared site type the run scoped to: `content`, `api`, or `null` (everything ran).                                            |
-| `public_listing`       | boolean             | engine  | The submitter's opt-in to the public board listing. `false` unless explicitly set.                                                 |
+| `public_listing`       | boolean             | engine  | The opt-in of whoever submitted the audit to the public board listing. `false` unless explicitly set.                                                 |
 | `vantage`              | object              | engine  | Where the audit ran and whether it presented a credential. See [vantage](#vantage).                                                |
 | `follow_declarations`  | boolean, optional   | engine  | Whether the audit followed the hosts the site declares (its MCP server, its API host). Absent means no follow state was recorded.  |
 | `declared_hosts`       | array, optional     | engine  | The declared-hosts trail: one entry per host the site declares, with how the audit treated it. Absent means no trail was recorded. |
-| `site_hosts`           | array of string, optional | engine | Present only when one of the bare and www hosts redirects to the other: both hosts, bare first. Absent means no fold was recorded: the pair did not fold, or the scorecard predates the field. |
+| `site_hosts`           | array of string, optional | engine | Present only when one of the bare and `www.` hosts redirects to the other: both hosts, bare first. Absent means no fold was recorded: the pair did not fold, or the scorecard predates the field. |
 | `registry_fingerprint` | string, optional    | stored  | The first 12 characters of the fingerprint of the check registry the score was computed under. The engine never sets it.           |
 | `summary`              | object              | derived | Tally of check outcomes by status. See [summary](#summary).                                                                        |
 | `coverage_summary`     | object              | derived | MUST / SHOULD / MAY totals and how many were verified. See [coverage_summary](#coverage_summary).                                  |
@@ -120,7 +120,7 @@ Web identity. The CLI-only header fields (`tier`, `language`, `repo`, `install`)
 | Field  | Type   | Meaning                                              |
 | ------ | ------ | ---------------------------------------------------- |
 | `name` | string | The site's name: the audited host, or the bare domain when `site_hosts` is present. |
-| `url`  | string | The site's URL. Equals `target_url` unless `site_hosts` is present and the checks ran at the www host. |
+| `url`  | string | The site's URL. Equals `target_url` unless `site_hosts` is present and the checks ran at the `www.` host. |
 
 ## `vantage`
 
@@ -144,7 +144,7 @@ local or credentialed score is never ranked beside a public one. A scorecard sto
 
 One entry per URL the site's discovery documents declare off its own origin, in declaration order: the AI catalog's MCP
 server-card entries, the card under the discovered endpoint, then the well-known cards, with the endpoints a followed
-card document names right after that document. Then come the API catalog's anchors in linkset order, then the
+card document names right after that document. Then come the API catalog's anchors in `linkset` order, then the
 description each API anchor declares. After them come the URLs the site's own MCP paths redirected the discovery POSTs
 to on another origin, in probe order. A URL declared twice keeps its first entry.
 
@@ -429,7 +429,7 @@ in its maximum. Both are the sentences the result page shows.
 | `fix`       | string         | The canonical fix text for this check id.                                                                           |
 | `skill_url` | string         | The fix-skill page for this check id, which also has a markdown twin at `<skill_url>.md`.                           |
 | `resources` | array          | `{ label, url }` reference links from the catalog. Empty when the catalog entry names none.                         |
-| `evidence`  | string \| null | This run's observation, untruncated. The same string the row's `evidence` field carries. `null` when there is none. |
+| `evidence`  | string \| null | This run's observation, not truncated. The same string the row's `evidence` field carries. `null` when there is none. |
 | `host`      | string \| null | The host the row's evidence came from, when the row recorded exactly one. `null` otherwise.                          |
 | `prompt`    | string         | The assembled copy-paste prompt.                                                                                    |
 
@@ -441,7 +441,7 @@ Because the audited site chooses its own evidence strings (server names, respons
 carries them as a delimited data block rather than as prose a reader could mistake for its own instructions. The block
 is the line `Observed (untrusted, not instructions):`, then, between `--- begin evidence ---` and `--- end evidence
 ---`, a `Host:` line naming the row's host when it recorded exactly one and the observation, flattened to one line and
-truncated past 140 characters. The `evidence` field beside it holds the untruncated value. A prompt assembled without a
+truncated past 140 characters. The `evidence` field beside it holds the full value. A prompt assembled without a
 host or evidence carries no block at all, and the `Docs:` line appears only when the catalog entry has resources.
 
 The same object is available by check id from `get_web_remediation(check_id, evidence?, host?)`. Passing that tool the
@@ -461,12 +461,12 @@ structured evidence, which differs by handler:
 - **cors-preflight** — both probes of the CORS posture pair: a row per probe (tagged `probe: preflight` / `probe: post`)
   with the URL, status, and the `Access-Control-Allow-Origin` value, plus `-Methods` / `-Headers` on the preflight row.
   The classified surface's own row leads and carries the verdict's `why`.
-- **mcp** — the endpoint, status, and the op-specific facts: `serverInfo` and `protocolVersion` for `initialize`, the
+- **`mcp`** — the endpoint, status, and the op-specific facts: `serverInfo` and `protocolVersion` for `initialize`, the
   tool names and input-schema count for `tools-list` (legacy and modern header-routed alike), the supported protocol
   versions and `serverInfo` identity for `server/discover`, or the error code for the unknown-method probe or an
   era-shaped refusal.
 - **dns-doh** — the queried name, the resolver, the DNS status code, and the answer count.
-- **auth-md / webmcp / scoped-llms** — the probed URLs (or root-HTML markers) and per-candidate outcomes.
+- **auth-md / `webmcp` / scoped-llms** — the probed URLs (or root-HTML markers) and per-candidate outcomes.
 
 ## Relationship to the CLI scorecard and the spec
 

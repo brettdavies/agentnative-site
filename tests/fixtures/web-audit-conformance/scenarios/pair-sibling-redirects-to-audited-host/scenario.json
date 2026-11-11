@@ -1,5 +1,5 @@
 {
-  "description": "the audited bare host serves its root and the www host redirects to it: the pair is one site, and the sibling observation alone folds it",
+  "description": "the audited bare host serves its root and the `www.` host redirects to it: the pair is one site, and the sibling observation alone folds it",
   "covers": [
     "mcp-initialize",
     "mcp-server-card"
