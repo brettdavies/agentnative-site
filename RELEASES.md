@@ -789,17 +789,17 @@ Four-layer cost-cap stance, ordered by speed-to-act:
 
    ```bash
    # Staging
-   wrangler kv key put --binding=SCORE_KV --env staging scoring_disabled true
+   wrangler kv key put --remote --binding=SCORE_KV --env staging scoring_disabled true
 
    # Production
-   wrangler kv key put --binding=SCORE_KV scoring_disabled true
+   wrangler kv key put --remote --binding=SCORE_KV scoring_disabled true
    ```
 
    Recovery time is bounded by the in-isolate cache TTL (30 s) and the KV global propagation (≤60 s). Reset by deleting
    the key:
 
    ```bash
-   wrangler kv key delete --binding=SCORE_KV --env staging scoring_disabled
+   wrangler kv key delete --remote --binding=SCORE_KV --env staging scoring_disabled
    ```
 
    The operator-facing playbook lives in the monitoring runbook; this section names the procedure.

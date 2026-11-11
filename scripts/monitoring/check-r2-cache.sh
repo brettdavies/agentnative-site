@@ -21,7 +21,7 @@ while [ $# -gt 0 ]; do
       cat <<EOF
 Usage: $0 [--env staging|production] [--dry-run]
 
-Counts scores/ prefix objects via wrangler r2 object list and confirms
+Counts scores/ prefix objects via the R2 API and confirms
 the scores-7day-ttl lifecycle rule is intact. Emits a JSON verdict.
 With --dry-run, prints the wrangler commands it would run inside the
 JSON envelope under evidence.would_run and exits 0 without calling
