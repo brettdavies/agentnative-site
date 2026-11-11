@@ -376,3 +376,6 @@ Order of work: U1, U5, U2, U3, U4. U5 comes second so it is observed failing on 
 ## Review log
 
 - 2026-11-11: plan written.
+- 2026-11-11: `/plan-eng-review` round 1 started at 5a47b76 (Opus, effort high).
+- 2026-11-11: `/plan-devex-review` round 1 started at 5a47b76 (Opus, effort high).
+- 2026-11-11: `/compound-engineering:ce-doc-review` round 1 started at 5a47b76 (Opus, effort high, non-interactive).
