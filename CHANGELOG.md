@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.1794452714-g3b6a03d] - 2026-11-12
+
+### Added
+
+- Add a `dateModified` key to the markdown twin frontmatter of the homepage, the principle pages, and the content sub-pages, giving the day the page's content last changed. by @brettdavies in [#569](https://github.com/brettdavies/agentnative-site/pull/569)
+- Add `dateModified` to each page's `TechArticle` JSON-LD node, and an `article:modified_time` meta tag, carrying the same date.
+
+### Changed
+
+- Change `/changelog` to record what changed on anc.dev, release by release since launch, with a link to the spec repository's changelog for the standard's own history. by @brettdavies in [#568](https://github.com/brettdavies/agentnative-site/pull/568)
+- Change each sitemap `<lastmod>` from the build date to the day the page's content last changed. A curated CLI scorecard page uses the day its audit ran. A seeded website result is listed without a `<lastmod>`. by @brettdavies in [#569](https://github.com/brettdavies/agentnative-site/pull/569)
+
+**Full Changelog**: [v0.0.1794439906-g7cd7f26...v0.0.1794452714-g3b6a03d](https://github.com/brettdavies/agentnative-site/compare/v0.0.1794439906-g7cd7f26...v0.0.1794452714-g3b6a03d)
+
 ## [0.0.1794439906-g7cd7f26] - 2026-11-11
 
 ### Added

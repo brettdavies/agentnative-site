@@ -8,6 +8,20 @@ The standard's own version history lives in the
 the site's principle pages to a new spec version, its entry here names the version and links the pages it touched. Each
 date is the UTC day the release shipped.
 
+## 2026-11-12
+
+### Added
+
+- The home page, the principle pages, and the other content pages carry the day their content last changed, as
+  `dateModified` in the markdown twin's frontmatter and in the JSON-LD, and as an `article:modified_time` meta tag.
+
+### Changed
+
+- Each `<lastmod>` in the [sitemap](/sitemap.xml) gives the day the page's content last changed instead of the build
+  date. A curated CLI scorecard uses the day its audit ran.
+- This changelog records what changed on anc.dev, release by release since launch, and links the spec repository's
+  changelog for the standard's own history.
+
 ## 2026-11-11
 
 ### Added
