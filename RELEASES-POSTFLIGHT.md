@@ -262,7 +262,7 @@ binary without bypass (asserts `source=live-cache`). Both paths must produce the
     -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
     https://anc.dev/mcp \
     | jq '.result.tools | length'
-  # expect: 13
+  # expect: 14
 
   META='"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"postflight","version":"1"},"io.modelcontextprotocol/clientCapabilities":{}}'
   curl -fsSL -H 'Content-Type: application/json' \
@@ -271,12 +271,12 @@ binary without bypass (asserts `source=live-cache`). Both paths must produce the
     -d "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/list\",\"params\":{${META}}}" \
     https://anc.dev/mcp \
     | jq '{count: (.result.tools | length), ttlMs: .result.ttlMs, cacheScope: .result.cacheScope}'
-  # expect: count: 13, ttlMs: 3600000, cacheScope: "public"
+  # expect: count: 14, ttlMs: 3600000, cacheScope: "public"
   ```
 
   A 503 / kill-switch envelope means the production `MCP_ENABLED` secret is unset or not `"true"`. Fix it with
   `wrangler secret put MCP_ENABLED` and no `--env` flag, because production is the top-level config and there is no
-  `env.production` block; the value takes effect on the next request to a fresh isolate, with no redeploy. A non-13 tool
+  `env.production` block; the value takes effect on the next request to a fresh isolate, with no redeploy. A non-14 tool
   count is a tool-wiring regression that escaped preflight — block and roll back if it cannot be hotfixed quickly.
 
 - [ ] **Symmetry contract: registry tier returns matching envelopes from both scorecard tools.** Same shape as

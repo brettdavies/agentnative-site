@@ -225,7 +225,7 @@ upgraded, so it names the same record as the bare host.
   length-bounded data block, the same prompt the row carries inline; omit both for the catalog text alone.
 
 ```jsonc
-// tools/call audit_website { "url": "anc.dev" }
+// tools/call audit_website { "url": "example.com" }
 // tools/call set_website_public_listing { "url": "example.com", "public_listing": true }
 ```
 
@@ -487,7 +487,7 @@ container-run cost is non-trivial and a shared anon bucket would be a DoS vector
 layers (CF binding burst gate + KV-backed per-hour window); both surface as `-32099` on breach.
 
 Read-tier breach is recoverable by waiting out the 60-second window. Audit-tier breach needs an hour-bucket window to
-roll. A `-32099` from `score_cli` or `audit_website` whose message reads
+roll. A `-32099` from `score_cli`, `audit_website`, or `set_website_public_listing` whose message reads
 `Several audits started at once from this address` is not the ceiling: the hour still has room, and the call can be
 retried after 2 seconds. Both ceilings are pre-data placeholders sized from parity with sister deployments and will be
 tuned with `mcp.request` log volume.
