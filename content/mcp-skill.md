@@ -494,6 +494,12 @@ other method returns `405` advertising `Allow: POST`. `OPTIONS` is not handled. 
 and call). The SEP-1649 server card's `protocolVersion` is pinned in lockstep; tests assert each literal so drift breaks
 the build.
 
+**Server identity.** Legacy `initialize` returns `serverInfo` with `name` (`anc`), `version`, `title`, `description`,
+`websiteUrl` (this guide), and `icons`: `https://anc.dev/favicon.svg` (`image/svg+xml`, `sizes: ["any"]`) and
+`https://anc.dev/apple-touch-icon-180.png` (`image/png`, `sizes: ["180x180"]`). The modern `server/discover` result has
+no `serverInfo` field; every modern result carries the same object under `_meta["io.modelcontextprotocol/serverInfo"]`.
+The URLs name the host that served the request.
+
 **Tool metadata.** Every `tools/list` entry carries a `title` (a short display name) alongside `description` and
 `inputSchema`, plus an `annotations` object describing the tool's posture. The eleven read tools carry `readOnlyHint:
 true`, `destructiveHint: false`, and `openWorldHint: false`, because they return anc's own data without altering any
@@ -531,8 +537,9 @@ stream that stays open and carries keep-alives until the client closes it. The t
 The card of record is the SEP-2127 server card at `https://anc.dev/mcp/server-card`, the location SEP-2127 reserves for
 an endpoint's card (the endpoint URL plus `/server-card`). It is served as `application/mcp-server-card+json` and
 carries the SEP-2127 `$schema`, the server's `name` (`dev.anc/anc`), `title`, `description`, `version`, a `websiteUrl`
-pointing at this guide, and one `streamable-http` remote, `https://anc.dev/mcp`. It describes identity and connection
-only: list the tools and resources over the protocol.
+pointing at this guide, two `icons`, and one `streamable-http` remote, `https://anc.dev/mcp`. Its `title`,
+`description`, `websiteUrl`, and `icons` match the endpoint's `serverInfo`. It describes identity and connection only:
+list the tools and resources over the protocol.
 
 The AI catalog at `https://anc.dev/.well-known/ai-catalog.json` (`application/ai-catalog+json`) lists the card in one
 entry with `type` `application/mcp-server-card+json`, `identifier` `urn:air:anc.dev:mcp:anc`, and `url`

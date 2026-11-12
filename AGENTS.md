@@ -103,7 +103,10 @@ card's `websiteUrl` is the client-skill page; the SEP-1649 card's `documentation
 server-cards section; `initialize.instructions` carries the client-skill pointer plus a session-time summary.
 `server/discover` carries the same instructions; the instructions and every tool description stay within the limits
 recorded in `src/worker/mcp/client-limits.ts`, which `tests/mcp-client-limits.test.ts` enforces, and those records are
-refreshed on each `SPEC_REVISION` bump. The card, the catalog, and the SEP-1649 card are built from seeds and
+refreshed on each `SPEC_REVISION` bump. The handshake's `serverInfo` (the legacy `initialize` result, and every modern
+result's `_meta["io.modelcontextprotocol/serverInfo"]`) and the SEP-2127 card take `title`, `description`, `websiteUrl`,
+and `icons` from `mcpServerMetadata` in `src/shared/mcp-discovery.ts`, so the two never disagree; the card schema caps
+`title` and `description` at 100 characters. The card, the catalog, and the SEP-1649 card are built from seeds and
 origin-rewritten at serve time, so staging hands out staging URLs; the card's `name` (`dev.anc/anc`) and the catalog
 entry's `identifier` (`urn:air:anc.dev:mcp:anc`) name the server, not the deployment, and stay fixed. The root `Link`
 header, the `<head>` of every page the shell renders, the `<noscript>` entry list, `/llms.txt`, the

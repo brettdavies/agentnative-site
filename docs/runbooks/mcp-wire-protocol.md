@@ -250,6 +250,21 @@ one round trip:
 Field-for-field pinned at
 `tests/worker-mcp-dispatch.test.ts#a modern claim of an unsupported protocol version draws the SDK -32022 at HTTP 400`.
 
+## Server identity
+
+The server reports one `Implementation` object: `name` (`anc`), `version`, `title`, `description`, `websiteUrl` (the
+client guide, `/mcp-skill`), and `icons` (`/favicon.svg` with `sizes: ["any"]`, `/apple-touch-icon-180.png` with
+`sizes: ["180x180"]`, no `theme`). The legacy lane returns it as `serverInfo` in the `initialize` result. The 2026-07-28
+`DiscoverResult` has no `serverInfo` field, so on the modern lane the SDK's encode seam stamps the same object into
+every result's `_meta` under `io.modelcontextprotocol/serverInfo`, `server/discover` included. The URLs are built per
+request from the origin it arrived on, the way the server card's are.
+
+The display fields come from `src/shared/mcp-discovery.ts#mcpServerMetadata`, which the SEP-2127 card also reads. The
+card schema caps `title` and `description` at 100 characters, and
+`tests/build-discovery-emit.test.ts#validates against the vendored extension schema` enforces the cap. Pinned per lane
+at `tests/worker-mcp.test.ts#initialize returns the server title, description, website, and icons in serverInfo` and
+`tests/worker-mcp.test.ts#server/discover carries the same serverInfo under the result _meta key`.
+
 ## Cache hints
 
 Four read methods return `ttlMs` and `cacheScope` alongside the result, declared once as
