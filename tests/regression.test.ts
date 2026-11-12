@@ -215,7 +215,7 @@ describe('regression #5 — /skill.json (skill-distribution canonical surface)',
     const html = await readFile(join(DIST, 'skill.html'), 'utf8');
     const md = await readFile(join(DIST, 'skill.md'), 'utf8');
     expect(html).toContain('<h1');
-    expect(md).toMatch(/^#\s+/);
+    expect(md).toMatch(/^---\n[\s\S]*?\n---\n\n#\s+/);
   });
 
   test('every install.<host> command appears byte-for-byte in skill.md', async () => {
@@ -587,6 +587,10 @@ function techArticleDate(html: string): unknown {
   return isRecord(article) ? article.dateModified : undefined;
 }
 
+function frontmatterKeys(md: string): string[] {
+  return [...md.slice(0, md.indexOf('\n---\n')).matchAll(/^([A-Za-z_]+):/gm)].map(([, key]) => key);
+}
+
 function frontmatterDate(md: string): string | null {
   if (!md.startsWith('---\n')) return null;
   return md.slice(0, md.indexOf('\n---\n')).match(/^dateModified: '([^']+)'$/m)?.[1] ?? null;
@@ -614,14 +618,16 @@ describe('regression #10 — one content date per page', () => {
       const twin = await readFile(join(DIST, `${stem}.md`), 'utf8');
       const twinDate = frontmatterDate(twin);
       if (twinDate !== null) {
-        expect({ path, twin: twinDate }).toEqual({ path, twin: lastmod });
+        expect({ path, twin: twinDate, opensWith: frontmatterKeys(twin).slice(0, 4) }).toEqual({
+          path,
+          twin: lastmod,
+          opensWith: ['title', 'description', 'url', 'dateModified'],
+        });
         twinsWithFrontmatter.push(path);
       }
     }
-    // The homepage, the principles, and every content sub-page carry the key.
-    const { SUB_PAGES } = await import('../src/build/07-subpages.mjs');
-    const expected = ['/', ...LOCKED_SLUGS.map((_, i) => `/p${i + 1}`), ...SUB_PAGES.map((p) => `/${p.name}`)];
-    expect(twinsWithFrontmatter.sort()).toEqual(expected.sort());
+    // Every dated page's twin opens with the standard block.
+    expect(twinsWithFrontmatter.sort()).toEqual(dated.map((d) => d.path).sort());
   });
 
   test('each tool page takes its audit day, read from its emitted envelope', async () => {

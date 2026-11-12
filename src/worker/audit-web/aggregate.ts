@@ -90,6 +90,7 @@ export async function rebuildWebAggregates(
         relative: scorecard.score?.relative ?? scorecard.score_pct,
         global: scorecard.score?.global ?? 0,
       },
+      ...(cached.scored_at === undefined ? {} : { scored_at: cached.scored_at }),
     });
   }
   // Every HTML and markdown board re-ranks by RELATIVE at render time, so

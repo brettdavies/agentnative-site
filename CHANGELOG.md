@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.1794455323-g5392089] - 2026-11-12
+
+### Added
+
+- Add the standard `title`, `description`, `url`, and `dateModified` frontmatter keys to `/scorecards.md`, `/coverage.md`, `/skill.md`, and every `/score/<target>` markdown twin. by @brettdavies in [#573](https://github.com/brettdavies/agentnative-site/pull/573)
+- Add `dateModified` and `article:modified_time` to website, live CLI, and branch scorecard pages, giving the day the scoring ran.
+
+### Changed
+
+- Change the sitemap so each curated website scorecard carries a `<lastmod>`: the day its audit ran. by @brettdavies in [#573](https://github.com/brettdavies/agentnative-site/pull/573)
+- Change the dates on `/` and `/scorecards`, in the sitemap, JSON-LD, `article:modified_time`, and the twin, to the later of the page's own content date and the newest website audit its board shows.
+
+### Fixed
+
+- Fix the `/scorecards` description, which said the scores run against seven agent-native principles; the standard has eight. by @brettdavies in [#573](https://github.com/brettdavies/agentnative-site/pull/573)
+
+**Full Changelog**: [v0.0.1794452714-g3b6a03d...v0.0.1794455323-g5392089](https://github.com/brettdavies/agentnative-site/compare/v0.0.1794452714-g3b6a03d...v0.0.1794455323-g5392089)
+
 ## [0.0.1794452714-g3b6a03d] - 2026-11-12
 
 ### Added
