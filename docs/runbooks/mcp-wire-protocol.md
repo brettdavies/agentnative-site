@@ -263,7 +263,7 @@ The display fields come from `src/shared/mcp-discovery.ts#mcpServerMetadata`, wh
 card schema caps `title` and `description` at 100 characters, and
 `tests/build-discovery-emit.test.ts#validates against the vendored extension schema` enforces the cap. Pinned per lane
 at `tests/worker-mcp.test.ts#initialize returns the server title, description, website, and icons in serverInfo` and
-`tests/worker-mcp.test.ts#server/discover carries the same serverInfo under the result _meta key`.
+`tests/worker-mcp.test.ts#server/discover and tools/list carry the same serverInfo under the result _meta key`.
 
 ## Cache hints
 

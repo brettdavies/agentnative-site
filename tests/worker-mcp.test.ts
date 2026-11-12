@@ -231,12 +231,19 @@ describe('MCP handshake', () => {
     expect(result.result?.serverInfo).toEqual(expectedServerInfo(CANONICAL_TEST_ORIGIN));
   });
 
-  test('server/discover carries the same serverInfo under the result _meta key', async () => {
-    expect(await discoverServerInfo(makeEnv())).toEqual(expectedServerInfo(CANONICAL_TEST_ORIGIN));
+  test('server/discover and tools/list carry the same serverInfo under the result _meta key', async () => {
+    const env = makeEnv();
+    expect(await discoverServerInfo(env)).toEqual(expectedServerInfo(CANONICAL_TEST_ORIGIN));
+    const list = await mcpRpcExpect200(env, modernToolsListBody(), modernToolsListHeaders());
+    expect((list.result?._meta as Record<string, unknown> | undefined)?.['io.modelcontextprotocol/serverInfo']).toEqual(
+      expectedServerInfo(CANONICAL_TEST_ORIGIN),
+    );
   });
 
   test('serverInfo website and icon URLs follow the origin the request arrived on, on both lanes', async () => {
     const env = makeEnv();
+    const canonical = await mcpInitialize(env, { origin: CANONICAL_TEST_ORIGIN });
+    expect(canonical.result?.serverInfo).toEqual(expectedServerInfo(CANONICAL_TEST_ORIGIN));
     const legacy = await mcpInitialize(env, { origin: STAGING_TEST_ORIGIN });
     expect(legacy.result?.serverInfo).toEqual(expectedServerInfo(STAGING_TEST_ORIGIN));
     expect(await discoverServerInfo(env, STAGING_TEST_ORIGIN)).toEqual(expectedServerInfo(STAGING_TEST_ORIGIN));
