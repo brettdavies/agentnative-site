@@ -175,20 +175,26 @@ git add -A
 
 # 4b. Write this release's /changelog entry by hand in content/changelog.md, curated
 #     from the section step 4 wrote. The page records what changed on anc.dev:
-#     - Head it `## YYYY-MM-DD`, the UTC day the release merges (step 4's date unless
-#       the merge slips a day). A release merging on a day that has a heading joins it.
-#     - Sort bullets under `### Added`, `### Changed`, `### Fixed`, `### Removed`, each
-#       only when it has items, one to six bullets for the day.
+#     - Head it `## YYYY-MM-DD` with the date on the CHANGELOG.md heading step 4 wrote,
+#       the UTC day of the cut. If the merge lands on a later UTC day, change the
+#       heading before merging. A release on a day that has a heading joins it.
+#     - Sort bullets under `### Added`, `### Changed`, `### Fixed`, `### Removed`, in
+#       that order and each only when it has items, one to six bullets for the day.
 #     - Keep what a visitor, an agent, or a CLI author reading a scorecard can see. Drop
 #       CI, release tooling, runbooks, tests, refactors, unpublished docs, attributions,
-#       PR and compare links, and anything § Withheld features holds back.
+#       PR and compare links, and anything this release does not ship, § Withheld
+#       features included. Describe a hardening change by what now holds.
 #     - Merge related bullets, say what changed in plain words, and link the page where
 #       it shows by relative path (`/audit`, `/p3`); tests/content-changelog.test.ts
 #       fails an absolute link to the site's own host.
 #     - When the release changes content/principles/VERSION, name the new spec version
 #       and link the principle pages it touched.
 #     - A release with nothing visible adds no entry.
-#     Edit this file only on release branches; § After merge says why.
+#     Release branches carry no prose stack, so before step 6 copy the file over
+#     content/changelog.md in a checkout of dev, run scripts/prose-check.sh there, and
+#     restore that checkout. Preflight's diff-B lists content/changelog.md for review
+#     beside the withheld paths; that is expected. Edit this file only on release
+#     branches; § After merge says why.
 $EDITOR content/changelog.md
 git add -A
 
@@ -372,10 +378,12 @@ discovered path; the script syncs `CHANGELOG.md` either way. Resolve anything le
 previous `v*` tag, so the first tagged release syncs `CHANGELOG.md` only.
 
 `content/changelog.md` must reach `dev` every release: the next overlay writes `dev`'s copy over `main`'s, so an entry
-the backport leaves out disappears from `/changelog`. It is release-prep while only release branches edit it. When the
-dry run lists it as contested because a `dev` PR edited it since the previous tag, check that
-`git diff origin/dev origin/main -- content/changelog.md` shows only this release's entry, then adopt it with
-`--only content/changelog.md`, naming beside it each release-prep path the dry run lists.
+the backport leaves out disappears from `/changelog`. It is release-prep while only release branches edit it; a `dev` PR
+that edits it makes the next dry run list it as contested. Then read
+`git diff origin/dev origin/main -- content/changelog.md`. When it shows only this release's entry, adopt the file with
+`--only content/changelog.md`, naming beside it every other path the dry run lists under `syncing` except
+`CHANGELOG.md`. When it shows more, `main`'s copy lacks a `dev` edit: leave the file out, and add this release's entry
+to `dev`'s copy in the sync PR before merging it.
 
 After committing, when the sync carried `CHANGELOG.md` and `git-cliff` is on `PATH`, the script runs
 `scripts/generate-changelog.py --dry-run --tag v<version>` and warns with the generator's own reason if the regenerated
