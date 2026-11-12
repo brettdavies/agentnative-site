@@ -4,12 +4,12 @@
 // markdown twin's `dateModified` frontmatter key.
 //
 // A file's date is the UTC committer day of the last commit that changed
-// it, read from one `git log` walk over the whole history. A shallow clone
-// would date every file to its oldest fetched commit, so it is refused
-// rather than read.
+// it, read from one `git log` walk over the whole history; a file with
+// uncommitted changes dates to today.
 
 import { execFileSync } from 'node:child_process';
-import { isAbsolute, relative } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
+import { isAbsolute, join, relative } from 'node:path';
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -71,31 +71,43 @@ export function newestDate(days) {
   return [...days].sort().at(-1);
 }
 
+/** A refusal the build reports as its message alone, without a source frame. */
+export class ContentDateError extends Error {}
+
 /**
- * Read every tracked file's last-commit day in one pass.
+ * Read every file's content day in one pass: the last commit that changed a
+ * committed file, or today for a file with uncommitted changes, since its
+ * content is changing today. A clean CI checkout never takes today's date.
  *
- * Throws when `repoRoot` is not a git checkout or is a shallow clone,
- * naming the fix. Never falls back to the build date.
+ * Throws when git cannot run, when `repoRoot` is not a git checkout, or when
+ * it is a shallow clone, naming the fix. On a shallow clone every file looks
+ * committed at the clone's boundary, so it is refused rather than read.
  *
  * @param {string} repoRoot — absolute path to the checkout
- * @returns {(...paths: string[]) => string} the newest last-commit day among
- *   the given files (absolute or repo-relative). Throws for a file no commit
- *   has touched.
+ * @returns {(...paths: string[]) => string} the newest content day among the
+ *   given files (absolute, or relative to `repoRoot`). Throws for a file git
+ *   has no record of.
  */
 export function loadFileDates(repoRoot) {
   let shallow;
+  let toplevel;
   try {
-    shallow = git(repoRoot, ['rev-parse', '--is-shallow-repository']).trim();
+    [shallow, toplevel] = git(repoRoot, ['rev-parse', '--is-shallow-repository', '--show-toplevel']).trim().split('\n');
   } catch (err) {
     const reason = String(err.stderr || err.message)
       .trim()
       .split('\n')[0];
-    throw new Error(
+    if (err.code === 'ENOENT') {
+      throw new ContentDateError(
+        `content dates: git is not installed or not on PATH (${reason}). The build dates each page from git history.`,
+      );
+    }
+    throw new ContentDateError(
       `content dates: ${repoRoot} is not a git checkout (${reason}). The build dates each page from git history; build from a clone of the repository.`,
     );
   }
   if (shallow === 'true') {
-    throw new Error(
+    throw new ContentDateError(
       `content dates: ${repoRoot} is a shallow clone, so git history cannot date the pages. ` +
         'Run `git fetch --unshallow`, or check out with `fetch-depth: 0` in CI, then build again.',
     );
@@ -104,7 +116,8 @@ export function loadFileDates(repoRoot) {
   // Each commit opens with a NUL-led timestamp line; git C-quotes control
   // characters in paths, so no path line can start with NUL. `--no-renames`
   // keeps the walk independent of diff.renames and of blob contents, so a
-  // blobless clone answers it from trees alone.
+  // blobless clone answers it from trees alone. Paths are relative to the
+  // top level, which sits above `repoRoot` when the site is nested.
   const out = git(repoRoot, ['-c', 'core.quotePath=false', 'log', '--no-renames', '--name-only', '--format=%x00%ct']);
   const dayOf = new Map();
   let day = null;
@@ -117,18 +130,30 @@ export function loadFileDates(repoRoot) {
     }
   }
   if (dayOf.size === 0) {
-    throw new Error(`content dates: git log in ${repoRoot} listed no files; the build needs the repository history.`);
+    throw new ContentDateError(
+      `content dates: git log in ${repoRoot} listed no files; the build needs the repository history.`,
+    );
+  }
+
+  // Each `-z` record is `XY <path>`, its path relative to the top level.
+  const today = utcDay(Date.now());
+  const status = git(repoRoot, ['status', '--porcelain', '-z', '--untracked-files=all', '--no-renames']);
+  for (const record of status.split('\0')) {
+    if (record.length > 3) dayOf.set(record.slice(3), today);
   }
 
   return (...paths) =>
     newestDate(
       paths.map((path) => {
-        const key = isAbsolute(path) ? relative(repoRoot, path) : path;
-        const day = dayOf.get(key);
-        if (day === undefined) {
-          throw new Error(`content dates: no commit has touched ${key}. Commit it, then build again.`);
+        const abs = isAbsolute(path) ? path : join(repoRoot, path);
+        const key = relative(toplevel, existsSync(abs) ? realpathSync(abs) : abs);
+        const known = dayOf.get(key);
+        if (known === undefined) {
+          throw new ContentDateError(
+            `content dates: git has no record of ${key}: no commit touched it and git status does not list it, so it is ignored or missing.`,
+          );
         }
-        return day;
+        return known;
       }),
     );
 }

@@ -57,7 +57,7 @@ import { emitWebAuditRegistry, emitWebRemediation } from './13-web-audit-registr
 import { emitWebSeedProjection, loadWebSeed } from './14-web-scorecards-emit.mjs';
 import { emitWebAuditSkillPages } from './15-web-audit-skills.mjs';
 import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
-import { loadFileDates } from './content-dates.mjs';
+import { ContentDateError, loadFileDates } from './content-dates.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, emitShellTemplate } from './shell.mjs';
 import { composeTwin, escHtml, parseFilename, sortedGlob } from './util.mjs';
@@ -466,6 +466,12 @@ export async function build() {
 }
 
 if (import.meta.main) {
-  const summary = await build();
-  console.log('build complete:', summary);
+  try {
+    const summary = await build();
+    console.log('build complete:', summary);
+  } catch (err) {
+    if (!(err instanceof ContentDateError)) throw err;
+    console.error(`error: ${err.message}`);
+    process.exit(1);
+  }
 }

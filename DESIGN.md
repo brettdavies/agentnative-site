@@ -1205,7 +1205,9 @@ the twins that carry frontmatter: the homepage, the principles, and the content 
   module writes into the page (a widget slot's prose, a generated page's lede). Shared layout is not content: the shell,
   nav, footer, CSS, scripts, and template labels that frame per-entry data.
 - **A file's date** is the UTC committer day of the last commit that changed it, read from one `git log` walk. On `main`
-  a release is one overlay commit, so a production page carries the day its content reached anc.dev.
+  a release is one overlay commit, so a production page carries the day its content reached anc.dev. A file with
+  uncommitted changes, untracked or edited, dates to today, since its content is changing today; one `git status` call
+  finds them, and a clean CI checkout never takes that path.
 - **A page built from one entry of a shared file** takes the entry's own date, never the shared file's: a per-tool
   scorecard page takes the day its audit run started (`run.started_at`).
 - **An aggregate page** takes the newest date among the rows it ranks plus its own copy.
@@ -1228,8 +1230,8 @@ remediation catalog, which carry no per-check date, so they carry no `dateModifi
 
 The build refuses to run without the history: on a shallow clone it stops before its first stage and names the fix
 (`git fetch --unshallow`, or `fetch-depth: 0` on the CI checkout). It never falls back to the build date. Every workflow
-job that runs the build checks out with `fetch-depth: 0`. A file no commit has touched also stops the build, until it is
-committed.
+job that runs the build checks out with `fetch-depth: 0`. A file git has no record of (ignored, or missing) also stops
+the build.
 
 ### 4.15 The instrument component layer
 

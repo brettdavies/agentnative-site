@@ -547,14 +547,13 @@ describe('regression #9 — Shiki code blocks keep their keyboard tab stop', () 
   });
 });
 
-// An oracle independent of content-dates.mjs: git's own answer for the last
-// commit that touched one path, as a UTC day.
+// An oracle independent of content-dates.mjs: git's own answer for one path,
+// as a UTC day. A path with uncommitted changes dates to today.
 function lastCommitDay(repoPath: string): string {
-  return execFileSync('git', ['log', '-1', '--format=%cd', '--date=format-local:%Y-%m-%d', '--', repoPath], {
-    cwd: REPO_ROOT,
-    encoding: 'utf8',
-    env: { ...process.env, TZ: 'UTC' },
-  }).trim();
+  const git = (args: string[]) =>
+    execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, TZ: 'UTC' } }).trim();
+  if (git(['status', '--porcelain', '--', repoPath]) !== '') return new Date().toISOString().slice(0, 10);
+  return git(['log', '-1', '--format=%cd', '--date=format-local:%Y-%m-%d', '--', repoPath]);
 }
 
 async function sitemapEntries(): Promise<Array<{ path: string; lastmod: string | null }>> {

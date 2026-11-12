@@ -79,12 +79,24 @@ describe('loadFileDates — one git walk dates every file', () => {
     expect(fileDate('content/a.md', 'content/b.md')).toBe('2026-04-11');
   });
 
-  test('a file no commit has touched is refused, not dated to the build', async () => {
+  test('a content file with uncommitted changes takes today: untracked or edited', async () => {
     const dir = await datedRepo();
     await writeFile(join(dir, 'content', 'new.md'), 'new\n');
+    await writeFile(join(dir, 'content', 'a.md'), 'a, edited\n');
+    const today = new Date().toISOString().slice(0, 10);
     const fileDate = loadFileDates(dir);
-    expect(() => fileDate('content/new.md')).toThrow(
-      'no commit has touched content/new.md. Commit it, then build again.',
+    expect(fileDate('content/new.md')).toBe(today);
+    expect(fileDate('content/a.md')).toBe(today);
+    expect(fileDate('content/b.md')).toBe('2026-04-11');
+  });
+
+  test('a file git has no record of, such as an ignored one, is refused', async () => {
+    const dir = await datedRepo();
+    await writeFile(join(dir, '.gitignore'), 'content/ignored.md\n');
+    await writeFile(join(dir, 'content', 'ignored.md'), 'ignored\n');
+    const fileDate = loadFileDates(dir);
+    expect(() => fileDate('content/ignored.md')).toThrow(
+      'git has no record of content/ignored.md: no commit touched it and git status does not list it, so it is ignored or missing.',
     );
   });
 
@@ -92,6 +104,29 @@ describe('loadFileDates — one git walk dates every file', () => {
     const dir = await shallowRepo(await datedRepo());
     expect(() => loadFileDates(dir)).toThrow(/is a shallow clone, so git history cannot date the pages/);
     expect(() => loadFileDates(dir)).toThrow('Run `git fetch --unshallow`, or check out with `fetch-depth: 0` in CI');
+  });
+
+  test('a site nested below the git top level resolves its paths from the site root', async () => {
+    const parent = await scratchDir('parent');
+    git(parent, ['init', '-q']);
+    await mkdir(join(parent, 'site', 'content'), { recursive: true });
+    await writeFile(join(parent, 'site', 'content', 'a.md'), 'a\n');
+    git(parent, ['add', '.']);
+    git(parent, ['commit', '-q', '-m', 'nested'], '2026-06-15T08:00:00Z');
+    const fileDate = loadFileDates(join(parent, 'site'));
+    expect(fileDate('content/a.md')).toBe('2026-06-15');
+    expect(fileDate(join(parent, 'site', 'content', 'a.md'))).toBe('2026-06-15');
+  });
+
+  test('a missing git binary is named as such', async () => {
+    const dir = await datedRepo();
+    const path = process.env.PATH;
+    process.env.PATH = join(dir, 'no-such-bin');
+    try {
+      expect(() => loadFileDates(dir)).toThrow('content dates: git is not installed or not on PATH');
+    } finally {
+      process.env.PATH = path;
+    }
   });
 
   test('a directory outside any git checkout is refused', async () => {
@@ -128,6 +163,8 @@ describe('the build refuses a shallow clone', () => {
     expect(run.status).not.toBe(0);
     expect(run.stderr).toContain('is a shallow clone, so git history cannot date the pages');
     expect(run.stderr).toContain('git fetch --unshallow');
+    // Only the refusal itself: no source frame quoting the other refusals' text.
+    expect(run.stderr).not.toContain('is not a git checkout');
     expect(existsSync(join(site, 'dist'))).toBe(false);
   }, 30_000);
 });
