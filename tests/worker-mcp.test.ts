@@ -46,10 +46,10 @@ import {
   STAGING_TEST_ORIGIN,
 } from './helpers/mcp-rpc';
 import {
+  EXPECTED_TOOL_ANNOTATIONS,
   EXPECTED_TOOL_COUNT,
   EXPECTED_TOOL_NAMES,
   EXPECTED_TOOL_TITLES,
-  NON_READ_TOOL_NAMES,
 } from './helpers/mcp-tools';
 
 const FIXTURE_CATALOG = {
@@ -274,6 +274,9 @@ describe('MCP instructions string (drift gate per KTD-8)', () => {
     expect(instructions.length).toBeGreaterThan(0);
     expect(instructions).toContain(`${EXPECTED_TOOL_COUNT} tools`);
     expect(instructions).toContain('5 resources');
+    expect(instructions).toContain(
+      "and the web leaderboard with list_website_audits; change a site's leaderboard listing with set_website_public_listing, only when the user asks; read the standard with",
+    );
     expect(instructions).toContain('60 requests per 60 seconds');
     expect(instructions).toContain('5 fresh audits per 60 minutes');
     expect(instructions).toContain('2026-07-28');
@@ -372,17 +375,6 @@ describe('MCP tools/list', () => {
     inputSchema?: unknown;
   }
 
-  const READ_ONLY_ANNOTATIONS = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
-
-  // score_cli and audit_website reach external systems and write cache /
-  // leaderboard state, so readOnlyHint is false and openWorldHint true.
-  const NON_READ_ANNOTATIONS = {
-    readOnlyHint: false,
-    destructiveHint: false,
-    idempotentHint: false,
-    openWorldHint: true,
-  };
-
   test('returns the full tool surface in registration order', async () => {
     const env = makeEnv();
     await initialize(env);
@@ -434,16 +426,14 @@ describe('MCP tools/list', () => {
     }
   });
 
-  test('titles match the catalog and annotations pin each tool read-only posture', async () => {
+  test('titles match the catalog and each tool declares exactly the hints recorded for it', async () => {
     const env = makeEnv();
     await initialize(env);
     const result = await rpc(env, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
     const tools = (result.result?.tools ?? []) as ListedTool[];
     for (const tool of tools) {
       expect(tool.title).toBe(EXPECTED_TOOL_TITLES[tool.name]);
-      expect(tool.annotations).toEqual(
-        NON_READ_TOOL_NAMES.has(tool.name) ? NON_READ_ANNOTATIONS : READ_ONLY_ANNOTATIONS,
-      );
+      expect(tool.annotations).toEqual(EXPECTED_TOOL_ANNOTATIONS[tool.name as keyof typeof EXPECTED_TOOL_ANNOTATIONS]);
     }
   });
 });

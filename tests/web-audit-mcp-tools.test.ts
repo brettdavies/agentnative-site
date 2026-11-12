@@ -18,7 +18,6 @@ import { keyFor, WEB_AUDIT_STALE_AFTER_MS } from '../src/worker/audit-web/cache'
 import type { DomainBudgetEnv } from '../src/worker/audit-web/domain-budget';
 import { FOLLOW_DISCLOSURE, FOLLOW_DISCLOSURE_SHORT } from '../src/worker/audit-web/follow-disclosure';
 import { flushHitMinPurge, runWithHitMinPurge } from '../src/worker/audit-web/hit-min-purge';
-import { enforcePublicListingFlipLimit } from '../src/worker/audit-web/public-listing';
 import {
   registryFingerprintPrefix,
   resetWebAuditRegistryCacheForTests,
@@ -48,6 +47,7 @@ import { withLogCapture } from './helpers/log-capture';
 import { getJsonToolContent, type JsonRpcBody, mcpInitialize, mcpRpc, resetMcpTestState } from './helpers/mcp-rpc';
 import { fakeRender } from './helpers/og-site-fakes';
 import { stubFetch } from './helpers/stub-fetch';
+import { webRecordBucket } from './helpers/web-record-bucket';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
 const DATA = join(REPO_ROOT, 'src', 'data', 'web-audit');
@@ -676,7 +676,7 @@ describe('list_website_audits', () => {
 });
 
 describe('tool registration', () => {
-  test('all four web tools appear in tools/list after the existing tools', async () => {
+  test('all five web tools appear in tools/list after the existing tools', async () => {
     const env = await makeEnv();
     const { body } = await mcpRpc(env, {
       jsonrpc: '2.0',
@@ -685,7 +685,13 @@ describe('tool registration', () => {
       params: {},
     });
     const names = (body.result?.tools as Array<{ name: string }> | undefined)?.map((t) => t.name) ?? [];
-    for (const name of ['audit_website', 'get_website_audit', 'list_website_audits', 'get_web_remediation']) {
+    for (const name of [
+      'audit_website',
+      'get_website_audit',
+      'list_website_audits',
+      'set_website_public_listing',
+      'get_web_remediation',
+    ]) {
       expect(names).toContain(name);
     }
   });
@@ -870,186 +876,194 @@ describe('cross-tool result parity', () => {
   });
 });
 
-// The audit_website tool mirrors the POST /api/audit-web inbound semantics —
-// a store-owning bucket lets these assert no-write and read the patched
-// envelope directly. The re-audit engine path stays e2e-smoke-only (this
-// file's header), so the stale rows are asserted at the routing level (they
-// fall through to the same gate chain a fresh MCP audit passes).
-describe('audit_website public_listing', () => {
+// audit_website runs or returns an audit and never changes a site's listing.
+// A call that still sends public_listing, or any other argument the tool does
+// not declare, is refused by input validation before a gate, an audit, or a
+// limit unit is spent. The routing of a stale record is asserted at the gate
+// chain; a fresh audit runs offline against a stubbed fetch.
+describe('audit_website never changes the listing', () => {
   const TARGET = 'https://example.com/';
   const IP = '203.0.113.7';
   const freshStamp = () => new Date().toISOString();
   const staleStamp = () => new Date(Date.now() - 10 * 60_000).toISOString();
 
-  async function seed(store: Map<string, string>, opts: { scoredAt: string; stored?: boolean }): Promise<string> {
-    const key = await keyFor(TARGET, SPEC_VERSION);
+  function record(scoredAt: string, stored?: boolean) {
     const scorecard: Record<string, unknown> = {
       schema_version: '0.2',
       target_url: TARGET,
       score_pct: 64,
       results: [],
     };
-    if (opts.stored !== undefined) scorecard.public_listing = opts.stored;
-    store.set(
-      key,
-      JSON.stringify({ spec_version: SPEC_VERSION, target_url: TARGET, scorecard, scored_at: opts.scoredAt }),
-    );
-    return key;
+    if (stored !== undefined) scorecard.public_listing = stored;
+    return { spec_version: SPEC_VERSION, target_url: TARGET, scorecard, scored_at: scoredAt };
   }
 
-  async function envWithStore(store: Map<string, string>, opts: WebEnvOpts = {}): Promise<McpEnv> {
-    const env = await makeEnv(opts);
-    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(store);
-    return env;
+  // An env over a bucket holding the example.com record, with the units the
+  // call takes counted: the burst limiter, KV writes, and outbound requests.
+  async function metered(opts: { scoredAt?: string; stored?: boolean } & WebEnvOpts = {}) {
+    const { scoredAt, stored, ...envOpts } = opts;
+    const bucket = webRecordBucket();
+    if (scoredAt !== undefined) await bucket.set(TARGET, record(scoredAt, stored));
+    const kvPuts: string[] = [];
+    const env = await makeEnv({ ...envOpts, kvPuts });
+    let burstTakes = 0;
+    Object.assign(env, {
+      SCORE_CACHE: bucket.bucket,
+      WEB_AUDIT_LIMITER_IP: {
+        async limit() {
+          burstTakes += 1;
+          return { success: true };
+        },
+      },
+    });
+    return { env, bucket, kvPuts, burstTakes: () => burstTakes };
+  }
+
+  async function offline<T>(fn: () => Promise<T>): Promise<{ result: T; requests: number }> {
+    const originalFetch = globalThis.fetch;
+    let requests = 0;
+    globalThis.fetch = (async () => {
+      requests += 1;
+      return new Response('not found', { status: 404 });
+    }) as unknown as typeof fetch;
+    try {
+      return { result: await fn(), requests };
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   }
 
   test('omitted param serves cached, does not erase a stored true, and writes nothing', async () => {
-    const store = new Map<string, string>();
-    const key = await seed(store, { scoredAt: freshStamp(), stored: true });
-    const before = store.get(key);
-    const env = await envWithStore(store);
+    const { env, bucket } = await metered({ scoredAt: freshStamp(), stored: true });
+    const before = (await bucket.recordOf(TARGET)) as unknown;
     const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, IP));
     expect(body.audited).toBe(false);
     expect(body.source).toBe('cache');
     expect((body.scorecard as { public_listing: boolean }).public_listing).toBe(true);
-    expect(store.get(key)).toBe(before);
+    expect(bucket.puts).toEqual([]);
+    expect(await bucket.recordOf(TARGET)).toEqual(before as never);
   });
 
-  test('fresh hit + stored false + explicit true patches to true, preserves scored_at, behind gates', async () => {
-    const store = new Map<string, string>();
-    const scoredAt = freshStamp();
-    const key = await seed(store, { scoredAt, stored: false });
-    const env = await envWithStore(store);
-    const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, IP));
-    expect((body.scorecard as { public_listing: boolean }).public_listing).toBe(true);
-    expect(body.scorecard_url).toBe('https://anc.dev/score/example.com');
-    const stored = JSON.parse(store.get(key) as string) as {
-      scorecard: { public_listing: boolean };
-      scored_at: string;
-    };
-    expect(stored.scorecard.public_listing).toBe(true);
-    expect(stored.scored_at).toBe(scoredAt);
-  });
-
-  test('a listing patch queues a single web tag purge', async () => {
-    const store = new Map<string, string>();
-    await seed(store, { scoredAt: freshStamp(), stored: false });
-    const env = await envWithStore(store);
-    const calls: string[][] = [];
-    const ctx = {
-      waitUntil() {},
-      passThroughOnException() {},
-      props: {},
-      exports: {
-        Cached: {
-          async purgeHitMinTags(tags: string[]) {
-            calls.push(tags);
-            return { success: true, errors: [] };
-          },
-        },
-      },
-    } as unknown as ExecutionContext;
-    await runWithHitMinPurge(ctx, async () => {
-      const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, IP));
-      expect((body.scorecard as { public_listing: boolean }).public_listing).toBe(true);
-      await flushHitMinPurge();
-    });
-    expect(calls).toEqual([['web']]);
-  });
-
-  test('fresh hit + stored true + explicit true serves cached (redundant, no write)', async () => {
-    const store = new Map<string, string>();
-    const key = await seed(store, { scoredAt: freshStamp(), stored: true });
-    const before = store.get(key);
-    const env = await envWithStore(store);
-    const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, IP));
-    expect(body.source).toBe('cache');
-    expect(store.get(key)).toBe(before);
-  });
-
-  test('kill switch off blocks an explicit-differing fresh patch: no write, unpatched served', async () => {
-    const store = new Map<string, string>();
-    const key = await seed(store, { scoredAt: freshStamp(), stored: false });
-    const before = store.get(key);
-    const env = await envWithStore(store, { webEnabled: false });
-    const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, IP));
-    expect(body.source).toBe('cache');
-    expect((body.scorecard as { public_listing: boolean }).public_listing).toBe(false);
-    expect(store.get(key)).toBe(before);
-  });
-
-  test('a breached limiter blocks the patch (rate-limit error, no write)', async () => {
-    const store = new Map<string, string>();
-    const key = await seed(store, { scoredAt: freshStamp(), stored: false });
-    const before = store.get(key);
-    const env = await envWithStore(store, { limiterOk: false });
+  test('public_listing on a fresh record is refused by name, and the store and every limit stay as they were', async () => {
+    const { env, bucket, kvPuts, burstTakes } = await metered({ scoredAt: freshStamp(), stored: false });
+    const before = bucket.objects.get(await keyFor(TARGET, SPEC_VERSION));
     const res = await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, IP);
     expect(res.result?.isError).toBe(true);
-    expect(res.result?.content?.[0]?.text ?? '').toContain('rate limit');
-    expect(store.get(key)).toBe(before);
+    const text = res.result?.content?.[0]?.text ?? '';
+    expect(text).toContain('public_listing is not an audit_website argument');
+    expect(text).toContain('set_website_public_listing');
+    expect(bucket.objects.get(await keyFor(TARGET, SPEC_VERSION))).toEqual(before);
+    expect(bucket.puts).toEqual([]);
+    expect(kvPuts).toEqual([]);
+    expect(burstTakes()).toBe(0);
   });
 
-  test('a failed patch write surfaces a tool error, not fabricated success', async () => {
-    const store = new Map<string, string>();
-    await seed(store, { scoredAt: freshStamp(), stored: false });
-    const env = await makeEnv();
-    const bucket = makeBucket(store);
-    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = {
-      get: bucket.get.bind(bucket),
-      async put() {
-        throw new Error('r2 unavailable');
-      },
-      delete: bucket.delete.bind(bucket),
-    } as unknown as R2Bucket;
-    const res = await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, IP);
-    expect(res.result?.isError).toBe(true);
-    expect((res.result?.content?.[0]?.text ?? '').toLowerCase()).toContain('public_listing');
+  test('public_listing on a stale record is refused with the same text, and no request leaves anc', async () => {
+    const { env, bucket, kvPuts, burstTakes } = await metered({ scoredAt: staleStamp(), stored: true });
+    const { result, requests } = await offline(() =>
+      callTool(env, 'audit_website', { url: 'example.com', public_listing: false }, IP),
+    );
+    expect(result.result?.isError).toBe(true);
+    expect(result.result?.content?.[0]?.text ?? '').toContain('set_website_public_listing');
+    expect(requests).toBe(0);
+    expect(bucket.puts).toEqual([]);
+    expect(kvPuts).toEqual([]);
+    expect(burstTakes()).toBe(0);
   });
 
-  test('stale hit + explicit differing falls through to the gate chain (re-audit routing, not serve-cached)', async () => {
-    const store = new Map<string, string>();
-    const key = await seed(store, { scoredAt: staleStamp(), stored: true });
-    const before = store.get(key);
-    const env = await envWithStore(store, { limiterOk: false });
-    const res = await callTool(env, 'audit_website', { url: 'example.com', public_listing: false }, IP);
+  test('every value of public_listing is refused, a non-boolean one included', async () => {
+    const { env, bucket } = await metered({ scoredAt: freshStamp(), stored: false });
+    for (const value of [true, false, 'false', 1, null]) {
+      const res = await callTool(env, 'audit_website', { url: 'example.com', public_listing: value }, IP);
+      expect(res.result?.isError).toBe(true);
+      expect(res.result?.content?.[0]?.text ?? '').toContain('set_website_public_listing');
+    }
+    expect(bucket.puts).toEqual([]);
+  });
+
+  test('public_listing beside another undeclared key shows only the public_listing message', async () => {
+    const { env } = await metered({ scoredAt: freshStamp(), stored: false });
+    const res = await callTool(env, 'audit_website', { url: 'example.com', public_listing: true, siteType: 'x' }, IP);
     expect(res.result?.isError).toBe(true);
-    expect(res.result?.content?.[0]?.text ?? '').toContain('rate limit');
-    // No patch on the stale path: the object is untouched (a re-audit would
-    // rewrite it only after the gate chain, which the breached limiter blocks).
-    expect(store.get(key)).toBe(before);
+    const text = res.result?.content?.[0]?.text ?? '';
+    expect(text).toContain('set_website_public_listing');
+    expect(text).not.toContain('siteType');
+  });
+
+  test('any other undeclared argument is refused by input validation, and nothing is spent', async () => {
+    const { env, kvPuts, burstTakes } = await metered({ scoredAt: staleStamp(), stored: false });
+    const res = await callTool(env, 'audit_website', { url: 'example.com', siteType: 'content' }, IP);
+    expect(res.result?.isError).toBe(true);
+    const text = res.result?.content?.[0]?.text ?? '';
+    expect(text).toContain('siteType');
+    expect(text).not.toContain('set_website_public_listing');
+    expect(kvPuts).toEqual([]);
+    expect(burstTakes()).toBe(0);
   });
 
   test('stale hit + omit falls through to the gate chain (re-audit carries prior, not serve-cached)', async () => {
-    const store = new Map<string, string>();
-    await seed(store, { scoredAt: staleStamp(), stored: true });
-    const env = await envWithStore(store, { limiterOk: false });
+    const { env } = await metered({ scoredAt: staleStamp(), stored: true, limiterOk: false });
+    Object.assign(env, { WEB_AUDIT_LIMITER_IP: { limit: async () => ({ success: false }) } });
     const res = await callTool(env, 'audit_website', { url: 'example.com' }, IP);
     expect(res.result?.isError).toBe(true);
     expect(res.result?.content?.[0]?.text ?? '').toContain('rate limit');
   });
 
-  test('a non-boolean public_listing is rejected by input validation', async () => {
-    const store = new Map<string, string>();
-    const key = await seed(store, { scoredAt: freshStamp(), stored: false });
-    const before = store.get(key);
-    const env = await envWithStore(store);
-    for (const bad of ['false', 1, null] as const) {
-      const res = await callTool(env, 'audit_website', { url: 'example.com', public_listing: bad }, IP);
-      expect(res.result?.isError).toBe(true);
-      expect(res.result?.content?.[0]?.text ?? '').toContain('public_listing');
-    }
-    // A rejected request never writes.
-    expect(store.get(key)).toBe(before);
+  test('a first-ever audit saves the site unlisted, in the body and in the board metadata', async () => {
+    const { env, bucket } = await metered({ minimalRegistry: true });
+    await offline(() => withLogCapture(() => callTool(env, 'audit_website', { url: 'example.com' }, IP)));
+    expect((await bucket.recordOf(TARGET))?.scorecard.public_listing).toBe(false);
+    expect((await bucket.metadataOf(TARGET))?.public_listing).toBe('false');
   });
 
-  test('audit_website and get_website_audit both surface the stored public_listing', async () => {
-    const store = new Map<string, string>();
-    await seed(store, { scoredAt: freshStamp(), stored: true });
-    const env = await envWithStore(store);
-    const readBody = jsonContent(await callTool(env, 'get_website_audit', { url: 'example.com' }));
-    const auditBody = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, IP));
-    expect((readBody.scorecard as { public_listing: boolean }).public_listing).toBe(true);
-    expect((auditBody.scorecard as { public_listing: boolean }).public_listing).toBe(true);
+  test('a later audit keeps a stored listing, in the body and in the board metadata', async () => {
+    const { env, bucket } = await metered({ minimalRegistry: true, scoredAt: staleStamp(), stored: true });
+    await offline(() => withLogCapture(() => callTool(env, 'audit_website', { url: 'example.com' }, IP)));
+    expect((await bucket.recordOf(TARGET))?.scorecard.public_listing).toBe(true);
+    expect((await bucket.metadataOf(TARGET))?.public_listing).toBe('true');
+  });
+
+  test('a listing stored while the audit runs is the listing the save keeps', async () => {
+    const { env, bucket } = await metered({ minimalRegistry: true, scoredAt: staleStamp(), stored: true });
+    const originalFetch = globalThis.fetch;
+    let rewrote = false;
+    globalThis.fetch = (async () => {
+      if (!rewrote) {
+        rewrote = true;
+        await bucket.set(TARGET, record(staleStamp(), false));
+      }
+      return new Response('not found', { status: 404 });
+    }) as unknown as typeof fetch;
+    let body: Record<string, unknown>;
+    try {
+      body = jsonContent(
+        (await withLogCapture(() => callTool(env, 'audit_website', { url: 'example.com' }, IP))).result,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(rewrote).toBe(true);
+    expect(body.audited).toBe(true);
+    expect((body.scorecard as { public_listing: boolean }).public_listing).toBe(false);
+    expect((await bucket.recordOf(TARGET))?.scorecard.public_listing).toBe(false);
+    expect((await bucket.metadataOf(TARGET))?.public_listing).toBe('false');
+  });
+
+  test('tools/list: audit_website declares no public_listing, refuses undeclared keys, and says an audit never lists', async () => {
+    const env = await makeEnv();
+    const { body } = await mcpRpc(env, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
+    const tools = (body.result?.tools ?? []) as Array<{
+      name: string;
+      description?: string;
+      inputSchema: { properties: Record<string, unknown>; additionalProperties?: unknown };
+    }>;
+    const tool = tools.find((t) => t.name === 'audit_website');
+    expect(tool?.inputSchema.properties).not.toHaveProperty('public_listing');
+    expect(Object.keys(tool?.inputSchema.properties ?? {})).toEqual(['url', 'site_type', 'follow_declarations']);
+    expect(tool?.inputSchema.additionalProperties).toBe(false);
+    expect(tool?.description).toContain(
+      `${FOLLOW_DISCLOSURE_SHORT} An audit never changes the site's leaderboard listing: a first audit saves the site unlisted, and later audits keep the stored choice; set_website_public_listing changes it.`,
+    );
   });
 });
 
@@ -1195,16 +1209,6 @@ describe('web-audit MCP freshness envelope', () => {
     expect(Date.parse(freshnessOf(body).refresh_after as string)).toBeLessThan(Date.now());
   });
 
-  test('an audit_website listing patch reports cached:true and does not restamp the stored instant', async () => {
-    const scoredAt = new Date().toISOString();
-    const { env, store, key } = await envWith({ scoredAt, stored: false });
-    const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, IP));
-    expect((body.scorecard as { public_listing: boolean }).public_listing).toBe(true);
-    expect(freshnessOf(body)).toEqual({ cached: true, scored_at: scoredAt, refresh_after: refreshAfter(scoredAt) });
-    const stored = JSON.parse(store.get(key) as string) as { scored_at: string };
-    expect(stored.scored_at).toBe(scoredAt);
-  });
-
   // AE6 on the MCP surface: one scoring instant reaches both R2 and the response.
   test('a fresh audit_website completion reports cached:false and the exact instant persisted to R2', async () => {
     const store = new Map<string, string>();
@@ -1282,84 +1286,6 @@ describe('web-audit MCP freshness envelope', () => {
   });
 });
 
-// The per-domain flip budget is enforced inside the shared flag-resolution
-// helper both surfaces call, so the MCP tool and the web route draw from one
-// budget per domain. These tests use Map-backed R2 + KV so the stored flag and
-// the budget accumulate across calls.
-describe('audit_website public_listing flip budget', () => {
-  const TARGET = 'https://example.com/';
-  const IP = '203.0.113.12';
-  const freshStamp = () => new Date().toISOString();
-
-  function makeKvStore(store: Map<string, string>): KVNamespace {
-    return {
-      async get(key: string) {
-        return store.get(key) ?? null;
-      },
-      async put(key: string, value: string) {
-        store.set(key, value);
-      },
-    } as unknown as KVNamespace;
-  }
-
-  async function seed(store: Map<string, string>, stored: boolean, scoredAt: string): Promise<string> {
-    const key = await keyFor(TARGET, SPEC_VERSION);
-    const scorecard = { schema_version: '0.2', target_url: TARGET, score_pct: 64, results: [], public_listing: stored };
-    store.set(key, JSON.stringify({ spec_version: SPEC_VERSION, target_url: TARGET, scorecard, scored_at: scoredAt }));
-    return key;
-  }
-
-  test('flips within budget patch; the sixth returns a flip_rate_limited tool error and writes nothing', async () => {
-    const r2 = new Map<string, string>();
-    const kv = new Map<string, string>();
-    const key = await seed(r2, false, freshStamp());
-    const env = await makeEnv();
-    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(r2);
-    (env as { SCORE_KV: KVNamespace }).SCORE_KV = makeKvStore(kv);
-    for (let i = 0; i < 5; i++) {
-      const want = i % 2 === 0;
-      const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com', public_listing: want }, IP));
-      expect((body.scorecard as { public_listing: boolean }).public_listing).toBe(want);
-    }
-    const afterFive = r2.get(key);
-    const res = await callTool(env, 'audit_website', { url: 'example.com', public_listing: false }, IP);
-    expect(res.result?.isError).toBe(true);
-    expect(res.result?.content?.[0]?.text ?? '').toContain('flip_rate_limited');
-    // Rejected before the write: the stored object is untouched.
-    expect(r2.get(key)).toBe(afterFive);
-  });
-
-  test('a budget exhausted through the shared flip meter blocks the MCP tool for the same domain', async () => {
-    const r2 = new Map<string, string>();
-    const kv = new Map<string, string>();
-    const key = await seed(r2, false, freshStamp());
-    // Both the transact endpoint and this tool meter a flip through the one
-    // helper, keyed by domain rather than by caller, so spending the budget
-    // through the helper is spending it for every surface.
-    const kvStore = makeKvStore(kv);
-    for (let i = 0; i < 5; i++) {
-      const outcome = await enforcePublicListingFlipLimit({
-        write: { path: 'audit', value: i % 2 === 0, flagChanges: true },
-        kv: kvStore,
-        domain: 'example.com',
-      });
-      expect(outcome).toBe('allowed');
-    }
-    // The MCP tool (fresh IP, same domain) draws from the same exhausted
-    // per-domain budget: its sixth flip is rejected and writes nothing.
-    const mcpEnv = await makeEnv();
-    (mcpEnv as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(r2);
-    (mcpEnv as { SCORE_KV: KVNamespace }).SCORE_KV = makeKvStore(kv);
-    const before = r2.get(key);
-    // The stored flag is false, so asking for true is a real flip and has to
-    // draw on the exhausted budget rather than serving the cached record.
-    const res = await callTool(mcpEnv, 'audit_website', { url: 'example.com', public_listing: true }, '203.0.113.14');
-    expect(res.result?.isError).toBe(true);
-    expect(res.result?.content?.[0]?.text ?? '').toContain('flip_rate_limited');
-    expect(r2.get(key)).toBe(before);
-  });
-});
-
 describe('audit_website: a run already in flight', () => {
   const AT = '2026-09-11T00:00:00.000Z';
   const complete = {
@@ -1418,13 +1344,6 @@ describe('audit_website: a run already in flight', () => {
     });
     expect(String(body.scorecard_url)).toContain('example.com');
     expect((body.scorecard as { score_pct: number }).score_pct).toBe(64);
-  });
-
-  test('an explicit public_listing is its own request: it runs the gates rather than attaching', async () => {
-    const env = await inFlightEnv(false);
-    const res = await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, '203.0.113.9');
-    expect(res.result?.isError).toBe(true);
-    expect(res.result?.content?.[0]?.text).toContain('-32099');
   });
 });
 
@@ -1546,12 +1465,6 @@ describe('audit_website: the declared-domain budget', () => {
     expect(body).toMatchObject({ audited: true, scorecard_url: null, markdown_url: null, json_url: null });
     expect(String(body.summary_html)).toContain("Not saved: example.net reached anc's hourly probe limit;");
     expect(stored).toEqual(saved);
-  });
-
-  test('a listing change the held run resolved is written onto the saved scorecard, which keeps its rows and scored_at', async () => {
-    const { body, saved, stored } = await spentRun({ public_listing: false }, { public_listing: true });
-    expect(body).toMatchObject({ audited: true, scorecard_url: null, scorecard: { public_listing: false } });
-    expect(stored).toEqual({ ...saved, scorecard: { ...saved.scorecard, public_listing: false } });
   });
 
   test('a declared domain over its burst floor is budget-exceeded and receives nothing', async () => {
@@ -1800,16 +1713,6 @@ describe('audit_website with follow_declarations false', () => {
     expect(out.purged).toEqual([]);
   });
 
-  test('a public_listing that differs from the stored choice is rejected; the stored choice runs', async () => {
-    const prefill = await seeded(new Date(Date.now() - 600_000).toISOString(), false);
-    const refused = await run({ follow_declarations: false, public_listing: true }, { prefill });
-    expect(refused.result.result?.isError).toBe(true);
-    expect(refused.result.result?.content?.[0]?.text).toContain('public_listing');
-    expect(refused.puts).toEqual([]);
-    const same = await run({ follow_declarations: false, public_listing: false }, { prefill });
-    expect(same.body).toMatchObject({ audited: true, scorecard_url: null });
-  });
-
   test('a non-boolean follow_declarations is rejected by input validation', async () => {
     const env = await makeEnv();
     const res = await callTool(env, 'audit_website', { url: 'example.com', follow_declarations: 'no' }, IP);
@@ -1908,7 +1811,7 @@ describe('audit_website discloses third-party probing', () => {
     expect(description).toContain(
       "With false the result is also never listed and never joined to another caller's run, and it carries no scorecard_url, markdown_url, or json_url",
     );
-    expect(description).toContain('a public_listing that differs from the stored choice is rejected');
+    expect(description).not.toContain('public_listing');
   });
 
   test('the follow_declarations parameter states each fact once where the two pieces join', async () => {

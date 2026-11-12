@@ -9,7 +9,7 @@
 // tests/mcp-client-limits.test.ts holds the string inside the limits recorded
 // in client-limits.ts.
 //
-// The numeric facts below (13 tools, 5 resources, the rate limits, the spec
+// The numeric facts below (14 tools, 5 resources, the rate limits, the spec
 // revision, the guide URL) also appear in content/mcp-skill.md. The tests in
 // tests/worker-mcp.test.ts assert each literal, so a change in one source
 // forces a change in the other.
@@ -21,7 +21,7 @@ import { FOLLOW_DISCLOSURE_SHORT } from '../audit-web/follow-disclosure';
 import { siteOrigin } from './site-origin';
 
 export const SPEC_REVISION = '2026-07-28';
-const TOOL_COUNT = 13;
+const TOOL_COUNT = 14;
 const RESOURCE_TOTAL = 5;
 const READ_LIMIT_REQUESTS = 60;
 const READ_LIMIT_WINDOW_SECONDS = 60;
@@ -47,7 +47,8 @@ function buildInstructionsText(siteUrl: string): string {
       'returns JSON-RPC -32099.',
     FOLLOW_DISCLOSURE_SHORT,
     'Browse the CLI registry with list_tools, search_tools, and get_tool, and the web leaderboard with ' +
-      'list_website_audits; read the standard with ' +
+      "list_website_audits; change a site's leaderboard listing with set_website_public_listing, only when the " +
+      'user asks; read the standard with ' +
       'list_principles, get_principle, list_spec_sections, and get_spec_section; get_web_remediation returns the ' +
       'fix for a failed check.',
     `${TOOL_COUNT} tools and ${RESOURCE_TOTAL} resources; full schemas are on tools/list and ` +

@@ -1,8 +1,9 @@
 // Shared decision for the opt-in `public_listing` flag on the web-audit
-// inbound surfaces (the `POST /api/audit-web` route and the `audit_website`
-// MCP tool). Each surface parses and gates the request its own way; this
-// module owns only the tri-state resolution and the serve-cached / patch /
-// re-audit choice so the two surfaces route identically.
+// inbound surfaces. The `POST /api/audit-web` route and the `POST /api/score`
+// endpoint parse and gate the request their own way; this module owns only the
+// tri-state resolution and the serve-cached / patch / re-audit choice so they
+// route identically. The `set_website_public_listing` MCP tool shares the
+// per-domain flip meter and the standing-listing reading.
 //
 // The flag is `boolean | undefined` end to end: an omitted request value
 // stays distinct from an explicit `false` so a blank never erases a stored
@@ -120,7 +121,12 @@ export async function enforcePublicListingFlipLimit(input: {
   domain: string;
 }): Promise<FlipLimitOutcome> {
   if (!input.write.flagChanges) return 'allowed';
-  if (!input.kv) return 'allowed';
-  const ok = await consumeWebAuditFlipBudget(input.kv, await sha256Hex(input.domain));
+  return meterListingFlip(input.kv, input.domain);
+}
+
+/** Spend one unit of `domain`'s flip budget; allowed without a KV binding, as the other windows are. */
+export async function meterListingFlip(kv: KVNamespace | undefined, domain: string): Promise<FlipLimitOutcome> {
+  if (!kv) return 'allowed';
+  const ok = await consumeWebAuditFlipBudget(kv, await sha256Hex(domain));
   return ok ? 'allowed' : 'rate-limited';
 }

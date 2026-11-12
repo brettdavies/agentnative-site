@@ -29,7 +29,7 @@ import {
   modernToolsListBody,
   modernToolsListHeaders,
 } from '../helpers/mcp-modern';
-import { EXPECTED_TOOL_COUNT, EXPECTED_TOOL_NAMES, NON_READ_TOOL_NAMES } from '../helpers/mcp-tools';
+import { EXPECTED_TOOL_ANNOTATIONS, EXPECTED_TOOL_COUNT, EXPECTED_TOOL_NAMES } from '../helpers/mcp-tools';
 import { PRINCIPLE_COUNT, PRINCIPLE_NUMBERS } from '../helpers/site-facts';
 
 const STAGING_BASE = process.env.ANC_STAGING_BASE_URL;
@@ -201,11 +201,7 @@ test.describe('staging /mcp — tools/list', () => {
     for (const tool of tools) {
       expect(typeof tool.title).toBe('string');
       expect((tool.title ?? '').length).toBeGreaterThan(0);
-      expect(tool.annotations).toEqual(
-        NON_READ_TOOL_NAMES.has(tool.name)
-          ? { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }
-          : { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-      );
+      expect(tool.annotations).toEqual(EXPECTED_TOOL_ANNOTATIONS[tool.name as keyof typeof EXPECTED_TOOL_ANNOTATIONS]);
     }
   });
 });

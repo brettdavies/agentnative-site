@@ -22,6 +22,7 @@ export const EXPECTED_TOOL_NAMES = [
   'get_website_audit',
   'audit_website',
   'list_website_audits',
+  'set_website_public_listing',
   'get_web_remediation',
 ] as const;
 
@@ -40,9 +41,39 @@ export const EXPECTED_TOOL_TITLES: Record<string, string> = {
   get_website_audit: 'Get a cached website audit',
   audit_website: 'Run a live website audit',
   list_website_audits: 'List cached website audits',
+  set_website_public_listing: "Set a website's public listing",
   get_web_remediation: 'Get web-audit remediation guidance',
 };
 
+const READ_ONLY = { readOnlyHint: true, destructiveHint: false, openWorldHint: false } as const;
+
 // score_cli and audit_website reach external systems and write cache /
 // leaderboard state, so readOnlyHint is false and openWorldHint true.
-export const NON_READ_TOOL_NAMES = new Set(['score_cli', 'audit_website']);
+const AUDIT = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } as const;
+
+// set_website_public_listing overwrites one stored choice in place and reaches
+// only anc's own bindings: not read-only, destructive, repeatable, closed-world.
+const LISTING_WRITE = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: true,
+  openWorldHint: false,
+} as const;
+
+// The exact hints each tool declares on tools/list.
+export const EXPECTED_TOOL_ANNOTATIONS: Record<(typeof EXPECTED_TOOL_NAMES)[number], Record<string, boolean>> = {
+  list_tools: READ_ONLY,
+  get_tool: READ_ONLY,
+  search_tools: READ_ONLY,
+  list_principles: READ_ONLY,
+  get_principle: READ_ONLY,
+  list_spec_sections: READ_ONLY,
+  get_spec_section: READ_ONLY,
+  get_scorecard: READ_ONLY,
+  score_cli: AUDIT,
+  get_website_audit: READ_ONLY,
+  audit_website: AUDIT,
+  list_website_audits: READ_ONLY,
+  set_website_public_listing: LISTING_WRITE,
+  get_web_remediation: READ_ONLY,
+};

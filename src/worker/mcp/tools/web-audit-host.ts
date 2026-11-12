@@ -15,7 +15,7 @@ import { awaitJobTerminal, claimJob, type InFlightEnv, InFlightFlags } from '../
 import { type RunWebAuditInput, runWebAuditStream, type WebCoreEnv } from '../../audit-web/core';
 
 export type HostedAuditInput = Omit<RunWebAuditInput, 'env' | 'surface' | 'probeFetch'> & {
-  /** False for a caller whose request differs from any run it could join (an explicit listing choice). */
+  /** False for a caller that must not join another caller's run. */
   attach: boolean;
   /**
    * False for a run that saves nothing (one that does not follow declared
