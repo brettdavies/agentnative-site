@@ -104,13 +104,13 @@ export function resolveAuditListing(
 export type FlipLimitOutcome = 'allowed' | 'rate-limited';
 
 /**
- * Meter a flag-changing write against the shared per-domain flip budget so the
- * `POST /api/audit-web` route and the `audit_website` MCP tool draw from one
- * budget per domain. Only a write that actually changes the stored flag
- * (`flagChanges` — the patch path always, a re-audit only when its resolved
- * value differs) spends a token; a serve-cached no-op or a same-value re-audit
- * is free. Keyed by a hash of the domain, following the cache-key hashing
- * convention. Fails open when no KV binding is present, mirroring the hourly
+ * Meter a re-audit whose resolved listing differs from the stored one against
+ * the per-domain flip budget. The listing patch (`patchWebListing`, which the
+ * browser form and `set_website_public_listing` call) draws on the same budget
+ * through `meterListingFlip`, so every flag change spends one token per domain.
+ * Only a write that actually changes the stored flag (`flagChanges`) spends a
+ * token; a serve-cached no-op or a same-value re-audit is free. Keyed by a hash
+ * of the domain, following the cache-key hashing convention. Fails open when no KV binding is present, mirroring the hourly
  * limiter (both surfaces skip that gate when `SCORE_KV` is unset), so a dev or
  * unprovisioned env still serves flips while the primary bot defenses
  * (Turnstile, burst + hourly limiters, the staleness gate) stand.
