@@ -14,13 +14,22 @@ date is the UTC day the release shipped.
 
 - The home page, the principle pages, and the other content pages carry the day their content last changed, as
   `dateModified` in the markdown twin's frontmatter and in the JSON-LD, and as an `article:modified_time` meta tag.
+- Scorecard pages carry the day their audit ran in the same three places. The home page and the
+  [scorecards board](/scorecards) carry their own content date or the day of the newest website audit they list,
+  whichever is newer.
+- The markdown twins of [/scorecards](/scorecards), [/coverage](/coverage), [/skill](/skill), and every scorecard open
+  with the same `title`, `description`, `url`, and `dateModified` frontmatter as the other pages.
 
 ### Changed
 
 - Each `<lastmod>` in the [sitemap](/sitemap.xml) gives the day the page's content last changed instead of the build
-  date. A curated CLI scorecard uses the day its audit ran.
+  date. A curated CLI or website scorecard uses the day its audit ran.
 - This changelog records what changed on anc.dev, release by release since launch, and links the spec repository's
   changelog for the standard's own history.
+
+### Fixed
+
+- The [scorecards board](/scorecards) description names the eight agent-native principles; it said seven.
 
 ## 2026-11-11
 
