@@ -4,8 +4,13 @@
 // <loc> is a canonical declaration, so it pins to the canonical host and
 // ignores PUBLIC_BASE_URL. A staging sitemap advertising staging URLs
 // would invite crawlers to index the staging deployment.
+//
+// <lastmod> is the page's content date (content-dates.mjs), the same value
+// its JSON-LD and markdown twin carry. A page the build cannot date (one the
+// Worker renders from stored records) is listed without one.
 
 import { AUDIT_PATH } from '../shared/audit-routes.ts';
+import { isDay } from './content-dates.mjs';
 import { canonicalBaseUrl } from './util.mjs';
 
 /**
@@ -13,12 +18,13 @@ import { canonicalBaseUrl } from './util.mjs';
  * @param {number[]} args.principleNumbers e.g. [1, 2, 3, 4, 5, 6, 7]
  * @param {string[]=} args.extraPaths additional canonical paths to include
  * @param {string=} args.baseUrl explicit override; defaults to the canonical host
- * @param {string=} args.lastmod ISO-8601 date string; defaults to today UTC.
+ * @param {(path: string) => string | null | undefined} args.lastmodOf a listed
+ *   path's `YYYY-MM-DD` content date, or `null` for a path the build cannot
+ *   date. `undefined` is an unmapped path and fails the build.
  * @returns {string} XML body.
  */
-export function buildSitemap({ principleNumbers, extraPaths = [], baseUrl, lastmod }) {
+export function buildSitemap({ principleNumbers, extraPaths = [], baseUrl, lastmodOf }) {
   const base = canonicalBaseUrl(baseUrl);
-  const today = lastmod ?? new Date().toISOString().slice(0, 10);
 
   const paths = [
     '/',
@@ -37,7 +43,11 @@ export function buildSitemap({ principleNumbers, extraPaths = [], baseUrl, lastm
   const urls = paths
     .map((p) => {
       const loc = p === '/' ? `${base}/` : base + p;
-      return `  <url>\n    <loc>${loc}</loc>\n    <lastmod>${today}</lastmod>\n  </url>`;
+      const lastmod = lastmodOf(p);
+      if (lastmod === undefined) throw new Error(`buildSitemap: no content date for ${p}`);
+      if (lastmod !== null && !isDay(lastmod)) throw new Error(`buildSitemap: ${p} lastmod "${lastmod}" is not a day`);
+      const lastmodLine = lastmod === null ? '' : `\n    <lastmod>${lastmod}</lastmod>`;
+      return `  <url>\n    <loc>${loc}</loc>${lastmodLine}\n  </url>`;
     })
     .join('\n');
 
