@@ -23,8 +23,8 @@ date is the UTC day the release shipped.
 - `score_cli` starts no live audit while live scoring is switched off, and two calls for the same input share one run.
   The [MCP server](/mcp-docs) instructions fit the 4,096 characters Claude Code delivers whole, and every tool declares
   all three behavior hints.
-- A CLI scorecard whose stored record cannot be read answers 503 with `Retry-After` instead of 404, a website board
-  rebuild keeps such a site's row, and two audits started in the same second both run.
+- A CLI scorecard whose stored record cannot be read answers 503 with `Retry-After` instead of 404, a rebuild of the
+  website board keeps such a site's row, and two audits started in the same second both run.
 
 ### Removed
 
