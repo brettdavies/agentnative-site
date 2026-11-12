@@ -249,8 +249,8 @@ export async function build() {
     });
     await writeFile(join(DIST_DIR, `p${n}.html`), page);
 
-    // 5. Markdown twin — title/description/url frontmatter plus the authored
-    // bytes with site-relative links absolutified, so `Accept: text/markdown`
+    // 5. Markdown twin — title/description/url/dateModified frontmatter plus
+    // the authored bytes with site-relative links absolutified, so `Accept: text/markdown`
     // agents fetching /p<n>.md get a self-describing, self-contained document.
     // Source authors `[text](/p3)`; the twin emits `[text](https://anc.dev/p3)`.
     await writeFile(

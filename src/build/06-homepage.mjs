@@ -332,8 +332,8 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles,
   );
 
   // index.md — content-only markdown twin, prefixed with title/description/
-  // url frontmatter so agents fetching it get the same metadata the HTML
-  // carries in <head>. The entry form is interactive (button-based
+  // url/dateModified frontmatter so agents fetching it get the same metadata
+  // the HTML carries in <head>. The entry form is interactive (button-based
   // chip examples); content extractors and agents fetching the twin need
   // the same examples surfaced as inline code so the homepage contract
   // holds without JavaScript.

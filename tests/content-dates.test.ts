@@ -1,18 +1,43 @@
 // Page content dates: the git walk behind every page's date, and the build's
 // refusal to run on a clone without history.
 
-import { afterAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { buildSitemap } from '../src/build/10-sitemap.mjs';
 import { loadFileDates, newestDate, scorecardDate, utcDay } from '../src/build/content-dates.mjs';
+import { emitShell } from '../src/build/shell.mjs';
 
 const REPO_ROOT = join(import.meta.dir, '..');
 
+// Git's repository variables outrank `-C` and `cwd`. A run that inherits them
+// would commit the fixtures, and write a shallow marker, into that repository,
+// so they are held out of this file's environment while it runs.
+const GIT_REPO_ENV = [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_INDEX_FILE',
+  'GIT_COMMON_DIR',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_PREFIX',
+  'GIT_NAMESPACE',
+];
+const heldGitEnv = new Map<string, string>();
+beforeAll(() => {
+  for (const key of GIT_REPO_ENV) {
+    const value = process.env[key];
+    if (value !== undefined) heldGitEnv.set(key, value);
+    delete process.env[key];
+  }
+});
+
 const scratch: string[] = [];
 afterAll(async () => {
+  for (const [key, value] of heldGitEnv) process.env[key] = value;
   for (const dir of scratch) await rm(dir, { recursive: true, force: true });
 });
 
@@ -146,6 +171,27 @@ describe('date helpers', () => {
     expect(scorecardDate({ run: { started_at: '2026-10-28T23:53:58.414771832Z' } })).toBe('2026-10-28');
     expect(scorecardDate({ run: { started_at: '2026-10-28T23:00:00-02:00' } })).toBe('2026-10-29');
     expect(() => utcDay('not a time')).toThrow(/not a valid timestamp/);
+  });
+});
+
+describe('the outputs refuse a missing or malformed date', () => {
+  test('the sitemap refuses a listed path with no date, and a lastmod that is not a day', () => {
+    expect(() => buildSitemap({ principleNumbers: [1], lastmodOf: () => undefined })).toThrow(/no content date for \//);
+    expect(() => buildSitemap({ principleNumbers: [1], lastmodOf: () => '2026-10-28T00:00:00Z' })).toThrow(
+      /is not a day/,
+    );
+  });
+
+  test('the shell refuses a dateModified that is not a day', () => {
+    const page = {
+      title: 'T',
+      description: 'D',
+      canonicalPath: '/about',
+      breadcrumb: 'About',
+      bodyHtml: '',
+      themeInitJs: '',
+    };
+    expect(() => emitShell({ ...page, dateModified: '28 Oct 2026' })).toThrow(/is not a YYYY-MM-DD day/);
   });
 });
 

@@ -12,14 +12,14 @@
 //   3. Markdown twin equivalence: dist/p<n>.md must equal
 //      composeTwin(frontmatter, content/principles/p<n>-*.md). The
 //      `/p<n>.md` endpoint promises the authored bytes behind a
-//      title/description/url frontmatter block, not a re-wrapped
-//      derivative.
+//      title/description/url/dateModified frontmatter block, not a
+//      re-wrapped derivative.
 //
 //   4. Scorecard pages — leaderboard exists with a <table>, at least one
 //      per-tool scorecard page exists, and sitemap includes scorecard paths.
 //
-//   5. One content date per page: a principle's sitemap <lastmod> is its
-//      source file's last commit day, and every dated page carries that one
+//  10. One content date per page: each page's sitemap <lastmod> is the
+//      newest day among its inputs, and every dated page carries that one
 //      date in its sitemap entry, JSON-LD, article:modified_time, and twin.
 //
 // Run `bun run build` before these tests (bun test does not auto-build).
@@ -548,12 +548,28 @@ describe('regression #9 — Shiki code blocks keep their keyboard tab stop', () 
 });
 
 // An oracle independent of content-dates.mjs: git's own answer for one path,
-// as a UTC day. A path with uncommitted changes dates to today.
+// as a UTC day. A path with uncommitted changes dates to today. A merge lists
+// no files in the build's walk, and on a PR's merge ref `git log -1` would
+// otherwise return the merge itself.
 function lastCommitDay(repoPath: string): string {
   const git = (args: string[]) =>
     execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, TZ: 'UTC' } }).trim();
   if (git(['status', '--porcelain', '--', repoPath]) !== '') return new Date().toISOString().slice(0, 10);
-  return git(['log', '-1', '--format=%cd', '--date=format-local:%Y-%m-%d', '--', repoPath]);
+  return git(['log', '-1', '--no-merges', '--format=%cd', '--date=format-local:%Y-%m-%d', '--', repoPath]);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** The UTC day a per-tool envelope's audit run started. */
+async function auditDayOf(scorePathname: string): Promise<string> {
+  const envelope: unknown = JSON.parse(await readFile(join(DIST, `${scorePathname.slice(1)}.json`), 'utf8'));
+  const scorecard = isRecord(envelope) ? envelope.scorecard : undefined;
+  const run = isRecord(scorecard) ? scorecard.run : undefined;
+  const startedAt = isRecord(run) ? run.started_at : undefined;
+  if (typeof startedAt !== 'string') throw new Error(`${scorePathname}.json carries no scorecard.run.started_at`);
+  return new Date(startedAt).toISOString().slice(0, 10);
 }
 
 async function sitemapEntries(): Promise<Array<{ path: string; lastmod: string | null }>> {
@@ -565,8 +581,10 @@ async function sitemapEntries(): Promise<Array<{ path: string; lastmod: string |
 
 function techArticleDate(html: string): unknown {
   const script = html.match(/<script type="?application\/ld\+json"?>([\s\S]*?)<\/script>/);
-  const graph: Array<{ '@type': string; dateModified?: unknown }> = JSON.parse(script?.[1] ?? '{}')['@graph'] ?? [];
-  return graph.find((node) => node['@type'] === 'TechArticle')?.dateModified;
+  const jsonLd: unknown = JSON.parse(script?.[1] ?? '{}');
+  const graph: unknown[] = isRecord(jsonLd) && Array.isArray(jsonLd['@graph']) ? jsonLd['@graph'] : [];
+  const article = graph.find((node) => isRecord(node) && node['@type'] === 'TechArticle');
+  return isRecord(article) ? article.dateModified : undefined;
 }
 
 function frontmatterDate(md: string): string | null {
@@ -574,7 +592,7 @@ function frontmatterDate(md: string): string | null {
   return md.slice(0, md.indexOf('\n---\n')).match(/^dateModified: '([^']+)'$/m)?.[1] ?? null;
 }
 
-describe('regression #5 — one content date per page', () => {
+describe('regression #10 — one content date per page', () => {
   test.each(LOCKED_SLUGS.map((slug, i) => [i + 1, slug] as const))(
     "sitemap lastmod for /p%s is its source file's last commit day",
     async (n, slug) => {
@@ -606,23 +624,61 @@ describe('regression #5 — one content date per page', () => {
     expect(twinsWithFrontmatter.sort()).toEqual(expected.sort());
   });
 
-  test('each tool page takes its audit day, and the leaderboard the newest of its rows, the registry, and its copy modules', async () => {
-    const entries = await sitemapEntries();
-    const rows = entries.filter((e) => /^\/score\/[a-z0-9-]+$/.test(e.path) && e.lastmod !== null);
+  test('each tool page takes its audit day, read from its emitted envelope', async () => {
+    const rows = (await sitemapEntries()).filter((e) => /^\/score\/[a-z0-9-]+$/.test(e.path) && e.lastmod !== null);
     expect(rows.length).toBeGreaterThan(0);
-    const auditDays: string[] = [];
     for (const row of rows) {
-      const envelope = JSON.parse(await readFile(join(DIST, `${row.path.slice(1)}.json`), 'utf8'));
-      const auditDay = new Date(envelope.scorecard.run.started_at).toISOString().slice(0, 10);
-      expect({ path: row.path, lastmod: row.lastmod }).toEqual({ path: row.path, lastmod: auditDay });
-      auditDays.push(auditDay);
+      expect({ path: row.path, lastmod: row.lastmod }).toEqual({ path: row.path, lastmod: await auditDayOf(row.path) });
     }
-    const inputs = [
-      ...auditDays,
-      ...['registry.yaml', 'src/build/08-scorecards-emit.mjs', 'src/build/scorecards-render.mjs'].map(lastCommitDay),
+  });
+
+  test('each page takes the newest day among the inputs its input map names', async () => {
+    const entries = await sitemapEntries();
+    const boardRows = entries.filter((e) => /^\/score\/[a-z0-9-]+$/.test(e.path) && e.lastmod !== null);
+    const board = [
+      ...(await Promise.all(boardRows.map((row) => auditDayOf(row.path)))),
+      lastCommitDay('registry.yaml'),
     ];
-    const newest = [...inputs].sort().at(-1);
-    expect(entries.find((e) => e.path === '/scorecards')?.lastmod).toBe(newest);
+    const principleFiles = LOCKED_SLUGS.map((slug) => `content/principles/${slug}.md`);
+    const { SUB_PAGES } = await import('../src/build/07-subpages.mjs');
+    const inputMap: Array<{ path: string; files: string[]; board?: boolean }> = [
+      {
+        path: '/',
+        files: [
+          'content/_intro.md',
+          'content/_use.md',
+          ...principleFiles,
+          'src/data/web-audit/hero-anc.dev.json',
+          'src/build/06-homepage.mjs',
+          'src/build/audit-form.mjs',
+        ],
+        board: true,
+      },
+      {
+        path: '/audit',
+        files: ['content/audit.md', 'content/_audit-web.md', 'src/build/07-subpages.mjs', 'src/build/audit-form.mjs'],
+      },
+      ...SUB_PAGES.filter((page) => page.name !== 'audit').map((page) => ({
+        path: `/${page.name}`,
+        files: [`content/${page.name}.md`],
+      })),
+      ...principleFiles.map((file, i) => ({ path: `/p${i + 1}`, files: [file] })),
+      {
+        path: '/scorecards',
+        files: ['src/build/08-scorecards-emit.mjs', 'src/build/scorecards-render.mjs'],
+        board: true,
+      },
+      {
+        path: '/coverage',
+        files: ['src/data/coverage-matrix.json', 'src/build/coverage.mjs', 'src/build/08-scorecards-emit.mjs'],
+      },
+      { path: '/skill', files: ['src/data/skill/skill.json', 'src/build/skill.mjs'] },
+    ];
+    for (const { path, files, board: ranksBoard } of inputMap) {
+      const days = [...files.map(lastCommitDay), ...(ranksBoard ? board : [])];
+      const newest = [...days].sort().at(-1);
+      expect({ path, lastmod: entries.find((e) => e.path === path)?.lastmod }).toEqual({ path, lastmod: newest });
+    }
   });
 
   test('only the seeded web results, which render from stored records, are listed without a lastmod', async () => {

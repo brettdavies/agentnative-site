@@ -3,8 +3,9 @@
 // For each entry in `SUB_PAGES`, reads content/<name>.md, renders the HTML
 // via the shared markdown pipeline, wraps in emitShell, and emits both the
 // HTML and markdown twin. The twin is the authored source with site-
-// relative links absolutified, prefixed with title/description/url
-// frontmatter derived from the same extractors the HTML <head> uses.
+// relative links absolutified, prefixed with title/description/url/
+// dateModified frontmatter: the first three from the same extractors the
+// HTML <head> uses, the date from the page's content inputs.
 //
 // Interactive widgets (forms/inputs/buttons) do NOT belong in content/*.md:
 // the markdown twin and llms-full.txt are served verbatim from the source,
@@ -45,19 +46,6 @@ const AUDIT_WIDGET = {
   sources: [fileURLToPath(import.meta.url), fileURLToPath(new URL('./audit-form.mjs', import.meta.url))],
 };
 
-/**
- * Emit content-driven sub-pages (HTML + MD twin via shared pipeline).
- *
- * @param {object} args
- * @param {string} args.distDir
- * @param {string} args.contentDir
- * @param {string} args.themeInit
- * @param {(...paths: string[]) => string} args.fileDate newest last-commit day
- *          among files (content-dates.mjs loadFileDates).
- * @returns {Promise<Array<{name: string, source: string, title: string, dateModified: string}>>}
- *          Per-page metadata (twin markdown) consumed by llms-full.txt assembly
- *          and the sitemap.
- */
 export const SUB_PAGES = [
   { name: 'audit', breadcrumb: 'Audit', extraScripts: ['/js/audit-entry.js', WEBMCP_SCRIPT], widget: AUDIT_WIDGET },
   { name: 'install', breadcrumb: 'Install' },
@@ -106,6 +94,19 @@ async function renderLanes(source, widget, contentDir) {
   return { html, twinSource: `${lead}${widget.md}${cli.trimEnd()}\n\n${web}` };
 }
 
+/**
+ * Emit content-driven sub-pages (HTML + MD twin via shared pipeline).
+ *
+ * @param {object} args
+ * @param {string} args.distDir
+ * @param {string} args.contentDir
+ * @param {string} args.themeInit
+ * @param {(...paths: string[]) => string} args.fileDate newest last-commit day
+ *          among files (content-dates.mjs loadFileDates).
+ * @returns {Promise<Array<{name: string, source: string, title: string, dateModified: string}>>}
+ *          Per-page metadata (twin markdown) consumed by llms-full.txt assembly
+ *          and the sitemap.
+ */
 export async function emitSubPages({ distDir, contentDir, themeInit, fileDate }) {
   const subPageData = [];
   for (const { name, breadcrumb, extraScripts, widget } of SUB_PAGES) {

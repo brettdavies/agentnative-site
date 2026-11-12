@@ -3136,6 +3136,7 @@ describe('emitHomepage — index.md twin frontmatter', () => {
   // remark/rehype/Shiki pipeline per call, so per-test re-emission is the
   // expensive part, and the tests only read the emitted files.
   const distDir = join(tmpdir(), `homepage-fm-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const homepageInputs: string[] = [];
 
   beforeAll(async () => {
     await mkdir(distDir, { recursive: true });
@@ -3146,7 +3147,10 @@ describe('emitHomepage — index.md twin frontmatter', () => {
       principles: HOMEPAGE_PRINCIPLES_FIXTURE,
       leaderboard: homepageLeaderboardFixture(),
       boardDate: '2026-02-01',
-      fileDate: stubFileDate,
+      fileDate: (...paths: string[]) => {
+        homepageInputs.push(...paths);
+        return stubFileDate(...paths);
+      },
     });
   });
 
@@ -3164,6 +3168,16 @@ describe('emitHomepage — index.md twin frontmatter', () => {
       dateModified: '2026-05-01',
     });
     expect(indexMd.startsWith(expectedFm)).toBe(true);
+  });
+
+  test('the homepage dates its intro, use note, hero snapshot, and the modules that write its copy', () => {
+    expect(homepageInputs.map((p) => p.split('/').slice(-2).join('/'))).toEqual([
+      'content/_intro.md',
+      'content/_use.md',
+      'web-audit/hero-anc.dev.json',
+      'build/06-homepage.mjs',
+      'build/audit-form.mjs',
+    ]);
   });
 
   test('the homepage takes the newest date among its rows, on both representations', async () => {
