@@ -105,6 +105,12 @@ EDITS: tuple[tuple[str, str, str], ...] = (
     ("src/worker-configuration.d.ts", '\tTELEMETRY_ENVIRONMENT: "staging" | "production";\n', ""),
     ("src/worker-configuration.d.ts", '\t\tTELEMETRY_ENVIRONMENT: "staging";\n', ""),
     ("src/worker-configuration.d.ts", ' | "TELEMETRY_ENVIRONMENT"', ""),
+    # The /audit dating test also pins the privacy page's dated inputs.
+    (
+        "tests/build.test.ts",
+        "    expect(datedInputs.get(join(CONTENT_DIR, 'privacy.md'))).toEqual([join(CONTENT_DIR, 'privacy.md')]);\n",
+        "",
+    ),
     # A runbook link into the deleted analytics doc.
     (
         "docs/runbooks/live-scoring-monitoring.md",
@@ -354,6 +360,7 @@ RESIDUE = (
     "sitewide-analytics",
     "logpush",
     "/privacy",
+    "privacy.md",
 )
 
 # Scorecard JSON is audit output about third-party CLIs. Its evidence strings

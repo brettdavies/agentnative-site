@@ -91,6 +91,7 @@ describe('withhold-telemetry-lake.py residue check', () => {
   test('reads the markers it is meant to scan for', () => {
     expect(MARKERS).toContain('logpush');
     expect(MARKERS).toContain('/privacy');
+    expect(MARKERS).toContain('privacy.md');
   });
 
   test('passes on a tree that carries no marker', () => {
@@ -203,6 +204,50 @@ describe('withhold-telemetry-lake.py --check', () => {
       expect(cut.stderr).toBe(check.stderr);
     }
   });
+});
+
+const BUILD_TEST = 'tests/build.test.ts';
+const PRIVACY_DATE_LINE =
+  "    expect(datedInputs.get(join(CONTENT_DIR, 'privacy.md'))).toEqual([join(CONTENT_DIR, 'privacy.md')]);\n";
+const AUDIT_DATE_TEST = (privacyLine: string) =>
+  [
+    "  test('/audit dates from its content', () => {\n",
+    "    expect(inputs).toEqual(['content/audit.md']);\n",
+    privacyLine,
+    '  });\n',
+  ].join('');
+
+describe('withhold-telemetry-lake.py privacy page date assertion', () => {
+  test('the cut drops the assertion and keeps the lines around it', () => {
+    plant(BUILD_TEST, AUDIT_DATE_TEST(PRIVACY_DATE_LINE));
+    const { status, stdout, stderr } = withhold();
+    expect(stderr).toBe('');
+    expect(stdout).toContain('withheld the telemetry lake (1 change(s)); no references survive');
+    expect(status).toBe(0);
+    expect(readFileSync(join(tree, BUILD_TEST), 'utf8')).toBe(AUDIT_DATE_TEST(''));
+  });
+
+  test('--check reports the assertion as a pending removal, not as residue', () => {
+    plant(BUILD_TEST, AUDIT_DATE_TEST(PRIVACY_DATE_LINE));
+    const { status, stdout, stderr } = withhold(['--check']);
+    expect(stderr).toBe('');
+    expect(stdout).toContain(`edit   ${BUILD_TEST}`);
+    expect(status).toBe(2);
+  });
+
+  test.each([[[]], [['--check']]])(
+    'fails on a reference to the file that names it without a leading slash (%j)',
+    (args) => {
+      plant(
+        BUILD_TEST,
+        AUDIT_DATE_TEST("    expect(datedInputs.get(join(CONTENT_DIR, 'privacy.md'))).toBeDefined();\n"),
+      );
+      const { status, stderr } = withhold(args);
+      expect(stderr).toContain('telemetry-lake references survive in:');
+      expect(stderr).toContain(`  ${BUILD_TEST}\n`);
+      expect(status).toBe(1);
+    },
+  );
 });
 
 describe('withhold-telemetry-lake.py residue scan trust', () => {
