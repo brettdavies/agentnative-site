@@ -12,7 +12,7 @@ export const MCP_SERVER_VERSION = '0.1.0';
 export const MCP_SERVER_TITLE = 'anc.dev agent-native standard';
 /** The SEP-2127 card schema caps a description at 100 characters. */
 export const MCP_SERVER_DESCRIPTION =
-  'Search CLI scorecards, read the agent-native principles and spec, and audit websites for agents.';
+  'Score CLIs and websites against the agent-native standard, read its principles, search leaderboards';
 export const MCP_SERVER_WEBSITE_PATH = '/mcp-skill';
 
 /** An MCP `Icon`: an image a client can show for the server. */

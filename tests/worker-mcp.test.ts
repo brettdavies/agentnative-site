@@ -193,7 +193,7 @@ function expectedServerInfo(origin: string) {
     name: 'anc',
     version: '0.1.0',
     title: 'anc.dev agent-native standard',
-    description: 'Search CLI scorecards, read the agent-native principles and spec, and audit websites for agents.',
+    description: 'Score CLIs and websites against the agent-native standard, read its principles, search leaderboards',
     websiteUrl: `${origin}/mcp-skill`,
     icons: [
       { src: `${origin}/favicon.svg`, mimeType: 'image/svg+xml', sizes: ['any'] },
