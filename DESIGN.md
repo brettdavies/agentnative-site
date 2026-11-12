@@ -244,8 +244,8 @@ Rollback is `wrangler rollback`.
   twin and the `/json` representation carry `noindex` at every score, as does the in-flight 202.
 
 **Cache strategy (P4).** Three classes, written only by `applyHeaders` (`src/worker/headers.ts`). A route that knows
-more than the path can tell passes the class it served (the result route: a curated slug and a live binary share a
-path shape); a 4xx/5xx or an always-MISS path is MISS regardless.
+more than the path can tell passes the class it served (the result route: a curated slug and a live binary share a path
+shape); a 4xx/5xx or an always-MISS path is MISS regardless.
 
 - **HIT-1d** — bake-at-build HTML/markdown (`/about`, `/p1`–`/p8`, bare `/audit`, curated `/score/<slug>` and its `/md`
   twin, `/mcp-skill`, `/mcp-docs`, other spec/docs pages without a live board). Browser:
@@ -340,12 +340,12 @@ the filename. No separate manifest file, no frontmatter ordering key.
 | Source                                                           | Emitted as               | Notes                                                                                                                                                                                                            |
 | ---------------------------------------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `_intro.md` + `principles/p[1-7]-*.md`                           | `index.html`, `index.md` | Intro concatenated with all seven principles in numeric order; each principle wrapped in `<section id="p<n>-<slug>">`.                                                                                           |
-| `principles/p<n>-<slug>.md`                                      | `p<n>.html`, `p<n>.md`   | Per-principle page. HTML has the same header/footer chrome as index; markdown is the source file copied verbatim.                                                                                                |
+| `principles/p<n>-<slug>.md`                                      | `p<n>.html`, `p<n>.md`   | Per-principle page. HTML has the same header/footer chrome as index; markdown is the source behind a `title`/`description`/`url`/`dateModified` frontmatter block (§4.14), site-relative links made absolute.    |
 | `check.md`                                                       | `check.html`, `check.md` | Sub-page; flat layout (not `check/index.html`); no mini-TOC.                                                                                                                                                     |
 | `about.md`                                                       | `about.html`, `about.md` | Sub-page; flat layout (not `about/index.html`); no mini-TOC.                                                                                                                                                     |
 | all principle files (titles + slugs)                             | `llms.txt`               | llmstxt.org index: project title, one-paragraph summary, H2-delimited "Principles" section listing all seven with their `.md` URLs.                                                                              |
 | `_intro.md` + `principles/p[1-7]-*.md` + `check.md` + `about.md` | `llms-full.txt`          | Concatenation of everything, each section delimited per the A5 format block below (`# <Title>` heading, `Source:` + `Canonical-Markdown:` URL headers, body, `---` separator); single-fetch endpoint for agents. |
-| all URLs                                                         | `sitemap.xml`            | Plain sitemap; no priority hacks.                                                                                                                                                                                |
+| all URLs                                                         | `sitemap.xml`            | Plain sitemap; no priority hacks. Each `<lastmod>` is the page's content date (§4.14); a seeded web result, rendered from R2, has none.                                                                          |
 | brief in §4.13                                                   | `og-image.png`           | Generated out-of-band via `bun run og` (Playwright→Sharp→PNG, see `scripts/og/generate.ts`); committed. Not regenerated on every build.                                                                          |
 
 **Static asset + CSS + JS pipeline (A2, C3):**
@@ -1177,11 +1177,11 @@ same metadata and the same older-only pruning. The render Worker draws each fram
 palette (one palette from the final card turns the mid-climb bands grey), encodes a GIF, and has the Media
 Transformations binding turn it into the MP4. One `RenderJob` Durable Object per card runs that render once, on its own
 alarm, whatever asks for it: a finished audit, the rescore Workflow, the live CLI Durable Object, or the curated pass
-after a deploy and on the weekly cron. No page view or crawler fetch ever starts one. A stored clip sends
-`og-rendered`, and the site purges the page so its next fetch names the clip. Workers Cache purges run at 5 a minute with
-a burst of 25, shared by every purge on the account, so the site takes up to 100 messages a batch and purges their tags
-in one call. A refused purge retries with a growing delay for about 15 minutes, then gives up, and the page names the
-clip once its cached copy expires: 300 s for a live result, a day for a curated page.
+after a deploy and on the weekly cron. No page view or crawler fetch ever starts one. A stored clip sends `og-rendered`,
+and the site purges the page so its next fetch names the clip. Workers Cache purges run at 5 a minute with a burst of
+25, shared by every purge on the account, so the site takes up to 100 messages a batch and purges their tags in one
+call. A refused purge retries with a growing delay for about 15 minutes, then gives up, and the page names the clip once
+its cached copy expires: 300 s for a live result, a day for a curated page.
 
 **Bump rule.** Any change to the card face or to the motion bumps `SCORE_OG_TEMPLATE`. Every key then changes: the
 curated pass re-renders curated cards the same day, and a live site gets a card and clip in the new design on its next
@@ -1189,11 +1189,49 @@ audit. Until then its page names the still card alone, because its clip under th
 
 ### 4.14 Schema.org / SEO surface
 
-Schema.org `TechArticle` JSON-LD in `<head>` per page, `isPartOf` pointing to a parent `TechArticle` for the full spec.
-Per the agent-native documentation surface pattern. Twitter card `summary_large_image`. Open Graph: `og:title`,
-`og:description`, `og:image`, `og:url`, `og:type="article"`, `article:published_time`, `article:modified_time`. Before
-domain purchase: canonical + og:url use the staging `workers.dev` host until production cut-over; swap via a single
-constant in the HTML shell. Documented in `wrangler.toml` per CEO plan (resolving open question 5.6 with "yes").
+Schema.org `TechArticle` JSON-LD in `<head>` per page, `isPartOf` pointing to the site's `WebSite` node, and
+`dateModified` on every page the build can date. Per the agent-native documentation surface pattern. Twitter card
+`summary_large_image`. Open Graph: `og:title`, `og:description`, `og:image`, `og:url`, `og:type="article"`, and
+`article:modified_time` on every dated page. Before domain purchase: canonical + og:url use the staging `workers.dev`
+host until production cut-over; swap via a single constant in the HTML shell. Documented in `wrangler.toml` per CEO plan
+(resolving open question 5.6 with "yes").
+
+**Content dates.** Each built page carries one `YYYY-MM-DD` date: the newest change among the content it renders. The
+build computes it once per page (`src/build/content-dates.mjs`) and states it four times: the sitemap `<lastmod>`, the
+`TechArticle` `dateModified`, `article:modified_time`, and a `dateModified` key in the markdown twin's frontmatter (on
+the twins that carry frontmatter: the homepage, the principles, and the content sub-pages).
+
+- **Content** is the `content/**/*.md` files a page renders, the data whose values appear on it, and the copy a build
+  module writes into the page (a widget slot's prose, a generated page's lede). Shared layout is not content: the shell,
+  nav, footer, CSS, scripts, and template labels that frame per-entry data.
+- **A file's date** is the UTC committer day of the last commit that changed it, read from one `git log` walk. On `main`
+  a release is one overlay commit, so a production page carries the day its content reached anc.dev. A file with
+  uncommitted changes, untracked or edited, dates to today, since its content is changing today; one `git status` call
+  finds them, and a clean CI checkout never takes that path.
+- **A page built from one entry of a shared file** takes the entry's own date, never the shared file's: a per-tool
+  scorecard page takes the day its audit run started (`run.started_at`).
+- **An aggregate page** takes the newest date among the rows it ranks plus its own copy.
+
+| Page                    | Inputs                                                                                                                                                  |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`                     | `_intro.md`, `_use.md`, every principle, `hero-anc.dev.json`, `06-homepage.mjs`, `audit-form.mjs`, and the CLI board (every scorecard, `registry.yaml`) |
+| `/p<n>`                 | `principles/p<n>-<slug>.md`                                                                                                                             |
+| `/audit`                | `audit.md`, `_audit-web.md`, `07-subpages.mjs` (the widget slot), `audit-form.mjs`                                                                      |
+| other content sub-pages | `content/<name>.md`                                                                                                                                     |
+| `/scorecards`           | every scorecard's audit day, `registry.yaml`, `08-scorecards-emit.mjs`, `scorecards-render.mjs`                                                         |
+| `/score/<tool>`         | the scorecard's audit day                                                                                                                               |
+| `/coverage`             | `coverage-matrix.json`, `coverage.mjs`, `08-scorecards-emit.mjs`                                                                                        |
+| `/skill`                | `skill.json`, `skill.mjs`                                                                                                                               |
+
+A page the Worker fills from stored records at request time has no build-time date. A seeded web result
+(`/score/<domain>`) is listed in the sitemap without `<lastmod>`, and the web board panes on `/` and `/scorecards` do
+not count toward those pages' dates. The `/fix/<id>` skill pages render from the shared web-audit registry and
+remediation catalog, which carry no per-check date, so they carry no `dateModified`.
+
+The build refuses to run without the history: on a shallow clone it stops before its first stage and names the fix
+(`git fetch --unshallow`, or `fetch-depth: 0` on the CI checkout). It never falls back to the build date. Every workflow
+job that runs the build checks out with `fetch-depth: 0`. A file git has no record of (ignored, or missing) also stops
+the build.
 
 ### 4.15 The instrument component layer
 
