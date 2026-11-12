@@ -254,7 +254,7 @@ export function composeTwin(meta, bodyMarkdown, baseUrl) {
  */
 export function twinMeta({ title, description, canonicalPath, dateModified }, baseUrl) {
   if (!isDay(dateModified)) {
-    throw new Error(`composeTwin: ${canonicalPath} needs a YYYY-MM-DD dateModified; got "${dateModified}"`);
+    throw new Error(`twinMeta: ${canonicalPath} needs a YYYY-MM-DD dateModified; got "${dateModified}"`);
   }
   // The description is body prose (extractDescription) and can carry
   // authored site-relative links; the twin surface promises every link
