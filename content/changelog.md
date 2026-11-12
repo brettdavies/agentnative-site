@@ -5,7 +5,8 @@ MCP server, and the files agents read.
 
 The standard's own version history lives in the
 [spec repository's changelog](https://github.com/brettdavies/agentnative/blob/main/CHANGELOG.md). When a release moves
-the site's principle pages to a new spec version, its entry here names the version and links the pages it touched.
+the site's principle pages to a new spec version, its entry here names the version and links the pages it touched. Each
+date is the UTC day the release shipped.
 
 ## 2026-11-11
 
@@ -15,21 +16,21 @@ the site's principle pages to a new spec version, its entry here names the versi
   stored and shown under the bare host, and `/score/www.<domain>` redirects to it.
 - The site serves its IndexNow key file at the root.
 
-### Removed
-
-- The OAuth discovery metadata for the MCP server: `/.well-known/oauth-protected-resource`,
-  `/.well-known/oauth-authorization-server`, `/.well-known/jwks.json`, and the `/oauth2/token` stub now answer 404. The
-  server needs no sign-in, which [/auth.md](/auth.md) and the server card still state.
-
 ### Fixed
 
 - The website audit reads a server card that says sign-in is not required and lists no scheme as declaring no
   authentication, so the sign-in checks read not applicable for an open server.
 - `score_cli` starts no live audit while live scoring is switched off, and two calls for the same input share one run.
-  The [MCP server](/mcp-docs) instructions fit the length clients deliver whole, and every tool declares all three
-  behavior hints.
-- A CLI scorecard whose stored record cannot be read answers 503 with `Retry-After` instead of 404, and two audits
-  started in the same second both run.
+  The [MCP server](/mcp-docs) instructions fit the 4,096 characters Claude Code delivers whole, and every tool declares
+  all three behavior hints.
+- A CLI scorecard whose stored record cannot be read answers 503 with `Retry-After` instead of 404, a website board
+  rebuild keeps such a site's row, and two audits started in the same second both run.
+
+### Removed
+
+- The OAuth discovery metadata for the MCP server: `/.well-known/oauth-protected-resource`,
+  `/.well-known/oauth-authorization-server`, `/.well-known/jwks.json`, and the `/oauth2/token` stub now answer 404. The
+  server needs no sign-in, which [/auth.md](/auth.md) and the server card still state.
 
 ## 2026-11-10
 
@@ -64,8 +65,8 @@ the site's principle pages to a new spec version, its entry here names the versi
 ### Changed
 
 - The principle pages move to spec v0.7.0, and the footer and social card show v0.7.0. [P2](/p2), [P3](/p3), and
-  [P5](/p5) take the v0.7.0 rules. Every page's "Measured by" list names the audit IDs `anc` reports, and [P1](/p1),
-  [P4](/p4), [P6](/p6), [P7](/p7), and [P8](/p8) drop conditions the standard does not have.
+  [P5](/p5) take the v0.7.0 rules. Every page's "Measured by" list, [P8](/p8)'s included, names the audit IDs `anc`
+  reports, and [P1](/p1), [P4](/p4), [P6](/p6), and [P7](/p7) drop conditions the standard does not have.
 - Live CLI scoring and every curated CLI scorecard run on anc 0.7.0. A tool with no skill bundle reads not applicable on
   the P8 bundle rows, and a live run whose audit errored is shown but not saved.
 
@@ -152,7 +153,8 @@ the site's principle pages to a new spec version, its entry here names the versi
 
 - `www.anc.dev` redirects to `anc.dev`.
 - An MCP probe answered 408 or 429 reads as an operational error, an OpenAPI description larger than 512 KiB counts as
-  present, and the score copy says what the relative and global scores count.
+  present, the score copy says what the relative and global scores count, and fix prompts keep the audited site's text
+  inside their evidence blocks.
 
 ## 2026-09-30
 
@@ -161,14 +163,14 @@ the site's principle pages to a new spec version, its entry here names the versi
 - Website results group their MCP checks into four protocol lanes (every MCP server, the legacy lane, the modern lane,
   and in-page WebMCP tools), each with its own pass count, on the result page and in its markdown twin.
 
+### Fixed
+
+- Website check rows are readable at phone width.
+
 ### Removed
 
 - The `GET /api/score`, `/api/score.json`, and `/api/score.md` read lane. A scorecard reads at `/score/<target>`;
   `POST /api/score` is unchanged.
-
-### Fixed
-
-- Website check rows are readable at phone width.
 
 ## 2026-09-15
 
@@ -212,6 +214,7 @@ the site's principle pages to a new spec version, its entry here names the versi
 - Audit probes identify themselves with an `anc-web-audit/1.0` User-Agent, and a site that refuses an identified agent
   has the refusal scored as evidence.
 - Leftover `/.well-known/mcp.json` and `/mcp.json` aliases score as their own MAY check.
+- A repeat website audit reuses the stored result for one minute after scoring, down from five.
 
 ### Fixed
 
@@ -224,7 +227,8 @@ the site's principle pages to a new spec version, its entry here names the versi
 ### Added
 
 - The MCP server serves both the legacy `initialize` handshake and the header-routed 2026-07-28 lane, so modern clients
-  connect without a handshake. All 13 tools carry a `title` and behavior annotations.
+  connect without a handshake. All 13 tools carry a `title` and behavior annotations, and the endpoint answers only
+  requests whose `Host` names one of the site's hosts.
 - The website audit scores MCP protocol eras separately, with conformance probes for each era's error codes and for
   whether a server honors the `Accept` header it advertises.
 
@@ -334,7 +338,8 @@ the site's principle pages to a new spec version, its entry here names the versi
 ### Added
 
 - An MCP server at `POST /mcp` with nine tools for the registry, principles, spec sections, and scorecards, live CLI
-  audits included, and a client guide at [/mcp-skill](/mcp-skill).
+  audits included, and a client guide at [/mcp-skill](/mcp-skill). It ships behind an operator switch, off until the
+  operator turns it on.
 
 ## 2026-06-02
 
@@ -388,14 +393,14 @@ the site's principle pages to a new spec version, its entry here names the versi
   its scorecard was scored against.
 - The 96 curated scorecards are scored again with anc 0.3.0.
 
-### Removed
-
-- The commit pin and `verify` block in `/skill.json`, and `anc.commit` in scorecards.
-
 ### Fixed
 
 - Scorecard pages no longer link to a wrong `agentnative-cli` commit, the reproduce block in each scorecard's markdown
   twin is tagged `bash`, and `/skill.json` reports the published skill version.
+
+### Removed
+
+- The commit pin and `verify` block in `/skill.json`, and `anc.commit` in scorecards.
 
 ## 2026-05-01
 
