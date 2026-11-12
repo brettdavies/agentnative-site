@@ -210,7 +210,7 @@ export async function emitScorecardSurface({
   const leaderboardMeta = {
     title: 'ANC 100 — Agent-Native CLI Leaderboard',
     description:
-      'Automated agent-readiness scores for real CLI tools, scored against the seven agent-native principles.',
+      'Automated agent-readiness scores for real CLI tools, scored against the eight agent-native principles.',
     canonicalPath: SCORECARDS_PATH,
     dateModified: pageDates.get(SCORECARDS_PATH),
   };
