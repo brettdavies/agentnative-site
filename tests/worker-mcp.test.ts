@@ -196,8 +196,8 @@ function expectedServerInfo(origin: string) {
     description: 'Score CLIs and websites against the agent-native standard, read its principles, search leaderboards',
     websiteUrl: `${origin}/mcp-skill`,
     icons: [
-      { src: `${origin}/favicon.svg`, mimeType: 'image/svg+xml', sizes: ['any'] },
       { src: `${origin}/apple-touch-icon-180.png`, mimeType: 'image/png', sizes: ['180x180'] },
+      { src: `${origin}/favicon.svg`, mimeType: 'image/svg+xml', sizes: ['any'] },
     ],
   };
 }

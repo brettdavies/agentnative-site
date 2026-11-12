@@ -495,10 +495,10 @@ and call). The SEP-1649 server card's `protocolVersion` is pinned in lockstep; t
 the build.
 
 **Server identity.** Legacy `initialize` returns `serverInfo` with `name` (`anc`), `version`, `title`, `description`,
-`websiteUrl` (this guide), and `icons`: `https://anc.dev/favicon.svg` (`image/svg+xml`, `sizes: ["any"]`) and
-`https://anc.dev/apple-touch-icon-180.png` (`image/png`, `sizes: ["180x180"]`). The modern `server/discover` result has
-no `serverInfo` field; every modern result carries the same object under `_meta["io.modelcontextprotocol/serverInfo"]`.
-The URLs name the host that served the request.
+`websiteUrl` (this guide), and `icons`: `https://anc.dev/apple-touch-icon-180.png` (`image/png`, `sizes: ["180x180"]`),
+then `https://anc.dev/favicon.svg` (`image/svg+xml`, `sizes: ["any"]`). The modern `server/discover` result has no
+`serverInfo` field; every modern result carries the same object under `_meta["io.modelcontextprotocol/serverInfo"]`. The
+URLs name the host that served the request.
 
 **Tool metadata.** Every `tools/list` entry carries a `title` (a short display name) alongside `description` and
 `inputSchema`, plus an `annotations` object describing the tool's posture. The eleven read tools carry `readOnlyHint:

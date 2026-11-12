@@ -257,8 +257,8 @@ describe('emitDiscovery() in isolation', () => {
       expect(card.name).toBe('dev.anc/anc');
       expect(card.websiteUrl).toBe('https://example.test/mcp-skill');
       expect(card.icons.map((icon) => icon.src)).toEqual([
-        'https://example.test/favicon.svg',
         'https://example.test/apple-touch-icon-180.png',
+        'https://example.test/favicon.svg',
       ]);
       expect(card.remotes[0].url).toBe('https://example.test/mcp');
 

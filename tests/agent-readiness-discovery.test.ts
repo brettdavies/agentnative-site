@@ -363,8 +363,8 @@ describe('SEP-2127 server card and AI catalog: worker red-team', () => {
     const card = JSON.parse(await res.text()) as { websiteUrl: string; icons: unknown };
     expect(card.websiteUrl).toBe('https://staging.example/mcp-skill');
     expect(card.icons).toEqual([
-      { src: 'https://staging.example/favicon.svg', mimeType: 'image/svg+xml', sizes: ['any'] },
       { src: 'https://staging.example/apple-touch-icon-180.png', mimeType: 'image/png', sizes: ['180x180'] },
+      { src: 'https://staging.example/favicon.svg', mimeType: 'image/svg+xml', sizes: ['any'] },
     ]);
   });
 

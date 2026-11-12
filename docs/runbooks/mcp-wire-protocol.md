@@ -253,11 +253,11 @@ Field-for-field pinned at
 ## Server identity
 
 The server reports one `Implementation` object: `name` (`anc`), `version`, `title`, `description`, `websiteUrl` (the
-client guide, `/mcp-skill`), and `icons` (`/favicon.svg` with `sizes: ["any"]`, `/apple-touch-icon-180.png` with
-`sizes: ["180x180"]`, no `theme`). The legacy lane returns it as `serverInfo` in the `initialize` result. The 2026-07-28
-`DiscoverResult` has no `serverInfo` field, so on the modern lane the SDK's encode seam stamps the same object into
-every result's `_meta` under `io.modelcontextprotocol/serverInfo`, `server/discover` included. The URLs are built per
-request from the origin it arrived on, the way the server card's are.
+client guide, `/mcp-skill`), and `icons` (`/apple-touch-icon-180.png` with `sizes: ["180x180"]`, then `/favicon.svg`
+with `sizes: ["any"]`, no `theme`). The legacy lane returns it as `serverInfo` in the `initialize` result. The
+2026-07-28 `DiscoverResult` has no `serverInfo` field, so on the modern lane the SDK's encode seam stamps the same
+object into every result's `_meta` under `io.modelcontextprotocol/serverInfo`, `server/discover` included. The URLs are
+built per request from the origin it arrived on, the way the server card's are.
 
 The display fields come from `src/shared/mcp-discovery.ts#mcpServerMetadata`, which the SEP-2127 card also reads. The
 card schema caps `title` and `description` at 100 characters, and

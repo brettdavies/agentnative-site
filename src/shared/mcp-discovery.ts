@@ -31,9 +31,10 @@ export interface McpServerMetadata {
 }
 
 /**
- * The server's display fields, with each URL on `origin`. The mark draws its
- * own background, so both icons read on light and dark surfaces and carry no
- * `theme`.
+ * The server's display fields, with each URL on `origin`. The PNG comes first
+ * because a client that renders icons MUST support PNG and only SHOULD support
+ * SVG. The mark draws its own background, so both icons read on light and dark
+ * surfaces and carry no `theme`.
  */
 export function mcpServerMetadata(origin: string): McpServerMetadata {
   return {
@@ -41,8 +42,8 @@ export function mcpServerMetadata(origin: string): McpServerMetadata {
     description: MCP_SERVER_DESCRIPTION,
     websiteUrl: `${origin}${MCP_SERVER_WEBSITE_PATH}`,
     icons: [
-      { src: `${origin}/favicon.svg`, mimeType: 'image/svg+xml', sizes: ['any'] },
       { src: `${origin}/apple-touch-icon-180.png`, mimeType: 'image/png', sizes: ['180x180'] },
+      { src: `${origin}/favicon.svg`, mimeType: 'image/svg+xml', sizes: ['any'] },
     ],
   };
 }
