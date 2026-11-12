@@ -492,12 +492,15 @@ describe('build output separates canonical identity from navigation', () => {
       expect(html).toContain(`content="${CANONICAL_SITE_URL}/p3"`);
       expect(html).not.toContain(STAGING_BASE);
 
-      const sitemap = buildSitemap({ principleNumbers: [1], lastmod: '2026-08-28' });
+      const sitemap = buildSitemap({ principleNumbers: [1], lastmodOf: () => '2026-08-28' });
       expect(sitemap).toContain(`<loc>${CANONICAL_SITE_URL}/p1</loc>`);
       expect(sitemap).not.toContain(STAGING_BASE);
 
       // One twin, both rules: canonical frontmatter, navigational body.
-      const twin = composeTwin({ title: 'P3', description: 'desc', canonicalPath: '/p3' }, 'See [P1](/p1).\n');
+      const twin = composeTwin(
+        { title: 'P3', description: 'desc', canonicalPath: '/p3', dateModified: '2026-08-28' },
+        'See [P1](/p1).\n',
+      );
       expect(twin).toContain(`url: ${CANONICAL_SITE_URL}/p3`);
       expect(twin).toContain(`](${STAGING_BASE}/p1)`);
     } finally {

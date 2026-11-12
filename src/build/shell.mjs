@@ -19,6 +19,7 @@ import { MCP_DISCOVERY_DOCUMENTS, SEP_1649_CARD_PATH } from '../shared/mcp-disco
 import { SITE_OG_IMAGE_ALT, SITE_OG_IMAGE_PATH } from '../shared/og-card.ts';
 import { markdownAlternateLink } from '../shared/result-head';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
+import { isDay } from './content-dates.mjs';
 import { loadInstallCommands } from './install-commands.mjs';
 import { ANC_VERSION, canonicalBaseUrl, escHtml, SITE_SPEC_VERSION } from './util.mjs';
 
@@ -210,6 +211,9 @@ export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
  * @param {string=} args.ogImageAlt          — alt for that card. Omitted pages use the site-wide alt.
  * @param {string=} args.ogVideo             — og:video meta markup, or the `{{OG_VIDEO}}` placeholder the
  *     Worker fills when the page's clip exists. Omitted pages name no video.
+ * @param {string=} args.dateModified        — the page's `YYYY-MM-DD` content date
+ *     (content-dates.mjs), emitted as the TechArticle `dateModified` and as
+ *     `article:modified_time`. Omitted on pages the build cannot date.
  * @returns {string} full HTML document.
  */
 export function emitShell({
@@ -232,7 +236,11 @@ export function emitShell({
   ogImage = null,
   ogImageAlt = null,
   ogVideo = '',
+  dateModified = null,
 }) {
+  if (dateModified !== null && !isDay(dateModified)) {
+    throw new Error(`emitShell: ${canonicalPath} dateModified "${dateModified}" is not a YYYY-MM-DD day`);
+  }
   // Everything `base` feeds below is crawler-facing identity: the
   // canonical link, the OpenGraph/Twitter block, and the JSON-LD @id
   // graph. All of it names where the real site lives, so it ignores
@@ -298,6 +306,7 @@ export function emitShell({
         description,
         url: canonical,
         image: resolvedOgImage,
+        ...(dateModified ? { dateModified } : {}),
         isPartOf: { '@id': siteId },
         author: {
           '@type': 'Person',
@@ -389,7 +398,7 @@ ${isIndex || turnstileSitekey ? `    <meta name="turnstile-sitekey" content="{{T
     <meta property="og:title" content="${esc(title)}" />
     <meta property="og:description" content="${esc(description)}" />
     <meta property="og:url" content="${canonical}" />
-    <meta property="og:image" content="${esc(resolvedOgImage)}" />
+${dateModified ? `    <meta property="article:modified_time" content="${dateModified}" />\n` : ''}    <meta property="og:image" content="${esc(resolvedOgImage)}" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="${esc(resolvedOgAlt)}" />
