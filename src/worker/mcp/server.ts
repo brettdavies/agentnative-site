@@ -7,12 +7,13 @@
 
 import { localhostAllowedOrigins, McpServer } from '@modelcontextprotocol/server';
 import { createMcpHandler } from 'agents/mcp/server';
-import { MCP_SERVER_NAME, MCP_SERVER_VERSION } from '../../shared/mcp-discovery';
+import { MCP_SERVER_NAME, MCP_SERVER_VERSION, mcpServerMetadata } from '../../shared/mcp-discovery';
 import type { AuditJob } from '../audit/job';
 import { type Catalog, getWarmCatalog } from './catalog';
 import { getMcpEnv } from './env-context';
 import { buildInstructions, SPEC_REVISION } from './instructions';
 import { registerResources } from './resources';
+import { siteOrigin } from './site-origin';
 import { type RegisterToolsEnv, registerTools } from './tools';
 
 // DNS-rebinding defense. The SDK only derives a default Host allowlist for
@@ -80,6 +81,7 @@ function createAncServer(catalog: Catalog): McpServer {
     {
       name: MCP_SERVER_NAME,
       version: MCP_SERVER_VERSION,
+      ...mcpServerMetadata(siteOrigin()),
     },
     {
       capabilities: {

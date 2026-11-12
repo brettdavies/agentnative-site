@@ -27,6 +27,7 @@ import {
   MCP_SERVER_CARD_PATH,
   MCP_SERVER_CARD_SEED_PATH,
   MCP_SERVER_CARD_TYPE,
+  mcpServerMetadata,
   SEP_1649_CARD_SEED_PATH,
 } from '../shared/mcp-discovery';
 import type { OgRenderedMessage } from '../shared/og-render';
@@ -351,7 +352,9 @@ async function buildOriginAwareJsonBody(
 }
 
 function rewriteServerCard(data: Record<string, unknown>, origin: string): void {
-  data.websiteUrl = `${origin}/mcp-skill`;
+  const { websiteUrl, icons } = mcpServerMetadata(origin);
+  data.websiteUrl = websiteUrl;
+  data.icons = icons;
   if (!Array.isArray(data.remotes)) return;
   for (const remote of data.remotes) {
     if (remote && typeof remote === 'object') {
