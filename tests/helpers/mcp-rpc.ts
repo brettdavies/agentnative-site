@@ -18,7 +18,14 @@ export type JsonRpcBody = {
   method?: string;
   params?: unknown;
   result?: {
-    serverInfo?: { name?: string; version?: string };
+    serverInfo?: {
+      name?: string;
+      version?: string;
+      title?: string;
+      description?: string;
+      websiteUrl?: string;
+      icons?: Array<{ src: string; mimeType?: string; sizes?: string[] }>;
+    };
     protocolVersion?: string;
     capabilities?: { tools?: unknown; resources?: { subscribe?: boolean } };
     instructions?: string;

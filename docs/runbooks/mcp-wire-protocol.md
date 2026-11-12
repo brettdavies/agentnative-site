@@ -160,8 +160,8 @@ as `CallToolResult` with `isError: true`, carrying a `-32099`-shaped JSON string
 (`src/worker/mcp/tools/web-audit.ts#jsonRpcError32099`, `src/worker/mcp/tools/scorecard-audit.ts#jsonRpcError32099`).
 The JSON-RPC envelope around it is successful. Pinned at
 `tests/worker-mcp-audit.test.ts#missing cf-connecting-ip on cache-miss returns isError: true with -32099` and
-`tests/web-audit-mcp-tools.test.ts#missing cf-connecting-ip returns the -32099 envelope (no anon fallback)`. Tool-level
-failure and transport-level failure are two layers, and only the second one is in this document's table.
+`tests/web-audit-mcp-tools.test.ts#missing cf-connecting-ip returns the rate-limit envelope with -32099 (no anon fallback)`.
+Tool-level failure and transport-level failure are two layers, and only the second one is in this document's table.
 
 ## Responses with no JSON-RPC envelope
 
@@ -250,6 +250,21 @@ one round trip:
 Field-for-field pinned at
 `tests/worker-mcp-dispatch.test.ts#a modern claim of an unsupported protocol version draws the SDK -32022 at HTTP 400`.
 
+## Server identity
+
+The server reports one `Implementation` object: `name` (`anc`), `version`, `title`, `description`, `websiteUrl` (the
+client guide, `/mcp-skill`), and `icons` (`/apple-touch-icon-180.png` with `sizes: ["180x180"]`, then `/favicon.svg`
+with `sizes: ["any"]`, no `theme`). The legacy lane returns it as `serverInfo` in the `initialize` result. The
+2026-07-28 `DiscoverResult` has no `serverInfo` field, so on the modern lane the SDK's encode seam stamps the same
+object into every result's `_meta` under `io.modelcontextprotocol/serverInfo`, `server/discover` included. The URLs are
+built per request from the origin it arrived on, the way the server card's are.
+
+The display fields come from `src/shared/mcp-discovery.ts#mcpServerMetadata`, which the SEP-2127 card also reads. The
+card schema caps `title` and `description` at 100 characters, and
+`tests/build-discovery-emit.test.ts#validates against the vendored extension schema` enforces the cap. Pinned per lane
+at `tests/worker-mcp.test.ts#initialize returns the server title, description, website, and icons in serverInfo` and
+`tests/worker-mcp.test.ts#server/discover and tools/list carry the same serverInfo under the result _meta key`.
+
 ## Cache hints
 
 Four read methods return `ttlMs` and `cacheScope` alongside the result, declared once as
@@ -310,8 +325,8 @@ Two codes are excluded from the conformance matrix, recorded above
 
 A third code appears in probe results without being probed for: **`-32000`**, JSON-RPC's reserved generic server error,
 which a stateful legacy server returns to a sessionless POST
-(`src/worker/audit-web/handlers/mcp.ts#SESSION_REQUIRED_CODE`). It is a statefulness signal, not an error-taxonomy
-signal. anc's own `-32000` is the HTTP 403 Host or Origin rejection in the table above, a different producer behind the
+(`src/worker/audit-web/handlers/mcp.ts#SESSION_REQUIRED_CODE`). It marks a stateful server, not an error
+category. anc's own `-32000` is the HTTP 403 Host or Origin rejection in the table above, a different producer behind the
 same code.
 
 ## Bumping the revision

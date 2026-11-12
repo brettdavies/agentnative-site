@@ -358,6 +358,16 @@ describe('SEP-2127 server card and AI catalog: worker red-team', () => {
     expect(res.headers.get('Cache-Control') ?? '').toContain('max-age=300');
   });
 
+  test('the served card names the website and icons on the origin it was requested from', async () => {
+    const res = await worker.fetch(req('https://staging.example/mcp/server-card'), makeEnv(), {} as ExecutionContext);
+    const card = JSON.parse(await res.text()) as { websiteUrl: string; icons: unknown };
+    expect(card.websiteUrl).toBe('https://staging.example/mcp-skill');
+    expect(card.icons).toEqual([
+      { src: 'https://staging.example/apple-touch-icon-180.png', mimeType: 'image/png', sizes: ['180x180'] },
+      { src: 'https://staging.example/favicon.svg', mimeType: 'image/svg+xml', sizes: ['any'] },
+    ]);
+  });
+
   test('a markdown Accept on /mcp/server-card still gets the card', async () => {
     const res = await worker.fetch(
       req('https://anc.dev/mcp/server-card', { headers: { accept: 'text/markdown' } }),

@@ -27,6 +27,8 @@ import {
   deepFindFirst,
   modernResourcesReadBody,
   modernResourcesReadHeaders,
+  modernServerDiscoverBody,
+  modernServerDiscoverHeaders,
   modernToolCallBody,
   modernToolCallBodyMissingCapabilities,
   modernToolCallHeaders,
@@ -34,12 +36,14 @@ import {
   modernToolsListHeaders,
 } from './helpers/mcp-modern';
 import {
+  CANONICAL_TEST_ORIGIN,
   getJsonToolContent,
   type JsonRpcBody,
   mcpInitialize,
   mcpRpc,
   mcpRpcExpect200,
   resetMcpTestState,
+  STAGING_TEST_ORIGIN,
 } from './helpers/mcp-rpc';
 import {
   EXPECTED_TOOL_COUNT,
@@ -182,6 +186,28 @@ function getJsonContent(body: JsonRpcBody): unknown {
   return getJsonToolContent(body);
 }
 
+// Written out rather than imported: a test that reads the constant it checks
+// cannot notice the constant changing.
+function expectedServerInfo(origin: string) {
+  return {
+    name: 'anc',
+    version: '0.1.0',
+    title: 'anc.dev agent-native standard',
+    description: 'Score CLIs and websites against the agent-native standard, read its principles, search leaderboards',
+    websiteUrl: `${origin}/mcp-skill`,
+    icons: [
+      { src: `${origin}/apple-touch-icon-180.png`, mimeType: 'image/png', sizes: ['180x180'] },
+      { src: `${origin}/favicon.svg`, mimeType: 'image/svg+xml', sizes: ['any'] },
+    ],
+  };
+}
+
+async function discoverServerInfo(env: McpEnv, origin?: string): Promise<unknown> {
+  const body = await mcpRpcExpect200(env, modernServerDiscoverBody(), modernServerDiscoverHeaders(), { origin });
+  expect(body.error).toBeUndefined();
+  return (body.result?._meta as Record<string, unknown> | undefined)?.['io.modelcontextprotocol/serverInfo'];
+}
+
 beforeEach(() => {
   resetMcpTestState();
 });
@@ -197,6 +223,30 @@ describe('MCP handshake', () => {
     expect(result.error).toBeUndefined();
     expect(result.result?.serverInfo?.name).toBe('anc');
     expect(result.result?.serverInfo?.version).toBe('0.1.0');
+  });
+
+  test('initialize returns the server title, description, website, and icons in serverInfo', async () => {
+    const result = await initialize(makeEnv());
+    expect(result.error).toBeUndefined();
+    expect(result.result?.serverInfo).toEqual(expectedServerInfo(CANONICAL_TEST_ORIGIN));
+  });
+
+  test('server/discover and tools/list carry the same serverInfo under the result _meta key', async () => {
+    const env = makeEnv();
+    expect(await discoverServerInfo(env)).toEqual(expectedServerInfo(CANONICAL_TEST_ORIGIN));
+    const list = await mcpRpcExpect200(env, modernToolsListBody(), modernToolsListHeaders());
+    expect((list.result?._meta as Record<string, unknown> | undefined)?.['io.modelcontextprotocol/serverInfo']).toEqual(
+      expectedServerInfo(CANONICAL_TEST_ORIGIN),
+    );
+  });
+
+  test('serverInfo website and icon URLs follow the origin the request arrived on, on both lanes', async () => {
+    const env = makeEnv();
+    const canonical = await mcpInitialize(env, { origin: CANONICAL_TEST_ORIGIN });
+    expect(canonical.result?.serverInfo).toEqual(expectedServerInfo(CANONICAL_TEST_ORIGIN));
+    const legacy = await mcpInitialize(env, { origin: STAGING_TEST_ORIGIN });
+    expect(legacy.result?.serverInfo).toEqual(expectedServerInfo(STAGING_TEST_ORIGIN));
+    expect(await discoverServerInfo(env, STAGING_TEST_ORIGIN)).toEqual(expectedServerInfo(STAGING_TEST_ORIGIN));
   });
 
   test('initialize advertises declared spec revision in instructions', async () => {

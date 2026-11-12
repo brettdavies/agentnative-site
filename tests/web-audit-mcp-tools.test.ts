@@ -489,7 +489,7 @@ describe('audit_website gates', () => {
     expect(res.result?.content?.[0]?.text ?? '').toContain('rate limit');
   });
 
-  test('missing cf-connecting-ip returns the -32099 envelope (no anon fallback)', async () => {
+  test('missing cf-connecting-ip returns the rate-limit envelope with -32099 (no anon fallback)', async () => {
     const env = await makeEnv();
     const res = await callTool(env, 'audit_website', { url: 'never-seen.dev' });
     expect(res.result?.isError).toBe(true);
