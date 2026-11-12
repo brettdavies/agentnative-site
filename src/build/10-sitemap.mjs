@@ -7,10 +7,12 @@
 //
 // <lastmod> is the page's content date (content-dates.mjs), the same value
 // its JSON-LD and markdown twin carry. A page the build cannot date (one the
-// Worker renders from stored records) is listed without one.
+// Worker renders from stored records) is listed without one, and the Worker
+// dates it when it serves the file (src/worker/sitemap.ts).
 
 import { AUDIT_PATH } from '../shared/audit-routes.ts';
-import { isDay } from './content-dates.mjs';
+import { isDay } from '../shared/page-date';
+import { sitemapEntry } from '../shared/sitemap-entry';
 import { canonicalBaseUrl } from './util.mjs';
 
 /**
@@ -46,8 +48,7 @@ export function buildSitemap({ principleNumbers, extraPaths = [], baseUrl, lastm
       const lastmod = lastmodOf(p);
       if (lastmod === undefined) throw new Error(`buildSitemap: no content date for ${p}`);
       if (lastmod !== null && !isDay(lastmod)) throw new Error(`buildSitemap: ${p} lastmod "${lastmod}" is not a day`);
-      const lastmodLine = lastmod === null ? '' : `\n    <lastmod>${lastmod}</lastmod>`;
-      return `  <url>\n    <loc>${loc}</loc>${lastmodLine}\n  </url>`;
+      return sitemapEntry(loc, lastmod);
     })
     .join('\n');
 
