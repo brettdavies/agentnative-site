@@ -14,12 +14,12 @@ topic: mcp-website-listing-tool
 ## Goal Capsule
 
 - **Objective:** an agent on anc.dev's MCP server can run or read a website audit without any way to change that site's public leaderboard listing as part of it. It changes a listing only through a tool whose name, input, description, and hints say that is all it does. When a user asks to list or unlist a site, the change lands and stays: an audit of the same site that carries no listing choice of its own does not undo it, and the change does not undo an audit saved while it waited on its rate limits.
-- **Means:** a new tool, `set_website_listing` (name pending D2), built on the existing listing-only write (KTD1 to KTD4, KTD7). `audit_website` drops `public_listing` and refuses a call that still sends it (KTD5, pending D3). An audit's save reads the stored listing when it writes rather than when it starts (KTD6), and the listing write patches the record as it stands after the rate limits pass (KTD12).
-- **Authority:** Product Contract requirements win on behavior, Key Technical Decisions win on mechanism, and units override neither. The owner decisions D2 to D5 bind both. Until the owner answers, each one's recommended option is the planning baseline, and the build does not start.
-- **Execution profile:** code. One PR from a `feat/` branch cut from `dev` after the instructions-trim follow-up to #563 has merged. #563 merged as `aa0537d`. Units U1 to U5 land in that PR.
+- **Means:** a new tool, `set_website_public_listing` (D2), built on the existing listing-only write (KTD1 to KTD4, KTD7). `audit_website` drops `public_listing` and refuses a call that still sends it (KTD5, D3). An audit's save reads the stored listing when it writes rather than when it starts (KTD6), and the listing write patches the record as it stands after the rate limits pass (KTD12).
+- **Authority:** Product Contract requirements win on behavior, Key Technical Decisions win on mechanism, and units override neither. The owner decisions D2 to D5 bind both.
+- **Execution profile:** code. One PR from a `feat/` branch cut from `dev` after the instructions-trim follow-up to #563 has merged. #563 merged as `aa0537d`, and the trim as #564 (`e20fe17`). Units U1 to U5 land in that PR.
 - **Stop conditions:**
   - The instructions trim lands with text other than what KTD10 measures. Re-measure KTD10 against what landed before building.
-  - The instructions trim has not merged when the rest of the build is ready. Leave the KTD10 clause out and change only the count, which keeps the same length. On #563's merged text the clause brings the instructions to 2,062 characters at `https://anc.dev`, past the 2,048-character cut that `src/worker/mcp/client-limits.ts` records (`claude-code-all-2048`). The clause then waits for the trim.
+  - The instructions trim has not merged when the rest of the build is ready. Leave the KTD10 clause out and change only the count, which keeps the same length. On #563's merged text the clause brings the instructions to 2,069 characters at `https://anc.dev`, past the 2,048-character cut that `src/worker/mcp/client-limits.ts` records (`claude-code-all-2048`). The clause then waits for the trim.
   - The write-time listing read (KTD6) cannot be placed without changing the listing an explicit browser request or the rescore writes. Stop and report.
   - The new tool's description cannot keep its purpose sentence and the explicit-request sentence inside the 2,048-byte window and the whole text inside #563's budget. Stop and report.
   - The owner picks an option for D2 to D5 that this plan does not describe. Re-plan the affected units before building.
@@ -75,19 +75,19 @@ Separating the write opens a race that the combination hid. While a stored audit
 ### Key Decisions
 
 - D1. **Split the listing change out of `audit_website` into its own tool.** (session-settled: user-directed: chosen over keeping `public_listing` on `audit_website`: the tool-design review found that the combined tool joins an open-world audit and a persistent public-listing write, which have different user goals and safety boundaries.) Governs R1, R10, R11.
-- D2. **The tool's name.** Pending owner decision. Recommended: `set_website_listing`. It matches the website family's verb-first pattern (`get_website_audit`, `audit_website`, `list_website_audits`), and `set_` says it writes one stored value. The parameter keeps the scorecard's own field name, `public_listing`. Alternatives: `set_public_listing`, `update_website_listing`, `set_website_public_listing`. Governs R1, R11, R12, R14.
-- D3. **What `audit_website` does with a caller that still sends `public_listing`.** Pending owner decision. Recommended: (b) refuse it with a tool error naming the new tool, with no transition window. Governs R11.
+- D2. **The tool's name: `set_website_public_listing`.** (owner decision) It follows the website family's verb-first pattern (`get_website_audit`, `audit_website`, `list_website_audits`), `set_` says it writes one stored value, and the rest names the stored field it writes. The parameter keeps the scorecard's own field name, `public_listing`. Considered: `set_website_listing`, `set_public_listing`, `update_website_listing`. Governs R1, R11, R12, R14.
+- D3. **What `audit_website` does with a caller that still sends `public_listing`.** (owner decision) (b): refuse it with a tool error naming the new tool, with no transition window. Governs R11.
   - (a) Remove the parameter and do nothing else. The MCP SDK wraps a raw input shape in `z.object` (`normalizeRawShapeSchema` in `@modelcontextprotocol/server` 2.4.0), which strips unknown keys. A stale caller's opt-in would be dropped while its audit still runs and spends its budget, and the caller would believe it had opted in. Not recommended.
   - (b) Refuse it. A strict input object with a custom unknown-key message (KTD5) answers `isError: true` with text naming the new tool, before any gate runs. The advertised schema gains `additionalProperties: false`: the SDK emits input-mode JSON Schema, where today's raw shape carries none, and it strips unknown keys. So any other undeclared key is refused too, where today it is dropped and the audit runs. That is a second change for callers, and the changelog states it.
   - (c) Accept it for a stated window, then (b). The combined operation stays live for the window, and the window cannot be measured to its end: the `mcp.request` log carries no tool arguments, so nothing counts the callers still sending it.
-- D4. **The published listing promises.** Pending owner decision. Recommended: accept these changes. Governs R3, R5, R7, R10.
+- D4. **The published listing promises.** (owner decision) Accept these changes. Governs R3, R5, R7, R10.
   - "Omit to keep the current stored choice: a blank never erases a prior opt-in" (the `public_listing` parameter description) becomes "an audit never changes the site's leaderboard listing" on `audit_website`. This is stronger, since no `audit_website` call can change the listing.
   - "Defaults to off only on a domain's first-ever audit" holds as is and moves to the `audit_website` description.
   - One call no longer audits a site and lists it. A first listing takes `audit_website`, then the new tool. Each spends one unit of the hourly window, so a first listing costs two units where it costs one today.
   - A listing change applies at any scorecard age, where today it applies only within 60 seconds of an audit and otherwise re-audits.
   - On a curated site the tool writes nothing. Today `audit_website` writes the flag there, the board ignores it, and the next rescore resets it.
   - The browser form's listing box starts unchecked and sends an explicit `false`, so a browser audit run with the box unchecked unlists a site the new tool listed. The browser path is unchanged (R16), and it behaves this way against today's MCP opt-in too.
-- D5. **No new rate limit, binding, or ownership rule.** Pending owner confirmation. Recommended: parity with today's MCP listing patch (R6). The tool takes no new binding, KV prefix, or kill switch, and it keeps the submitter-set model that `docs/plans/2026-08-07-001-feat-web-public-listing-opt-in-plan.md` (KD2) chose over ownership verification. Governs R6.
+- D5. **No new rate limit, binding, or ownership rule.** (owner decision) Parity with today's MCP listing patch (R6). The tool takes no new binding, KV prefix, or kill switch, and it keeps the submitter-set model that `docs/plans/2026-08-07-001-feat-web-public-listing-opt-in-plan.md` (KD2) chose over ownership verification. Governs R6.
   - Parity holds the bound at the same level as today. The per-domain flip budget (5 per hour, keyed by the domain's hash) caps changes to any one site across all callers. One IP can change at most 30 sites an hour, through the shared hourly window. Today's re-audit route spends the same single hourly unit per change.
   - What changes is the server-side work per change: a patch instead of a full audit, and no request to the site's declared hosts.
   - Not recommended: a dedicated per-IP listing budget (a new KV prefix), a separate kill switch for listing changes (a new binding), or an ownership check, such as a DNS TXT record or a well-known file.
@@ -99,7 +99,7 @@ The new tool's answer in each state. "Spends" lists the units taken beyond `MCP_
 | ID | Given | Answer | `isError` | Writes | Spends |
 | --- | --- | --- | --- | --- | --- |
 | AE1 | invalid url, a scheme other than http(s), or a host the SSRF gate refuses | the reason text | true | nothing | nothing |
-| AE2 | the site's record, or for `www.<domain>` the `<domain>` record, cannot be read | `cache_unavailable: ...; nothing was changed. Retry set_website_listing in 30 seconds.` | true | nothing | nothing |
+| AE2 | the site's record, or for `www.<domain>` the `<domain>` record, cannot be read | `cache_unavailable: ...; nothing was changed. Retry set_website_public_listing in 30 seconds.` | true | nothing | nothing |
 | AE3 | curated site | `{ changed: false, curated: true, target, public_listing: true, board_url, scorecard_url, message }` | false | nothing | nothing |
 | AE4 | no stored audit | `{ changed: false, found: false, next_tool: "audit_website", message }` | false | nothing | nothing |
 | AE5 | stored audit with no `scored_at` | `{ changed: false, found: true, next_tool: "audit_website", message }` | false | nothing | nothing |
@@ -149,7 +149,7 @@ Each tool was checked against the same guideline for a second state-changing ope
 
 ### Key Technical Decisions
 
-- KTD1. **The tool lives in its own module, `src/worker/mcp/tools/web-listing.ts`, registered right after the website audit tools.** `tools/list` order becomes `... list_website_audits, set_website_listing, get_web_remediation`, and that order is what `EXPECTED_TOOL_NAMES` pins. `web-audit.ts` is 491 lines and owns the audit; the listing write is a different responsibility.
+- KTD1. **The tool lives in its own module, `src/worker/mcp/tools/web-listing.ts`, registered right after the website audit tools.** `tools/list` order becomes `... list_website_audits, set_website_public_listing, get_web_remediation`, and that order is what `EXPECTED_TOOL_NAMES` pins. `web-audit.ts` is 491 lines and owns the audit; the listing write is a different responsibility.
 - KTD2. **The write reuses `patchWebListing` (`src/worker/audit-web/core.ts`), the function the browser patch calls.** It meters the per-domain flip budget, rewrites the body and the board metadata in one `scored_at`-preserving put, and queues the board-tag purge. Both surfaces therefore keep one write and one budget. Its signature narrows from the browser's read-tier object to `(env, target, value)`, so the new tool does not build a browser decision it never makes; the browser call site in `src/worker/audit/api.ts` passes `tier.write.value`. The tool decides a change itself instead of calling `decidePublicListingWrite`. That function's 60-second staleness rule chooses a re-audit, and this tool never audits. It compares against `standingPublicListing`, so a record with no stored flag and a request for `false` is a no-op, as the board already reads a missing flag as unlisted.
 - KTD3. **Hints, argued from what the tool does** (definitions from `ToolAnnotations` in the MCP SDK's `spec.types.d.ts`):
   - `readOnlyHint: false`. A change rewrites the stored R2 object, both its body and its board metadata, and takes KV counter units.
@@ -165,8 +165,8 @@ Each tool was checked against the same guideline for a second state-changing ope
   - `url`: "The website URL or bare domain whose listing to change, e.g. "anc.dev"; read at its https origin. www.<domain> changes the <domain> listing when that scorecard records that one of the two hosts redirects to the other (its site_hosts lists both); otherwise www.<domain> is its own site."
   - `public_listing`: "true lists the site on the public website leaderboard; false removes it from the leaderboard. Required."
   - Title: "Set a website's public listing".
-- KTD9. **The `audit_website` text.** One sentence goes directly after `FOLLOW_DISCLOSURE_SHORT`, which keeps #563's placement test true: "An audit never changes the site's leaderboard listing: a first audit saves the site unlisted, and later audits keep the stored choice; set_website_listing changes it." The description grows from 1,476 to 1,643 bytes on #563 as merged (`aa0537d`). The `follow_declarations` description ends at "...and it carries no scorecard_url, markdown_url, or json_url."
-- KTD10. **The server instructions name the new tool once, in the browse line,** after the instructions trim lands. That line is the instructions' routing index. One clause goes after `list_website_audits;` and keeps the pinned prefix "Browse the CLI registry with list_tools, search_tools, and get_tool, and the web leaderboard with list_website_audits" whole: "change a site's leaderboard listing with set_website_listing, only when the user asks;". The count reads 14 and the shared limit stays in paragraph 2. Measured on the trim's text, which the coordinating session holds until the trim's PR opens: 1,717 bytes at `https://anc.dev` and 1,811 at the longest origin (`https://agentnative-site-staging.brettdavies.workers.dev:65535`), against 1,630 and 1,724 without the change. The clause ends at 1,388 and 1,435, after the short disclosure (1,182 and 1,229). The trim is required: on #563's merged text the clause gives 2,062 and 2,203 (stop conditions).
+- KTD9. **The `audit_website` text.** One sentence goes directly after `FOLLOW_DISCLOSURE_SHORT`, which keeps #563's placement test true: "An audit never changes the site's leaderboard listing: a first audit saves the site unlisted, and later audits keep the stored choice; set_website_public_listing changes it." The description grows from 1,476 to 1,643 bytes on #563 as merged (`aa0537d`). The `follow_declarations` description ends at "...and it carries no scorecard_url, markdown_url, or json_url."
+- KTD10. **The server instructions name the new tool once, in the browse line,** after the instructions trim lands. That line is the instructions' routing index. One clause goes after `list_website_audits;` and keeps the pinned prefix "Browse the CLI registry with list_tools, search_tools, and get_tool, and the web leaderboard with list_website_audits" whole: "change a site's leaderboard listing with set_website_public_listing, only when the user asks;". The count reads 14 and the shared limit stays in paragraph 2. Measured on the trim's text, which the coordinating session holds until the trim's PR opens: 1,724 bytes at `https://anc.dev` and 1,818 at the longest origin (`https://agentnative-site-staging.brettdavies.workers.dev:65535`), against 1,630 and 1,724 without the change. The clause ends at 1,395 and 1,442, after the short disclosure (1,182 and 1,229). The trim is required: on #563's merged text the clause gives 2,069 and 2,210 (stop conditions).
 - KTD11. **The test pins take one annotation map per tool.** `NON_READ_TOOL_NAMES` in `tests/helpers/mcp-tools.ts` encodes two shapes, and the new tool is a third (a write with no outside host). It becomes `EXPECTED_TOOL_ANNOTATIONS`, a record from tool name to the exact hints object, read by `tests/worker-mcp.test.ts` and `tests/e2e/mcp.e2e.ts`.
 - KTD12. **The listing write re-reads the record after its gates** (R17). `patchWebListing` spends the flip unit, then re-reads the record at the target's key with the tolerant reader and patches over what it read, not over the record the caller read before the gates. A record that is gone or unreadable at the re-read answers `patch_failed` with nothing written (AE11). A record that already holds the value is not written again, and that call answers the AE12 shape with `changed: false` while its burst, hourly, and flip units stay spent; the R4 no-op that spends nothing is the comparison before the gates. The gap left is one GET to one PUT, in milliseconds, against the 50 ms to about 2.5 s the gates can take. The browser patch gets the same re-read through the shared function, and none of its answers change.
 
@@ -205,7 +205,7 @@ The race KTD6 closes. Today the audit writes the listing it read at the start.
 sequenceDiagram
   participant A as Caller A (audit_website)
   participant S as Stored record
-  participant B as Caller B (set_website_listing)
+  participant B as Caller B (set_website_public_listing)
   A->>S: read at start: listed
   Note over A: audit runs for up to the deadline
   B->>S: write unlisted
@@ -217,7 +217,7 @@ The reverse case KTD12 closes. Today the listing write puts back the record it r
 
 ```mermaid
 sequenceDiagram
-  participant B as Caller B (set_website_listing)
+  participant B as Caller B (set_website_public_listing)
   participant S as Stored record
   participant A as Caller A (audit_website)
   B->>S: read scorecard T0
@@ -310,14 +310,14 @@ sequenceDiagram
   - Modify `src/worker/mcp/tools/web-audit.ts`.
   - Test `tests/web-audit-mcp-tools.test.ts`.
 - **Approach:**
-  1. Replace the raw input shape with the KTD5 strict object, without `public_listing`. Refusal message: "public_listing is not an audit_website argument: an audit never changes the leaderboard listing. Call audit_website again without public_listing to run the audit, then set_website_listing with the same url and public_listing to change the listing. If your client does not list set_website_listing, reconnect."
+  1. Replace the raw input shape with the KTD5 strict object, without `public_listing`. Refusal message: "public_listing is not an audit_website argument: an audit never changes the leaderboard listing. Call audit_website again without public_listing to run the audit, then set_website_public_listing with the same url and public_listing to change the listing. If your client does not list set_website_public_listing, reconnect."
   2. Remove the listing branches from the handler: the `decidePublicListingWrite` call, the `follow_declarations: false` listing refusal, the flip-budget call, and the patch path. Every non-transient call may attach to a run in flight. A fresh audit carries `standingPublicListing(cached)` as its listing, with no explicit choice.
   3. Apply the KTD9 text.
   4. Update the file's header comment to the tool's present behavior.
 - **Execution note:** write the refusal scenario first and record its failure against the unchanged handler. Today that call patches or audits, so the scenario fails on the stored bytes.
 - **Patterns to follow:** the `site_type` input-validation test in the same file.
 - **Test scenarios:**
-  - `public_listing: true` on a fresh record stored unlisted: `isError: true`, the text names `set_website_listing`, the store is unchanged, and no limiter, hourly, or flip unit is taken.
+  - `public_listing: true` on a fresh record stored unlisted: `isError: true`, the text names `set_website_public_listing`, the store is unchanged, and no limiter, hourly, or flip unit is taken.
   - `public_listing: false` on a stale record: the same refusal, and no outbound request is made.
   - An unknown key other than `public_listing` (`siteType`): refused by input validation.
   - A stale record stored listed, blank call: the saved scorecard is still listed and the board metadata reads `"true"`.
@@ -326,7 +326,7 @@ sequenceDiagram
   - `follow_declarations: false`: a transient result, unsaved, as today.
   - `tools/list`: the `audit_website` input schema has no `public_listing` property and gains `additionalProperties: false`, which fails on the unchanged handler. Its description contains the KTD9 sentence directly after the short disclosure.
   - `public_listing` together with another unknown key: refused with the `public_listing` message.
-  - Tests of removed behavior in `tests/web-audit-mcp-tools.test.ts` retire: the `audit_website public_listing` block except "both surface the stored public_listing", which becomes a `get_website_audit` and `set_website_listing` parity test; the explicit-listing in-flight test; and the `follow_declarations: false` listing pair. The `audit_website public_listing flip budget` block moves to U1.
+  - Tests of removed behavior in `tests/web-audit-mcp-tools.test.ts` retire: the `audit_website public_listing` block except "both surface the stored public_listing", which becomes a `get_website_audit` and `set_website_public_listing` parity test; the explicit-listing in-flight test; and the `follow_declarations: false` listing pair. The `audit_website public_listing flip budget` block moves to U1.
 - **Verification:** the refusal scenario's failure on the unchanged handler is quoted in the PR, and every scenario passes on the change.
 
 ### U3. Write-time listing for audits with no explicit choice
@@ -374,7 +374,7 @@ sequenceDiagram
 - **Requirements:** R14, R15, D4.
 - **Dependencies:** U1, U2.
 - **Files:**
-  - `content/mcp-skill.md`: the count in the intro; the lead of the website section ("Four tools score a website"), which gains the listing tool; a bullet for the new tool, with a runnable call next to the `audit_website` one (`tools/call set_website_listing { "url": "example.com", "public_listing": true }`) and the miss answer that sends the agent to audit first; the `audit_website` bullet without its `public_listing` clause; the freshness paragraph without "or a listing-only flag patch", since no MCP tool returns a patched envelope; and the tool-metadata paragraph naming the new tool's hints.
+  - `content/mcp-skill.md`: the count in the intro; the lead of the website section ("Four tools score a website"), which gains the listing tool; a bullet for the new tool, with a runnable call next to the `audit_website` one (`tools/call set_website_public_listing { "url": "example.com", "public_listing": true }`) and the miss answer that sends the agent to audit first; the `audit_website` bullet without its `public_listing` clause; the freshness paragraph without "or a listing-only flag patch", since no MCP tool returns a patched envelope; and the tool-metadata paragraph naming the new tool's hints.
   - `content/_audit-web.md`: "five web tools", and the `audit_website` signature without `public_listing`.
   - `content/web-scorecard-schema.md`: the `public_listing` field row says the audit form or the new tool sets it.
   - `AGENTS.md`: the tool count and list, the rate-limit paragraph, and the `WEB_AUDIT_ENABLED` line, which now also stops listing changes.
@@ -394,7 +394,7 @@ sequenceDiagram
 | Build first | `bun run build` | `dist/` and the catalog match the branch before tests read them (AGENTS.md gate order) |
 | Unit | `bun test` | U1 to U4 scenarios, the #563 limit guard, and the moved pins |
 | Observed failing | the U2 refusal scenario and the first U3 scenario against the unchanged code, with output quoted in the PR | the tests detect the behavior they exist for |
-| Local Worker | `bun run dev` with `MCP_ENABLED="true"` in `.dev.vars.staging`; `tools/list`, then `audit_website` on a public site and `set_website_listing` on it, then `GET /scorecards?lane=web&view=all` with `Accept: text/html` | the served tool surface, a real listing change, and the board row it controls |
+| Local Worker | `bun run dev` with `MCP_ENABLED="true"` in `.dev.vars.staging`; `tools/list`, then `audit_website` on a public site and `set_website_public_listing` on it, then `GET /scorecards?lane=web&view=all` with `Accept: text/html` | the served tool surface, a real listing change, and the board row it controls |
 | Release smoke | `scripts/release/mcp-smoke.sh --core-only http://localhost:8787` | the smoke's count matches the served surface |
 | Staging | `tests/e2e/mcp.e2e.ts`, `tests/e2e/discoverability.e2e.ts`, and the release smoke after the `dev` deploy | the deployed surface and the published guide |
 | Reviews | `ce-code-review`, `/devex-review`, and `/cso`, one round each on Opus, verdicts in PR comments; the `/cso` brief names the shared flip budget, which lets one caller unlist a site and hold its owner off for the rest of the hour | code and prose; the new tool, its output, and the changed parameter; an unauthenticated write to public state |
@@ -404,7 +404,7 @@ sequenceDiagram
 - R1 to R17 hold, each covered by a U1 to U4 scenario, the local Worker run, or the U5 check.
 - D2 to D5 carry the owner's answers, and the code matches them.
 - When the instructions trim has not merged by the build, this PR states the count only, and the KTD10 clause and its assertion follow once the trim merges.
-- The PR's `## Changelog` reads: "Added: the `set_website_listing` MCP tool, which opts a site in to or out of the public website leaderboard and does nothing else." and "Changed: `audit_website` no longer accepts `public_listing`; a call that sends it is refused with a pointer to `set_website_listing`, and an audit never changes a site's listing." and "Changed: `audit_website` refuses any argument it does not declare, where it ignored one before."
+- The PR's `## Changelog` reads: "Added: the `set_website_public_listing` MCP tool, which opts a site in to or out of the public website leaderboard and does nothing else." and "Changed: `audit_website` no longer accepts `public_listing`; a call that sends it is refused with a pointer to `set_website_public_listing`, and an audit never changes a site's listing." and "Changed: `audit_website` refuses any argument it does not declare, where it ignored one before."
 - No code from abandoned approaches remains in the diff, and no scratch file is left in the tree.
 
 ---
