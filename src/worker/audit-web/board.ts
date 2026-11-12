@@ -4,6 +4,8 @@
 // surfaces can disagree on which non-curated rows list. Curated rows come
 // from the aggregate and never pass through that gate.
 
+import { newestDay } from '../../shared/page-date';
+import { shortDate } from '../../shared/result-spine';
 import { SPEC_VERSION } from '../spec-version.gen';
 import { getAggregate, isBoardListable, listAllWebAudits, type WebCacheEnv } from './cache';
 import type { WebBoardEntry, WebBoardView } from './leaderboard-render';
@@ -37,6 +39,7 @@ export async function resolveBoardEntries(
     description: '',
     score_pct: l.score_pct,
     score: l.score,
+    scored_at: l.scored_at,
     curated: false,
   }));
   return {
@@ -44,4 +47,13 @@ export async function resolveBoardEntries(
     curatedCount: curatedEntries.length,
     userCount: userEntries.length,
   };
+}
+
+/**
+ * The newest day among the rows a board shows. A board page shows those
+ * rows, so it is dated no earlier; a row without a date that parses moves
+ * nothing.
+ */
+export function newestScoredDay(rows: readonly { scored_at?: string }[]): string | null {
+  return newestDay(rows.map((row) => shortDate(row.scored_at)));
 }

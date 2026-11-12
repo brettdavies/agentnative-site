@@ -5,9 +5,9 @@ import { readFileSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import * as yaml from 'js-yaml';
+import { isDay } from '../shared/page-date';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
-import { isDay } from './content-dates.mjs';
+import { renderFrontmatter } from '../shared/twin-frontmatter';
 
 const PRINCIPLE_FILENAME_RE = /^p(\d+)-([a-z0-9-]+)\.md$/;
 
@@ -222,24 +222,6 @@ export function absolutifyMarkdownLinks(markdown, baseUrl) {
 }
 
 /**
- * Render the YAML frontmatter block prepended to every authored markdown
- * twin. `title`/`description` come from the page's content extractors,
- * `url` is the canonical HTML URL, and `dateModified` is the page's content
- * date, so an agent fetching the twin gets the same metadata the HTML page
- * carries in <head>.
- *
- * @param {{ title: string, description: string, url: string, dateModified: string }} meta
- * @returns {string} `---\n<yaml>---\n\n` — closing fence plus one blank
- *          line before the body.
- */
-export function renderFrontmatter({ title, description, url, dateModified }) {
-  // lineWidth: -1 disables yaml's line folding so a long description stays
-  // one physical `description:` line instead of a `>-` block scalar.
-  const dumped = yaml.dump({ title, description, url, dateModified }, { lineWidth: -1 });
-  return `---\n${dumped}---\n\n`;
-}
-
-/**
  * Compose a complete markdown-twin string: frontmatter block followed by
  * the link-absolutified body. Emitters and the principle byte-equivalence
  * invariant both call this, so there is exactly one definition of a
@@ -257,19 +239,30 @@ export function renderFrontmatter({ title, description, url, dateModified }) {
  * @param {string=} baseUrl — explicit override for the navigational half
  * @returns {string}
  */
-export function composeTwin({ title, description, canonicalPath, dateModified }, bodyMarkdown, baseUrl) {
+export function composeTwin(meta, bodyMarkdown, baseUrl) {
+  return renderFrontmatter(twinMeta(meta, baseUrl)) + absolutifyMarkdownLinks(bodyMarkdown, baseUrl);
+}
+
+/**
+ * A built page's twin metadata: the canonical `url`, and a description
+ * whose links resolve, for a twin whose front matter its body builder
+ * writes (a result twin's block also names the page's representations).
+ *
+ * @param {{ title: string, description: string, canonicalPath: string, dateModified: string }} meta
+ * @param {string=} baseUrl — explicit override for the description's links
+ * @returns {import('../shared/twin-frontmatter.ts').TwinMeta}
+ */
+export function twinMeta({ title, description, canonicalPath, dateModified }, baseUrl) {
   if (!isDay(dateModified)) {
     throw new Error(`composeTwin: ${canonicalPath} needs a YYYY-MM-DD dateModified; got "${dateModified}"`);
   }
   // The description is body prose (extractDescription) and can carry
   // authored site-relative links; the twin surface promises every link
   // self-resolves, so absolutify it like the body.
-  return (
-    renderFrontmatter({
-      title,
-      description: absolutifyMarkdownLinks(description, baseUrl),
-      url: `${canonicalBaseUrl()}${canonicalPath}`,
-      dateModified,
-    }) + absolutifyMarkdownLinks(bodyMarkdown, baseUrl)
-  );
+  return {
+    title,
+    description: absolutifyMarkdownLinks(description, baseUrl),
+    url: `${canonicalBaseUrl()}${canonicalPath}`,
+    dateModified,
+  };
 }

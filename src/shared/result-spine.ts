@@ -8,6 +8,8 @@
 import { type Lane, scoreJsonPath, scoreMarkdownPath } from './audit-routes';
 import { escHtml } from './esc-html';
 import { bandOf, renderMeter } from './meter';
+import { isDay } from './page-date';
+import { frontmatterFence, type TwinMeta } from './twin-frontmatter';
 
 export type ResultTier = 'registry' | 'cache' | 'live';
 
@@ -81,31 +83,32 @@ export function renderBigScore(input: BigScoreInput): string {
 export function shortDate(iso: string | null | undefined): string | null {
   if (!iso) return null;
   const at = Date.parse(iso);
-  return Number.isNaN(at) ? null : new Date(at).toISOString().slice(0, 10);
+  if (Number.isNaN(at)) return null;
+  const day = new Date(at).toISOString().slice(0, 10);
+  return isDay(day) ? day : null;
 }
 
 export type ResultLinks = { scorecard: string | null; markdown: string | null; json: string | null };
 
 /**
- * The front matter every markdown twin opens with: the page, the twin,
+ * The front matter every result twin opens with: the page metadata every
+ * twin carries, when the caller names the page, then the page, the twin,
  * the JSON envelope, and the two `Accept` values the bare path honors, so
  * a fetch-only agent finds every representation from the twin alone.
  */
-export function resultFrontMatter(input: { target: string; lane: Lane; tier: ResultTier; links: ResultLinks }): string {
+export function resultFrontMatter(input: {
+  target: string;
+  lane: Lane;
+  tier: ResultTier;
+  links: ResultLinks;
+  page?: TwinMeta;
+}): string {
   const page = input.links.scorecard;
-  const lines = ['---', `target: ${yamlString(input.target)}`, `lane: ${input.lane}`, `tier: ${input.tier}`];
-  if (page) lines.push(`scorecard_url: ${yamlString(page)}`);
-  if (input.links.markdown) lines.push(`markdown_url: ${yamlString(input.links.markdown)}`);
-  if (input.links.json) lines.push(`json_url: ${yamlString(input.links.json)}`);
-  if (page) {
-    lines.push(
-      `negotiate: ${yamlString(`Accept: text/markdown or Accept: application/json on ${page} serve the twin and the JSON`)}`,
-    );
-  }
-  lines.push('---', '');
-  return lines.join('\n');
-}
-
-function yamlString(value: string): string {
-  return JSON.stringify(value);
+  const fields: Record<string, string> = { target: input.target, lane: input.lane, tier: input.tier };
+  if (page) fields.scorecard_url = page;
+  if (input.links.markdown) fields.markdown_url = input.links.markdown;
+  if (input.links.json) fields.json_url = input.links.json;
+  if (page)
+    fields.negotiate = `Accept: text/markdown or Accept: application/json on ${page} serve the twin and the JSON`;
+  return frontmatterFence(input.page ?? null, fields);
 }

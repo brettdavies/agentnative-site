@@ -6,6 +6,7 @@
 
 import type { ResultLinks, SpineInput } from '../../shared/result-spine';
 import { CANONICAL_SITE_URL } from '../../shared/site-url';
+import type { TwinMeta } from '../../shared/twin-frontmatter';
 import type { WebAuditFreshness } from './cache';
 import type { WebRemediationCatalog } from './remediation';
 import type { FreshnessState } from './summary-freshness';
@@ -46,6 +47,8 @@ export interface WebSummaryInput {
   transient?: TransientReason;
   /** The three representation URLs the twin's front matter names; omitted renders none. */
   links?: ResultLinks;
+  /** The page metadata the twin's front matter opens with; omitted, the block names only the representations. */
+  page?: TwinMeta;
 }
 
 /** Everything a renderer needs, resolved once from the caller's input. */

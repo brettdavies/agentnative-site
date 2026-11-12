@@ -112,7 +112,13 @@ export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
   const lines: string[] = [];
   if (input.links) {
     lines.push(
-      resultFrontMatter({ target: input.domain, lane: 'web', tier: input.spine?.tier ?? 'cache', links: input.links }),
+      resultFrontMatter({
+        target: input.domain,
+        lane: 'web',
+        tier: input.spine?.tier ?? 'cache',
+        links: input.links,
+        page: input.page,
+      }),
     );
   }
   const clause = model.hostsClause === null ? '' : richMarkdown(model.hostsClause);

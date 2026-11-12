@@ -213,9 +213,9 @@ export function buildLeaderboardMarkdown(leaderboard) {
 /**
  * Build per-tool scorecard markdown twin. Thin wrapper over the shared
  * `buildScorecardMarkdown` — same single-source-of-truth pattern as the
- * HTML body above.
+ * HTML body above. `page` is the metadata its front matter opens with.
  */
-export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleScore, resolvedVersion, metadata) {
+export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleScore, resolvedVersion, metadata, page) {
   return sharedBuildScorecardMarkdown(tool, scorecard, {
     principleScore,
     version: resolvedVersion,
@@ -223,5 +223,6 @@ export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleSco
     links: curatedLinks(tool),
     lane: 'cli',
     tier: 'registry',
+    page,
   });
 }

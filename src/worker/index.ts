@@ -30,13 +30,15 @@ import {
   SEP_1649_CARD_SEED_PATH,
 } from '../shared/mcp-discovery';
 import type { OgRenderedMessage } from '../shared/og-render';
+import { raiseHtmlDate } from '../shared/page-date';
 import { isScoreOgClipPath, isScoreOgPath } from '../shared/score-og';
+import { raiseFrontmatterDate } from '../shared/twin-frontmatter';
 import { classifyGatewayRequest, detectMcpFormat, detectPreference } from './accept';
 import { type AuditApiEnv, handleAuditApi, isAuditApiPath } from './audit/api';
 import type { AuditJob } from './audit/job';
 import { badgeAliasRedirect, handleResultRoute, type ResultEnv } from './audit/result';
 import { handleScoringPage, type ScoringPageEnv } from './audit/scoring-page';
-import { resolveBoardEntries, type WebBoardEnv } from './audit-web/board';
+import { newestScoredDay, resolveBoardEntries, type WebBoardEnv } from './audit-web/board';
 import { getAggregate, type WebAggregateEntry, type WebCacheEnv } from './audit-web/cache';
 import { flushHitMinPurge, runWithHitMinPurge } from './audit-web/hit-min-purge';
 import {
@@ -82,6 +84,7 @@ import { handleCuratedPass, runCuratedPass } from './og/curated-pass';
 import type { OgVideoEnv } from './og/render-request';
 import { handleOgRendered } from './og/rendered-consumer';
 import { handleScoreOg } from './og/route';
+import { SITEMAP_PATH, serveSitemap } from './sitemap';
 import { SPEC_VERSION } from './spec-version.gen';
 import { LAKE_FRESHNESS_CRON, type LakeFreshnessEnv, runLakeFreshnessCheck } from './telemetry/lake-freshness';
 import { emitLog } from './telemetry/log';
@@ -868,6 +871,10 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
 
   const upstream = await env.ASSETS.fetch(assetRequest);
 
+  if (pathname === SITEMAP_PATH && upstream.ok) {
+    return serveSitemap(upstream, env as unknown as WebBoardEnv, request);
+  }
+
   // Homepage: substitute {{TURNSTILE_SITEKEY}} on HTML and {{WEB_BOARD_ROWS}}
   // on HTML and markdown. Runs AFTER the markdown-CN rewrite so negotiated
   // `/` and `/index.md` share the same inject. Production with no
@@ -943,6 +950,15 @@ function frontpageBoardSlice(markdown: boolean, entries: WebAggregateEntry[]): s
   return entries.length > 0 ? buildFrontpageBoardRows(entries) : buildFrontpageBoardEmptyState();
 }
 
+/**
+ * A board page dated by the later of the day the build gave it and the
+ * newest row its board shows.
+ */
+function datedBoardPage(body: string, markdown: boolean, rows: readonly { scored_at?: string }[]): string {
+  const day = newestScoredDay(rows);
+  return markdown ? raiseFrontmatterDate(body, day) : raiseHtmlDate(body, day);
+}
+
 function substituteTurnstileSitekey(html: string, env: Env): string {
   return html.replaceAll('{{TURNSTILE_SITEKEY}}', env.TURNSTILE_SITEKEY ?? '');
 }
@@ -998,10 +1014,11 @@ async function injectLeaderboardBoard(
   // The minifier writes the boolean out as `checked="checked"`, so the match
   // has to take the value with it: dropping only the bare word leaves an
   // orphaned `="checked"` behind and the tag stops parsing as intended.
+  const dated = datedBoardPage(body, opts.markdown, resolved.entries);
   const withLane =
     !opts.markdown && opts.url.searchParams.get('lane') === 'web'
-      ? body.replace(/id="s-cli"\s+checked(?:="checked")?/, 'id="s-cli"').replace('id="s-web"', 'id="s-web" checked')
-      : body;
+      ? dated.replace(/id="s-cli"\s+checked(?:="checked")?/, 'id="s-cli"').replace('id="s-web"', 'id="s-web" checked')
+      : dated;
   const headers = new Headers(upstream.headers);
   headers.delete('etag');
   headers.delete('last-modified');
@@ -1032,7 +1049,12 @@ async function injectHomepageBoards(
     getAggregate(env as WebCacheEnv, 'leaderboard-frontpage', SPEC_VERSION),
   ]);
   const entries = aggregate?.entries ?? [];
-  let substituted = opts.markdown ? body : substituteTurnstileSitekey(body, env);
+  // The page is dated before the rows go in, so no row text can move the day.
+  let substituted = datedBoardPage(
+    opts.markdown ? body : substituteTurnstileSitekey(body, env),
+    opts.markdown,
+    entries,
+  );
   // A function replacement, because a row's name is an audited site's own title
   // and a string replacement expands `$&` and its siblings.
   substituted = substituted.replaceAll('{{WEB_BOARD_ROWS}}', () => frontpageBoardSlice(opts.markdown, entries));

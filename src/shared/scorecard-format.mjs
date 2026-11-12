@@ -696,7 +696,7 @@ ${renderAuditRows(bonusChecks)}
  *
  * @param {object} tool
  * @param {object} scorecard
- * @param {{ version?: string | null, metadata?: object, principleScore?: { met:number,total:number }, baseUrl?: string, header?: string, footer?: string[], hideBadgeEmbed?: boolean, hideReproduce?: boolean, hideVersionRow?: boolean, links?: import('./result-spine.ts').ResultLinks, lane?: 'cli' | 'web', tier?: import('./result-spine.ts').ResultTier }} [opts]
+ * @param {{ version?: string | null, metadata?: object, principleScore?: { met:number,total:number }, baseUrl?: string, header?: string, footer?: string[], hideBadgeEmbed?: boolean, hideReproduce?: boolean, hideVersionRow?: boolean, links?: import('./result-spine.ts').ResultLinks, lane?: 'cli' | 'web', tier?: import('./result-spine.ts').ResultTier, page?: import('./twin-frontmatter.ts').TwinMeta }} [opts]
  * @returns {string} markdown
  */
 export function buildScorecardMarkdown(tool, scorecard, opts = {}) {
@@ -719,6 +719,7 @@ export function buildScorecardMarkdown(tool, scorecard, opts = {}) {
         lane: opts.lane ?? 'cli',
         tier: opts.tier ?? 'registry',
         links: opts.links,
+        page: opts.page,
       }),
     );
   }

@@ -8,8 +8,11 @@ import { aggregateKeyFor, type WebAggregateEntry } from '../src/worker/audit-web
 import worker, { type Env } from '../src/worker/index';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
+// The build dates the page; the day here is that build date.
+const BUILD_DAY = '2026-10-01';
+
 const SCORECARDS_SHELL = `<!doctype html>
-<html><head><title>ANC 100</title></head>
+<html><head><title>ANC 100</title><meta property="article:modified_time" content="${BUILD_DAY}"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"ANC 100","dateModified":"${BUILD_DAY}"}]}</script></head>
 <body>
   <div class="scope">
     <div class="seg" role="radiogroup" aria-label="Leaderboard surface" data-surface-board-seg>
@@ -29,7 +32,14 @@ const SCORECARDS_SHELL = `<!doctype html>
   </div>
 </body></html>`;
 
-const SCORECARDS_MD = `# ANC 100
+const SCORECARDS_MD = `---
+title: ANC 100
+description: Leaderboard.
+url: https://anc.dev/scorecards
+dateModified: '${BUILD_DAY}'
+---
+
+# ANC 100
 
 | # | Tool | Tier | Lang | Score | Principles |
 |---|------|------|------|-------|------------|
@@ -40,7 +50,7 @@ const SCORECARDS_MD = `# ANC 100
 {{WEB_BOARD_ROWS}}
 `;
 
-function boardEntry(domain: string, globalScore: number): WebAggregateEntry {
+function boardEntry(domain: string, globalScore: number, scoredAt?: string): WebAggregateEntry {
   return {
     domain,
     url: `https://${domain}/`,
@@ -48,6 +58,7 @@ function boardEntry(domain: string, globalScore: number): WebAggregateEntry {
     description: `about ${domain}`,
     score_pct: globalScore + 5,
     score: { relative: globalScore + 5, global: globalScore },
+    ...(scoredAt === undefined ? {} : { scored_at: scoredAt }),
   };
 }
 
@@ -282,5 +293,32 @@ describe('merged leaderboard: the rewritten response', () => {
     const env = makeEnv(null);
     (env as { SCORE_CACHE?: unknown }).SCORE_CACHE = undefined;
     expect(await fetchBoard(env)).toContain('Scoring in progress');
+  });
+});
+
+describe('merged leaderboard: the page date', () => {
+  /** The day the page states in its JSON-LD, its article:modified_time, and its twin. */
+  async function statedDates(env: Env) {
+    const html = await fetchBoard(env);
+    const md = await fetchBoard(env, 'https://anc.dev/scorecards.md');
+    return {
+      jsonLd: html.match(/"dateModified":"([^"]+)"/)?.[1],
+      meta: html.match(/article:modified_time" content="([^"]+)"/)?.[1],
+      twin: md.match(/^dateModified: '([^']+)'$/m)?.[1],
+    };
+  }
+
+  test('takes the newest board row when it is newer than the build date', async () => {
+    const env = makeEnv([
+      boardEntry('old.dev', 60, '2026-09-01T00:00:00.000Z'),
+      boardEntry('new.dev', 70, '2026-11-05T23:30:00.000Z'),
+      boardEntry('legacy.dev', 80),
+    ]);
+    expect(await statedDates(env)).toEqual({ jsonLd: '2026-11-05', meta: '2026-11-05', twin: '2026-11-05' });
+  });
+
+  test('keeps the build date when every row is older or undated', async () => {
+    const env = makeEnv([boardEntry('old.dev', 60, '2026-09-01T00:00:00.000Z'), boardEntry('legacy.dev', 80)]);
+    expect(await statedDates(env)).toEqual({ jsonLd: BUILD_DAY, meta: BUILD_DAY, twin: BUILD_DAY });
   });
 });

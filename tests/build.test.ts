@@ -39,7 +39,6 @@ import {
   composeTwin,
   escHtml,
   parseFilename,
-  renderFrontmatter,
   SITE_SPEC_VERSION,
   SPEC_VERSION,
   sortedGlob,
@@ -47,6 +46,7 @@ import {
 import { scoreJsonPath, scoreMarkdownPath, scorePath } from '../src/shared/audit-routes';
 import { markdownAlternateLink, resultAlternateLinks } from '../src/shared/result-head';
 import { CANONICAL_SITE_URL } from '../src/shared/site-url';
+import { renderFrontmatter } from '../src/shared/twin-frontmatter';
 
 // Shape of one registry.yaml entry as loaded by loadRegistry — narrows the
 // loosely-typed (object) return for property access in assertions below.

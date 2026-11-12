@@ -63,6 +63,7 @@ import { type ReauditControl, type ResultTier, type SpineInput, shortDate } from
 import { brandName, cliOgIdentity, scoreOgAlt, scoreOgEdition, scoreOgKey, scoreOgUrl } from '../../shared/score-og';
 import { buildScorecardBody, buildScorecardMarkdown } from '../../shared/scorecard-format.mjs';
 import { CANONICAL_SITE_URL } from '../../shared/site-url';
+import type { TwinMeta } from '../../shared/twin-frontmatter';
 import { detectResultPreference } from '../accept';
 import {
   getAggregate,
@@ -213,9 +214,9 @@ type Rendered = {
   envelope: AuditEnvelope;
   tier: ResultTier;
   spine: SpineInput;
-  /** Server-rendered HTML body and markdown twin for the envelope. */
+  /** Server-rendered HTML body and markdown twin for the envelope; the twin's front matter names the page. */
   html: () => Promise<string>;
-  markdown: () => Promise<string>;
+  markdown: (page: TwinMeta) => Promise<string>;
   /** The page's `<meta name="robots">` equivalent. */
   noindex: boolean;
 };
@@ -344,7 +345,7 @@ async function serveWeb(ctx: RenderContext, host: string): Promise<Response> {
     spine,
     noindex: webPageNoindex(seedEntry !== undefined, record.scorecard),
     html: async () => buildWebSummaryBody(await summaryInput()),
-    markdown: async () => buildWebSummaryMarkdown(await summaryInput()),
+    markdown: async (page) => buildWebSummaryMarkdown({ ...(await summaryInput()), page }),
   });
 }
 
@@ -569,8 +570,9 @@ async function respondCli(
     noindex,
     html: async () =>
       buildScorecardBody(tool, scorecard, { version: record.tool_version, spine, showBadgePreview: false }),
-    markdown: async () =>
+    markdown: async (page) =>
       buildScorecardMarkdown(tool, scorecard, {
+        page,
         version: record.tool_version,
         baseUrl: ctx.origin,
         links,
@@ -586,9 +588,18 @@ async function respond(ctx: RenderContext, rendered: Rendered): Promise<Response
   if (representation === 'json') {
     return finish(ctx, jsonResponse(envelopeJsonBody(rendered.envelope), noindex), 'json', { noindex });
   }
+  const { target, lane } = rendered.spine;
+  const pct = rendered.envelope.score_pct;
+  const title = `${target} — ${lane === 'web' ? 'Agent-Readiness Audit' : 'Agent-Native Scorecard'}`;
+  const description =
+    lane === 'web'
+      ? `${target} scored ${pct ?? 0}% for agent-readiness against the agentnative web audit (spec ${rendered.envelope.spec_version}).`
+      : `${target} scored ${pct ?? 0}% against the agent-native CLI standard (spec ${rendered.envelope.spec_version}).`;
+  // Everything the page shows comes from this one scoring, so its day dates the page.
+  const dateModified = shortDate(rendered.envelope.freshness.scored_at);
   if (representation === 'md') {
-    const body = await rendered.markdown();
-    return finish(ctx, new Response(body, { status: 200 }), 'md', { noindex });
+    const page = { title, description, url: `${CANONICAL_SITE_URL}${scorePath(target)}`, dateModified };
+    return finish(ctx, new Response(await rendered.markdown(page), { status: 200 }), 'md', { noindex });
   }
   let template: string;
   try {
@@ -599,13 +610,6 @@ async function respond(ctx: RenderContext, rendered: Rendered): Promise<Response
       headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
     });
   }
-  const { target, lane } = rendered.spine;
-  const pct = rendered.envelope.score_pct;
-  const title = `${target} — ${lane === 'web' ? 'Agent-Readiness Audit' : 'Agent-Native Scorecard'}`;
-  const description =
-    lane === 'web'
-      ? `${target} scored ${pct ?? 0}% for agent-readiness against the agentnative web audit (spec ${rendered.envelope.spec_version}).`
-      : `${target} scored ${pct ?? 0}% against the agent-native CLI standard (spec ${rendered.envelope.spec_version}).`;
   const body = `${await rendered.html()}${controlAssets(ctx, rendered.spine)}`;
   const scorePct = typeof pct === 'number' ? pct : null;
   const friendly = lane === 'web' ? ((await seedEntryFor(ctx.env, target))?.name ?? null) : null;
@@ -630,6 +634,7 @@ async function respond(ctx: RenderContext, rendered: Rendered): Promise<Response
     ogImage: scoreOgUrl(CANONICAL_SITE_URL, target, ogKey),
     ogImageAlt: scoreOgAlt({ name: identity.name, lane, scorePct, specVersion: rendered.envelope.spec_version }),
     ogVideoHtml: clip.metaHtml,
+    dateModified,
   });
   return finish(
     ctx,

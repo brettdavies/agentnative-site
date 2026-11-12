@@ -71,6 +71,17 @@ function expectServedOnOwnOrigin(serialized: string, origin: string = NON_CANONI
   expect(serialized).toContain(origin);
 }
 
+/**
+ * A twin's front matter `url` is its canonical declaration and names the
+ * canonical host on every deployment, as a built twin's does (Surface 5).
+ * Every link the twin offers follows the serving origin.
+ */
+function withoutCanonicalUrl(twin: string, path: string): string {
+  const line = `url: ${CANONICAL_SITE_URL}${path}\n`;
+  expect(twin).toContain(line);
+  return twin.replace(line, '');
+}
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -351,7 +362,8 @@ describe('web result pages link back to the origin they were served from', () =>
     for (const path of ['/score/example.com', '/score/example.com/md']) {
       const res = await handleResultRoute(new Request(`${NON_CANONICAL_ORIGIN}${path}`), env);
       expect({ path, status: res.status }).toEqual({ path, status: 200 });
-      expectServedOnOwnOrigin(await res.text());
+      const text = await res.text();
+      expectServedOnOwnOrigin(path.endsWith('/md') ? withoutCanonicalUrl(text, '/score/example.com') : text);
     }
   });
 
@@ -381,7 +393,7 @@ describe('live CLI result pages link back to the origin they were served from', 
     const env = await liveEnv(cached);
     const res = await handleResultRoute(new Request(`${NON_CANONICAL_ORIGIN}/score/cowsay/md`), env);
     expect(res.status).toBe(200);
-    expectServedOnOwnOrigin(await res.text());
+    expectServedOnOwnOrigin(withoutCanonicalUrl(await res.text(), '/score/cowsay'));
   });
 
   test('an unknown binary not-found twin', async () => {
