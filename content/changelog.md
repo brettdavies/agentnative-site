@@ -349,8 +349,8 @@ the site's principle pages to a new spec version, its entry here names the versi
   version line and exits 0, and a SHOULD for a short alias.
 - `check` becomes `audit` across the site: `/check` redirects to [/audit](/audit), and scorecards and twins name
   `anc audit`.
-- The curated scorecards are rescored with anc 0.5.0, scorecard pages show `opt_out` and `n_a` statuses, and badges use
-  five score bands.
+- The curated scorecards are scored again with anc 0.5.0, scorecard pages show `opt_out` and `n_a` statuses, and badges
+  use five score bands.
 - The live-scoring form's examples cover each supported input kind, and a live result reads at `/score/live/<binary>`
   with a markdown twin.
 
@@ -386,7 +386,7 @@ the site's principle pages to a new spec version, its entry here names the versi
 
 - The footer shows the spec version the principle pages are written to, v0.3.0, and each badge shows the spec version
   its scorecard was scored against.
-- The 96 curated scorecards are rescored with anc 0.3.0.
+- The 96 curated scorecards are scored again with anc 0.3.0.
 
 ### Removed
 
