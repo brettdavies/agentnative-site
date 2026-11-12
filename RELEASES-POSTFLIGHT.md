@@ -64,7 +64,8 @@ Flags:
   (`v<version>`) to find the PR `scripts/sync-dev-after-release.sh` opens (default: the tag the newest
   `release/v<version>` branch merged into `main` names)
 - `--mcp-binary <binary>` — override the live-audit binary (default: `${MCP_BINARY:-figlet}`)
-- `--staging-url <url>` — override the staging Worker URL (default: `STAGING_URL_DEFAULT` in `scripts/release/release.env`)
+- `--staging-url <url>` — override the staging Worker URL (default: `STAGING_URL_DEFAULT` in
+  `scripts/release/release.env`)
 - `--prod-url <url>` — override the prod URL (default: `PROD_URL_DEFAULT` in `scripts/release/release.env`)
 
 ## Checklist
@@ -165,8 +166,8 @@ manual recipe below skips the headers; for prod the recipe runs unauthenticated.
 
   The curated pass that ran with the deploy did so while the switch was off and asked for nothing, so the manual pass
   renders the curated clips now instead of at Sunday's cron. It answers 200 with `{enabled, requested, fresh, skipped}`,
-  where `requested` counts the cards it asked for. `jq -e` fails the step unless `enabled` is `true`: an isolate that
-  has not picked up the new switch yet answers `enabled: false` and asks for nothing, and a rerun a few seconds later
+  where `requested` counts the cards it asked for. `jq -e` fails the step unless `enabled` is `true`: a running isolate
+  that has not picked up the new switch yet answers `enabled: false` and asks for nothing, and a rerun a few seconds later
   reaches the new one. `WEB_RESCORE_SECRET` is in the 1Password item
   `CF Worker Secret - WEB_RESCORE_SECRET (agentnative-site)`. Allow a few minutes for the clips before the playback
   check below.
@@ -343,12 +344,11 @@ directly from `dev` — there is no `main → dev` flow to verify.
   release branch lands edits on `main` that never round-trip to `dev` (the `CHANGELOG.md` section, RELEASES.md
   meta-edits). The script copies `CHANGELOG.md` from `main`, so the next release's overlay keeps it rather than deleting
   it as a `main`-only file, and adopts every other release-only edit whose `dev` copy still matches the previous `v*`
-  tag. It writes no `package.json` version: the tag is the version. It lists
-  the contested paths both branches changed since that tag and leaves them out; name the ones to take with
-  `--only PATH`, or take them all with `--include-contested`. It then opens a PR titled
-  `chore(release): sync dev after v<version>`; merge it once CI is green. That keeps the next release's preflight diff-B
-  quiet, so a real missed change stands out instead of hiding in expected divergence noise. Never merge `main` into
-  `dev` or push to `dev` directly (see
+  tag. It writes no `package.json` version: the tag is the version. It lists the contested paths both branches changed
+  since that tag and leaves them out; name the ones to take with `--only PATH`, or take them all with
+  `--include-contested`. It then opens a PR titled `chore(release): sync dev after v<version>`; merge it once CI is
+  green. That keeps the next release's preflight diff-B quiet, so a real missed change stands out instead of hiding in
+  expected divergence noise. Never merge `main` into `dev` or push to `dev` directly (see
   [`RELEASES.md` § After merge](./RELEASES.md#after-merge-tag-then-sync-dev-with-the-release)).
 
   The gate (`scripts/release/postflight.sh --env prod --release-slug v<version> backport`) is signal-agnostic about

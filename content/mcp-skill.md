@@ -213,7 +213,7 @@ upgraded, so it names the same record as the bare host.
   domains that opted in to public listing. Each entry carries `scorecard_url`.
 - `set_website_public_listing` (listing write): pass a `url` and a boolean `public_listing`; it opts a site in to or out
   of the user-submitted rows of `list_website_audits` and changes nothing else. Call it only when the user asks to list
-  or unlist a site. It needs a stored audit: on a miss it answers `{ changed: false, found: false, next_tool:
+  a site or to take it off the board. It needs a stored audit: on a miss it answers `{ changed: false, found: false, next_tool:
   "audit_website" }`, so run `audit_website` first. A value already stored answers `changed: false` and costs nothing. A
   change keeps the scorecard and its `scored_at`, applies at any scorecard age, and spends the per-IP burst limit, one
   unit of the 30-per-hour audit window `audit_website` also draws on, and one of 5 changes per hour per site across all
