@@ -160,8 +160,8 @@ as `CallToolResult` with `isError: true`, carrying a `-32099`-shaped JSON string
 (`src/worker/mcp/tools/web-audit.ts#jsonRpcError32099`, `src/worker/mcp/tools/scorecard-audit.ts#jsonRpcError32099`).
 The JSON-RPC envelope around it is successful. Pinned at
 `tests/worker-mcp-audit.test.ts#missing cf-connecting-ip on cache-miss returns isError: true with -32099` and
-`tests/web-audit-mcp-tools.test.ts#missing cf-connecting-ip returns the -32099 envelope (no anon fallback)`. Tool-level
-failure and transport-level failure are two layers, and only the second one is in this document's table.
+`tests/web-audit-mcp-tools.test.ts#missing cf-connecting-ip returns the rate-limit envelope with -32099 (no anon fallback)`.
+Tool-level failure and transport-level failure are two layers, and only the second one is in this document's table.
 
 ## Responses with no JSON-RPC envelope
 
@@ -325,8 +325,8 @@ Two codes are excluded from the conformance matrix, recorded above
 
 A third code appears in probe results without being probed for: **`-32000`**, JSON-RPC's reserved generic server error,
 which a stateful legacy server returns to a sessionless POST
-(`src/worker/audit-web/handlers/mcp.ts#SESSION_REQUIRED_CODE`). It is a statefulness signal, not an error-taxonomy
-signal. anc's own `-32000` is the HTTP 403 Host or Origin rejection in the table above, a different producer behind the
+(`src/worker/audit-web/handlers/mcp.ts#SESSION_REQUIRED_CODE`). It marks a stateful server, not an error
+category. anc's own `-32000` is the HTTP 403 Host or Origin rejection in the table above, a different producer behind the
 same code.
 
 ## Bumping the revision
