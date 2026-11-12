@@ -51,6 +51,7 @@ export interface WebListingToolEnv extends WebCoreEnv {
 }
 
 const TOOL = 'set_website_public_listing';
+const UNCHANGED = 'nothing was changed';
 const DISPLAY_DAYS = WEB_ALL_BOARD_DISPLAY_MAX_AGE_MS / 86_400_000;
 
 const DESCRIPTION =
@@ -114,7 +115,7 @@ export function registerWebListingTool(server: McpServer, env: WebListingToolEnv
       try {
         resolution = await resolveWebTarget(env, site.target, 'strict');
       } catch (err) {
-        if (err instanceof WebCacheUnavailableError) return cacheUnavailable(site.target.host, TOOL);
+        if (err instanceof WebCacheUnavailableError) return cacheUnavailable(site.target.host, TOOL, UNCHANGED);
         throw err;
       }
       const domain = resolution.target.host;
@@ -138,7 +139,7 @@ export function registerWebListingTool(server: McpServer, env: WebListingToolEnv
       try {
         stored = await readStoredAudit(env, resolution);
       } catch (err) {
-        if (err instanceof WebCacheUnavailableError) return unreadableRecord(domain, TOOL);
+        if (err instanceof WebCacheUnavailableError) return unreadableRecord(domain, TOOL, UNCHANGED);
         throw err;
       }
       if (stored === null) {

@@ -377,6 +377,7 @@ describe('set_website_public_listing: answers that cost nothing', () => {
     const out = await call(f, { url: 'example.com', public_listing: true });
     expect(out.isError).toBe(true);
     expect(out.text).toContain('cache_unavailable');
+    expect(out.text).toContain('nothing was changed');
     expect(out.text).toContain('Retry set_website_public_listing in 30 seconds');
     expect(f.bucket.puts).toEqual([]);
     expect(spent(f)).toEqual(NOTHING_SPENT);
@@ -390,6 +391,7 @@ describe('set_website_public_listing: answers that cost nothing', () => {
     const out = await call(f, { url: 'www.example.com', public_listing: true });
     expect(out.isError).toBe(true);
     expect(out.text).toContain('stored scorecard for example.com');
+    expect(out.text).toContain('nothing was changed');
     expect(f.bucket.puts).toEqual([]);
   });
 });

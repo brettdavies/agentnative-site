@@ -39,14 +39,18 @@ export function siteTarget(url: string): { ok: true; target: WebTarget } | { ok:
   return prepareWebTarget(parsed.host);
 }
 
-/** The answer when the stored scorecard of `site` could not be read; a stored record is never reported removed or missing for it. */
-export function unreadableRecord(site: string, retryTool: string) {
+/**
+ * The answer when the stored scorecard of `site` could not be read; a stored
+ * record is never reported removed or missing for it. `outcome` says what the
+ * failed call left as it was.
+ */
+export function unreadableRecord(site: string, retryTool: string, outcome = 'it has not been removed') {
   return isError(
-    `cache_unavailable: the stored scorecard for ${site} could not be read right now; it has not been removed. Retry ${retryTool} in 30 seconds.`,
+    `cache_unavailable: the stored scorecard for ${site} could not be read right now; ${outcome}. Retry ${retryTool} in 30 seconds.`,
   );
 }
 
 /** The answer when the record that names a `www.` host's site could not be read; the host's own record is never read in its place. */
-export function cacheUnavailable(host: string, retryTool: string) {
-  return unreadableRecord(sitePairOf(host)?.apex ?? host, retryTool);
+export function cacheUnavailable(host: string, retryTool: string, outcome?: string) {
+  return unreadableRecord(sitePairOf(host)?.apex ?? host, retryTool, outcome);
 }
