@@ -8,8 +8,10 @@ import { aggregateKeyFor, type WebAggregateEntry } from '../src/worker/audit-web
 import worker, { type Env } from '../src/worker/index';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
+const BUILD_DAY = '2026-10-01';
+
 const HOMEPAGE_SHELL = `<!doctype html>
-<html><head><meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}"></head>
+<html><head><meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}"><meta property="article:modified_time" content="${BUILD_DAY}"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"anc.dev","dateModified":"${BUILD_DAY}"}]}</script></head>
 <body>
   <div class="board" data-s="cli" aria-label="Top CLI tools">
     <a class="lrow good" href="/score/ripgrep"><span class="rank">01</span>ripgrep</a>
@@ -19,7 +21,14 @@ const HOMEPAGE_SHELL = `<!doctype html>
   </div>
 </body></html>`;
 
-const HOMEPAGE_MD = `# anc.dev
+const HOMEPAGE_MD = `---
+title: anc.dev
+description: The agent-native standard.
+url: https://anc.dev/
+dateModified: '${BUILD_DAY}'
+---
+
+# anc.dev
 
 CLI names stay baked: ripgrep.
 
@@ -28,7 +37,7 @@ CLI names stay baked: ripgrep.
 {{WEB_BOARD_ROWS}}
 `;
 
-function frontpageEntry(domain: string, globalScore: number): WebAggregateEntry {
+function frontpageEntry(domain: string, globalScore: number, scoredAt?: string): WebAggregateEntry {
   return {
     domain,
     url: `https://${domain}/`,
@@ -36,6 +45,7 @@ function frontpageEntry(domain: string, globalScore: number): WebAggregateEntry 
     description: `about ${domain}`,
     score_pct: globalScore + 5,
     score: { relative: globalScore + 5, global: globalScore },
+    ...(scoredAt === undefined ? {} : { scored_at: scoredAt }),
   };
 }
 
@@ -210,6 +220,33 @@ describe('homepage markdown board inject', () => {
     expect(html).toContain('href="/score/top.dev"');
     expect(html).toContain('class="lrow');
     expect(html).not.toContain('{{WEB_BOARD_ROWS}}');
+  });
+});
+
+describe('homepage: the page date', () => {
+  /** The day the page states in its JSON-LD, its article:modified_time, and its twin. */
+  async function statedDates(env: Env) {
+    const html = await fetchHomepage(env);
+    const md = await fetchHomepage(env, { url: 'https://anc.dev/index.md' });
+    return {
+      jsonLd: html.match(/"dateModified":"([^"]+)"/)?.[1],
+      meta: html.match(/article:modified_time" content="([^"]+)"/)?.[1],
+      twin: md.match(/^dateModified: '([^']+)'$/m)?.[1],
+    };
+  }
+
+  test('takes the newest frontpage row when it is newer than the build date', async () => {
+    const env = makeEnv([
+      frontpageEntry('old.dev', 60, '2026-09-01T00:00:00.000Z'),
+      frontpageEntry('new.dev', 70, '2026-11-05T23:30:00.000Z'),
+      frontpageEntry('legacy.dev', 80),
+    ]);
+    expect(await statedDates(env)).toEqual({ jsonLd: '2026-11-05', meta: '2026-11-05', twin: '2026-11-05' });
+  });
+
+  test('keeps the build date when every row is older or undated', async () => {
+    const env = makeEnv([frontpageEntry('old.dev', 60, '2026-09-01T00:00:00.000Z'), frontpageEntry('legacy.dev', 80)]);
+    expect(await statedDates(env)).toEqual({ jsonLd: BUILD_DAY, meta: BUILD_DAY, twin: BUILD_DAY });
   });
 });
 

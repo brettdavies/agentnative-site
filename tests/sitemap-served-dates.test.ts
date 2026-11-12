@@ -109,6 +109,21 @@ describe('the served sitemap dates the pages stored scorecards fill', () => {
     }).toEqual({ tag: 'home', cdn: 'public, max-age=300', browser: 'public, max-age=0, must-revalidate' });
   });
 
+  test('a board older than the build keeps the built dates on / and /scorecards', async () => {
+    const { sitemap, seed } = await built();
+    const dayOf = (i: number) => new Date(Date.UTC(2000, 0, 1 + i)).toISOString().slice(0, 10);
+    const board = seed.map((entry, i) => row(entry, `${dayOf(i)}T12:00:00.000Z`));
+    const before = entries(sitemap);
+    const after = entries(
+      await (await served(makeEnv(sitemap, seed, { leaderboard: board, 'leaderboard-frontpage': board }))).text(),
+    );
+    expect({
+      home: after.get('/'),
+      scorecards: after.get(SCORECARDS_PATH),
+      firstCurated: after.get(scorePath(seed[0].domain)),
+    }).toEqual({ home: before.get('/'), scorecards: before.get(SCORECARDS_PATH), firstCurated: dayOf(0) });
+  });
+
   test('a curated row with no scoring date leaves its page undated', async () => {
     const { sitemap, seed } = await built();
     const [dated, undated] = seed;
