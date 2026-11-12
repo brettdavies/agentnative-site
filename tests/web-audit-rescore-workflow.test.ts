@@ -1128,6 +1128,51 @@ describe('rebuildWebAggregates', () => {
     expect(after?.entries).toEqual(built.map((e) => (e.domain === 'b.dev' ? { ...e, ...storedScore } : e)));
   });
 
+  test("each row carries its record's scored_at, and an unreadable record's row keeps the stored one", async () => {
+    const { env } = makeEnv([seedEntry('a.dev'), seedEntry('b.dev')]);
+    await cachePut(env, 'https://a.dev/', scorecardFor('a.dev', 70), SPEC_VERSION, '2026-11-01T10:00:00.000Z');
+    await cachePut(env, 'https://b.dev/', scorecardFor('b.dev', 60), SPEC_VERSION, '2026-11-02T10:00:00.000Z');
+    await rebuildWebAggregates(env, SPEC_VERSION);
+    const built = (await getAggregate(env, 'leaderboard', SPEC_VERSION))?.entries ?? [];
+    const scoredAt = (entries: typeof built) => Object.fromEntries(entries.map((e) => [e.domain, e.scored_at]));
+    expect(scoredAt(built)).toEqual({ 'a.dev': '2026-11-01T10:00:00.000Z', 'b.dev': '2026-11-02T10:00:00.000Z' });
+
+    const stored = built.map((e) => (e.domain === 'b.dev' ? { ...e, scored_at: '2026-10-15T08:00:00.000Z' } : e));
+    await putAggregate(env, 'leaderboard', stored, SPEC_VERSION);
+    const unreadable = await keyFor('https://b.dev/', SPEC_VERSION);
+    const realGet = env.SCORE_CACHE.get.bind(env.SCORE_CACHE);
+    env.SCORE_CACHE.get = (async (key: string) => {
+      if (key === unreadable) throw new Error('get: We encountered an internal error. Please try again. (10001)');
+      return realGet(key);
+    }) as R2Bucket['get'];
+    const logs = captureLogs();
+    try {
+      await rebuildWebAggregates(env, SPEC_VERSION);
+    } finally {
+      logs.restore();
+      env.SCORE_CACHE.get = realGet as R2Bucket['get'];
+    }
+    const after = (await getAggregate(env, 'leaderboard', SPEC_VERSION))?.entries ?? [];
+    expect(scoredAt(after)).toEqual({ 'a.dev': '2026-11-01T10:00:00.000Z', 'b.dev': '2026-10-15T08:00:00.000Z' });
+  });
+
+  test('a record stored without a scored_at gives its row none', async () => {
+    const { env, store } = makeEnv([seedEntry('a.dev'), seedEntry('legacy.dev')]);
+    await cachePut(env, 'https://a.dev/', scorecardFor('a.dev', 70), SPEC_VERSION, '2026-11-01T10:00:00.000Z');
+    const legacy: CachedWebAudit = {
+      spec_version: SPEC_VERSION,
+      target_url: 'https://legacy.dev/',
+      scorecard: scorecardFor('legacy.dev', 60),
+    };
+    store.set(await keyFor('https://legacy.dev/', SPEC_VERSION), JSON.stringify(legacy));
+    await rebuildWebAggregates(env, SPEC_VERSION);
+    const rows = (await getAggregate(env, 'leaderboard-frontpage', SPEC_VERSION))?.entries ?? [];
+    expect(rows.map((e) => [e.domain, Object.hasOwn(e, 'scored_at'), e.scored_at])).toEqual([
+      ['a.dev', true, '2026-11-01T10:00:00.000Z'],
+      ['legacy.dev', false, undefined],
+    ]);
+  });
+
   test('an empty seed writes empty aggregates (cold-start shape, not an error)', async () => {
     const { env } = makeEnv([]);
     await rebuildWebAggregates(env, SPEC_VERSION);

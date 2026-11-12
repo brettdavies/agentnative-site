@@ -17,9 +17,9 @@ import {
 } from '../shared/breadcrumb.ts';
 import { MCP_DISCOVERY_DOCUMENTS, SEP_1649_CARD_PATH } from '../shared/mcp-discovery';
 import { SITE_OG_IMAGE_ALT, SITE_OG_IMAGE_PATH } from '../shared/og-card.ts';
+import { DATE_MODIFIED_TOKEN, isDay, MODIFIED_TIME_META_TOKEN, modifiedTimeMeta } from '../shared/page-date';
 import { markdownAlternateLink } from '../shared/result-head';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
-import { isDay } from './content-dates.mjs';
 import { loadInstallCommands } from './install-commands.mjs';
 import { ANC_VERSION, canonicalBaseUrl, escHtml, SITE_SPEC_VERSION } from './util.mjs';
 
@@ -152,8 +152,8 @@ const esc = escHtml;
 
 /**
  * Emit a placeholder-only version of the shell. The Worker renders its
- * dynamic pages from it without duplicating the shell layout. The
- * template has five placeholders:
+ * dynamic pages from it without duplicating the shell layout. Its main
+ * placeholders:
  *
  *   {{TITLE}}            — document <title> + og:title (escaped at substitution)
  *   {{DESCRIPTION}}      — meta description + og:description
@@ -162,6 +162,10 @@ const esc = escHtml;
  *                          built by src/shared/result-head.ts from the route
  *                          module's representation builders
  *   {{BODY}}             — already-rendered body HTML (pre-escaped by caller)
+ *   {{DATE_MODIFIED}}    — the TechArticle `dateModified` value, and
+ *   {{MODIFIED_TIME_META}} — the `article:modified_time` tag: the page's
+ *                          day, both removed on a page with none
+ *                          (src/shared/page-date.ts)
  *
  * Same shell layout as the static pages; the only difference is the
  * placeholders for the dynamic fields. The footer's markdown-twin anchor
@@ -268,6 +272,10 @@ export function emitShell({
   const trail = deferred ? [] : breadcrumbTrail(canonicalPath, breadcrumb);
   const crumbNav = deferred ? '{{BREADCRUMB_NAV}}' : renderBreadcrumbNav(trail);
   const crumbNode = deferred ? BREADCRUMB_JSONLD_TOKEN : breadcrumbJsonLd(trail, base);
+  // The template's page is dated from the record the Worker serves, so the
+  // day is deferred the same way.
+  const jsonLdDate = deferred ? DATE_MODIFIED_TOKEN : dateModified;
+  const dateMeta = deferred ? MODIFIED_TIME_META_TOKEN : dateModified ? modifiedTimeMeta(dateModified) : '';
 
   const orgId = `${base}/#organization`;
   const siteId = `${base}/#website`;
@@ -306,7 +314,7 @@ export function emitShell({
         description,
         url: canonical,
         image: resolvedOgImage,
-        ...(dateModified ? { dateModified } : {}),
+        ...(jsonLdDate ? { dateModified: jsonLdDate } : {}),
         isPartOf: { '@id': siteId },
         author: {
           '@type': 'Person',
@@ -398,7 +406,7 @@ ${isIndex || turnstileSitekey ? `    <meta name="turnstile-sitekey" content="{{T
     <meta property="og:title" content="${esc(title)}" />
     <meta property="og:description" content="${esc(description)}" />
     <meta property="og:url" content="${canonical}" />
-${dateModified ? `    <meta property="article:modified_time" content="${dateModified}" />\n` : ''}    <meta property="og:image" content="${esc(resolvedOgImage)}" />
+${dateMeta ? `    ${dateMeta}\n` : ''}    <meta property="og:image" content="${esc(resolvedOgImage)}" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="${esc(resolvedOgAlt)}" />

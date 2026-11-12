@@ -43,7 +43,7 @@ import {
 } from './scorecards-render.mjs';
 import { emitShell } from './shell.mjs';
 import { emitSkillJson, emitSkillMarkdown, loadSkillData, renderSkillPage } from './skill.mjs';
-import { absolutifyMarkdownLinks } from './util.mjs';
+import { absolutifyMarkdownLinks, composeTwin, twinMeta } from './util.mjs';
 
 // Build modules that author page copy, which dates those pages along with
 // their data. The per-tool scorecard template frames one entry's data, so a
@@ -207,13 +207,17 @@ export async function emitScorecardSurface({
   <code>anc audit &lt;binary&gt;</code>.</p>`;
 
   const leaderboardBody = buildLeaderboardBody(leaderboard, methodologyHtml);
+  const leaderboardMeta = {
+    title: 'ANC 100 — Agent-Native CLI Leaderboard',
+    description:
+      'Automated agent-readiness scores for real CLI tools, scored against the eight agent-native principles.',
+    canonicalPath: SCORECARDS_PATH,
+    dateModified: pageDates.get(SCORECARDS_PATH),
+  };
   await writeFile(
     join(distDir, 'scorecards.html'),
     emitShell({
-      title: 'ANC 100 — Agent-Native CLI Leaderboard',
-      description:
-        'Automated agent-readiness scores for real CLI tools, scored against the seven agent-native principles.',
-      canonicalPath: SCORECARDS_PATH,
+      ...leaderboardMeta,
       breadcrumb: 'Leaderboard',
       bodyHtml: leaderboardBody,
       themeInitJs: themeInit,
@@ -221,10 +225,9 @@ export async function emitScorecardSurface({
       // they paint, and no other page carries both boards.
       extraHeadJs: laneInit,
       extraScripts: ['/js/leaderboard.js'],
-      dateModified: pageDates.get(SCORECARDS_PATH),
     }),
   );
-  await writeFile(join(distDir, 'scorecards.md'), absolutifyMarkdownLinks(buildLeaderboardMarkdown(leaderboard)));
+  await writeFile(join(distDir, 'scorecards.md'), composeTwin(leaderboardMeta, buildLeaderboardMarkdown(leaderboard)));
 
   // Per-tool scorecard pages → dist/score/<tool-name>.html + .md + .json
   // Badge SVGs               → dist/badge/<tool-name>.svg
@@ -262,6 +265,12 @@ export async function emitScorecardSurface({
     const scorecardBody = buildScorecardBody(tool, scorecard, topIssues, principleScore, version, metadata);
     const canonicalPath = scorePath(tool.name);
     pageDates.set(canonicalPath, scorecardDate(scorecard));
+    const toolMeta = {
+      title: `${tool.name} — Agent-Native Scorecard`,
+      description: `Agent-readiness scorecard for ${tool.name}: ${tool.description}`,
+      canonicalPath,
+      dateModified: pageDates.get(canonicalPath),
+    };
     const ogKey = scoreOgKey({
       scorePct: scorecard.badge.score_pct,
       specVersion: scorecard.spec_version,
@@ -270,9 +279,7 @@ export async function emitScorecardSurface({
     await writeFile(
       join(distDir, 'score', `${tool.name}.html`),
       emitShell({
-        title: `${tool.name} — Agent-Native Scorecard`,
-        description: `Agent-readiness scorecard for ${tool.name}: ${tool.description}`,
-        canonicalPath,
+        ...toolMeta,
         breadcrumb: tool.name,
         markdownTwinPath: scoreMarkdownPath(tool.name),
         alternatesHtml: resultAlternateLinks(tool.name),
@@ -285,12 +292,13 @@ export async function emitScorecardSurface({
           scorePct: scorecard.badge.score_pct,
           specVersion: scorecard.spec_version,
         }),
-        dateModified: pageDates.get(canonicalPath),
       }),
     );
     await writeFile(
       join(distDir, 'score', `${tool.name}.md`),
-      absolutifyMarkdownLinks(buildScorecardMarkdown(tool, scorecard, topIssues, principleScore, version, metadata)),
+      absolutifyMarkdownLinks(
+        buildScorecardMarkdown(tool, scorecard, topIssues, principleScore, version, metadata, twinMeta(toolMeta)),
+      ),
     );
     await writeFile(
       join(distDir, 'score', `${tool.name}.json`),
@@ -317,19 +325,22 @@ export async function emitScorecardSurface({
   const coverageBody = buildCoverageBody(coverageMatrix);
   const coverageMarkdown = buildCoverageMarkdown(coverageMatrix);
   pageDates.set('/coverage', fileDate(coverageMatrixPath, moduleSource('./coverage.mjs'), THIS_MODULE));
+  const coverageMeta = {
+    title: 'Spec Coverage Matrix — anc.dev',
+    description: 'Which agent-native CLI requirements have automated audits and which remain uncovered.',
+    canonicalPath: '/coverage',
+    dateModified: pageDates.get('/coverage'),
+  };
   await writeFile(
     join(distDir, 'coverage.html'),
     emitShell({
-      title: 'Spec Coverage Matrix — anc.dev',
-      description: 'Which agent-native CLI requirements have automated audits and which remain uncovered.',
-      canonicalPath: '/coverage',
+      ...coverageMeta,
       breadcrumb: 'Coverage',
       bodyHtml: `<article class="container doc">${coverageBody}</article>`,
       themeInitJs: themeInit,
-      dateModified: pageDates.get('/coverage'),
     }),
   );
-  await writeFile(join(distDir, 'coverage.md'), absolutifyMarkdownLinks(coverageMarkdown));
+  await writeFile(join(distDir, 'coverage.md'), composeTwin(coverageMeta, coverageMarkdown));
 
   // 8c. /skill.json + /skill + /skill.md — skill-distribution surface.
   // The same manifest is emitted as canonical JSON, rendered HTML (via the
@@ -339,19 +350,22 @@ export async function emitScorecardSurface({
   await emitSkillJson(skillData, distDir);
   const { markdown: skillMarkdown, html: skillBodyHtml } = await renderSkillPage(skillData);
   pageDates.set('/skill', fileDate(skillDataPath, moduleSource('./skill.mjs')));
+  const skillMeta = {
+    title: `Install ${skillData.name}`,
+    description: skillData.description,
+    canonicalPath: '/skill',
+    dateModified: pageDates.get('/skill'),
+  };
   await writeFile(
     join(distDir, 'skill.html'),
     emitShell({
-      title: `Install ${skillData.name}`,
-      description: skillData.description,
-      canonicalPath: '/skill',
+      ...skillMeta,
       breadcrumb: 'Skill',
       bodyHtml: `<article class="container doc">${skillBodyHtml}</article>`,
       themeInitJs: themeInit,
-      dateModified: pageDates.get('/skill'),
     }),
   );
-  await emitSkillMarkdown(absolutifyMarkdownLinks(skillMarkdown), distDir);
+  await emitSkillMarkdown(composeTwin(skillMeta, skillMarkdown), distDir);
 
   return {
     leaderboard,

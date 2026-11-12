@@ -47,6 +47,12 @@ export type WebAggregateEntry = {
   description: string;
   score_pct: number;
   score: { relative: number; global: number };
+  /**
+   * When the row's audit ran, copied from its per-domain record. Absent on
+   * a stored row the rescore has not rebuilt and on a record without one; a
+   * row without it dates nothing.
+   */
+  scored_at?: string;
 };
 
 export type CachedWebAggregate = {

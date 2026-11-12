@@ -256,14 +256,15 @@ shape); a 4xx/5xx or an always-MISS path is MISS regardless.
   and the curated `/score/<slug>/json` keep
   `Cache-Control: public, max-age=300, s-maxage=86400, stale-while-revalidate=60` with no `Vary`.
 - **HIT-min** — the live board and live results, every representation alike: `/`, `/index.md`, `/scorecards`,
-  `/scorecards.md`, and their `?lane=`/`?view=` queries; a live or branch-scoped `/score/<target>` with its `/md` and
-  `/json`; and a website `/score/<host>` with its `/md` and `/json`. Browser:
-  `Cache-Control: public, max-age=0, must-revalidate` so a tag purge is visible on the next navigation. Edge:
-  `Cloudflare-CDN-Cache-Control: public, max-age=300`. `Cache-Tag: home` on `/`, `/index.md`, and `/scorecards*`;
-  `web:{host}` on a website result; `cli:{binary}` on a live CLI result and `cli:{owner}/{repo}@{branch}` on a branch
-  run. The Durable Object purges the `cli:` tag after its R2 write; the web stream and the rescore workflow purge
-  `web:{host}` with `web` and `home`. `/audit` with a query string is HIT-min with no tag, so a prefill hop never mints
-  a day-long edge key. Explicit `.md` and `/md` twins and `/json` still have no `Vary`.
+  `/scorecards.md`, and their `?lane=`/`?view=` queries; `/sitemap.xml`, which the Worker dates from the same board
+  data; a live or branch-scoped `/score/<target>` with its `/md` and `/json`; and a website `/score/<host>` with its
+  `/md` and `/json`. Browser: `Cache-Control: public, max-age=0, must-revalidate` so a tag purge is visible on the next
+  navigation. Edge: `Cloudflare-CDN-Cache-Control: public, max-age=300`. `Cache-Tag: home` on `/`, `/index.md`,
+  `/scorecards*`, and `/sitemap.xml`; `web:{host}` on a website result; `cli:{binary}` on a live CLI result and
+  `cli:{owner}/{repo}@{branch}` on a branch run. The Durable Object purges the `cli:` tag after its R2 write; the web
+  stream and the rescore workflow purge `web:{host}` with `web` and `home`. `/audit` with a query string is HIT-min with
+  no tag, so a prefill hop never mints a day-long edge key. Explicit `.md` and `/md` twins and `/json` still have no
+  `Vary`.
 - **MISS** — every-request `Cache-Control: no-store` plus `Cloudflare-CDN-Cache-Control: no-store`, untagged.
   `/scoring*`, `GET` and `POST /mcp` (the protocol endpoint sets `no-store` itself and never enters the cached
   entrypoint), `/api/score`, a `/score/<target>?v=` fetch, the 202 in-progress `/json`, and every Worker 4xx/5xx
@@ -345,7 +346,7 @@ the filename. No separate manifest file, no frontmatter ordering key.
 | `about.md`                                                       | `about.html`, `about.md` | Sub-page; flat layout (not `about/index.html`); no mini-TOC.                                                                                                                                                     |
 | all principle files (titles + slugs)                             | `llms.txt`               | llmstxt.org index: project title, one-paragraph summary, H2-delimited "Principles" section listing all seven with their `.md` URLs.                                                                              |
 | `_intro.md` + `principles/p[1-7]-*.md` + `check.md` + `about.md` | `llms-full.txt`          | Concatenation of everything, each section delimited per the A5 format block below (`# <Title>` heading, `Source:` + `Canonical-Markdown:` URL headers, body, `---` separator); single-fetch endpoint for agents. |
-| all URLs                                                         | `sitemap.xml`            | Plain sitemap; no priority hacks. Each `<lastmod>` is the page's content date (§4.14); a seeded web result, rendered from R2, has none.                                                                          |
+| all URLs                                                         | `sitemap.xml`            | Plain sitemap; no priority hacks. Each `<lastmod>` is the page's content date (§4.14); the Worker dates a seeded web result, which renders from R2, when it serves the file.                                     |
 | brief in §4.13                                                   | `og-image.png`           | Generated out-of-band via `bun run og` (Playwright→Sharp→PNG, see `scripts/og/generate.ts`); committed. Not regenerated on every build.                                                                          |
 
 **Static asset + CSS + JS pipeline (A2, C3):**
@@ -1190,7 +1191,7 @@ audit. Until then its page names the still card alone, because its clip under th
 ### 4.14 Schema.org / SEO surface
 
 Schema.org `TechArticle` JSON-LD in `<head>` per page, `isPartOf` pointing to the site's `WebSite` node, and
-`dateModified` on every page the build can date. Per the agent-native documentation surface pattern. Twitter card
+`dateModified` on every dated page. Per the agent-native documentation surface pattern. Twitter card
 `summary_large_image`. Open Graph: `og:title`, `og:description`, `og:image`, `og:url`, `og:type="article"`, and
 `article:modified_time` on every dated page. Before domain purchase: canonical + og:url use the staging `workers.dev`
 host until production cut-over; swap via a single constant in the HTML shell. Documented in `wrangler.toml` per CEO plan
@@ -1198,8 +1199,12 @@ host until production cut-over; swap via a single constant in the HTML shell. Do
 
 **Content dates.** Each built page carries one `YYYY-MM-DD` date: the newest change among the content it renders. The
 build computes it once per page (`src/build/content-dates.mjs`) and states it four times: the sitemap `<lastmod>`, the
-`TechArticle` `dateModified`, `article:modified_time`, and a `dateModified` key in the markdown twin's frontmatter (on
-the twins that carry frontmatter: the homepage, the principles, and the content sub-pages).
+`TechArticle` `dateModified`, `article:modified_time`, and a `dateModified` key in the markdown twin's frontmatter.
+The twin of every dated page, built or Worker-rendered, opens with one frontmatter block whose first keys are `title`,
+`description`, `url` (the canonical HTML URL), and `dateModified`, written by `src/shared/twin-frontmatter.ts`. A result
+twin's block goes on to name the page's representations (`target`, `lane`, `tier`, `scorecard_url`, `markdown_url`,
+`json_url`, `negotiate`); a result whose record states no date keeps the block without `dateModified`. The `/scoring`
+progress twin and the not-found twin carry no block.
 
 - **Content** is the `content/**/*.md` files a page renders, the data whose values appear on it, and the copy a build
   module writes into the page (a widget slot's prose, a generated page's lede). Shared layout is not content: the shell,
@@ -1223,10 +1228,21 @@ the twins that carry frontmatter: the homepage, the principles, and the content 
 | `/coverage`             | `coverage-matrix.json`, `coverage.mjs`, `08-scorecards-emit.mjs`                                                                                        |
 | `/skill`                | `skill.json`, `skill.mjs`                                                                                                                               |
 
-A page the Worker fills from stored records at request time has no build-time date. A seeded web result
-(`/score/<domain>`) is listed in the sitemap without `<lastmod>`, and the web board panes on `/` and `/scorecards` do
-not count toward those pages' dates. The `/fix/<id>` skill pages render from the shared web-audit registry and
-remediation catalog, which carry no per-check date, so they carry no `dateModified`.
+**Served dates.** The Worker dates what it fills from stored scorecards, in the same four places, with the same day
+format. A record or row whose date does not parse states no date; the Worker never invents one.
+
+| Page                                                                        | Date                                                                                                               | Filled by                                                                                                                 |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `/score/<domain>` (seeded and on-demand), live and branch `/score/<target>` | the UTC day of the record's scoring instant (`scored_at`; a CLI record without one falls back to `run.started_at`) | the result route: the shell template's `{{DATE_MODIFIED}}` and `{{MODIFIED_TIME_META}}` slots, and the twin's frontmatter |
+| `/`, `/scorecards` (HTML and twin)                                          | whichever is newer: the build's date or the newest `scored_at` among the website board rows shown                        | the board inject, before the rows go in                                                                                   |
+| `/sitemap.xml`                                                              | a seeded web result takes its `leaderboard` row's `scored_at`; `/` and `/scorecards` take the day each page states | `src/worker/sitemap.ts`                                                                                                   |
+
+A board row's `scored_at` is copied from its per-domain record when the rescore rebuilds the aggregates. The served
+sitemap reads the same board data as the board pages, so it is cached the same way: HIT-min under the `home` tag the
+rebuild already purges. Its `<loc>` list stays the build's; an on-demand result is never listed.
+
+The `/fix/<id>` skill pages render from the shared web-audit registry and remediation catalog, which carry no per-check
+date, so they carry no `dateModified`, and their twins open with no frontmatter block.
 
 The build refuses to run without the history: on a shallow clone it stops before its first stage and names the fix
 (`git fetch --unshallow`, or `fetch-depth: 0` on the CI checkout). It never falls back to the build date. Every workflow

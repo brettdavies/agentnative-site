@@ -1531,3 +1531,51 @@ describe('a www host that a recorded fold names', () => {
     expect((await route('/score/cnn.com/json', env)).status).toBe(202);
   });
 });
+
+describe('a Worker-rendered result page carries the day its scoring ran', () => {
+  const realShell = { '/_internal/score-live-shell.html': emitShellTemplate() };
+
+  /** The day the page states in each of its three places, and the keys its twin's front matter opens with. */
+  async function statedDates(path: string, env: TestEnv) {
+    const html = await (await route(path, env, { accept: 'text/html' })).text();
+    const twin = await (await route(`${path}/md`, env)).text();
+    const script = html.match(/<script type="?application\/ld\+json"?>([\s\S]*?)<\/script>/)?.[1] ?? '{}';
+    const graph = (JSON.parse(script) as { '@graph'?: Array<Record<string, unknown>> })['@graph'] ?? [];
+    const block = twin.startsWith('---\n') ? twin.slice(4, twin.indexOf('\n---\n') + 1) : '';
+    const front = (yaml.load(block) ?? {}) as Record<string, unknown>;
+    expect(html).not.toContain('{{');
+    return {
+      jsonLd: graph.find((node) => node['@type'] === 'TechArticle')?.dateModified,
+      meta: html.match(/<meta property="?article:modified_time"? content="?([^"\s>]+)/)?.[1],
+      twin: front.dateModified,
+      twinOpensWith: Object.keys(front).slice(0, 4),
+    };
+  }
+
+  test.each([
+    ['a website scorecard', '/score/anc.dev'],
+    ['a live CLI scorecard', '/score/ouch'],
+  ])("%s states its record's scoring day in JSON-LD, article:modified_time, and its twin", async (_label, path) => {
+    const env = await seededEnv({ assets: realShell });
+    expect(await statedDates(path, env)).toEqual({
+      jsonLd: '2026-09-10',
+      meta: '2026-09-10',
+      twin: '2026-09-10',
+      twinOpensWith: ['title', 'description', 'url', 'dateModified'],
+    });
+  });
+
+  test('a record with no scoring date states none, and its JSON-LD still parses', async () => {
+    const { scored_at: _dropped, ...undated } = WEB_RECORD;
+    const env = await makeEnv({
+      cache: { [await webKeyFor('https://anc.dev/', SPEC_VERSION)]: undated },
+      assets: realShell,
+    });
+    expect(await statedDates('/score/anc.dev', env)).toEqual({
+      jsonLd: undefined,
+      meta: undefined,
+      twin: undefined,
+      twinOpensWith: ['title', 'description', 'url', 'target'],
+    });
+  });
+});

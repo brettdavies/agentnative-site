@@ -10,18 +10,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
-
-const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-/**
- * Whether a value is a `YYYY-MM-DD` day string.
- *
- * @param {unknown} value
- * @returns {boolean}
- */
-export function isDay(value) {
-  return typeof value === 'string' && DAY_RE.test(value);
-}
+import { isDay } from '../shared/page-date';
 
 function git(repoRoot, args) {
   return execFileSync('git', ['-C', repoRoot, ...args], {
