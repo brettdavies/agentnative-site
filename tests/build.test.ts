@@ -2977,15 +2977,17 @@ describe('renderFrontmatter — YAML frontmatter block for markdown twins', () =
     title: 'The agent-native standard',
     description: 'One bar for agent-readiness.',
     url: 'https://anc.dev/',
+    dateModified: '2026-10-28',
   };
 
-  test('emits a fenced block with title, description, and url keys', () => {
+  test('emits a fenced block with title, description, url, and dateModified keys', () => {
     const block = renderFrontmatter(meta);
     expect(block.startsWith('---\n')).toBe(true);
     expect(block.endsWith('---\n\n')).toBe(true);
     expect(block).toContain('title:');
     expect(block).toContain('description:');
     expect(block).toContain('url:');
+    expect(block).toContain("dateModified: '2026-10-28'\n");
   });
 
   test('round-trips through yaml.load', async () => {
@@ -3036,6 +3038,7 @@ describe('composeTwin — frontmatter + absolutified body', () => {
     title: 'P3: Progressive Help Discovery',
     description: 'Help output is layered.',
     canonicalPath: '/p3',
+    dateModified: '2026-10-28',
   };
   const body = '# P3: Progressive Help Discovery\n\nSee [the standard](/p1) for context.\n';
 
@@ -3045,6 +3048,7 @@ describe('composeTwin — frontmatter + absolutified body', () => {
       title: meta.title,
       description: meta.description,
       url: 'https://anc.dev/p3',
+      dateModified: meta.dateModified,
     });
     expect(twin.startsWith(fm)).toBe(true);
     expect(twin.slice(fm.length)).toBe(absolutifyMarkdownLinks(body));
@@ -3079,6 +3083,15 @@ describe('composeTwin — frontmatter + absolutified body', () => {
     expect(twin).toContain('[website audit](https://anc.dev/web-audit)');
     expect(twin).not.toContain('](/web-audit)');
   });
+
+  test('a twin without a YYYY-MM-DD dateModified is refused', () => {
+    const { dateModified: _omitted, ...undated } = meta;
+    // @ts-expect-error an undated twin is the case under test
+    expect(() => composeTwin(undated, body)).toThrow(/needs a YYYY-MM-DD dateModified/);
+    expect(() => composeTwin({ ...meta, dateModified: '2026-10-28T00:00:00Z' }, body)).toThrow(
+      /needs a YYYY-MM-DD dateModified/,
+    );
+  });
 });
 
 // -------------------------------------------------------------------
@@ -3108,10 +3121,15 @@ function homepageLeaderboardFixture() {
 }
 
 const HOMEPAGE_PRINCIPLES_FIXTURE = [
-  { n: 1, title: 'P1: Non-Interactive by Default', shortDesc: 'No prompts.' },
-  { n: 2, title: 'P2: Structured, Parseable Output', shortDesc: 'JSON out.' },
-  { n: 3, title: 'P3: Progressive Help Discovery', shortDesc: 'Layered help.' },
+  { n: 1, title: 'P1: Non-Interactive by Default', shortDesc: 'No prompts.', dateModified: '2026-03-01' },
+  { n: 2, title: 'P2: Structured, Parseable Output', shortDesc: 'JSON out.', dateModified: '2026-05-01' },
+  { n: 3, title: 'P3: Progressive Help Discovery', shortDesc: 'Layered help.', dateModified: '2026-04-01' },
 ];
+
+// Every file the stub is asked about dates to one older day, so a page's
+// date shows which of its rows was newest.
+const STUB_FILE_DAY = '2026-01-01';
+const stubFileDate = (..._paths: string[]) => STUB_FILE_DAY;
 
 describe('emitHomepage — index.md twin frontmatter', () => {
   // One emission serves all three tests: renderMarkdown rebuilds the full
@@ -3127,6 +3145,8 @@ describe('emitHomepage — index.md twin frontmatter', () => {
       themeInit: '/* theme */',
       principles: HOMEPAGE_PRINCIPLES_FIXTURE,
       leaderboard: homepageLeaderboardFixture(),
+      boardDate: '2026-02-01',
+      fileDate: stubFileDate,
     });
   });
 
@@ -3134,15 +3154,26 @@ describe('emitHomepage — index.md twin frontmatter', () => {
     await rm(distDir, { recursive: true, force: true });
   });
 
-  test('index.md opens with title/description/url frontmatter derived from _intro.md', async () => {
+  test('index.md opens with title/description/url/dateModified frontmatter derived from _intro.md', async () => {
     const introSource = await readFile(join(CONTENT_DIR, '_intro.md'), 'utf8');
     const indexMd = await readFile(join(distDir, 'index.md'), 'utf8');
     const expectedFm = renderFrontmatter({
       title: extractTitle(introSource),
       description: extractDescription(introSource),
       url: 'https://anc.dev/',
+      dateModified: '2026-05-01',
     });
     expect(indexMd.startsWith(expectedFm)).toBe(true);
+  });
+
+  test('the homepage takes the newest date among its rows, on both representations', async () => {
+    // P2's 2026-05-01 is newer than the board (2026-02-01), the other
+    // principles, and every file the homepage reads.
+    const indexMd = await readFile(join(distDir, 'index.md'), 'utf8');
+    const indexHtml = await readFile(join(distDir, 'index.html'), 'utf8');
+    expect(indexMd).toContain("dateModified: '2026-05-01'\n");
+    expect(indexHtml).toContain('"dateModified":"2026-05-01"');
+    expect(indexHtml).toContain('<meta property="article:modified_time" content="2026-05-01" />');
   });
 
   test('twin body keeps the Principles section, the use-note, and homepage silence', async () => {
@@ -3178,11 +3209,20 @@ describe('emitSubPages — twin frontmatter', () => {
   // One emission serves all three tests: the subpage pipeline renders
   // thirteen markdown pages through Shiki per run.
   const distDir = join(tmpdir(), `subpages-fm-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  let subPageData: Array<{ name: string; source: string; title: string }> = [];
+  let subPageData: Array<{ name: string; source: string; title: string; dateModified: string }> = [];
+  const datedInputs = new Map<string, string[]>();
 
   beforeAll(async () => {
     await mkdir(distDir, { recursive: true });
-    subPageData = await emitSubPages({ distDir, contentDir: CONTENT_DIR, themeInit: '/* theme */' });
+    subPageData = await emitSubPages({
+      distDir,
+      contentDir: CONTENT_DIR,
+      themeInit: '/* theme */',
+      fileDate: (...paths: string[]) => {
+        datedInputs.set(paths[0], paths);
+        return STUB_FILE_DAY;
+      },
+    });
   });
 
   afterAll(async () => {
@@ -3196,6 +3236,7 @@ describe('emitSubPages — twin frontmatter', () => {
       title: extractTitle(source),
       description: extractDescription(source),
       url: 'https://anc.dev/audit',
+      dateModified: STUB_FILE_DAY,
     });
     expect(auditMd.startsWith(expectedFm)).toBe(true);
     const auditHtml = await readFile(join(distDir, 'audit.html'), 'utf8');
@@ -3216,11 +3257,23 @@ describe('emitSubPages — twin frontmatter', () => {
       title: extractTitle(source),
       description: extractDescription(source),
       url: 'https://anc.dev/privacy',
+      dateModified: STUB_FILE_DAY,
     });
     expect(privacyMd.startsWith(expectedFm)).toBe(true);
     const privacyHtml = await readFile(join(distDir, 'privacy.html'), 'utf8');
     expect(privacyHtml).not.toContain('---\ntitle:');
     expect(privacyHtml).not.toMatch(/^url: /m);
+  });
+
+  test('/audit dates from its content, its web-lane partial, and the modules that write its widget copy', () => {
+    const inputs = (datedInputs.get(join(CONTENT_DIR, 'audit.md')) ?? []).map((p) => p.split('/').slice(-2).join('/'));
+    expect(inputs).toEqual([
+      'content/audit.md',
+      'content/_audit-web.md',
+      'build/07-subpages.mjs',
+      'build/audit-form.mjs',
+    ]);
+    expect(datedInputs.get(join(CONTENT_DIR, 'privacy.md'))).toEqual([join(CONTENT_DIR, 'privacy.md')]);
   });
 
   test('/audit HTML carries the Turnstile sitekey meta, because its form transacts', async () => {
@@ -3242,6 +3295,7 @@ describe('emitSubPages — twin frontmatter', () => {
 describe('runInvariantChecks — principle twin equivalence (invariant #4)', () => {
   const SOURCE = '# P1: Test Principle\n\nA test paragraph for the invariant fixture.\n\nSee [the next one](/p2).\n';
   const SLUG = 'p1-test-principle';
+  const SOURCE_DAY = '2026-10-28';
 
   /** Seed a dist dir satisfying every invariant except the p1.md under test. */
   async function seedDist(p1Md: string) {
@@ -3263,6 +3317,7 @@ describe('runInvariantChecks — principle twin equivalence (invariant #4)', () 
         title: extractTitle(SOURCE),
         description: extractDescription(SOURCE),
         canonicalPath: '/p1',
+        dateModified: SOURCE_DAY,
       },
       SOURCE,
     );
@@ -3271,7 +3326,7 @@ describe('runInvariantChecks — principle twin equivalence (invariant #4)', () 
   test('a correctly composed twin (frontmatter + absolutified body) passes', async () => {
     const { distDir, sourcePath } = await seedDist(expectedTwin());
     try {
-      await runInvariantChecks(distDir, [SLUG], [{ n: 1, sourcePath }]);
+      await runInvariantChecks(distDir, [SLUG], [{ n: 1, sourcePath, dateModified: SOURCE_DAY }]);
     } finally {
       await rm(distDir, { recursive: true, force: true });
     }
@@ -3281,7 +3336,9 @@ describe('runInvariantChecks — principle twin equivalence (invariant #4)', () 
     const { distDir, sourcePath } = await seedDist(expectedTwin());
     await writeFile(join(distDir, 'audit.md'), '# Audit\n\nThe form runs a Turnstile challenge.\n');
     try {
-      await expect(runInvariantChecks(distDir, [SLUG], [{ n: 1, sourcePath }])).rejects.toThrow(/audit\.md leaked/);
+      await expect(
+        runInvariantChecks(distDir, [SLUG], [{ n: 1, sourcePath, dateModified: SOURCE_DAY }]),
+      ).rejects.toThrow(/audit\.md leaked/);
     } finally {
       await rm(distDir, { recursive: true, force: true });
     }
@@ -3290,9 +3347,9 @@ describe('runInvariantChecks — principle twin equivalence (invariant #4)', () 
   test('a twin missing the frontmatter fails', async () => {
     const { distDir, sourcePath } = await seedDist(absolutifyMarkdownLinks(SOURCE));
     try {
-      await expect(runInvariantChecks(distDir, [SLUG], [{ n: 1, sourcePath }])).rejects.toThrow(
-        /invariant: dist\/p1\.md/,
-      );
+      await expect(
+        runInvariantChecks(distDir, [SLUG], [{ n: 1, sourcePath, dateModified: SOURCE_DAY }]),
+      ).rejects.toThrow(/invariant: dist\/p1\.md/);
     } finally {
       await rm(distDir, { recursive: true, force: true });
     }
@@ -3301,9 +3358,9 @@ describe('runInvariantChecks — principle twin equivalence (invariant #4)', () 
   test('a twin whose body drifts from the absolutified source fails', async () => {
     const { distDir, sourcePath } = await seedDist(`${expectedTwin()}\ndrifted copy-edit\n`);
     try {
-      await expect(runInvariantChecks(distDir, [SLUG], [{ n: 1, sourcePath }])).rejects.toThrow(
-        /invariant: dist\/p1\.md/,
-      );
+      await expect(
+        runInvariantChecks(distDir, [SLUG], [{ n: 1, sourcePath, dateModified: SOURCE_DAY }]),
+      ).rejects.toThrow(/invariant: dist\/p1\.md/);
     } finally {
       await rm(distDir, { recursive: true, force: true });
     }

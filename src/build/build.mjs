@@ -7,8 +7,9 @@
 //   2. sortedGlob principle files in numeric order.
 //   3. Render each principle; pin H1 id to the locked filename slug.
 //   4. Emit per-principle HTML pages wrapped in the production shell.
-//   5. Emit each principle's markdown twin: title/description/url
-//      frontmatter plus the authored source with links absolutified.
+//   5. Emit each principle's markdown twin: title/description/url/
+//      dateModified frontmatter plus the authored source with links
+//      absolutified.
 //   6. Build homepage — hero (title + lede) + principle listing (links to
 //      /p{N} pages). No inline principle content on the index page.
 //   7. Render audit.md + about.md + the rest of content/*.md into sub-pages
@@ -17,7 +18,7 @@
 //      + scorecards/*.json. Emits dist/registry-index.json consumed by
 //      stage 11.
 //   9. Emit llms.txt + llms-full.txt.
-//  10. Emit sitemap.xml.
+//  10. Emit sitemap.xml, each <lastmod> the page's content date.
 //  11. Emit dist/_internal/mcp-catalog.json — denormalized projection of
 //      registry-index + principles + vendored spec for the Worker's MCP
 //      module. Public path 404s; Worker reads via env.ASSETS.fetch.
@@ -27,7 +28,9 @@
 //  13. Minify dist/ HTML, JSON, and CSS as a unified post step.
 //
 // Fail-fast: the invariant check throws on violation so CI/`bun run build`
-// exits non-zero. Regression tests are the verification net.
+// exits non-zero. Regression tests are the verification net. A shallow clone
+// is refused before any stage runs, because every page's date comes from git
+// history (content-dates.mjs).
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -54,6 +57,7 @@ import { emitWebAuditRegistry, emitWebRemediation } from './13-web-audit-registr
 import { emitWebSeedProjection, loadWebSeed } from './14-web-scorecards-emit.mjs';
 import { emitWebAuditSkillPages } from './15-web-audit-skills.mjs';
 import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
+import { loadFileDates } from './content-dates.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, emitShellTemplate } from './shell.mjs';
 import { composeTwin, escHtml, parseFilename, sortedGlob } from './util.mjs';
@@ -121,11 +125,12 @@ export async function runInvariantChecks(distDir, principleSlugs, principleSourc
   }
 
   // 4. dist/p<n>.md == composeTwin(frontmatter, content/principles/p<n>-*.md).
-  // Twin-source equivalence: the twin is exactly the title/description/url
-  // frontmatter block plus the source with site-relative links absolutified.
+  // Twin-source equivalence: the twin is exactly the title/description/url/
+  // dateModified frontmatter block plus the source with site-relative links
+  // absolutified.
   // Re-deriving through the same composeTwin the emitter uses means emit and
   // check cannot drift, and any copy-edit that drifts the body still fails.
-  for (const { n, sourcePath } of principleSources) {
+  for (const { n, sourcePath, dateModified } of principleSources) {
     const distContent = await readFile(join(distDir, `p${n}.md`), 'utf8');
     const sourceContent = await readFile(sourcePath, 'utf8');
     const expected = composeTwin(
@@ -133,6 +138,7 @@ export async function runInvariantChecks(distDir, principleSlugs, principleSourc
         title: extractTitle(sourceContent),
         description: extractDescription(sourceContent),
         canonicalPath: `/p${n}`,
+        dateModified,
       },
       sourceContent,
     );
@@ -161,6 +167,7 @@ export async function runInvariantChecks(distDir, principleSlugs, principleSourc
 }
 
 export async function build() {
+  const fileDate = loadFileDates(REPO_ROOT);
   await ensureDir(DIST_DIR);
 
   // 0. Regenerate src/worker/spec-version.gen.ts from VERSION files BEFORE
@@ -195,7 +202,8 @@ export async function build() {
     const title = extractTitle(source);
     const description = extractDescription(source);
     const shortDesc = extractDefinitionParagraph(source);
-    principles.push({ n, slug, title, description, source, html, filename: file, shortDesc });
+    const dateModified = fileDate(file);
+    principles.push({ n, slug, title, description, source, html, filename: file, shortDesc, dateModified });
   }
 
   // 4. Per-principle pages — the rendered markdown wrapped in the reading
@@ -203,7 +211,7 @@ export async function build() {
   // prev/next pager. The markdown twin keeps the authored source bytes
   // behind its frontmatter block.
   for (const [i, p] of principles.entries()) {
-    const { n, title, description, source } = p;
+    const { n, title, description, source, dateModified } = p;
     const tier = principleTier(n);
     const shortTitle = (t) => escHtml(t.replace(/^P\d+:\s*/, ''));
 
@@ -237,6 +245,7 @@ export async function build() {
       bodyHtml: `<article class="container doc">${head}${body}${pager}</article>`,
       themeInitJs: themeInit,
       extraScripts: [WEBMCP_SCRIPT],
+      dateModified,
     });
     await writeFile(join(DIST_DIR, `p${n}.html`), page);
 
@@ -244,13 +253,16 @@ export async function build() {
     // bytes with site-relative links absolutified, so `Accept: text/markdown`
     // agents fetching /p<n>.md get a self-describing, self-contained document.
     // Source authors `[text](/p3)`; the twin emits `[text](https://anc.dev/p3)`.
-    await writeFile(join(DIST_DIR, `p${n}.md`), composeTwin({ title, description, canonicalPath: `/p${n}` }, source));
+    await writeFile(
+      join(DIST_DIR, `p${n}.md`),
+      composeTwin({ title, description, canonicalPath: `/p${n}`, dateModified }, source),
+    );
   }
 
   // 6. Scorecard surface — leaderboard, per-tool pages, badges, coverage,
   // skill. Runs BEFORE the homepage because the homepage board panes render
   // the computed leaderboard rows.
-  const { leaderboard, scorecardPaths, badgePaths, coverageMarkdown, skillData, skillMarkdown } =
+  const { leaderboard, boardDate, pageDates, scorecardPaths, badgePaths, coverageMarkdown, skillData, skillMarkdown } =
     await emitScorecardSurface({
       distDir: DIST_DIR,
       registryPath: REGISTRY_PATH,
@@ -260,6 +272,7 @@ export async function build() {
       scorecardsDir: SCORECARDS_DIR,
       themeInit,
       laneInit,
+      fileDate,
     });
 
   // 6a. Web seed — the domain list feeding the 11d runtime projection.
@@ -269,12 +282,21 @@ export async function build() {
   for (const w of webSeed.warnings) console.warn(`warning: ${w}`);
 
   // 6b. Homepage — instrument hero + toggle-driven boards + spec index.
-  const { introTitle, introSummary, introSource, specContextSource, useSource } = await emitHomepage({
+  const {
+    introTitle,
+    introSummary,
+    introSource,
+    specContextSource,
+    useSource,
+    dateModified: homepageDate,
+  } = await emitHomepage({
     distDir: DIST_DIR,
     contentDir: CONTENT_DIR,
     themeInit,
     principles,
     leaderboard,
+    boardDate,
+    fileDate,
   });
 
   // 7. content-driven sub-pages (HTML + MD twin via shared pipeline).
@@ -282,6 +304,7 @@ export async function build() {
     distDir: DIST_DIR,
     contentDir: CONTENT_DIR,
     themeInit,
+    fileDate,
   });
 
   // 9. llms.txt + llms-full.txt (includes scorecard + skill sections).
@@ -316,7 +339,16 @@ export async function build() {
   // Both lanes list their result pages: a seeded host's page is indexable
   // (the result route drops noindex for a seed member), so leaving it out is
   // the difference between a crawlable corpus and pages nothing points at. An
-  // on-demand host keeps noindex and stays unlisted.
+  // on-demand host keeps noindex and stays unlisted. A seeded host's page
+  // renders from R2 at request time, so the build has no date for it and
+  // lists it without <lastmod>.
+  const lastmods = new Map([
+    ['/', homepageDate],
+    ...principles.map((p) => [`/p${p.n}`, p.dateModified]),
+    ...subPageData.map((page) => [`/${page.name}`, page.dateModified]),
+    ...pageDates,
+    ...webSeed.entries.map((entry) => [scorePath(entry.domain), null]),
+  ]);
   const sitemap = buildSitemap({
     principleNumbers: principles.map((p) => p.n),
     extraPaths: [
@@ -329,6 +361,7 @@ export async function build() {
       ...scorecardPaths,
       ...webSeed.entries.map((entry) => scorePath(entry.domain)),
     ],
+    lastmodOf: (path) => lastmods.get(path),
   });
   await writeFile(join(DIST_DIR, 'sitemap.xml'), sitemap);
 
@@ -398,7 +431,7 @@ export async function build() {
   await runInvariantChecks(
     DIST_DIR,
     LOCKED_SLUGS,
-    principles.map((p) => ({ n: p.n, sourcePath: p.filename })),
+    principles.map((p) => ({ n: p.n, sourcePath: p.filename, dateModified: p.dateModified })),
   );
 
   // 13. Minify dist/ HTML, JSON, and CSS. Runs after invariants so the

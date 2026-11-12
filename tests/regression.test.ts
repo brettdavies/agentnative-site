@@ -18,9 +18,15 @@
 //   4. Scorecard pages — leaderboard exists with a <table>, at least one
 //      per-tool scorecard page exists, and sitemap includes scorecard paths.
 //
+//   5. One content date per page: a principle's sitemap <lastmod> is its
+//      source file's last commit day, and every dated page carries that one
+//      date in its sitemap entry, JSON-LD, article:modified_time, and twin.
+//
 // Run `bun run build` before these tests (bun test does not auto-build).
 
 import { describe, expect, test } from 'bun:test';
+import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -122,6 +128,7 @@ describe('regression #3 — markdown twin is frontmatter + source with site-rela
         title: extractTitle(sourceContent),
         description: extractDescription(sourceContent),
         canonicalPath: `/p${n}`,
+        dateModified: lastCommitDay(join('content', 'principles', sourceName)),
       },
       sourceContent,
     );
@@ -537,5 +544,95 @@ describe('regression #9 — Shiki code blocks keep their keyboard tab stop', () 
     // otherwise pass vacuously.
     expect(shikiPreCount).toBeGreaterThanOrEqual(10);
     expect(offenders).toEqual([]);
+  });
+});
+
+// An oracle independent of content-dates.mjs: git's own answer for the last
+// commit that touched one path, as a UTC day.
+function lastCommitDay(repoPath: string): string {
+  return execFileSync('git', ['log', '-1', '--format=%cd', '--date=format-local:%Y-%m-%d', '--', repoPath], {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+    env: { ...process.env, TZ: 'UTC' },
+  }).trim();
+}
+
+async function sitemapEntries(): Promise<Array<{ path: string; lastmod: string | null }>> {
+  const xml = await readFile(join(DIST, 'sitemap.xml'), 'utf8');
+  return [
+    ...xml.matchAll(/<url>\s*<loc>https:\/\/anc\.dev([^<]*)<\/loc>(?:\s*<lastmod>([^<]+)<\/lastmod>)?\s*<\/url>/g),
+  ].map(([, path, lastmod]) => ({ path: path || '/', lastmod: lastmod ?? null }));
+}
+
+function techArticleDate(html: string): unknown {
+  const script = html.match(/<script type="?application\/ld\+json"?>([\s\S]*?)<\/script>/);
+  const graph: Array<{ '@type': string; dateModified?: unknown }> = JSON.parse(script?.[1] ?? '{}')['@graph'] ?? [];
+  return graph.find((node) => node['@type'] === 'TechArticle')?.dateModified;
+}
+
+function frontmatterDate(md: string): string | null {
+  if (!md.startsWith('---\n')) return null;
+  return md.slice(0, md.indexOf('\n---\n')).match(/^dateModified: '([^']+)'$/m)?.[1] ?? null;
+}
+
+describe('regression #5 — one content date per page', () => {
+  test.each(LOCKED_SLUGS.map((slug, i) => [i + 1, slug] as const))(
+    "sitemap lastmod for /p%s is its source file's last commit day",
+    async (n, slug) => {
+      const entry = (await sitemapEntries()).find((e) => e.path === `/p${n}`);
+      expect(entry?.lastmod).toBe(lastCommitDay(join('content', 'principles', `${slug}.md`)));
+    },
+  );
+
+  test('every dated page states its sitemap lastmod in JSON-LD, article:modified_time, and its twin', async () => {
+    const dated = (await sitemapEntries()).flatMap(({ path, lastmod }) =>
+      lastmod === null ? [] : [{ path, lastmod }],
+    );
+    const twinsWithFrontmatter: string[] = [];
+    for (const { path, lastmod } of dated) {
+      const stem = path === '/' ? 'index' : path.slice(1);
+      const html = await readFile(join(DIST, `${stem}.html`), 'utf8');
+      const ogDate = html.match(/<meta property="?article:modified_time"? content="?([^"\s>]+)/)?.[1];
+      expect({ path, jsonLd: techArticleDate(html), og: ogDate }).toEqual({ path, jsonLd: lastmod, og: lastmod });
+      const twin = await readFile(join(DIST, `${stem}.md`), 'utf8');
+      const twinDate = frontmatterDate(twin);
+      if (twinDate !== null) {
+        expect({ path, twin: twinDate }).toEqual({ path, twin: lastmod });
+        twinsWithFrontmatter.push(path);
+      }
+    }
+    // The homepage, the principles, and every content sub-page carry the key.
+    const { SUB_PAGES } = await import('../src/build/07-subpages.mjs');
+    const expected = ['/', ...LOCKED_SLUGS.map((_, i) => `/p${i + 1}`), ...SUB_PAGES.map((p) => `/${p.name}`)];
+    expect(twinsWithFrontmatter.sort()).toEqual(expected.sort());
+  });
+
+  test('each tool page takes its audit day, and the leaderboard the newest of its rows, the registry, and its copy modules', async () => {
+    const entries = await sitemapEntries();
+    const rows = entries.filter((e) => /^\/score\/[a-z0-9-]+$/.test(e.path) && e.lastmod !== null);
+    expect(rows.length).toBeGreaterThan(0);
+    const auditDays: string[] = [];
+    for (const row of rows) {
+      const envelope = JSON.parse(await readFile(join(DIST, `${row.path.slice(1)}.json`), 'utf8'));
+      const auditDay = new Date(envelope.scorecard.run.started_at).toISOString().slice(0, 10);
+      expect({ path: row.path, lastmod: row.lastmod }).toEqual({ path: row.path, lastmod: auditDay });
+      auditDays.push(auditDay);
+    }
+    const inputs = [
+      ...auditDays,
+      ...['registry.yaml', 'src/build/08-scorecards-emit.mjs', 'src/build/scorecards-render.mjs'].map(lastCommitDay),
+    ];
+    const newest = [...inputs].sort().at(-1);
+    expect(entries.find((e) => e.path === '/scorecards')?.lastmod).toBe(newest);
+  });
+
+  test('only the seeded web results, which render from stored records, are listed without a lastmod', async () => {
+    const yaml = await import('js-yaml');
+    const seed = yaml.load(await readFile(join(REPO_ROOT, 'src', 'data', 'web-audit', 'seed.yaml'), 'utf8')) as {
+      entries: Array<{ domain: string }>;
+    };
+    const undated = (await sitemapEntries()).filter((e) => e.lastmod === null).map((e) => e.path);
+    expect(undated.sort()).toEqual(seed.entries.map((e) => `/score/${e.domain}`).sort());
+    for (const path of undated) expect(existsSync(join(DIST, `${path.slice(1)}.html`))).toBe(false);
   });
 });

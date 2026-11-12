@@ -18,12 +18,14 @@
 
 import { mkdir, readdir, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { buildRegistryEnvelope } from '../shared/audit-envelope';
 import { SCORECARDS_PATH, scoreMarkdownPath, scorePath } from '../shared/audit-routes';
 import { resultAlternateLinks } from '../shared/result-head';
 import { scoreOgAlt, scoreOgEdition, scoreOgKey, scoreOgPath } from '../shared/score-og';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
 import { renderBadgeSvg } from './badge.mjs';
+import { newestDate, scorecardDate } from './content-dates.mjs';
 import { buildCoverageBody, buildCoverageMarkdown, loadCoverageMatrix } from './coverage.mjs';
 import { emitBuildIndexes } from './registry-index.mjs';
 import {
@@ -42,6 +44,12 @@ import {
 import { emitShell } from './shell.mjs';
 import { emitSkillJson, emitSkillMarkdown, loadSkillData, renderSkillPage } from './skill.mjs';
 import { absolutifyMarkdownLinks } from './util.mjs';
+
+// Build modules that author page copy, which dates those pages along with
+// their data. The per-tool scorecard template frames one entry's data, so a
+// per-tool page takes its scorecard's date alone.
+const THIS_MODULE = fileURLToPath(import.meta.url);
+const moduleSource = (name) => fileURLToPath(new URL(name, import.meta.url));
 
 /** The per-tool files this emit owns under dist/score/, keyed by slug; anything else there is left alone. */
 export const REAPABLE_SCORE_FILE_RE = /^([a-z0-9-]+)\.(html|md|json)$/;
@@ -106,8 +114,12 @@ export function curatedResultEnvelope(tool, scorecard, ancVersion, version) {
  * @param {string} args.skillDataPath
  * @param {string} args.scorecardsDir
  * @param {string} args.themeInit
+ * @param {(...paths: string[]) => string} args.fileDate newest last-commit day
+ *   among files (content-dates.mjs loadFileDates).
  * @returns {Promise<{
  *   leaderboard: Array<object>,
+ *   boardDate: string,
+ *   pageDates: Map<string, string>,
  *   scorecardPaths: string[],
  *   badgePaths: string[],
  *   coverageMarkdown: string,
@@ -124,6 +136,7 @@ export async function emitScorecardSurface({
   scorecardsDir,
   themeInit,
   laneInit,
+  fileDate,
 }) {
   const registry = await loadRegistry(registryPath);
 
@@ -173,6 +186,14 @@ export async function emitScorecardSurface({
   });
   for (const w of indexWarnings) console.warn(`warning: ${w}`);
   const leaderboard = computeLeaderboard(toolsWithScorecards);
+  // The board ranks every row, so any row's change or a registry edit can
+  // change what a board shows.
+  const boardDate = newestDate([...leaderboard.map((entry) => scorecardDate(entry.scorecard)), fileDate(registryPath)]);
+  const pageDates = new Map();
+  pageDates.set(
+    SCORECARDS_PATH,
+    newestDate([boardDate, fileDate(THIS_MODULE, moduleSource('./scorecards-render.mjs'))]),
+  );
 
   const methodologyHtml = `  <p>Every score is the output of <code>anc audit &lt;binary&gt;</code> against a real CLI tool.
   The <strong>score</strong> column is the behavioral-layer compliance score: requirement checks,
@@ -200,6 +221,7 @@ export async function emitScorecardSurface({
       // they paint, and no other page carries both boards.
       extraHeadJs: laneInit,
       extraScripts: ['/js/leaderboard.js'],
+      dateModified: pageDates.get(SCORECARDS_PATH),
     }),
   );
   await writeFile(join(distDir, 'scorecards.md'), absolutifyMarkdownLinks(buildLeaderboardMarkdown(leaderboard)));
@@ -239,6 +261,7 @@ export async function emitScorecardSurface({
 
     const scorecardBody = buildScorecardBody(tool, scorecard, topIssues, principleScore, version, metadata);
     const canonicalPath = scorePath(tool.name);
+    pageDates.set(canonicalPath, scorecardDate(scorecard));
     const ogKey = scoreOgKey({
       scorePct: scorecard.badge.score_pct,
       specVersion: scorecard.spec_version,
@@ -262,6 +285,7 @@ export async function emitScorecardSurface({
           scorePct: scorecard.badge.score_pct,
           specVersion: scorecard.spec_version,
         }),
+        dateModified: pageDates.get(canonicalPath),
       }),
     );
     await writeFile(
@@ -292,6 +316,7 @@ export async function emitScorecardSurface({
   const coverageMatrix = await loadCoverageMatrix(coverageMatrixPath);
   const coverageBody = buildCoverageBody(coverageMatrix);
   const coverageMarkdown = buildCoverageMarkdown(coverageMatrix);
+  pageDates.set('/coverage', fileDate(coverageMatrixPath, moduleSource('./coverage.mjs'), THIS_MODULE));
   await writeFile(
     join(distDir, 'coverage.html'),
     emitShell({
@@ -301,6 +326,7 @@ export async function emitScorecardSurface({
       breadcrumb: 'Coverage',
       bodyHtml: `<article class="container doc">${coverageBody}</article>`,
       themeInitJs: themeInit,
+      dateModified: pageDates.get('/coverage'),
     }),
   );
   await writeFile(join(distDir, 'coverage.md'), absolutifyMarkdownLinks(coverageMarkdown));
@@ -312,6 +338,7 @@ export async function emitScorecardSurface({
   const skillData = await loadSkillData(skillDataPath);
   await emitSkillJson(skillData, distDir);
   const { markdown: skillMarkdown, html: skillBodyHtml } = await renderSkillPage(skillData);
+  pageDates.set('/skill', fileDate(skillDataPath, moduleSource('./skill.mjs')));
   await writeFile(
     join(distDir, 'skill.html'),
     emitShell({
@@ -321,12 +348,15 @@ export async function emitScorecardSurface({
       breadcrumb: 'Skill',
       bodyHtml: `<article class="container doc">${skillBodyHtml}</article>`,
       themeInitJs: themeInit,
+      dateModified: pageDates.get('/skill'),
     }),
   );
   await emitSkillMarkdown(absolutifyMarkdownLinks(skillMarkdown), distDir);
 
   return {
     leaderboard,
+    boardDate,
+    pageDates,
     scorecardPaths,
     badgePaths,
     coverageMarkdown,

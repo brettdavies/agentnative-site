@@ -20,6 +20,7 @@
 
 import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { WEBMCP_SCRIPT } from '../shared/webmcp-script.ts';
 import { renderAuditForm } from './audit-form.mjs';
 import { extractDescription, extractTitle } from './content.mjs';
@@ -39,6 +40,9 @@ const AUDIT_WIDGET = {
 </section>`,
   md: 'The audit runs live from this page in a browser. From an agent, use the MCP tools named below.',
   lanes: { web: '_audit-web.md' },
+  // The build modules that author the widget's copy, which dates the page
+  // along with its content files.
+  sources: [fileURLToPath(import.meta.url), fileURLToPath(new URL('./audit-form.mjs', import.meta.url))],
 };
 
 /**
@@ -48,8 +52,11 @@ const AUDIT_WIDGET = {
  * @param {string} args.distDir
  * @param {string} args.contentDir
  * @param {string} args.themeInit
- * @returns {Promise<Array<{name: string, source: string, title: string}>>}
- *          Per-page metadata (twin markdown) consumed by llms-full.txt assembly.
+ * @param {(...paths: string[]) => string} args.fileDate newest last-commit day
+ *          among files (content-dates.mjs loadFileDates).
+ * @returns {Promise<Array<{name: string, source: string, title: string, dateModified: string}>>}
+ *          Per-page metadata (twin markdown) consumed by llms-full.txt assembly
+ *          and the sitemap.
  */
 export const SUB_PAGES = [
   { name: 'audit', breadcrumb: 'Audit', extraScripts: ['/js/audit-entry.js', WEBMCP_SCRIPT], widget: AUDIT_WIDGET },
@@ -99,10 +106,16 @@ async function renderLanes(source, widget, contentDir) {
   return { html, twinSource: `${lead}${widget.md}${cli.trimEnd()}\n\n${web}` };
 }
 
-export async function emitSubPages({ distDir, contentDir, themeInit }) {
+export async function emitSubPages({ distDir, contentDir, themeInit, fileDate }) {
   const subPageData = [];
   for (const { name, breadcrumb, extraScripts, widget } of SUB_PAGES) {
-    const source = await readFile(join(contentDir, `${name}.md`), 'utf8');
+    const sourcePath = join(contentDir, `${name}.md`);
+    const source = await readFile(sourcePath, 'utf8');
+    const dateModified = fileDate(
+      sourcePath,
+      ...(widget?.lanes ? [join(contentDir, widget.lanes.web)] : []),
+      ...(widget?.sources ?? []),
+    );
     const title = extractTitle(source);
     const description = extractDescription(source);
     const { html, twinSource } = widget?.lanes
@@ -120,16 +133,17 @@ export async function emitSubPages({ distDir, contentDir, themeInit }) {
         themeInitJs: themeInit,
         extraScripts: extraScripts ?? (name === 'mcp-docs' ? [WEBMCP_SCRIPT] : []),
         turnstileSitekey: name === 'web-audit' || name === 'audit',
+        dateModified,
       }),
     );
     await writeFile(
       join(distDir, `${name}.md`),
-      composeTwin({ title, description, canonicalPath: `/${name}` }, twinSource),
+      composeTwin({ title, description, canonicalPath: `/${name}`, dateModified }, twinSource),
     );
     // llms-full.txt consumes `source` and must stay frontmatter-free (the
     // A5 section header already carries the metadata), so push the raw
     // twin source, not the composed twin.
-    subPageData.push({ name, source: twinSource, title });
+    subPageData.push({ name, source: twinSource, title, dateModified });
   }
   // dist/ is not cleared between builds, and /mcp is the protocol endpoint:
   // no asset may answer it, whatever order the Worker dispatches in.

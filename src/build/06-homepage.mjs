@@ -18,12 +18,14 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { AUDIT_PATH, auditPath, leaderboardPath, scorePath } from '../shared/audit-routes.ts';
 import { bandOf, principleTier, renderMeter } from '../shared/scorecard-format.mjs';
 import { buildWebHeroCardEmptyState, buildWebHeroCardFromSnapshot } from '../shared/web-hero-card.mjs';
 import { WEBMCP_SCRIPT } from '../shared/webmcp-script.ts';
 import { renderAuditForm } from './audit-form.mjs';
 import { extractDescription, extractFirstParagraph, extractIntroSummary, extractTitle } from './content.mjs';
+import { newestDate } from './content-dates.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell } from './shell.mjs';
 import { composeTwin, countWord, escHtml } from './util.mjs';
@@ -259,11 +261,14 @@ ${buildWebCheckRows()}
  * @param {string} args.distDir
  * @param {string} args.contentDir
  * @param {string} args.themeInit
- * @param {Array<{n: number, title: string, shortDesc: string}>} args.principles
+ * @param {Array<{n: number, title: string, shortDesc: string, dateModified: string}>} args.principles
  * @param {Array} args.leaderboard — ranked entries from computeLeaderboard()
- * @returns {Promise<{introTitle: string, introSummary: string, introSource: string, specContextSource: string, useSource: string, introLede: string}>}
+ * @param {string} args.boardDate — the CLI board's content date (08-scorecards-emit.mjs)
+ * @param {(...paths: string[]) => string} args.fileDate newest last-commit day
+ *   among files (content-dates.mjs loadFileDates)
+ * @returns {Promise<{introTitle: string, introSummary: string, introSource: string, specContextSource: string, useSource: string, introLede: string, dateModified: string}>}
  */
-export async function emitHomepage({ distDir, contentDir, themeInit, principles, leaderboard }) {
+export async function emitHomepage({ distDir, contentDir, themeInit, principles, leaderboard, boardDate, fileDate }) {
   if (!Array.isArray(leaderboard) || leaderboard.length === 0) {
     throw new Error('emitHomepage: leaderboard is empty — board data must be computed before the homepage emits');
   }
@@ -296,6 +301,19 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles,
     webHeroHtml = buildWebHeroCardEmptyState();
   }
 
+  // This module and the shared form author the hero, web-check, and twin copy.
+  const dateModified = newestDate([
+    boardDate,
+    ...principles.map((p) => p.dateModified),
+    fileDate(
+      join(contentDir, '_intro.md'),
+      join(contentDir, '_use.md'),
+      heroSnapshotPath,
+      fileURLToPath(import.meta.url),
+      fileURLToPath(new URL('./audit-form.mjs', import.meta.url)),
+    ),
+  ]);
+
   const indexBody = buildHomepageBody(introTitle, introLede, useItHtml, principles, leaderboard, webHeroHtml);
   await writeFile(
     join(distDir, 'index.html'),
@@ -309,6 +327,7 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles,
       // Homepage carries the audit entry form; /js/audit-entry.js loads
       // Turnstile on the first interaction and takes the submit click.
       extraScripts: ['/js/audit-entry.js', WEBMCP_SCRIPT],
+      dateModified,
     }),
   );
 
@@ -345,8 +364,11 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles,
   ];
   await writeFile(
     join(distDir, 'index.md'),
-    composeTwin({ title: introTitle, description: introDescription, canonicalPath: '/' }, indexMdLines.join('\n')),
+    composeTwin(
+      { title: introTitle, description: introDescription, canonicalPath: '/', dateModified },
+      indexMdLines.join('\n'),
+    ),
   );
 
-  return { introTitle, introSummary, introSource, specContextSource, useSource, introLede };
+  return { introTitle, introSummary, introSource, specContextSource, useSource, introLede, dateModified };
 }
