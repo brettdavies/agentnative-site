@@ -38,9 +38,11 @@ const AI_CATALOG = join(DIST_DIR, '.well-known', 'ai-catalog.json');
 type ServerCard = {
   $schema: string;
   name: string;
+  title: string;
   version: string;
   description: string;
   websiteUrl: string;
+  icons: Array<{ src: string; mimeType: string; sizes: string[] }>;
   remotes: Array<{ type: string; url: string }>;
 };
 
@@ -150,6 +152,19 @@ describe('SEP-2127 server card seed (built dist/)', () => {
     expect(card.version).toBe(serverInfo?.version ?? '');
     expect(card.name.split('/')[1]).toBe(serverInfo?.name ?? '');
   });
+
+  test('carries the title, description, website, and icons the endpoint reports', async () => {
+    resetMcpTestState();
+    const card = await readJson<ServerCard>(SERVER_CARD_SEED);
+    const serverInfo = (await mcpInitialize(distAssetsEnv(DIST_DIR))).result?.serverInfo;
+    const { title, description, websiteUrl, icons } = card;
+    expect({
+      title: serverInfo?.title,
+      description: serverInfo?.description,
+      websiteUrl: serverInfo?.websiteUrl,
+      icons: serverInfo?.icons,
+    }).toEqual({ title, description, websiteUrl, icons });
+  });
 });
 
 describe('.well-known/ai-catalog.json (built dist/)', () => {
@@ -241,6 +256,10 @@ describe('emitDiscovery() in isolation', () => {
       const card = await readJson<ServerCard>(stats.mcpServerCardSeedPath);
       expect(card.name).toBe('dev.anc/anc');
       expect(card.websiteUrl).toBe('https://example.test/mcp-skill');
+      expect(card.icons.map((icon) => icon.src)).toEqual([
+        'https://example.test/favicon.svg',
+        'https://example.test/apple-touch-icon-180.png',
+      ]);
       expect(card.remotes[0].url).toBe('https://example.test/mcp');
 
       const catalog = await readJson<AiCatalog>(stats.aiCatalogPath);
