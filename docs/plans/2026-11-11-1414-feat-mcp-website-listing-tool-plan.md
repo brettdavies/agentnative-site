@@ -452,3 +452,6 @@ Each plan-review finding and what the plan does with it. `eng` is `/plan-eng-rev
 - 2026-11-11: `/plan-eng-review` round 1 ended: no P0 or P1, 4 P2, 9 P3; all folded in (Review decisions).
 - 2026-11-11: `/compound-engineering:ce-doc-review` round 1 started on `78f52c3`.
 - 2026-11-11: `/compound-engineering:ce-doc-review` round 1 ended: 2 fixes applied, 2 proposed fixes and 1 decision settled, 3 FYIs folded in (Review decisions).
+- 2026-11-12: `/compound-engineering:ce-code-review` round 1 started on `c289659` (PR #579).
+- 2026-11-12: `/devex-review` round 1 started on `c289659` (PR #579).
+- 2026-11-12: `/cso` round 1 started on `c289659` (PR #579).
