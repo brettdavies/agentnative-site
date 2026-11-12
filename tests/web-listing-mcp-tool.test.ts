@@ -12,6 +12,7 @@ import { resetWebSeedCacheForTests } from '../src/worker/audit-web/seed';
 import { resetCatalogCacheForTests } from '../src/worker/mcp/catalog';
 import type { McpEnv } from '../src/worker/mcp/server';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { type CapturedLog, withLogCapture } from './helpers/log-capture';
 import { getJsonToolContent, type JsonRpcBody, mcpInitialize, mcpRpc, resetMcpTestState } from './helpers/mcp-rpc';
 import { type StoredWebRecord, webRecordBucket } from './helpers/web-record-bucket';
 
@@ -554,6 +555,72 @@ describe('set_website_public_listing: a write that does not land', () => {
     expect(out.text).toContain('500 Internal Error');
     expect(f.bucket.puts).toEqual([]);
     expect((await bodyOf(f))?.scorecard.public_listing).toBe(false);
+  });
+});
+
+describe('set_website_public_listing: the log record', () => {
+  const LISTING_SCOPE = 'web-listing.change';
+
+  function changeRecords(records: CapturedLog[]) {
+    return records.filter(({ record }) => record.scope === LISTING_SCOPE);
+  }
+
+  test('a change writes one record naming the site, the new value, and the MCP surface, and no caller detail', async () => {
+    const f = await fixture({ records: { [TARGET]: { listing: false } } });
+    const { result, records } = await withLogCapture(() => answer(f, { url: 'example.com', public_listing: true }));
+    expect(result.changed).toBe(true);
+    const written = changeRecords(records);
+    expect(written).toHaveLength(1);
+    expect(written[0]).toEqual({
+      level: 'log',
+      record: { scope: LISTING_SCOPE, target: 'example.com', public_listing: true, surface: 'mcp' },
+    });
+    expect(JSON.stringify(records)).not.toContain(IP);
+  });
+
+  test('an unlisting writes its own record carrying false', async () => {
+    const f = await fixture({ records: { [TARGET]: { listing: true } } });
+    const { records } = await withLogCapture(() => answer(f, { url: 'example.com', public_listing: false }));
+    expect(changeRecords(records).map(({ record }) => record.public_listing)).toEqual([false]);
+  });
+
+  test('www.<domain> folded onto <domain> logs the <domain> record it changed', async () => {
+    const f = await fixture({
+      records: { [TARGET]: { listing: false, extra: { site_hosts: ['example.com', 'www.example.com'] } } },
+    });
+    const { records } = await withLogCapture(() => answer(f, { url: 'www.example.com', public_listing: true }));
+    expect(changeRecords(records).map(({ record }) => record.target)).toEqual(['example.com']);
+  });
+
+  test('a record that already stores the value at the re-read writes no record', async () => {
+    const f = await fixture({
+      kvHooks: {
+        onPut: async (key) => {
+          if (key.startsWith('web_audit_flip:')) await f.bucket.set(TARGET, recordOf(TARGET, { listing: true }));
+        },
+      },
+    });
+    const { result, records } = await withLogCapture(() => answer(f, { url: 'example.com', public_listing: true }));
+    expect(result.changed).toBe(false);
+    expect(changeRecords(records)).toEqual([]);
+  });
+
+  test('a call refused by the flip budget writes no record', async () => {
+    const f = await fixture({ records: { [TARGET]: { listing: false } } });
+    for (let i = 0; i < FLIP_CEILING; i++) {
+      await answer(f, { url: 'example.com', public_listing: i % 2 === 0 });
+    }
+    const { result, records } = await withLogCapture(() => call(f, { url: 'example.com', public_listing: false }));
+    expect(result.text).toContain('flip_rate_limited');
+    expect(changeRecords(records)).toEqual([]);
+  });
+
+  test('a write that does not land writes no record', async () => {
+    const f = await fixture();
+    f.bucket.hooks.failPuts = true;
+    const { result, records } = await withLogCapture(() => call(f, { url: 'example.com', public_listing: true }));
+    expect(result.text).toContain('patch_failed');
+    expect(changeRecords(records)).toEqual([]);
   });
 });
 

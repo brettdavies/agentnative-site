@@ -264,6 +264,14 @@ summary line to Workers Logs (`observability.enabled` with 100% head sampling in
 
 Query them in the dashboard under Workers & Pages -> agentnative-site -> Logs, filtering on the `scope` field.
 
+A listing change is not an audit and writes no `web-audit.run` line. `set_website_public_listing` writes one
+`scope: web-listing.change` record for each change it applies, once the new value is stored: `target` (the resolved host
+whose stored listing changed, so `www.<domain>` folded onto `<domain>` logs `<domain>`), `public_listing` (the value now
+stored), and `surface` (`mcp`). A call that finds the value already stored, a curated site, a refusal, and a change that
+fails to save write no such record; the request's `mcp.request` line (`name: set_website_public_listing`) records the
+call and its transport outcome, not the tool's answer. The browser form's listing-only change logs an `audit.request`
+row with `outcome: patched`, so counting every listing-only change reads both.
+
 ### The declared-domain budget
 
 Every audit that follows a site's declarations draws one unit per declared registrable domain before its first request
