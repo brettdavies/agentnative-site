@@ -256,14 +256,15 @@ shape); a 4xx/5xx or an always-MISS path is MISS regardless.
   and the curated `/score/<slug>/json` keep
   `Cache-Control: public, max-age=300, s-maxage=86400, stale-while-revalidate=60` with no `Vary`.
 - **HIT-min** — the live board and live results, every representation alike: `/`, `/index.md`, `/scorecards`,
-  `/scorecards.md`, and their `?lane=`/`?view=` queries; a live or branch-scoped `/score/<target>` with its `/md` and
-  `/json`; and a website `/score/<host>` with its `/md` and `/json`. Browser:
-  `Cache-Control: public, max-age=0, must-revalidate` so a tag purge is visible on the next navigation. Edge:
-  `Cloudflare-CDN-Cache-Control: public, max-age=300`. `Cache-Tag: home` on `/`, `/index.md`, and `/scorecards*`;
-  `web:{host}` on a website result; `cli:{binary}` on a live CLI result and `cli:{owner}/{repo}@{branch}` on a branch
-  run. The Durable Object purges the `cli:` tag after its R2 write; the web stream and the rescore workflow purge
-  `web:{host}` with `web` and `home`. `/audit` with a query string is HIT-min with no tag, so a prefill hop never mints
-  a day-long edge key. Explicit `.md` and `/md` twins and `/json` still have no `Vary`.
+  `/scorecards.md`, and their `?lane=`/`?view=` queries; `/sitemap.xml`, which the Worker dates from the same board
+  data; a live or branch-scoped `/score/<target>` with its `/md` and `/json`; and a website `/score/<host>` with its
+  `/md` and `/json`. Browser: `Cache-Control: public, max-age=0, must-revalidate` so a tag purge is visible on the next
+  navigation. Edge: `Cloudflare-CDN-Cache-Control: public, max-age=300`. `Cache-Tag: home` on `/`, `/index.md`,
+  `/scorecards*`, and `/sitemap.xml`; `web:{host}` on a website result; `cli:{binary}` on a live CLI result and
+  `cli:{owner}/{repo}@{branch}` on a branch run. The Durable Object purges the `cli:` tag after its R2 write; the web
+  stream and the rescore workflow purge `web:{host}` with `web` and `home`. `/audit` with a query string is HIT-min with
+  no tag, so a prefill hop never mints a day-long edge key. Explicit `.md` and `/md` twins and `/json` still have no
+  `Vary`.
 - **MISS** — every-request `Cache-Control: no-store` plus `Cloudflare-CDN-Cache-Control: no-store`, untagged.
   `/scoring*`, `GET` and `POST /mcp` (the protocol endpoint sets `no-store` itself and never enters the cached
   entrypoint), `/api/score`, a `/score/<target>?v=` fetch, the 202 in-progress `/json`, and every Worker 4xx/5xx
@@ -1199,10 +1200,11 @@ host until production cut-over; swap via a single constant in the HTML shell. Do
 **Content dates.** Each built page carries one `YYYY-MM-DD` date: the newest change among the content it renders. The
 build computes it once per page (`src/build/content-dates.mjs`) and states it four times: the sitemap `<lastmod>`, the
 `TechArticle` `dateModified`, `article:modified_time`, and a `dateModified` key in the markdown twin's frontmatter.
-Every twin, built or Worker-rendered, opens with one frontmatter block whose first keys are `title`, `description`,
-`url` (the canonical HTML URL), and `dateModified`, written by `src/shared/twin-frontmatter.ts`. A result twin's block
-goes on to name the page's representations (`target`, `lane`, `tier`, `scorecard_url`, `markdown_url`, `json_url`,
-`negotiate`).
+The twin of every dated page, built or Worker-rendered, opens with one frontmatter block whose first keys are `title`,
+`description`, `url` (the canonical HTML URL), and `dateModified`, written by `src/shared/twin-frontmatter.ts`. A result
+twin's block goes on to name the page's representations (`target`, `lane`, `tier`, `scorecard_url`, `markdown_url`,
+`json_url`, `negotiate`); a result whose record states no date keeps the block without `dateModified`. The `/scoring`
+progress twin and the not-found twin carry no block.
 
 - **Content** is the `content/**/*.md` files a page renders, the data whose values appear on it, and the copy a build
   module writes into the page (a widget slot's prose, a generated page's lede). Shared layout is not content: the shell,
@@ -1240,7 +1242,7 @@ sitemap reads the same board data as the board pages, so it is cached the same w
 rebuild already purges. Its `<loc>` list stays the build's; an on-demand result is never listed.
 
 The `/fix/<id>` skill pages render from the shared web-audit registry and remediation catalog, which carry no per-check
-date, so they carry no `dateModified`.
+date, so they carry no `dateModified`, and their twins open with no frontmatter block.
 
 The build refuses to run without the history: on a shallow clone it stops before its first stage and names the fix
 (`git fetch --unshallow`, or `fetch-depth: 0` on the CI checkout). It never falls back to the build date. Every workflow

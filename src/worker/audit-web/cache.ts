@@ -49,8 +49,8 @@ export type WebAggregateEntry = {
   score: { relative: number; global: number };
   /**
    * When the row's audit ran, copied from its per-domain record. Absent on
-   * a board written before the field existed and on a record without one;
-   * a row without it dates nothing.
+   * a stored row the rescore has not rebuilt and on a record without one; a
+   * row without it dates nothing.
    */
   scored_at?: string;
 };

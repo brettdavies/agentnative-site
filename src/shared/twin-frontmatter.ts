@@ -1,6 +1,7 @@
-// The YAML frontmatter block every markdown twin opens with, built and
-// Worker-rendered alike, so an agent fetching a twin gets the metadata the
-// HTML page carries in its head. Every block is written here.
+// The YAML frontmatter block that opens the markdown twin of every dated page
+// and every result, built and Worker-rendered alike, so an agent fetching a
+// twin gets the metadata the HTML page carries in its head. Every block is
+// written here.
 
 import * as yaml from 'js-yaml';
 import { isDay } from './page-date';
