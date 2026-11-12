@@ -200,9 +200,10 @@ export interface Env {
   // Web-audit bindings. WEB_AUDIT_LIMITER is the session-keyed burst
   // limiter (`<sid>:<sha256(target)>`, 10/60s) on the fresh /api/audit-web
   // path; WEB_AUDIT_LIMITER_IP is the coarse per-IP fallback (30/60s) and
-  // also the per-IP burst limiter the audit_website MCP tool keys directly.
-  // WEB_AUDIT_ENABLED is the secret-backed kill switch covering both the
-  // webapp route and the MCP fresh path. WEB_AUDIT_FOLLOW_ENABLED switches
+  // also the per-IP burst limiter the audit_website and
+  // set_website_public_listing MCP tools key directly.
+  // WEB_AUDIT_ENABLED is the secret-backed kill switch covering the webapp
+  // route, the MCP fresh path, and listing changes. WEB_AUDIT_FOLLOW_ENABLED switches
   // off only the following of declared hosts; audits keep running.
   // WEB_AUDIT_DOMAIN_LIMITER is the per-declared-domain burst floor under
   // the hourly KV window every audit's follow slice draws on. Optional so

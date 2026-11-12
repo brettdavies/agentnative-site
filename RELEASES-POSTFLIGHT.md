@@ -255,7 +255,7 @@ binary without bypass (asserts `source=live-cache`). Both paths must produce the
     | jq '{server: .result.serverInfo.name, instructions: (.result.instructions | contains("2026-07-28"))}'
   # expect: server: "anc", instructions: true
 
-  # Legacy tools/list — 13 tools
+  # Legacy tools/list — 14 tools
   curl -fsSL -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \

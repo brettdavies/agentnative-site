@@ -369,7 +369,7 @@ Driven by `scripts/release/preflight.sh do-smoke`. The fresh-binary picker is th
 
 The MCP transport surface composes the same orchestrator core (`lookupOnly` for the read tier, `runFreshOnly` for the
 run-fresh tier) as the HTTP `/api/score` handler. What this section covers and the HTTP smoke above does not: transport
-wiring, the 13-tool dual-stack surface (legacy + modern SEP-2243), MCP kill switches (`MCP_ENABLED`,
+wiring, the 14-tool dual-stack surface (legacy + modern SEP-2243), MCP kill switches (`MCP_ENABLED`,
 `MCP_LIVE_SCORING_ENABLED`, `MCP_LEGACY_ENABLED`), and the orchestrator's MCP-side result envelope (`next_tool`
 bouncing, `source: "registry" | "live-cache" | "live"`).
 
@@ -416,7 +416,7 @@ The curl recipes below show the **staging** shape (with CF Access headers). For 
     | jq '{server: .result.serverInfo.name, instructions: (.result.instructions | contains("2026-07-28"))}'
   # expect: server: "anc", instructions: true
 
-  # Legacy tools/list — 13 tools
+  # Legacy tools/list — 14 tools
   curl -fsSL -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \

@@ -268,7 +268,7 @@ export CF_ACCESS_CLIENT_SECRET=…
 scripts/release/mcp-smoke.sh https://agentnative-site-staging.brettdavies.workers.dev
 ```
 
-Expect **6/6** pass: server card `2026-07-28`, legacy initialize + 13 tools, modern list cache hints, modern
+Expect **6/6** pass: server card `2026-07-28`, legacy initialize + 14 tools, modern list cache hints, modern
 `get_scorecard` hit/miss.
 
 **Check 6 miss input (recorded 2026-08-26):** unknown registry slugs (`nope-not-a-tool`) are validator rejection

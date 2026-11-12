@@ -50,15 +50,17 @@ checks that first, probes the host the redirect lands on, and stores one scoreca
 
 ## From an agent: websites
 
-An MCP client can run the audit without the form. The [anc.dev MCP server](/mcp-docs) exposes four web tools:
+An MCP client can run the audit without the form. The [anc.dev MCP server](/mcp-docs) exposes five web tools:
 
-- `audit_website(url, site_type?, public_listing?, follow_declarations?)`: run a fresh audit; every observed non-passing
+- `audit_website(url, site_type?, follow_declarations?)`: run a fresh audit, which never changes the site's leaderboard listing; every observed non-passing
   row carries inline remediation with a copy-paste prompt. By default the audit also contacts the hosts the site
   declares (its MCP server, its API host), at most 4 per audit and about 30 audits per hour per declared registrable
   domain; `follow_declarations: false` audits only the site and returns a result that is never saved or listed.
 - `get_website_audit(url)`: read a cached scorecard without re-running. A `www.` host whose bare host records the fold
   reads the bare host's scorecard.
 - `list_website_audits(view?)`: the web leaderboard, curated by default.
+- `set_website_public_listing(url, public_listing)`: opt a site that already has a stored audit in to or out of the web
+  leaderboard, only when the user asks; it changes nothing else.
 - `get_web_remediation(check_id, evidence?, host?)`: the canonical fix for any check, with a ready-to-paste prompt. Pass
   the failing row's evidence and its `remediation.host` (omitted when null) and they are appended to the prompt as a
   delimited, untrusted data block.
