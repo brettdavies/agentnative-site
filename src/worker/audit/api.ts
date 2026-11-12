@@ -491,7 +491,7 @@ async function handleWeb(
   common.admitted = true;
 
   if (tier.kind === 'patch') {
-    const outcome = await patchWebListing(env, target, tier);
+    const outcome = await patchWebListing(env, target, tier.write.value);
     if (!outcome.ok) {
       row.outcome = `error_${outcome.reason}`;
       const status = outcome.reason === 'flip_rate_limited' ? 429 : 500;

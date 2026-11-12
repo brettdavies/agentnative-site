@@ -1,13 +1,20 @@
-// Web-audit MCP tools (plan U12).
+// Website MCP tools: the audit and the reads around it.
 //
 //   get_website_audit(url)   cheap read: per-domain R2 cache.
 //   audit_website(url)       metered fresh audit; single terminal
-//                            scorecard (no progress notifications — the
+//                            scorecard (no progress notifications; the
 //                            server runs stateless per-request, KTD-6).
+//                            It never changes the site's leaderboard
+//                            listing: a first audit saves the site
+//                            unlisted and a later one keeps the stored
+//                            choice. Its input is strict, so a call that
+//                            sends public_listing, or any other argument it
+//                            does not declare, is refused before a gate runs;
+//                            web-listing.ts owns the listing change.
 //   list_website_audits()    the board summaries from the R2 leaderboard
 //                            aggregate (the same object /web renders).
 //
-// Both tools audit and read a site at its https origin, the target the
+// The tools audit and read a site at its https origin, the target the
 // transact endpoint builds, so an http:// URL names the same record, job,
 // and result page as the bare host.
 //
@@ -23,35 +30,26 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { TerminalEvent } from '../../../shared/audit-events';
-import { leaderboardPath, scorePath, sitePairOf } from '../../../shared/audit-routes';
+import { leaderboardPath, scorePath } from '../../../shared/audit-routes';
 import { awaitInFlightTerminal, type InFlightEnv, readInFlight } from '../../audit/inflight';
 import type { AuditLogEnv } from '../../audit-web/audit-log';
 import {
   type CachedWebAudit,
   get as cacheGet,
-  coerceUrl,
   getAggregate,
   isBoardListable,
   isStale,
   keyFor,
   listAllWebAudits,
-  patchStoredPublicListing,
-  scorecardWithPublicListing,
   WEB_AUDIT_STALE_AFTER_MS,
   WebCacheUnavailableError,
 } from '../../audit-web/cache';
-import { prepareWebTarget, type WebTarget, webEnvelope } from '../../audit-web/core';
+import { webEnvelope } from '../../audit-web/core';
 import type { DomainBudgetEnv } from '../../audit-web/domain-budget';
 import { FOLLOW_DISCLOSURE, FOLLOW_DISCLOSURE_SHORT } from '../../audit-web/follow-disclosure';
 import type { FollowSwitchEnv } from '../../audit-web/follow-switch';
-import { queueHitMinPurge, webTag } from '../../audit-web/hit-min-purge';
 import { consumeWebAuditHourlyBudget, HOURLY_CONTENTION_MESSAGE } from '../../audit-web/limiter';
-import {
-  decidePublicListingWrite,
-  enforcePublicListingFlipLimit,
-  resolveAuditListing,
-  standingPublicListing,
-} from '../../audit-web/public-listing';
+import { standingPublicListing } from '../../audit-web/public-listing';
 import { boardExcludeDomains } from '../../audit-web/seed';
 import { resolveWebTarget, type WebResolution } from '../../audit-web/web-target';
 import type { NotifyEnv } from '../../notify';
@@ -60,6 +58,16 @@ import { getMcpRequest } from '../request-context';
 import { requestHeader } from '../request-header';
 import { siteOrigin } from '../site-origin';
 import { hostWebAudit } from './web-audit-host';
+import {
+  BURST_REFUSED,
+  cacheUnavailable,
+  HOURLY_FULL,
+  isError,
+  jsonRpcError32099,
+  SOURCE_IP_REQUIRED,
+  siteTarget,
+  textContent,
+} from './web-tool-results';
 
 export interface WebAuditToolsEnv extends AuditLogEnv, NotifyEnv, InFlightEnv, FollowSwitchEnv, DomainBudgetEnv {
   ASSETS: Fetcher;
@@ -75,23 +83,6 @@ export interface WebAuditToolsEnv extends AuditLogEnv, NotifyEnv, InFlightEnv, F
 // payload, so the user-cache enumeration is capped rather than dumped whole.
 // Parity with /web?view=all holds for any user set within this cap.
 const LIST_ALL_MAX_USER_ROWS = 100;
-
-function textContent(value: unknown) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }] };
-}
-
-function jsonRpcError32099(message: string) {
-  return {
-    content: [
-      { type: 'text' as const, text: JSON.stringify({ jsonrpc: '2.0', error: { code: -32099, message } }, null, 2) },
-    ],
-    isError: true,
-  };
-}
-
-function isError(message: string) {
-  return { content: [{ type: 'text' as const, text: message }], isError: true };
-}
 
 /** The answer to a call that attached to another caller's run of the same site. */
 function attachedResult(terminal: TerminalEvent | null, signal: AbortSignal | undefined) {
@@ -132,28 +123,22 @@ function freshResult(terminal: TerminalEvent | null) {
   return isError('the audit ended without a result; nothing was cached. Retry.');
 }
 
-/** The tool input's host at its https origin, behind the SSRF gate; a scheme other than http(s) is refused. */
-function siteTarget(url: string): { ok: true; target: WebTarget } | { ok: false; reason: string } {
-  const parsed = coerceUrl(url);
-  if (!parsed) return { ok: false, reason: 'invalid url' };
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return { ok: false, reason: `scheme ${parsed.protocol} is not http(s)` };
-  }
-  return prepareWebTarget(parsed.host);
-}
-
 /** The site's stored audit at its https key, which the resolution may already have read; null on a miss. */
 async function readCachedAudit(env: WebAuditToolsEnv, resolution: WebResolution): Promise<CachedWebAudit | null> {
   if (resolution.stored !== undefined) return resolution.stored;
   return cacheGet(env, await keyFor(resolution.target.canonical, SPEC_VERSION));
 }
 
-/** The answer when the record that names a `www.` host's site could not be read; the host's own record is never read in its place. */
-function cacheUnavailable(host: string) {
-  const site = sitePairOf(host)?.apex ?? host;
-  return isError(
-    `cache_unavailable: the stored scorecard for ${site} could not be read right now; it has not been removed. Retry get_website_audit in 30 seconds.`,
-  );
+const RETIRED_LISTING_ARGUMENT =
+  'public_listing is not an audit_website argument: an audit never changes the leaderboard listing. ' +
+  'Call audit_website again without public_listing to run the audit, then set_website_public_listing with the ' +
+  'same url and public_listing to change the listing. If your client does not list set_website_public_listing, reconnect.';
+
+/** The message for an input key audit_website does not declare; undefined leaves zod's own text. */
+function refuseRetiredArgument(issue: { code: string; keys?: readonly string[] }): string | undefined {
+  return issue.code === 'unrecognized_keys' && issue.keys?.includes('public_listing')
+    ? RETIRED_LISTING_ARGUMENT
+    : undefined;
 }
 
 export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv): void {
@@ -193,7 +178,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       try {
         resolution = await resolveWebTarget(env, site.target, 'strict');
       } catch (err) {
-        if (err instanceof WebCacheUnavailableError) return cacheUnavailable(site.target.host);
+        if (err instanceof WebCacheUnavailableError) return cacheUnavailable(site.target.host, 'get_website_audit');
         throw err;
       }
       const domain = resolution.target.host;
@@ -228,6 +213,8 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         'Run a fresh website agent-readiness audit and return one terminal scorecard, with no progress ' +
         'notifications; get_website_audit reads the cache without running an audit. ' +
         `${FOLLOW_DISCLOSURE_SHORT} ` +
+        "An audit never changes the site's leaderboard listing: a first audit saves the site unlisted, and later " +
+        'audits keep the stored choice; set_website_public_listing changes it. ' +
         'A result under 1 minute old is returned without re-running, and a cached result is still served as-is when ' +
         "the audit is disabled. Results carry freshness.cached (false for a fresh run's result, including a run " +
         'this call attached to), freshness.scored_at (when it ran, null on a legacy entry), and ' +
@@ -237,45 +224,39 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         'exists, otherwise a message that points at get_website_audit. A per-IP burst limit and 30 fresh audits per ' +
         '60 minutes per IP apply; a breach, or a request without cf-connecting-ip, returns isError: true with a ' +
         'JSON-RPC -32099 error in the text, so read get_website_audit or retry later.',
-      inputSchema: {
-        url: z
-          .string()
-          .describe(
-            'The website URL or bare domain to audit; audited at its https origin; an http:// URL is upgraded. ' +
-              'The audit first checks whether <domain> or www.<domain> redirects to the other. If one does, they are ' +
-              'one site named <domain>: target and scorecard_url name <domain>, scorecard.target_url is the origin ' +
-              'the checks ran at, and scorecard.site_hosts lists both hosts. A www. host with no such redirect is ' +
-              'audited as its own site.',
-          ),
-        site_type: z
-          .enum(['content', 'api'])
-          .optional()
-          .describe(
-            'Declared site type scoping applicability: "content" (blog/docs/marketing) or "api" (REST API and/or ' +
-              'interactive app). Omit to run everything. MCP surfaces are auto-detected regardless.',
-          ),
-        public_listing: z
-          .boolean()
-          .optional()
-          .describe(
-            `Opt this domain in to (true) or out of (false) the public website leaderboard at ${leaderboardPath({ lane: 'web' })}. Omit to keep ` +
-              "the current stored choice — a blank never erases a prior opt-in. Defaults to off only on a domain's " +
-              'first-ever audit.',
-          ),
-        follow_declarations: z
-          .boolean()
-          .optional()
-          .describe(
-            'Follow the hosts the site declares (its MCP server, its API host) and score them with the site. ' +
-              `${FOLLOW_DISCLOSURE} ` +
-              "With false the result is also never listed and never joined to another caller's run, and it carries " +
-              'no scorecard_url, markdown_url, or json_url; a public_listing that differs from the stored choice is ' +
-              'rejected.',
-          ),
-      },
+      inputSchema: z.strictObject(
+        {
+          url: z
+            .string()
+            .describe(
+              'The website URL or bare domain to audit; audited at its https origin; an http:// URL is upgraded. ' +
+                'The audit first checks whether <domain> or www.<domain> redirects to the other. If one does, they are ' +
+                'one site named <domain>: target and scorecard_url name <domain>, scorecard.target_url is the origin ' +
+                'the checks ran at, and scorecard.site_hosts lists both hosts. A www. host with no such redirect is ' +
+                'audited as its own site.',
+            ),
+          site_type: z
+            .enum(['content', 'api'])
+            .optional()
+            .describe(
+              'Declared site type scoping applicability: "content" (blog/docs/marketing) or "api" (REST API and/or ' +
+                'interactive app). Omit to run everything. MCP surfaces are auto-detected regardless.',
+            ),
+          follow_declarations: z
+            .boolean()
+            .optional()
+            .describe(
+              'Follow the hosts the site declares (its MCP server, its API host) and score them with the site. ' +
+                `${FOLLOW_DISCLOSURE} ` +
+                "With false the result is also never listed and never joined to another caller's run, and it carries " +
+                'no scorecard_url, markdown_url, or json_url.',
+            ),
+        },
+        { error: refuseRetiredArgument },
+      ),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    async ({ url, site_type, public_listing, follow_declarations }, extra) => {
+    async ({ url, site_type, follow_declarations }, extra) => {
       // URL validation + SSRF (the cache key needs the URL, so these precede
       // the cache read and the kill switch).
       const siteUrl = siteOrigin();
@@ -285,8 +266,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       const target = resolution.target;
       const domain = target.host;
       // A run that does not follow declared hosts is never saved, so no
-      // stored scorecard answers it, it joins no run, and it may not change
-      // the listing.
+      // stored scorecard answers it and it joins no run.
       const optedOut = follow_declarations === false;
 
       // Cache hit short-circuits ahead of the kill switch: cache state is
@@ -295,25 +275,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       // fresh path (still behind every gate below) so a re-run refreshes
       // the board.
       const cached = await readCachedAudit(env, resolution);
-      // Resolve the opt-in flag against the stored entry once. A fresh hit
-      // only short-circuits when the request asks for no flag change; an
-      // explicit, differing public_listing falls through the full gate stack
-      // (kill switch, cf-connecting-ip, limiters) like a fresh audit and then
-      // takes the scored_at-preserving patch below, so a flag flip never
-      // bypasses a gate the kill switch also enforces.
-      const listingWrite = decidePublicListingWrite({ explicit: public_listing, cached });
-      if (optedOut) {
-        if (public_listing !== undefined && public_listing !== standingPublicListing(cached)) {
-          return isError(
-            'follow_declarations false runs an audit that is never saved, so it cannot change public_listing; ' +
-              'omit public_listing or keep follow_declarations on.',
-          );
-        }
-      } else if (
-        cached &&
-        !isStale(cached.scored_at, WEB_AUDIT_STALE_AFTER_MS) &&
-        listingWrite.path === 'serve-cached'
-      ) {
+      if (!optedOut && cached && !isStale(cached.scored_at, WEB_AUDIT_STALE_AFTER_MS)) {
         return textContent({
           audited: false,
           source: 'cache',
@@ -340,24 +302,18 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
 
       // cf-connecting-ip presence (no anon fallback).
       const ipString = requestHeader(extra, 'cf-connecting-ip');
-      if (!ipString) {
-        return jsonRpcError32099(
-          'fresh audits require a source IP; missing cf-connecting-ip is not rate-limit-keyable.',
-        );
-      }
+      if (!ipString) return jsonRpcError32099(SOURCE_IP_REQUIRED);
       // Per-IP burst limiter.
       if (env.WEB_AUDIT_LIMITER_IP) {
         const { success } = await env.WEB_AUDIT_LIMITER_IP.limit({ key: ipString });
-        if (!success)
-          return jsonRpcError32099('audit rate limit exceeded — burst window (30 per 60 seconds per source).');
+        if (!success) return jsonRpcError32099(BURST_REFUSED);
       }
       // A run already in flight for this domain is attached to rather than
       // run twice. Attaching spends no audit budget, but it holds a request
       // open for the rest of that run, so it passes the source gates above
-      // first. An explicit listing choice is its own request: attaching would
-      // answer it with a run that never writes the caller's opt-in.
+      // first.
       const signal = getMcpRequest()?.signal;
-      if (public_listing === undefined && !optedOut) {
+      if (!optedOut) {
         const attached = await awaitInFlightTerminal(env, 'web', domain, signal);
         // A null answer means nothing answered in flight; the audit runs below.
         if (attached || signal?.aborted) return attachedResult(attached, signal);
@@ -366,71 +322,25 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       // Hourly window (shared with the webapp route).
       if (env.SCORE_KV) {
         const hourly = await consumeWebAuditHourlyBudget(env.SCORE_KV, ipString);
-        if (hourly === 'full')
-          return jsonRpcError32099('audit rate limit exceeded — 30 fresh audits per hour per source.');
+        if (hourly === 'full') return jsonRpcError32099(HOURLY_FULL);
         if (hourly === 'contended') return jsonRpcError32099(HOURLY_CONTENTION_MESSAGE);
       }
 
-      if (optedOut) {
-        const run = await hostWebAudit(env, {
-          target,
-          requested: resolution.requested,
-          siteType: site_type ?? null,
-          listing: standingPublicListing(cached),
-          followDeclarations: false,
-          origin: siteUrl,
-          attach: false,
-          singleFlight: false,
-          signal,
-        });
-        return freshResult(run.terminal);
-      }
-
-      // Per-domain flip budget (the same shared helper the webapp route calls,
-      // so both surfaces draw from one budget per domain). A write that changes
-      // the stored public_listing is capped per domain because the flag is
-      // submitter-set with no ownership check; a no-op serve or same-value
-      // re-audit spends nothing. Rejected before the write.
-      if ((await enforcePublicListingFlipLimit({ write: listingWrite, kv: env.SCORE_KV, domain })) === 'rate-limited') {
-        return jsonRpcError32099(
-          'flip_rate_limited: too many public_listing changes for this domain; try again later.',
-        );
-      }
-
-      // Fresh-window flag patch — the request only changes public_listing, so
-      // no re-audit runs; the preserving writer rewrites both stores without
-      // resetting scored_at. A write failure surfaces a tool error rather than
-      // a fabricated success the caller would follow as a saved result. The
-      // response mirrors a normal read: the envelope over the patched record.
-      if (listingWrite.path === 'patch') {
-        const wrote = await patchStoredPublicListing(env, listingWrite.cached, listingWrite.value);
-        if (!wrote) return isError('failed to persist the public_listing change; please retry.');
-        queueHitMinPurge([webTag()]);
-        const patched = {
-          ...listingWrite.cached,
-          scorecard: scorecardWithPublicListing(listingWrite.cached.scorecard, listingWrite.value),
-        };
-        return textContent({
-          audited: false,
-          source: 'cache',
-          ...(await webEnvelope(env, { tier: 'cache', host: domain, record: patched, origin: siteUrl })),
-        });
-      }
-
-      // Miss or stale hit — a (re-)audit, hosted under the site's job so a
-      // caller that arrives mid-run attaches to it.
+      // The audit carries the listing stored now and writes no choice of its
+      // own, so the save keeps whatever is stored when it lands. A run that
+      // does not follow declared hosts saves nothing.
       const run = await hostWebAudit(env, {
         target,
         requested: resolution.requested,
         siteType: site_type ?? null,
-        listing: resolveAuditListing(listingWrite, public_listing, cached),
-        explicitListing: public_listing,
-        followDeclarations: true,
+        listing: standingPublicListing(cached),
+        followDeclarations: !optedOut,
         origin: siteUrl,
-        attach: public_listing === undefined,
-        singleFlight: true,
+        attach: !optedOut,
+        singleFlight: !optedOut,
         signal,
       });
+      if (optedOut) return freshResult(run.terminal);
       return run.attached ? attachedResult(run.terminal, signal) : freshResult(run.terminal);
     },
   );

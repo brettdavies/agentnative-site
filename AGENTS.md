@@ -115,14 +115,15 @@ from one list, `MCP_DISCOVERY_DOCUMENTS` in `src/shared/mcp-discovery.ts`, SEP-1
 8631 `rel="service-desc"`, since neither card spec defines a relation; the catalog carries `rel="ai-catalog"`, the
 relation the AI Catalog spec defines. A new discovery document goes into that list, not into each surface.
 
-**Thirteen tools, five resources.** Tools cover five surfaces:
+**Fourteen tools, five resources.** Tools cover five surfaces:
 
 - Registry: `list_tools`, `get_tool`, `search_tools`
 - Principles: `list_principles`, `get_principle`
 - Spec: `list_spec_sections`, `get_spec_section`
 - Scorecards: `get_scorecard` (cache read), `score_cli` (cache-miss audit)
-- Web audits: `get_website_audit` (cache read), `audit_website` (fresh audit), `list_website_audits` (curated web
-  board), `get_web_remediation` (per-check fix)
+- Web audits: `get_website_audit` (cache read), `audit_website` (fresh audit, never changes a listing),
+  `list_website_audits` (curated web board), `set_website_public_listing` (the one listing write, no audit),
+  `get_web_remediation` (per-check fix)
 
 Resources: `anc://registry` (concrete) plus four templates `anc://tool/{slug}`, `anc://principle/{n}`,
 `anc://spec/{section}`, `anc://scorecard/{binary}`.
@@ -131,9 +132,11 @@ Resources: `anc://registry` (concrete) plus four templates `anc://tool/{slug}`, 
 falls back to a shared `anon` bucket on missing `cf-connecting-ip`. `MCP_AUDIT_LIMITER` gates `score_cli` cache-miss
 audits only, at 5 fresh audits per 60 minutes per IP, with **no anon fallback**. `audit_website` fresh audits key
 `WEB_AUDIT_LIMITER_IP` (30 per 60 seconds per IP burst, no anon fallback) plus a shared 30-per-hour-per-IP ceiling;
-missing IP returns `-32099` rather than consuming a shared bucket, because the audit cost is non-trivial. The browser
-path reaches the same hourly counter through `POST /api/score`, gated on a session rather than an IP: a Turnstile solve
-mints a `__Host-anc-session` cookie, `WEB_AUDIT_LIMITER` caps 10 audits per session per 60 seconds keyed
+missing IP returns `-32099` rather than consuming a shared bucket, because the audit cost is non-trivial. A listing
+change through `set_website_public_listing` draws the same burst and hourly units, then one unit of the per-domain flip
+budget (5 per hour per domain across all callers); a value already stored, a curated site, and a miss take none. The
+browser path reaches the same hourly counter through `POST /api/score`, gated on a session rather than an IP: a
+Turnstile solve mints a `__Host-anc-session` cookie, `WEB_AUDIT_LIMITER` caps 10 audits per session per 60 seconds keyed
 `<sid>:<sha256(target)>`, and `WEB_AUDIT_LIMITER_IP` is the coarse per-IP fallback. The hourly window is enforced in two
 layers: the CF Rate Limiting binding only accepts `period: 10 | 60`, so the binding holds the per-60-seconds burst floor
 and an application-side KV-backed per-hour window in `SCORE_KV` (`mcp_audit:<ip>:<hour_bucket>` /
@@ -165,8 +168,9 @@ config and there is no `env.production` block. Per-flag shapes, flip verbs, and 
   `next_tool: get_scorecard` redirect; the read tier stays alive.
 - `MCP_LEGACY_ENABLED`: gates the legacy lane only. Falsy returns JSON-RPC `-32022` (`data.supported: ["2026-07-28"]`)
   at the shell before the SDK handles legacy `initialize` / stateless legacy calls; modern SEP-2243 requests stay live.
-- `WEB_AUDIT_ENABLED`: gates the website audit (`audit_website` and the endpoint's web lane). Falsy returns
-  `audited: false` with a disabled message; `get_website_audit` still serves cached web scorecards.
+- `WEB_AUDIT_ENABLED`: gates the website audit (`audit_website` and the endpoint's web lane) and listing changes
+  (`set_website_public_listing`). Falsy returns `audited: false` with a disabled message, or `changed: false` with
+  `disabled: true` for a listing change; `get_website_audit` still serves cached web scorecards.
 - `WEB_AUDIT_FOLLOW_ENABLED`: gates following the hosts a site declares (its MCP server, its API host) on every web
   audit: the endpoint's web lane, `audit_website`, and the rescore. Falsy keeps audits running on the site's own origin;
   the stored scorecard records `follow_declarations: false` and rows that need a declared host read `n_a` with reason
@@ -236,9 +240,9 @@ its messages after 60 s, then 120 s, up to 300 s; the sixth refusal acknowledges
 **Diagnostic headers.** Every card PNG response carries `x-anc-card` (`drawn`, `stored`, or `fallback` when the render
 Worker could not draw and the site-wide card was served) and, for a drawn or stored card, `x-anc-card-logo` (`homepage`,
 `brand`, `stored`, `tile`). A scorecard page carries `x-anc-clip`: `present`, `off`, the job's state (`queued`,
-`rendering`, `failed`), `none` when no job holds the card, or `unknown` when the job did not answer within 250 ms; a live
-or failed job adds `x-anc-clip-run`, the run id its `og.render` log records carry. Read both from a `?v=` fetch, which
-is served uncached.
+`rendering`, `failed`), `none` when no job holds the card, or `unknown` when the job did not answer within 250 ms; a
+live or failed job adds `x-anc-clip-run`, the run id its `og.render` log records carry. Read both from a `?v=` fetch,
+which is served uncached.
 
 **Commands.**
 
@@ -365,9 +369,9 @@ staging Worker and bypass the local build.
 gitignored, so the file is yours alone and never reaches a deploy. Same shape for `MCP_LIVE_SCORING_ENABLED` when
 exercising `score_cli`.
 
-**Local CLI audits need `CAP_SYS_ADMIN`.** `anc --version` and the audit run under `unshare --net`, which Docker's default
-capabilities refuse, so an audit through `bun run dev` fails closed with `anc_version_unreadable` naming the refused
-namespace. Cloudflare's default scheduling policy grants the capability; the `durable_object` policy does not
+**Local CLI audits need `CAP_SYS_ADMIN`.** `anc --version` and the audit run under `unshare --net`, which Docker's
+default capabilities refuse, so an audit through `bun run dev` fails closed with `anc_version_unreadable` naming the
+refused namespace. Cloudflare's default scheduling policy grants the capability; the `durable_object` policy does not
 (`tests/wrangler-config.test.ts`).
 
 **The video binding has no local simulation.** `--local` turns remote bindings off, so a local render cannot call the

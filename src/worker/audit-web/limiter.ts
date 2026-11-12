@@ -12,7 +12,7 @@
 import type { Lane } from '../../shared/audit-routes';
 
 const HOUR_MS = 3_600_000;
-const HOURLY_AUDIT_CEILING = 30;
+export const HOURLY_AUDIT_CEILING = 30;
 const HOURLY_KV_TTL_SECONDS = 7200;
 
 // Workers KV refuses a second write to one key inside a second, which two
@@ -41,7 +41,7 @@ export type HourlyTake = 'taken' | 'full' | 'contended';
 // well above a legitimate owner's correction rate — opt in, then change your
 // mind a couple of times — but far below what rapid listing-flip griefing
 // needs. The window is the same fixed hour the audit ceiling uses.
-const FLIP_CEILING = 5;
+export const FLIP_CEILING = 5;
 
 // Audits an hour that may reach one declared registrable domain, whichever
 // site declares it and whichever caller audits that site. Approximate: the

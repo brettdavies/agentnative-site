@@ -155,13 +155,14 @@ The shell emits it when `MCP_LIMITER` denies (`src/worker/index.ts#env.MCP_LIMIT
 id echoed. The `mcp.request` log line fires after the gate so denials stay recorded while log volume stays bounded
 (`src/worker/index.ts#outcome: 'rate_limited'`).
 
-**A `-32099` inside a tool result is a different thing.** `audit_website` and `score_cli` return their budget refusals
-as `CallToolResult` with `isError: true`, carrying a `-32099`-shaped JSON string inside a text content block
-(`src/worker/mcp/tools/web-audit.ts#jsonRpcError32099`, `src/worker/mcp/tools/scorecard-audit.ts#jsonRpcError32099`).
-The JSON-RPC envelope around it is successful. Pinned at
+**A `-32099` inside a tool result is a different thing.** `audit_website`, `set_website_public_listing`, and `score_cli`
+return their budget refusals as `CallToolResult` with `isError: true`, carrying a `-32099`-shaped JSON string inside a
+text content block (`src/worker/mcp/tools/web-tool-results.ts#jsonRpcError32099`,
+`src/worker/mcp/tools/scorecard-audit.ts#jsonRpcError32099`). The JSON-RPC envelope around it is successful. Pinned at
 `tests/worker-mcp-audit.test.ts#missing cf-connecting-ip on cache-miss returns isError: true with -32099` and
-`tests/web-audit-mcp-tools.test.ts#missing cf-connecting-ip returns the rate-limit envelope with -32099 (no anon fallback)`.
-Tool-level failure and transport-level failure are two layers, and only the second one is in this document's table.
+`tests/web-audit-mcp-tools.test.ts#missing cf-connecting-ip returns the rate-limit envelope with -32099 (no anon
+fallback)`. Tool-level failure and transport-level failure are two layers, and only the second one is in this document's
+table.
 
 ## Responses with no JSON-RPC envelope
 
@@ -325,9 +326,8 @@ Two codes are excluded from the conformance matrix, recorded above
 
 A third code appears in probe results without being probed for: **`-32000`**, JSON-RPC's reserved generic server error,
 which a stateful legacy server returns to a sessionless POST
-(`src/worker/audit-web/handlers/mcp.ts#SESSION_REQUIRED_CODE`). It marks a stateful server, not an error
-category. anc's own `-32000` is the HTTP 403 Host or Origin rejection in the table above, a different producer behind the
-same code.
+(`src/worker/audit-web/handlers/mcp.ts#SESSION_REQUIRED_CODE`). It marks a stateful server, not an error category. anc's
+own `-32000` is the HTTP 403 Host or Origin rejection in the table above, a different producer behind the same code.
 
 ## Bumping the revision
 

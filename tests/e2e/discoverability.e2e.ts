@@ -388,9 +388,15 @@ test.describe('staging published web-audit contracts', () => {
     expect(md).toContain('Turnstile');
   });
 
-  test('/mcp-skill.md publishes the four web tools and the freshness envelope', async ({ request }) => {
+  test('/mcp-skill.md publishes the five web tools and the freshness envelope', async ({ request }) => {
     const md = await twin(request, '/mcp-skill.md');
-    for (const tool of ['get_website_audit', 'audit_website', 'list_website_audits', 'get_web_remediation']) {
+    for (const tool of [
+      'get_website_audit',
+      'audit_website',
+      'list_website_audits',
+      'set_website_public_listing',
+      'get_web_remediation',
+    ]) {
       expect(md).toContain(tool);
     }
     for (const field of FRESHNESS_FIELDS) expect(md).toContain(`\`${field}\``);

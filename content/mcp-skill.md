@@ -1,7 +1,7 @@
 # Using anc.dev's MCP server
 
 anc.dev exposes the agent-native CLI standard catalog over a Model Context Protocol server at `https://anc.dev/mcp`.
-Thirteen tools cover five surfaces (registry, principles, spec, scorecards, web audits) plus five resources for direct
+Fourteen tools cover five surfaces (registry, principles, spec, scorecards, web audits) plus five resources for direct
 lookup. The catalog is public: no authentication, no API key.
 
 ## Quick reference
@@ -191,7 +191,8 @@ Do not call `score_cli` again for that input until live scoring is back.
 ## Audit a website
 
 Four tools score a website and its MCP server against the same eight principles as a CLI, mirroring the scorecard
-surface above. The web audit runs entirely as in-Worker network probes (HTTP, JSON-RPC over streamable-HTTP, CORS,
+surface above, and a fifth, `set_website_public_listing`, changes whether a site appears on the website leaderboard. The
+web audit runs entirely as in-Worker network probes (HTTP, JSON-RPC over streamable-HTTP, CORS,
 DNS-over-HTTPS): no container, nothing crawled. A site is read and audited at its HTTPS origin: an `http://` URL is
 upgraded, so it names the same record as the bare host.
 
@@ -204,16 +205,28 @@ upgraded, so it names the same record as the bare host.
   progress notifications: the server runs stateless per-request. A cached result younger than one minute is returned
   without re-running. Gated by `WEB_AUDIT_ENABLED` + `WEB_AUDIT_LIMITER_IP` (30 per hour per IP, no anon fallback).
   `follow_declarations` (default `true`) follows the hosts the site declares; `false` audits only the site and returns
-  a transient result that is never cached or listed, carries `null` for `scorecard_url`, `markdown_url`, and
-  `json_url`, and refuses a `public_listing` that differs from the stored choice.
+  a transient result that is never cached or listed and carries `null` for `scorecard_url`, `markdown_url`, and
+  `json_url`. An audit never changes a site's leaderboard listing: a first audit saves the site unlisted, and a later
+  one keeps the stored choice. The tool takes `url`, `site_type`, and `follow_declarations` only; any other argument,
+  `public_listing` included, is refused with `isError: true` before a limit is spent or an audit runs.
 - `list_website_audits`: the website half of the leaderboard, curated by default; `view: "all"` adds the user-submitted
   domains that opted in to public listing. Each entry carries `scorecard_url`.
+- `set_website_public_listing` (listing write): pass a `url` and a boolean `public_listing`; it opts a site in to or out
+  of the user-submitted rows of `list_website_audits` and changes nothing else. Call it only when the user asks to list
+  a site or to take it off the board. It needs a stored audit: on a miss it answers `{ changed: false, found: false, next_tool:
+  "audit_website" }`, so run `audit_website` first. A value already stored answers `changed: false` and costs nothing. A
+  change keeps the scorecard and its `scored_at`, applies at any scorecard age, and spends the per-IP burst limit, one
+  unit of the 30-per-hour audit window `audit_website` also draws on, and one of 5 changes per hour per site across all
+  callers (`flip_rate_limited` when those are used up). `WEB_AUDIT_ENABLED` off answers `isError: false` with
+  `changed: false` and `disabled: true`. A curated site is always listed and is not changed. anc does not check who owns
+  a site.
 - `get_web_remediation`: the canonical fix for a web-audit `check_id`. Pass the failing row's `evidence` and its
   `remediation.host` (omit the host when it is `null`) and they are appended to the prompt as a delimited,
   length-bounded data block, the same prompt the row carries inline; omit both for the catalog text alone.
 
 ```jsonc
-// tools/call audit_website { "url": "anc.dev" }
+// tools/call audit_website { "url": "example.com" }
+// tools/call set_website_public_listing { "url": "example.com", "public_listing": true }
 ```
 
 **Bare and `www.` hosts.** A bare host and its `www.` host are one site when the first redirect from either root lands
@@ -237,8 +250,7 @@ without replacing it, with no `scorecard_url`, `markdown_url`, or `json_url`. Th
 every audit (`WEB_AUDIT_FOLLOW_ENABLED`); the scorecard's `follow_declarations` records whether the audit followed.
 
 **Freshness.** Every result that carries a scorecard carries a `freshness` object beside it, outside the scorecard
-itself: `cached` is `true` for a served cache entry or a listing-only flag patch and `false` for a result the call
-produced; `scored_at` is when the audit ran (`null` on a legacy entry with no stamp); `refresh_after` is `scored_at`
+itself: `cached` is `true` for a served cache entry and `false` for a result the call produced; `scored_at` is when the audit ran (`null` on a legacy entry with no stamp); `refresh_after` is `scored_at`
 plus the one-minute cache-reuse window. Past `refresh_after` a repeat call stops reusing the cached entry and tries a
 fresh audit, which is eligibility rather than a promise: the kill switch, the rate limits, and probe failures still
 apply, and the cached scorecard is served as data when they refuse.
@@ -475,7 +487,7 @@ container-run cost is non-trivial and a shared anon bucket would be a DoS vector
 layers (CF binding burst gate + KV-backed per-hour window); both surface as `-32099` on breach.
 
 Read-tier breach is recoverable by waiting out the 60-second window. Audit-tier breach needs an hour-bucket window to
-roll. A `-32099` from `score_cli` or `audit_website` whose message reads
+roll. A `-32099` from `score_cli`, `audit_website`, or `set_website_public_listing` whose message reads
 `Several audits started at once from this address` is not the ceiling: the hour still has room, and the call can be
 retried after 2 seconds. Both ceilings are pre-data placeholders sized from parity with sister deployments and will be
 tuned with `mcp.request` log volume.
@@ -505,8 +517,11 @@ URLs name the host that served the request.
 true`, `destructiveHint: false`, and `openWorldHint: false`, because they return anc's own data without altering any
 record a client can read, and they send no request to an outside host. The two tools that run fresh work, `score_cli`
 and `audit_website`, carry `readOnlyHint: false` with `destructiveHint: false`, `idempotentHint: false`, and
-`openWorldHint: true`, because they reach external systems and write cache and leaderboard state. Annotations are hints
-for client UX and consent prompts, not a security boundary.
+`openWorldHint: true`, because they reach external systems and write cache and leaderboard state. The listing tool,
+`set_website_public_listing`, carries `readOnlyHint: false`, `destructiveHint: true`, `idempotentHint: true`, and
+`openWorldHint: false`, because it overwrites one stored choice in place, repeating a call with the same arguments
+changes nothing, and it reaches only anc's own storage. Annotations are hints for client UX and consent prompts, not a
+security boundary.
 
 **Accept-header negotiation.** Server picks between `application/json` and `text/event-stream`. JSON wins ties; q-values
 resolve unequal preferences. Absent or `*/*` Accept → JSON. Only a request that accepts neither MIME type returns `406`.

@@ -49,7 +49,7 @@ The web scorecard is site-owned. Its `schema_version` is **0.5**, independent of
 | `audience`             | null                | engine  | Always `null` for web targets; the audience classifier is a CLI concept.                                                           |
 | `audit_profile`        | null                | engine  | Always `null` for web targets; audit profiles are a CLI concept.                                                                   |
 | `site_type`            | string \| null      | engine  | The declared site type the run scoped to: `content`, `api`, or `null` (everything ran).                                            |
-| `public_listing`       | boolean             | engine  | The opt-in of whoever submitted the audit to the public board listing. `false` unless explicitly set.                                                 |
+| `public_listing`       | boolean             | engine  | The opt-in to the public board listing, set by the audit form or `set_website_public_listing`. `false` unless explicitly set.                         |
 | `vantage`              | object              | engine  | Where the audit ran and whether it presented a credential. See [vantage](#vantage).                                                |
 | `follow_declarations`  | boolean, optional   | engine  | Whether the audit followed the hosts the site declares (its MCP server, its API host). Absent means no follow state was recorded.  |
 | `declared_hosts`       | array, optional     | engine  | The declared-hosts trail: one entry per host the site declares, with how the audit treated it. Absent means no trail was recorded. |
