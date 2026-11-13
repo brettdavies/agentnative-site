@@ -265,7 +265,7 @@ function checkEvent(result: EngineResult, siteHosts: readonly string[]): AuditEv
  * caller opted out of following, or one a declared domain's spent hourly
  * budget held back from replacing a saved scorecard, saves no scorecard,
  * rebuilds nothing, and ends on the transient envelope, though a held run
- * still writes the listing it resolved onto the saved scorecard; a
+ * still writes an explicit listing choice onto the saved scorecard; a
  * deadline-bound run yields `incomplete` and is never persisted; an
  * unreachable target or a thrown engine yields `error`.
  */
@@ -331,7 +331,7 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
         listing: input.listing,
       });
       const held = input.followDeclarations
-        ? await heldRun(env, site.target, site.scorecard, site.listing, refusals)
+        ? await heldRun(env, site.target, site.scorecard, input.explicitListing, refusals)
         : null;
       const transient: TransientReason | undefined = input.followDeclarations ? held?.reason : { kind: 'opt-out' };
       if (!transient) {
