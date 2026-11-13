@@ -8,6 +8,33 @@ The standard's own version history lives in the
 the site's principle pages to a new spec version, its entry here names the version and links the pages it touched. Each
 date is the UTC day the release shipped.
 
+## 2026-11-13
+
+### Added
+
+- The MCP server introduces itself: its handshake carries a title, a description, a link to the
+  [client guide](/mcp-skill), and two icons (an SVG and a 180-pixel square PNG), in the `initialize` result and in the `_meta` of
+  every result on the 2026-07-28 lane. The [server card](/mcp/server-card) carries the same values, and the title and
+  description cover website scoring and the leaderboards as well as CLI scoring and the principles.
+- The MCP tool `set_website_public_listing` opts a site in to or out of the public website leaderboard on the
+  [scorecards board](/scorecards), and does nothing else.
+
+### Changed
+
+- Every MCP tool refuses an argument it does not declare, with `isError: true` and a message naming the key, where it
+  ignored the argument before. The read tools declare `idempotentHint: true`.
+
+### Fixed
+
+- A website audit held back by a declared host's hourly limit keeps the site's leaderboard listing as stored when it
+  saves, unless the request chose a listing.
+
+### Removed
+
+- `audit_website` no longer takes `public_listing`, and an audit never changes a site's listing. The tool refuses a
+  call that still sends it, with a message that names `set_website_public_listing`.
+- `search_tools` no longer takes `principle_min_score`, which filtered nothing.
+
 ## 2026-11-12
 
 ### Added
