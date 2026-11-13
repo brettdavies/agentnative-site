@@ -436,7 +436,7 @@ The curl recipes below show the **staging** shape (with CF Access headers). For 
     -d "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/list\",\"params\":{${META}}}" \
     https://agentnative-site-staging.brettdavies.workers.dev/mcp \
     | jq '{count: (.result.tools | length), ttlMs: .result.ttlMs, cacheScope: .result.cacheScope}'
-  # expect: count: 14, ttlMs: 3600000, cacheScope: "public"
+  # expect: count: 14, ttlMs: 300000, cacheScope: "public"
   ```
 
   A 503 or `MCP_ENABLED` kill-switch envelope means the switch is unset or not `"true"` on the staging Worker. It is a

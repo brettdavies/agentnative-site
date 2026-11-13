@@ -97,11 +97,7 @@ describe('MCP server card seed (built dist/)', () => {
       protocolVersion: string;
       url: string;
       transport: { type: string; endpoint: string };
-      capabilities: {
-        tools: { listChanged: boolean };
-        resources: { subscribe: boolean; listChanged: boolean };
-        prompts: { listChanged: boolean };
-      };
+      capabilities: Record<string, unknown>;
       authentication: { required: boolean; schemes: string[]; documentation: string };
     };
     expect(parsed).not.toHaveProperty('$schema');
@@ -111,8 +107,10 @@ describe('MCP server card seed (built dist/)', () => {
     expect(parsed.transport.type).toBe('streamable-http');
     expect(parsed.transport.endpoint).toBe('https://anc.dev/mcp');
     expect(parsed.url).toBe('https://anc.dev/mcp');
-    expect(parsed.capabilities.tools.listChanged).toBe(false);
-    expect(parsed.capabilities.resources.subscribe).toBe(false);
+    expect(parsed.capabilities).toEqual({
+      tools: { listChanged: false },
+      resources: { subscribe: false, listChanged: false },
+    });
     expect(parsed.authentication.required).toBe(false);
     expect(parsed.authentication.schemes).toEqual([]);
     expect(parsed.authentication.documentation).toBe('https://anc.dev/auth.md');

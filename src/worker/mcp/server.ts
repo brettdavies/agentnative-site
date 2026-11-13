@@ -7,7 +7,12 @@
 
 import { localhostAllowedOrigins, McpServer } from '@modelcontextprotocol/server';
 import { createMcpHandler } from 'agents/mcp/server';
-import { MCP_SERVER_NAME, MCP_SERVER_VERSION, mcpServerMetadata } from '../../shared/mcp-discovery';
+import {
+  MCP_SERVER_CAPABILITIES,
+  MCP_SERVER_NAME,
+  MCP_SERVER_VERSION,
+  mcpServerMetadata,
+} from '../../shared/mcp-discovery';
 import type { AuditJob } from '../audit/job';
 import { type Catalog, getWarmCatalog } from './catalog';
 import { getMcpEnv } from './env-context';
@@ -29,10 +34,13 @@ export const MCP_ALLOWED_HOSTNAMES = [
   '127.0.0.1',
 ];
 
+// Nothing publishes a list change, so a list is as fresh as its hint. The
+// three list methods carry 5 minutes so a client sees a deploy's new list
+// within that window; the resources are build-time data and keep one hour.
 const CACHE_HINTS = {
-  'tools/list': { ttlMs: 3_600_000, cacheScope: 'public' as const },
-  'resources/list': { ttlMs: 3_600_000, cacheScope: 'public' as const },
-  'resources/templates/list': { ttlMs: 3_600_000, cacheScope: 'public' as const },
+  'tools/list': { ttlMs: 300_000, cacheScope: 'public' as const },
+  'resources/list': { ttlMs: 300_000, cacheScope: 'public' as const },
+  'resources/templates/list': { ttlMs: 300_000, cacheScope: 'public' as const },
   'resources/read': { ttlMs: 3_600_000, cacheScope: 'public' as const },
 };
 
@@ -84,10 +92,7 @@ function createAncServer(catalog: Catalog): McpServer {
       ...mcpServerMetadata(siteOrigin()),
     },
     {
-      capabilities: {
-        tools: {},
-        resources: {},
-      },
+      capabilities: MCP_SERVER_CAPABILITIES,
       instructions: buildInstructions(env),
       cacheHints: CACHE_HINTS,
     },

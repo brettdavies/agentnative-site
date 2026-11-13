@@ -760,7 +760,7 @@ describe('MCP modern-era wire (no initialize)', () => {
     expect(body.error).toBeUndefined();
     const tools = body.result?.tools ?? [];
     expect(tools.length).toBe(EXPECTED_TOOL_COUNT);
-    expect(deepFindFirst(body, 'ttlMs')).toBe(3_600_000);
+    expect(deepFindFirst(body, 'ttlMs')).toBe(300_000);
     expect(deepFindFirst(body, 'cacheScope')).toBe('public');
   });
 

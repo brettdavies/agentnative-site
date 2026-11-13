@@ -9,6 +9,16 @@
 /** The `serverInfo` the MCP server reports, which its card must not contradict. */
 export const MCP_SERVER_NAME = 'anc';
 export const MCP_SERVER_VERSION = '0.1.0';
+/**
+ * The capabilities the handshake on both lanes and the SEP-1649 card declare.
+ * Nothing publishes a list change, so a list is as fresh as its cache hint,
+ * and no prompt is registered. `@modelcontextprotocol/server` fills an absent
+ * `listChanged` with `true`; an explicit `false` is kept.
+ */
+export const MCP_SERVER_CAPABILITIES = {
+  tools: { listChanged: false },
+  resources: { subscribe: false, listChanged: false },
+} as const;
 export const MCP_SERVER_TITLE = 'anc.dev agent-native standard';
 /** The SEP-2127 card schema caps a description at 100 characters. */
 export const MCP_SERVER_DESCRIPTION =

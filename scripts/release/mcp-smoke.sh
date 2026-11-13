@@ -6,7 +6,7 @@
 #   2. legacy-initialize: client 2025-06-18, instructions mention 2026-07-28
 #   3. legacy-tools-list: 14 tools with core names
 #   4. legacy-get-scorecard: registry hit on curated slug ripgrep
-#   5. modern-tools-list: _meta + headers, ttlMs=3600000, cacheScope=public
+#   5. modern-tools-list: _meta + headers, ttlMs=300000, cacheScope=public
 #   6. modern-get-scorecard: hit on ripgrep + miss on unknown slug
 #   7. malformed-body: non-JSON POST answers HTTP 400 + JSON-RPC -32700
 #
@@ -324,7 +324,7 @@ run_check_5_modern_tools_list() {
     report 5 modern-tools-list no "HTTP 503 (MCP_ENABLED off?)"
     return
   fi
-  if [[ "$http_code" == "200" && "$tool_count" == "14" && "$ttl" == "3600000" && "$cache_scope" == "public" ]]; then
+  if [[ "$http_code" == "200" && "$tool_count" == "14" && "$ttl" == "300000" && "$cache_scope" == "public" ]]; then
     report 5 modern-tools-list ok "14 tools ttlMs=$ttl cacheScope=$cache_scope"
   else
     report 5 modern-tools-list no "http=$http_code count=$tool_count ttlMs=$ttl cacheScope=$cache_scope"
