@@ -145,7 +145,7 @@ The full table is in the Planning Contract, `### Owner decisions`. Each unit it 
   - **D6, the two HTTP-only keys:** the projection carries `site_spec_version` and `auditor_url` on every representation, MCP included (OD8 records the alternative). Evidence: `scripts/smoke-api-score.sh`, `tests/e2e/homepage-score-live.e2e.ts`, and `tests/regression.test.ts` read both on HTTP, so dropping them from HTTP would break the additive rule; one body builder needs one key set.
   - **D7, curated `scored_at`:** filled from `run.started_at` through `cliScoredAt`, with `refresh_after` kept `null`. Evidence: all 98 committed scorecards carry `run.started_at`; the page already prints "audited 2026-10-28" for `ripgrep` from it; and the guide documents a `null` `refresh_after` for curated results, not a `null` `scored_at`.
   - **D15, WebMCP on CLI pages:** stays out of `0.2.0`. Evidence: the four result tools read website-only page structure (`.web-check` rows, the seven website statuses, fix prompts from the remediation catalog), and the CLI lane has none of those, so loading the script on a CLI page would register tools that answer an empty list. OD9 records the alternative.
-- KTD14. **Byte figures are measured, and #582's rule 5 is the gate.** Method: the compact `tools` array served at `https://agentnative-site-staging.brettdavies.workers.dev:65535` (rule 5's longest origin) on #582's head `c30dfed`, which reproduces #582's 18,971 bytes, plus each draft schema converted through zod's output-mode JSON Schema as the SDK does. Every PR that adds a schema re-measures with rule 5; the table below is the plan's expectation, not the gate. Covers R26.
+- KTD14. **Byte figures are measured, and #582's rule 5 is the gate.** Method: the compact `tools` array served at `https://agentnative-site-staging.brettdavies.workers.dev:65535` (rule 5's longest origin) on #582's head `c30dfed`, which reproduces #582's 18,971 bytes (its later head `3a7b5b5` rebases onto #580 and #581 and changes no tool text and no contract rule), plus each draft schema converted through zod's output-mode JSON Schema as the SDK does. Every PR that adds a schema re-measures with rule 5; the table below is the plan's expectation, not the gate. Covers R26.
 - KTD15. **The scorecard resource reads curated scorecards through the resolver (OD6 default).** `anc://scorecard/{binary}` resolves a slug or a binary through `resolveTarget('cli', ...)`, serves the projection of a registry-tier hit, and answers `-32602` naming `get_scorecard` for anything else. Every resource then stays build-time data, so the 1-hour `resources/read` hint stays true. Covers R2.
 
 ### Owner decisions
@@ -326,7 +326,6 @@ PR order and waits:
 ```mermaid
 flowchart TB
   X582[#582 tool contract] --> PR3
-  X580[#580 listing log] -.merge order.-> PR3
   PR1[PR1 independent fixes] -.merge order.-> PR2
   PR2[PR2 scorecard read layer] --> PR3[PR3 catalog operations, outputSchema phases 1 and 2]
   PR3 --> PR4
@@ -362,7 +361,7 @@ Phase 1 adds more than the triage's estimate (about 4,200) because each found-or
 ### Assumptions
 
 - #582 merges with its budget (36,864) and pending list as of `c30dfed`; PR3 rebases onto whatever lands and re-measures.
-- #580 and #581 merge before PR3; PR3 moves `src/worker/mcp/tools/web-listing.ts` and `src/worker/audit-web/held-run.ts` callers as they stand after them.
+- #581 merges before PR3 (#580 is on dev); PR3 moves `src/worker/mcp/tools/web-listing.ts` and `src/worker/audit-web/held-run.ts` callers as they stand after them.
 - Brett answers the owner decisions in one batch before PR2 merges; PR1 depends on none of them except OD10 and OD15.
 - The operator's wrangler token can delete objects in `anc-score-cache-staging` (the scoring design's stated prerequisite for PR7).
 
@@ -405,7 +404,7 @@ Phase 1 adds more than the triage's estimate (about 4,200) because each found-or
 | U12 | Parity test harness and scorecard rows | `tests/entry-point-parity.test.ts`, `tests/helpers/parity/` | U11 |
 | U13 | Catalog operations and their schemas | `src/worker/ops/catalog.ts`, `src/worker/mcp/tools/{registry,principles,spec}.ts` | U12, #582 |
 | U14 | Board operation | `src/worker/ops/board.ts`, `src/worker/mcp/tools/web-audit.ts` | U12 |
-| U15 | Remediation and listing operations | `src/worker/ops/{remediation,listing}.ts`, `src/worker/mcp/tools/{web-remediation,web-listing}.ts` | U12, #580 |
+| U15 | Remediation and listing operations | `src/worker/ops/{remediation,listing}.ts`, `src/worker/mcp/tools/{web-remediation,web-listing}.ts` | U12 |
 | U16 | Catalog parity rows | `tests/entry-point-parity.test.ts` | U13, U14, U15 |
 | U17 | Answer projection and ranking | `src/worker/ops/{present,rank}.ts` | PR3 |
 | U18 | One body builder and the in-progress rule | `src/worker/audit/api.ts`, `src/worker/audit/result.ts` | U17 |
@@ -569,7 +568,7 @@ Reviews: `ce-code-review`, `/devex-review` (more targets resolve and the outage 
 
 ### PR3: Catalog operations and `outputSchema` phases 1 and 2
 
-Waits on: #582, needed before start (its pending list and budget are the gate); PR2, needed before start (it creates the ops module and the parity harness); #580, merge order only (`web-listing.ts`).
+Waits on: #582, needed before start (its pending list and budget are the gate); PR2, needed before start (it creates the ops module and the parity harness); #581, merge order only (`held-run.ts`).
 
 Separate PR because: Brett reviews each PR, and the nine tool schemas plus five operations would make PR2 too large for one sitting.
 
@@ -881,3 +880,4 @@ All 98 committed scorecards under `scorecards/` carry `run.started_at`.
 ## Review log
 
 - 2026-11-12: plan written.
+- 2026-11-12: `/plan-eng-review` round 1 started, in its own process from a clone of the pushed plan.
