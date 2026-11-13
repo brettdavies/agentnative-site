@@ -276,7 +276,10 @@ at `tests/worker-mcp.test.ts#initialize returns the server title, description, w
 
 Four read methods return `ttlMs` and `cacheScope` alongside the result, declared once as
 `src/worker/mcp/server.ts#CACHE_HINTS` and handed to the `McpServer` constructor
-(`src/worker/mcp/server.ts#cacheHints: CACHE_HINTS`). All four are one hour and `public`.
+(`src/worker/mcp/server.ts#cacheHints: CACHE_HINTS`). All four are `public`. The three list methods, `tools/list`,
+`resources/list`, and `resources/templates/list`, are five minutes; `resources/read` is one hour, because every resource
+is build-time data. Nothing publishes a list change, so a client learns of a changed list on its next list call, and the
+list hint bounds how stale it can be after a deploy.
 
 `cacheScope` is about who may reuse the answer, not about whether it is secret:
 
@@ -287,8 +290,21 @@ Four read methods return `ttlMs` and `cacheScope` alongside the result, declared
   never in a shared tier.
 
 Pinned on the wire at `tests/worker-mcp.test.ts#tools/list carries cache hints and the full tool surface`
-(`ttlMs: 3600000`, `cacheScope: 'public'`), which reads the values out of a live `tools/list` response rather than
-asserting the constant.
+(`ttlMs: 300000`, `cacheScope: 'public'`) and at `tests/mcp-capabilities.test.ts#list cache hints` for all four methods.
+Both read the values out of a live response rather than asserting the constant.
+
+## `subscriptions/listen`
+
+`MCP_SERVER_CAPABILITIES` (`src/shared/mcp-discovery.ts#MCP_SERVER_CAPABILITIES`) declares `listChanged: false` for
+tools and resources, and no `prompts`. The server passes it to `McpServer`, and the SEP-1649 card
+(`src/build/11a-discovery-emit.mjs#MCP_SERVER_CAPABILITIES`) writes the same object, so the handshake on both lanes and
+the card never disagree. The SDK fills an absent `listChanged` with `true` and keeps an explicit `false`.
+
+A modern `subscriptions/listen` therefore honors no notification kind. The SDK's listen router writes the empty
+acknowledgement, a `complete` result, and closes the stream, and the response is `text/event-stream` whatever the
+`Accept` value. The dispatch shell logs the call with `response_format: sse` and no error code. Pinned at
+`tests/mcp-capabilities.test.ts#a request for both list notifications gets an empty acknowledgement and a closed stream`
+and `tests/worker-mcp-dispatch.test.ts#POST /mcp — subscriptions/listen`.
 
 ## GET posture
 

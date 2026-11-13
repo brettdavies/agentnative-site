@@ -536,8 +536,11 @@ resolve unequal preferences. Absent or `*/*` Accept → JSON. Only a request tha
 | `application/json;q=0.5, text/event-stream;q=0.9` | `text/event-stream` (higher q-value wins) |
 | any value with neither type acceptable            | `406 Not Acceptable` (plain text)         |
 
-`subscriptions/listen` is the exception: it always answers `text/event-stream`, whatever the `Accept` value, with a
-stream that stays open and carries keep-alives until the client closes it. The table applies to every other method.
+`subscriptions/listen` is the exception: it always answers `text/event-stream`, whatever the `Accept` value. The server
+declares `listChanged: false` for tools and resources and never publishes a list change, so the stream carries an empty
+acknowledgement and ends. A client learns of a changed list from its next list call: `tools/list`, `resources/list`,
+and `resources/templates/list` carry `ttlMs: 300000`, and `resources/read` carries `ttlMs: 3600000`. The table applies to
+every other method.
 
 **Discovery siblings.**
 
