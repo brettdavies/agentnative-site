@@ -327,7 +327,7 @@ run_check_5_modern_tools_list() {
   if [[ "$http_code" == "200" && "$tool_count" == "14" && "$ttl" == "300000" && "$cache_scope" == "public" ]]; then
     report 5 modern-tools-list ok "14 tools ttlMs=$ttl cacheScope=$cache_scope"
   else
-    report 5 modern-tools-list no "http=$http_code count=$tool_count ttlMs=$ttl cacheScope=$cache_scope"
+    report 5 modern-tools-list no "http=$http_code count=$tool_count ttlMs=$ttl cacheScope=$cache_scope (want http=200 count=14 ttlMs=300000 cacheScope=public)"
   fi
 }
 
