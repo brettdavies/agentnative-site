@@ -34,7 +34,7 @@ async function principlesDir(titles: Record<number, string>): Promise<string> {
 }
 
 describe('principle-names-gen drift guard', () => {
-  test('src/shared/principle-names.gen.mjs matches the principle page titles', async () => {
+  test('src/shared/principle-names.gen.mjs matches the principle page titles (run bun run build to regenerate)', async () => {
     const expected = await computeExpectedPrincipleNamesModule();
     expect(await readFile(expected.path, 'utf8')).toBe(expected.content);
   });
