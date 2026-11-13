@@ -3,7 +3,8 @@
 // Cloudflare runtime).
 //
 // Single source of truth for:
-//   - Principle name + group constants (PRINCIPLE_NAMES, PRINCIPLE_GROUPS, BONUS_GROUPS)
+//   - Principle name + group constants (PRINCIPLE_NAMES, generated from the principle page
+//     titles; PRINCIPLE_GROUPS; BONUS_GROUPS)
 //   - groupToPrincipleNum derivation
 //   - topIssues extractor (FAIL > WARN, capped)
 //   - The CLI result body and markdown twin every CLI result page renders,
@@ -17,11 +18,13 @@
 // code both depend on `shared/`, never the other way around.
 
 import { escHtml } from './esc-html.ts';
+import { PRINCIPLE_NAMES } from './principle-names.gen.mjs';
 import { renderBigScore, renderResultSpine, resultFrontMatter, shortDate } from './result-spine.ts';
 import { CANONICAL_SITE_URL } from './site-url';
 
 export { escHtml } from './esc-html.ts';
 export { bandOf, renderMeter } from './meter.ts';
+export { PRINCIPLE_NAMES };
 
 /**
  * Headline obligation tier for a principle. P1-P7 carry MUST-tier
@@ -35,18 +38,6 @@ export { bandOf, renderMeter } from './meter.ts';
 export function principleTier(n) {
   return n === 8 ? 'SHOULD' : 'MUST';
 }
-
-/** Map of principle group code → human-readable name. */
-export const PRINCIPLE_NAMES = {
-  P1: 'Non-Interactive by Default',
-  P2: 'Structured, Parseable Output',
-  P3: 'Progressive Help Discovery',
-  P4: 'Fail-Fast, Actionable Errors',
-  P5: 'Safe Retries & Mutation Boundaries',
-  P6: 'Composable, Predictable Command Structure',
-  P7: 'Bounded, High-Signal Responses',
-  P8: 'Discoverable Through Agent Skill Bundles',
-};
 
 export const PRINCIPLE_GROUPS = Object.keys(PRINCIPLE_NAMES);
 

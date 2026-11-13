@@ -44,6 +44,7 @@ import { WEBMCP_SCRIPT } from '../shared/webmcp-script.ts';
 // shell.mjs, util.mjs, etc.) stay unnumbered because they don't represent
 // a single pipeline stage.
 import { generateSpecVersionModule } from './00-spec-version-gen.mjs';
+import { generatePrincipleNamesModule } from './00a-principle-names-gen.mjs';
 import { copyAssets } from './01-assets.mjs';
 import { emitHomepage } from './06-homepage.mjs';
 import { emitSubPages } from './07-subpages.mjs';
@@ -176,6 +177,7 @@ export async function build() {
   // verbatim into the bundle even when the VERSION files have advanced. The
   // drift test (tests/spec-version-gen.test.ts) is the second guardrail.
   await generateSpecVersionModule();
+  await generatePrincipleNamesModule();
 
   // 1. Copy static assets + bundle client JS. themeInit inlined into every shell.
   // bundleClient also emits /js/live-score.js used by the homepage form.

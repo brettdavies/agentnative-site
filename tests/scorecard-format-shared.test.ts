@@ -7,6 +7,8 @@
 // it. Pipe-escape behavior and principle-link shape live here.
 
 import { describe, expect, test } from 'bun:test';
+import { readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   BONUS_GROUPS,
   buildScorecardBody,
@@ -40,6 +42,19 @@ describe('PRINCIPLE_GROUPS + PRINCIPLE_NAMES', () => {
     expect(PRINCIPLE_GROUPS).toEqual(['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8']);
     for (const g of PRINCIPLE_GROUPS) {
       expect((PRINCIPLE_NAMES as Record<string, string>)[g]).toBeTruthy();
+    }
+  });
+  test('each name is the title of its principle page after the "P<n>: " prefix', async () => {
+    const dir = join(import.meta.dir, '..', 'content', 'principles');
+    const files = await readdir(dir);
+    for (const group of PRINCIPLE_GROUPS) {
+      const n = group.slice(1);
+      const file = files.find((name) => name.startsWith(`p${n}-`) && name.endsWith('.md'));
+      expect(file).toBeDefined();
+      const source = await readFile(join(dir, file as string), 'utf8');
+      const h1 = source.split('\n').find((line) => line.startsWith('# '));
+      expect(h1?.startsWith(`# ${group}: `)).toBe(true);
+      expect((PRINCIPLE_NAMES as Record<string, string>)[group]).toBe((h1 as string).slice(`# ${group}: `.length));
     }
   });
   test('BONUS_GROUPS is closed set', () => {
