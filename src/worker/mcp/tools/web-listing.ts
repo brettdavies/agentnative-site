@@ -31,6 +31,7 @@ import { standingPublicListing } from '../../audit-web/public-listing';
 import { isSeededDomain } from '../../audit-web/seed';
 import { resolveWebTarget, type WebResolution } from '../../audit-web/web-target';
 import { SPEC_VERSION } from '../../spec-version.gen';
+import { emitLog } from '../../telemetry/log';
 import { requestHeader } from '../request-header';
 import { siteOrigin } from '../site-origin';
 import {
@@ -216,6 +217,8 @@ export function registerWebListingTool(server: McpServer, env: WebListingToolEnv
           `patch_failed: the listing change did not save; nothing was changed, and this attempt used one of the site's ${FLIP_CEILING} listing changes this hour. Retry once; if it fails again, stop and report.`,
         );
       }
+      // `written: false` means the re-read found the value already stored: no change happened.
+      if (outcome.written) emitLog({ scope: 'web-listing.change' }, { target: domain, public_listing, surface: 'mcp' });
       return answer(outcome.cached, outcome.written);
     },
   );

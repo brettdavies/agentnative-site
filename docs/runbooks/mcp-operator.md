@@ -174,6 +174,10 @@ Every `POST /mcp` attempt emits **exactly one** PII-free JSON log line with `"ev
 
 No IP, slug, query text, or tool results appear in the log line. Use Cloudflare rate-limit analytics for IP triage.
 
+A `set_website_public_listing` call that changes a listing also writes one `scope: web-listing.change` record, described
+in the [web-audit operations runbook](./web-audit-operations.md#logging); it is a second line for that request, not part
+of the `mcp.request` line.
+
 ### Reading `response_format`
 
 The field records what went on the wire, not what the client asked for, so `response_format:sse` counts real streams and
