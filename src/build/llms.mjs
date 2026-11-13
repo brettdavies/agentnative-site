@@ -44,7 +44,7 @@ import { resolveBaseUrl } from './util.mjs';
  * @param {Array<{ name: string, path: string }>=} args.websiteScorecardLinks
  * @param {Array<{ name: string, path: string }>=} args.skillLinks
  * @param {Array<{ label: string, path: string }>=} args.programmaticAccess
- *        Optional Programmatic access section (U6 of the MCP plan).
+ *        Optional Programmatic access section.
  *        When provided, renders between the summary and Principles.
  * @param {string=} args.baseUrl
  */
