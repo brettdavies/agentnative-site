@@ -40,6 +40,7 @@ export type LogScope =
   | 'web-cache.publicListingBackfill'
   | 'web-cache.put'
   | 'web-cache.putAggregate'
+  | 'web-listing.change'
   | 'web-rescore'
   | 'web-rescore.trigger'
   | 'web-seed';

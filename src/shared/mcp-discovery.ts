@@ -9,6 +9,44 @@
 /** The `serverInfo` the MCP server reports, which its card must not contradict. */
 export const MCP_SERVER_NAME = 'anc';
 export const MCP_SERVER_VERSION = '0.1.0';
+export const MCP_SERVER_TITLE = 'anc.dev agent-native standard';
+/** The SEP-2127 card schema caps a description at 100 characters. */
+export const MCP_SERVER_DESCRIPTION =
+  'Score CLIs and websites against the agent-native standard, read its principles, search leaderboards';
+export const MCP_SERVER_WEBSITE_PATH = '/mcp-skill';
+
+/** An MCP `Icon`: an image a client can show for the server. */
+export interface McpServerIcon {
+  src: string;
+  mimeType: string;
+  sizes: string[];
+}
+
+/** The display fields shared by the MCP `Implementation` and the SEP-2127 card. */
+export interface McpServerMetadata {
+  title: string;
+  description: string;
+  websiteUrl: string;
+  icons: McpServerIcon[];
+}
+
+/**
+ * The server's display fields, with each URL on `origin`. The PNG comes first
+ * because a client that renders icons MUST support PNG and only SHOULD support
+ * SVG. The mark draws its own background, so both icons read on light and dark
+ * surfaces and carry no `theme`.
+ */
+export function mcpServerMetadata(origin: string): McpServerMetadata {
+  return {
+    title: MCP_SERVER_TITLE,
+    description: MCP_SERVER_DESCRIPTION,
+    websiteUrl: `${origin}${MCP_SERVER_WEBSITE_PATH}`,
+    icons: [
+      { src: `${origin}/apple-touch-icon-180.png`, mimeType: 'image/png', sizes: ['180x180'] },
+      { src: `${origin}/favicon.svg`, mimeType: 'image/svg+xml', sizes: ['any'] },
+    ],
+  };
+}
 
 /** The SEP-1649 card's canonical path; its pointer aliases 301 here. */
 export const SEP_1649_CARD_PATH = '/.well-known/mcp/server-card.json';

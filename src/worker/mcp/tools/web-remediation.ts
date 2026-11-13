@@ -42,7 +42,7 @@ export function registerWebRemediationTool(server: McpServer, env: WebRemediatio
         "failing row's evidence and its remediation.host (omit host when that is null) to append them to the " +
         'prompt as a delimited, length-bounded data block, the same prompt the row carries inline; omit both for ' +
         'the catalog text alone.',
-      inputSchema: {
+      inputSchema: z.strictObject({
         check_id: z.string().describe('The check id from the web scorecard results, e.g. "llms-txt".'),
         evidence: z
           .string()
@@ -59,8 +59,8 @@ export function registerWebRemediationTool(server: McpServer, env: WebRemediatio
               "null. Not the row's own host, which names the audited host for a row that recorded none. It opens " +
               'the delimited block as a Host line.',
           ),
-      },
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ check_id, evidence, host }) => {
       let catalog: WebRemediationCatalog;

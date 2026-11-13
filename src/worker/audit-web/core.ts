@@ -45,9 +45,11 @@ import { rowHostFields } from './provenance';
 import {
   decidePublicListingWrite,
   enforcePublicListingFlipLimit,
+  meterListingFlip,
   type PublicListingWrite,
   resolveAuditListing,
   standingPublicListing,
+  storedPublicListing,
 } from './public-listing';
 import { loadWebAuditRegistry, type WebAuditRegistry, type WebSiteType, withRegistryFingerprint } from './registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remediation';
@@ -179,27 +181,31 @@ export async function webEnvelope(
 }
 
 export type PatchOutcome =
-  | { ok: true; cached: CachedWebAudit }
+  | { ok: true; cached: CachedWebAudit; written: boolean }
   | { ok: false; reason: 'flip_rate_limited' | 'patch_failed' };
 
 /**
- * The listing-only write: meter the per-domain flip budget, rewrite the
- * stored record with the new flag and its scored_at preserved, and queue
- * the board purge. The returned record is what the caller wraps.
+ * The listing-only write: meter the per-domain flip budget, then patch the
+ * record as it stands at that moment with the new flag and its scored_at
+ * preserved, and queue the board purge. The record is read after the budget
+ * because the rate-limit windows before it can take over a second, and an
+ * audit saved meanwhile must not be replaced by an older scorecard. A record
+ * that already stores the flag is returned unwritten (`written: false`) with
+ * the budget unit spent.
  */
-export async function patchWebListing(
-  env: WebCoreEnv,
-  target: WebTarget,
-  tier: Extract<WebTier, { kind: 'patch' }>,
-): Promise<PatchOutcome> {
-  const budget = await enforcePublicListingFlipLimit({ write: tier.write, kv: env.SCORE_KV, domain: target.host });
-  if (budget === 'rate-limited') return { ok: false, reason: 'flip_rate_limited' };
-  const wrote = await patchStoredPublicListing(env, tier.cached, tier.write.value);
-  if (!wrote) return { ok: false, reason: 'patch_failed' };
+export async function patchWebListing(env: WebCoreEnv, target: WebTarget, value: boolean): Promise<PatchOutcome> {
+  if ((await meterListingFlip(env.SCORE_KV, target.host)) === 'rate-limited') {
+    return { ok: false, reason: 'flip_rate_limited' };
+  }
+  const current = await cacheGet(env, await keyFor(target.canonical, SPEC_VERSION));
+  if (current === null) return { ok: false, reason: 'patch_failed' };
+  if (storedPublicListing(current) === value) return { ok: true, cached: current, written: false };
+  if (!(await patchStoredPublicListing(env, current, value))) return { ok: false, reason: 'patch_failed' };
   queueHitMinPurge([webTag()]);
   return {
     ok: true,
-    cached: { ...tier.cached, scorecard: scorecardWithPublicListing(tier.cached.scorecard, tier.write.value) },
+    cached: { ...current, scorecard: scorecardWithPublicListing(current.scorecard, value) },
+    written: true,
   };
 }
 
@@ -259,7 +265,7 @@ function checkEvent(result: EngineResult, siteHosts: readonly string[]): AuditEv
  * caller opted out of following, or one a declared domain's spent hourly
  * budget held back from replacing a saved scorecard, saves no scorecard,
  * rebuilds nothing, and ends on the transient envelope, though a held run
- * still writes the listing it resolved onto the saved scorecard; a
+ * still writes an explicit listing choice onto the saved scorecard; a
  * deadline-bound run yields `incomplete` and is never persisted; an
  * unreachable target or a thrown engine yields `error`.
  */
@@ -325,7 +331,7 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
         listing: input.listing,
       });
       const held = input.followDeclarations
-        ? await heldRun(env, site.target, site.scorecard, site.listing, refusals)
+        ? await heldRun(env, site.target, site.scorecard, input.explicitListing, refusals)
         : null;
       const transient: TransientReason | undefined = input.followDeclarations ? held?.reason : { kind: 'opt-out' };
       if (!transient) {

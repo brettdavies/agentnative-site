@@ -174,6 +174,10 @@ Every `POST /mcp` attempt emits **exactly one** PII-free JSON log line with `"ev
 
 No IP, slug, query text, or tool results appear in the log line. Use Cloudflare rate-limit analytics for IP triage.
 
+A `set_website_public_listing` call that changes a listing also writes one `scope: web-listing.change` record, described
+in the [web-audit operations runbook](./web-audit-operations.md#logging); it is a second line for that request, not part
+of the `mcp.request` line.
+
 ### Reading `response_format`
 
 The field records what went on the wire, not what the client asked for, so `response_format:sse` counts real streams and
@@ -268,7 +272,7 @@ export CF_ACCESS_CLIENT_SECRET=…
 scripts/release/mcp-smoke.sh https://agentnative-site-staging.brettdavies.workers.dev
 ```
 
-Expect **6/6** pass: server card `2026-07-28`, legacy initialize + 13 tools, modern list cache hints, modern
+Expect **6/6** pass: server card `2026-07-28`, legacy initialize + 14 tools, modern list cache hints, modern
 `get_scorecard` hit/miss.
 
 **Check 6 miss input (recorded 2026-08-26):** unknown registry slugs (`nope-not-a-tool`) are validator rejection

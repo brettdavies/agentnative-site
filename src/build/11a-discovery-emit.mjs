@@ -36,8 +36,10 @@ import {
   MCP_SERVER_CARD_SCHEMA_URL,
   MCP_SERVER_CARD_SEED_PATH,
   MCP_SERVER_CARD_TYPE,
+  MCP_SERVER_DESCRIPTION,
   MCP_SERVER_NAME,
   MCP_SERVER_VERSION,
+  mcpServerMetadata,
   SEP_1649_CARD_PATH,
   SEP_1649_CARD_SEED_PATH,
 } from '../shared/mcp-discovery';
@@ -46,8 +48,6 @@ import { canonicalBaseUrl, expiresInOneYearIso, resolveBaseUrl } from './util.mj
 const MCP_SPEC_VERSION = '2026-07-28';
 const MCP_CARD_VERSION = '1.0';
 const ANC_CONTACT = '97-boss-beetle@icloud.com';
-const MCP_DESCRIPTION = 'agent-native CLI standard registry: scorecards, principles, vendored spec';
-const MCP_TITLE = 'anc.dev agent-native CLI standard registry';
 
 // A card's name and its catalog identifier name the server, not the
 // deployment serving them, so both stay on the canonical host the way
@@ -57,14 +57,16 @@ const MCP_CARD_NAME = `${CANONICAL_HOST.split('.').reverse().join('.')}/${MCP_SE
 const MCP_CATALOG_IDENTIFIER = `urn:air:${CANONICAL_HOST}:mcp:${MCP_SERVER_NAME}`;
 
 function buildServerCard(baseUrl) {
+  const { title, description, websiteUrl, icons } = mcpServerMetadata(baseUrl);
   return `${JSON.stringify(
     {
       $schema: MCP_SERVER_CARD_SCHEMA_URL,
       name: MCP_CARD_NAME,
-      title: MCP_TITLE,
-      description: MCP_DESCRIPTION,
+      title,
+      description,
       version: MCP_SERVER_VERSION,
-      websiteUrl: `${baseUrl}/mcp-skill`,
+      websiteUrl,
+      icons,
       remotes: [{ type: 'streamable-http', url: `${baseUrl}/mcp` }],
     },
     null,
@@ -98,7 +100,7 @@ function buildMcpDescriptor(baseUrl) {
     {
       mcp_endpoint: `${baseUrl}/mcp`,
       version: MCP_CARD_VERSION,
-      description: MCP_DESCRIPTION,
+      description: MCP_SERVER_DESCRIPTION,
       documentation: `${baseUrl}/mcp-skill.md#server-cards`,
       serverInfo: {
         name: MCP_SERVER_NAME,

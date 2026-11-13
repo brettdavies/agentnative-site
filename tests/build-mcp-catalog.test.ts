@@ -278,7 +278,7 @@ describe('built dist artifacts', () => {
     } as McpEnv;
     const result = await mcpRpcExpect200(env, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
     const served = (result.result?.tools ?? []).map((t) => t.name);
-    expect(emitted.length).toBe(13);
+    expect(emitted.length).toBe(14);
     expect([...emitted].sort()).toEqual([...served].sort());
   });
 

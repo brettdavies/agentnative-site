@@ -476,7 +476,7 @@ test.describe('@render web audit — result-page context and WebMCP tools', () =
   // Tools that fill the entry form. They belong to the two entry pages and
   // must never reach a result page: a browser-origin audit path would sit
   // outside the Turnstile gate the form submit goes through.
-  const SUBMISSION_TOOLS = ['set_surface', 'fill_target', 'open_audit', 'audit_website'];
+  const SUBMISSION_TOOLS = ['set_surface', 'fill_target', 'open_audit', 'audit_website', 'set_website_public_listing'];
   // The browser tools answer within a DOMString cap that binds WebMCP only,
   // not the regular MCP server. WEBMCP_EXECUTE_MAX in
   // src/client/webmcp-lib.ts is the source of truth.

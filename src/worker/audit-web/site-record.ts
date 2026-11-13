@@ -50,22 +50,39 @@ function withListing(scorecard: WebScorecard, listing: boolean): WebScorecard {
 }
 
 /**
- * The record this audit writes. Reads at most the bare host's record, plus the
- * www host's when a folded write has no listing choice to take from the
- * caller or the bare host.
+ * The listing a save carries. An explicit choice is written as given. A blank
+ * save takes the listing stored on the record it replaces at the moment it
+ * writes, because a listing change can land while the audit runs; `fallback`
+ * applies when that record is missing or unreadable.
+ */
+async function replacedListing(
+  input: SiteRecordInput,
+  replaced: () => Promise<CachedWebAudit | null>,
+  fallback: boolean,
+): Promise<boolean> {
+  if (input.explicit !== undefined) return input.explicit;
+  return storedPublicListing(await replaced()) ?? fallback;
+}
+
+/**
+ * The record this audit writes. Reads the record it replaces, plus the bare
+ * host's when a pair is involved, and the www host's when a folded write has
+ * no listing choice to take from the caller or the bare host.
  */
 export async function planSiteRecord(env: WebCacheEnv, input: SiteRecordInput): Promise<SiteRecord> {
   const { target, requested, pair, scorecard } = input;
   const hosts = sitePairOf(requested.host);
-  const plain: SiteRecord = {
-    target,
-    scorecard,
-    listing: input.listing,
-    alsoPurge: [],
-    supersedes: null,
-    foldToDrop: null,
-  };
-  if (pair === null || hosts === null) return plain;
+  if (pair === null || hosts === null) {
+    const listing = await replacedListing(input, () => read(env, target), input.listing);
+    return {
+      target,
+      scorecard: withListing(scorecard, listing),
+      listing,
+      alsoPurge: [],
+      supersedes: null,
+      foldToDrop: null,
+    };
+  }
 
   const apex = targetOfHost(hosts.apex);
   const www = targetOfHost(hosts.www);
@@ -86,16 +103,21 @@ export async function planSiteRecord(env: WebCacheEnv, input: SiteRecordInput): 
   }
 
   if (pair.outcome === 'no-answer' && recorded) {
+    const listing = await replacedListing(input, async () => apexRecord, input.listing);
     const stamped: WebScorecard = {
-      ...scorecard,
+      ...withListing(scorecard, listing),
       tool: { name: apex.host, url: apex.canonical },
       site_hosts: [apex.host, www.host],
     };
-    return { ...plain, target: apex, scorecard: stamped };
+    return { target: apex, scorecard: stamped, listing, alsoPurge: [], supersedes: null, foldToDrop: null };
   }
 
   const other = requested.host === www.host ? apex : www;
-  const listing = requested.host === target.host ? input.listing : (input.explicit ?? false);
+  const listing = await replacedListing(
+    input,
+    async () => (requested.host === apex.host ? apexRecord : read(env, requested)),
+    requested.host === target.host ? input.listing : false,
+  );
   return {
     target: requested,
     scorecard: withListing(scorecard, listing),

@@ -904,13 +904,19 @@ describe("POST /api/score: a run a declared domain's spent hourly budget limited
     expect(res.status).toBe(200);
     await Promise.all(ctx._promises);
     return (await res.json()) as Record<string, unknown> & {
-      scorecard: { follow_declarations?: boolean; declared_hosts?: Array<Record<string, unknown>> };
+      scorecard: {
+        follow_declarations?: boolean;
+        public_listing?: boolean;
+        declared_hosts?: Array<Record<string, unknown>>;
+      };
     };
   }
 
   async function stored(env: ReturnType<typeof makeEnv>) {
     const object = await env.SCORE_CACHE.get(await KEY());
-    return (await object?.json()) as { scored_at: string; scorecard: { declared_hosts?: unknown[] } } | undefined;
+    return (await object?.json()) as
+      | { scored_at: string; scorecard: { public_listing?: boolean; declared_hosts?: unknown[] } }
+      | undefined;
   }
 
   // The stored object's bytes, to show a run left it untouched.
@@ -1048,6 +1054,33 @@ describe("POST /api/score: a run a declared domain's spent hourly budget limited
         scorecard: { ...saved.scorecard, public_listing: false },
       });
       expect(ctx.purged).toEqual([['web']]);
+    });
+
+    test('on a blank request is the listing stored when the run writes, not the one it resolved before', async () => {
+      const saved = listed();
+      const changed = { ...saved, scorecard: { ...saved.scorecard, public_listing: false } };
+      const env = await declaringEnv({ prior: saved, kvSeed: await spentBudget() });
+      const bucket = env.SCORE_CACHE;
+      const key = await KEY();
+      const get = bucket.get.bind(bucket);
+      const put = bucket.put.bind(bucket);
+      let reads = 0;
+      // The run reads the saved record to start, to plan its write, and to keep it;
+      // the listing changes before the third read.
+      bucket.get = (async (
+        k: string,
+        ...rest: Parameters<R2Bucket['get']> extends [string, ...infer R] ? R : never
+      ) => {
+        if (k === key && ++reads === 3) await put(key, JSON.stringify(changed));
+        return get(k, ...rest);
+      }) as R2Bucket['get'];
+      const body = await audit(env);
+      expect(reads).toBe(3);
+      expect({
+        envelope: body.scorecard.public_listing,
+        stored: (await stored(env))?.scorecard.public_listing,
+        scored_at: (await stored(env))?.scored_at,
+      }).toEqual({ envelope: false, stored: false, scored_at: changed.scored_at });
     });
 
     test('that the store refuses to write leaves the envelope reporting the listing still stored', async () => {
