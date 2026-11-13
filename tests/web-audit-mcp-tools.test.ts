@@ -744,6 +744,17 @@ describe('get_web_remediation (reshaped, U13)', () => {
     const body = jsonContent(await callTool(env, 'get_web_remediation', { check_id: 'nope' }));
     expect(body.found).toBe(false);
   });
+
+  test('a check id that names an inherited object property returns found:false', async () => {
+    for (const check_id of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
+      const env = await makeEnv();
+      const result = await callTool(env, 'get_web_remediation', { check_id });
+      expect((result.result as { isError?: boolean }).isError).not.toBe(true);
+      const body = jsonContent(result);
+      expect(body.found).toBe(false);
+      expect(body.message).toBe(`no remediation for check id: ${check_id}`);
+    }
+  });
 });
 
 describe('audit_website inline remediation (U13)', () => {

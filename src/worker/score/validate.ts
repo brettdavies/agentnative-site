@@ -112,7 +112,7 @@ export function validateInput(raw: string, registryIndex: RegistryIndexShape): V
 
   // Slug: regex AND in registry. A bare alphanumeric+hyphen string that
   // ISN'T in the registry falls through (unrecognized_input at the end).
-  if (SLUG_RE.test(trimmed) && trimmed in registryIndex.by_slug) {
+  if (SLUG_RE.test(trimmed) && Object.hasOwn(registryIndex.by_slug, trimmed)) {
     return { kind: 'slug', slug: trimmed };
   }
 

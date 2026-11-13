@@ -32,6 +32,7 @@ import { AUDIT_PATH } from '../shared/audit-routes';
 import {
   AI_CATALOG_PATH,
   MCP_DISCOVERY_DOCUMENTS,
+  MCP_SERVER_CAPABILITIES,
   MCP_SERVER_CARD_PATH,
   MCP_SERVER_CARD_SCHEMA_URL,
   MCP_SERVER_CARD_SEED_PATH,
@@ -112,11 +113,7 @@ function buildMcpDescriptor(baseUrl) {
         type: 'streamable-http',
         endpoint: `${baseUrl}/mcp`,
       },
-      capabilities: {
-        tools: { listChanged: false },
-        resources: { subscribe: false, listChanged: false },
-        prompts: { listChanged: false },
-      },
+      capabilities: MCP_SERVER_CAPABILITIES,
       authentication: {
         required: false,
         schemes: [],

@@ -4,6 +4,7 @@ import {
   deriveShareBinary,
   lookupRegistry,
   lookupScorecard,
+  resolveCuratedSlug,
   SHARE_URL_BINARY_RE,
 } from '../src/worker/score/registry-lookup';
 import type { ValidatedInput } from '../src/worker/score/validate';
@@ -92,6 +93,17 @@ describe('lookupRegistry', () => {
       expect(r.entry.name).toBe('ripgrep');
       expect(r.entry.binary).toBe('rg'); // curated entry's actual binary, not the parser's binary
     }
+  });
+
+  test('a slug or install-command binary naming an inherited object property → miss', () => {
+    const slug: ValidatedInput = { kind: 'slug', slug: 'constructor' };
+    expect(lookupRegistry(slug, REGISTRY, HINTS).kind).toBe('miss');
+    const install: ValidatedInput = {
+      kind: 'install-command',
+      spec: { pm: 'brew', package: 'constructor', binary: 'constructor' },
+    };
+    expect(lookupRegistry(install, REGISTRY, HINTS).kind).toBe('miss');
+    expect(resolveCuratedSlug('constructor', REGISTRY)).toBeNull();
   });
 
   test('install-command with non-curated binary → miss (live path)', () => {

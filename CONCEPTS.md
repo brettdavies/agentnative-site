@@ -364,8 +364,9 @@ rests on.
 The era path for clients that skip the handshake and address the server directly, carrying the protocol revision in an
 `MCP-Protocol-Version` header, the operation in `Mcp-Method`, and client capabilities in `_meta` inside JSON-RPC params.
 Two behaviors exist only here: a rate-limit key narrows to the named tool when `Mcp-Name` identifies a registered one,
-and list and read results carry the server's cache hints (`ttlMs`, `cacheScope`). This is the lane the site's declared
-spec revision describes.
+and list and read results carry the server's cache hints (`ttlMs`, `cacheScope`). Nothing publishes a list change, so list
+freshness rides the hints: five minutes for the three list methods, one hour for resource reads. This is the lane the
+site's declared spec revision describes.
 
 ### MCP server card
 
@@ -377,8 +378,9 @@ finds it without guessing. It describes identity and connection only; the server
 runtime listing. The card validates against the vendored extension schema. Its version matches the `serverInfo` the
 endpoint reports, and its name is that server name under the reverse-DNS namespace of the canonical host (`dev.anc/anc`
 for `serverInfo.name` `anc`). The SEP-1649 card at `/.well-known/mcp/server-card.json` is superseded by it and is still
-served, carrying the protocol revision, the transport, and the no-authentication declaration; the legacy alias paths
-permanently redirect to that path.
+served, carrying the protocol revision, the transport, the no-authentication declaration, and the capabilities object
+the handshake reports on both lanes (no list-change notifications, no prompts); the legacy alias paths permanently
+redirect to that path.
 
 ### Discovery surface
 

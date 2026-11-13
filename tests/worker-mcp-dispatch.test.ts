@@ -13,6 +13,7 @@
 // dist/_internal/mcp-catalog.json on disk.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { MCP_SERVER_CAPABILITIES } from '../src/shared/mcp-discovery';
 import { detectMcpFormat } from '../src/worker/accept';
 import worker, { type Env } from '../src/worker/index';
 import { extractTransportErrorCode } from '../src/worker/mcp/telemetry';
@@ -88,11 +89,7 @@ const FIXTURE_WELL_KNOWN_MCP = JSON.stringify({
   protocolVersion: '2026-07-28',
   url: 'https://anc.dev/mcp',
   transport: { type: 'streamable-http', endpoint: 'https://anc.dev/mcp' },
-  capabilities: {
-    tools: { listChanged: false },
-    resources: { subscribe: false, listChanged: false },
-    prompts: { listChanged: false },
-  },
+  capabilities: MCP_SERVER_CAPABILITIES,
   authentication: { required: false, schemes: [], documentation: 'https://anc.dev/auth.md' },
 });
 
@@ -610,6 +607,25 @@ describe('POST /mcp — mcp.request telemetry fires after the gate decision', ()
     expect(payload.outcome).toBe('rate_limited');
     expect(payload.error_code).toBe(-32099);
   });
+
+  test('the rate_limited line names the method and tool the request carries', async () => {
+    const cases: Array<{ body: object; method: string; name: string | null }> = [
+      { body: initBody(), method: 'initialize', name: null },
+      { body: { jsonrpc: '2.0', id: 2, method: 'tools/list' }, method: 'tools/list', name: null },
+      {
+        body: { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'get_scorecard', arguments: {} } },
+        method: 'tools/call',
+        name: 'get_scorecard',
+      },
+    ];
+    for (const { body, method, name } of cases) {
+      const limiter: RateStub = { calls: 0, shouldSucceed: false };
+      const env = makeEnv({ limiter });
+      const { lines } = await captureMcpRequestLogs(() => postMcp(env, 'application/json', body));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatchObject({ era: 'legacy', outcome: 'rate_limited', method, name });
+    }
+  });
 });
 
 describe('POST /mcp — response_format records the served format', () => {
@@ -716,7 +732,7 @@ describe('POST /mcp — subscriptions/listen', () => {
     return { jsonrpc: '2.0', id: 'listen:1', method: 'subscriptions/listen', params: { ...params, ...MODERN_META } };
   }
 
-  // The stream stays open, so a dispatch that reads it to the end never
+  // A dispatch or a read that waits on a stream the server holds open never
   // settles. The race turns that hang into a failure with a readable message.
   function settlesPromptly<T>(pending: Promise<T>): Promise<T> {
     return Promise.race([
@@ -728,7 +744,7 @@ describe('POST /mcp — subscriptions/listen', () => {
   }
 
   for (const accept of ['application/json, text/event-stream', 'text/event-stream']) {
-    test(`Accept: ${accept} gets the open stream and its acknowledgement`, async () => {
+    test(`Accept: ${accept} gets an empty acknowledgement and a stream that ends`, async () => {
       const env = makeEnv();
       const { result: res, lines } = await captureMcpRequestLogs(() =>
         settlesPromptly(
@@ -744,12 +760,19 @@ describe('POST /mcp — subscriptions/listen', () => {
       expect(res.headers.get('access-control-allow-origin')).toBeNull();
 
       const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+      const decoder = new TextDecoder();
+      let streamed = '';
       try {
-        const { value } = await settlesPromptly(reader.read());
-        expect(new TextDecoder().decode(value)).toContain('notifications/subscriptions/acknowledged');
+        for (;;) {
+          const { value, done } = await settlesPromptly(reader.read());
+          if (done) break;
+          streamed += decoder.decode(value, { stream: true });
+        }
       } finally {
         await reader.cancel();
       }
+      expect(streamed).toContain('notifications/subscriptions/acknowledged');
+      expect(streamed).toContain('"notifications":{}');
 
       expect(lines).toHaveLength(1);
       expect(lines[0]).toMatchObject({

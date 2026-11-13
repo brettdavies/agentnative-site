@@ -219,7 +219,7 @@ test.describe('staging /mcp — modern era (2026-07-28)', () => {
     const body = (await res.json()) as JsonRpcBody;
     expect(body.error).toBeUndefined();
     expect((body.result?.tools ?? []).length).toBe(EXPECTED_TOOL_COUNT);
-    expect(body.result?.ttlMs).toBe(3_600_000);
+    expect(body.result?.ttlMs).toBe(300_000);
     expect(body.result?.cacheScope).toBe('public');
   });
 

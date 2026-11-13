@@ -32,6 +32,7 @@ import { absolutifyMarkdownLinks } from './util.mjs';
  * @param {Array<{n: number, slug: string, title: string, source: string}>} args.principles
  * @param {Array<{name: string, source: string, title: string}>} args.subPageData
  * @param {Array<object>} args.leaderboard         — per-tool entries; .tool.name is the canonical slug
+ * @param {Array<{domain: string, name: string}>} args.webSeedEntries — the curated website seed
  * @param {string} args.coverageMarkdown            — pre-built coverage page body
  * @param {object} args.skillData                   — manifest object; .name embedded in the section heading
  * @param {string} args.skillMarkdown               — pre-built skill page body
@@ -48,6 +49,16 @@ export function scorecardTwinLinks(leaderboard) {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * Each curated website's markdown twin, in seed order and named by its domain,
+ * so no link text repeats one in the CLI list (a display label can: "anc").
+ * @param {Array<{domain: string}>} entries
+ * @returns {Array<{name: string, path: string}>}
+ */
+export function websiteScorecardLinks(entries) {
+  return entries.map((e) => ({ name: e.domain, path: scoreMarkdownPath(e.domain) }));
+}
+
 export async function emitLlmsSurface({
   distDir,
   introTitle,
@@ -58,6 +69,7 @@ export async function emitLlmsSurface({
   principles,
   subPageData,
   leaderboard,
+  webSeedEntries,
   coverageMarkdown,
   skillData,
   skillMarkdown,
@@ -81,6 +93,7 @@ export async function emitLlmsSurface({
       { name: 'Coverage Matrix', path: '/coverage.md' },
       ...scorecardTwinLinks(leaderboard),
     ],
+    websiteScorecardLinks: websiteScorecardLinks(webSeedEntries),
     skillLinks: [
       { name: 'Skill (HTML)', path: '/skill.md' },
       { name: 'Skill (canonical JSON)', path: '/skill.json' },

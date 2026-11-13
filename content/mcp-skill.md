@@ -78,17 +78,18 @@ so the tool result and the page you follow it to cannot disagree.
   "scorecard_url": "https://anc.dev/score/ripgrep",
   "markdown_url": "https://anc.dev/score/ripgrep/md",
   "json_url": "https://anc.dev/score/ripgrep/json",
-  "freshness": { "cached": true, "scored_at": null, "refresh_after": null },
-  "spec_version": "2026.05",
+  "freshness": { "cached": true, "scored_at": "2026-10-28T15:52:55.243773537Z", "refresh_after": null },
+  "spec_version": "0.6.0",
   "scorecard": { "...": "..." },
-  "score_pct": 87,
-  "anc_version": "0.7.2"
+  "score_pct": 78,
+  "anc_version": "0.7.0"
 }
 ```
 
 Use `tier` as your cost signal: `registry` means curated and committed, `cache` means a prior audit cached the result,
 and `live` means this call produced it. A curated result carries no `refresh_after`: it changes when the registry does,
-not on a clock.
+not on a clock. Its `scored_at` is when the committed scorecard was taken, and its `spec_version` is the spec that
+scorecard was scored against, which can trail the version the server declares.
 
 ### "Is this binary in the live-score cache?"
 
@@ -107,7 +108,7 @@ audited says so; a miss returns a typed redirect. None of the three is an error.
   "markdown_url": "https://anc.dev/score/cowsay/md",
   "json_url": "https://anc.dev/score/cowsay/json",
   "freshness": { "cached": true, "scored_at": "2026-09-14T18:02:11.000Z", "refresh_after": "2026-09-21T18:02:11.000Z" },
-  "spec_version": "2026.05",
+  "spec_version": "0.7.0",
   "scorecard": { "...": "..." },
   "anc_version": "0.7.2"
 }
@@ -124,7 +125,7 @@ audited says so; a miss returns a typed redirect. None of the three is an error.
 {
   "found": false,
   "next_tool": "score_cli",
-  "spec_version": "2026.05",
+  "spec_version": "0.7.0",
   "message": "no cached scorecard for this input. Call score_cli with the same arguments to run a fresh audit (subject to the audit rate limit and the operator-controlled live-scoring kill switch)."
 }
 ```
@@ -152,7 +153,7 @@ container run, no cost). On a true cache miss it runs a metered audit and return
   "markdown_url": "https://anc.dev/score/some-new-cli/md",
   "json_url": "https://anc.dev/score/some-new-cli/json",
   "freshness": { "cached": true, "scored_at": "2026-09-14T18:02:11.000Z", "refresh_after": "2026-09-21T18:02:11.000Z" },
-  "spec_version": "2026.05",
+  "spec_version": "0.7.0",
   "scorecard": { "...": "..." },
   "message": "a cached live-score result already exists; call get_scorecard for the inline record."
 }
@@ -168,7 +169,7 @@ container run, no cost). On a true cache miss it runs a metered audit and return
   "markdown_url": "https://anc.dev/score/some-new-cli/md",
   "json_url": "https://anc.dev/score/some-new-cli/json",
   "freshness": { "cached": false, "scored_at": "2026-09-14T18:09:02.000Z", "refresh_after": "2026-09-21T18:09:02.000Z" },
-  "spec_version": "2026.05",
+  "spec_version": "0.7.0",
   "scorecard": { "...": "..." },
   "anc_version": "0.7.2"
 }
@@ -393,7 +394,7 @@ look up exactly which requirement a finding maps to.
 
 // tools/call list_spec_sections
 {
-  "spec_version": "2026.05",
+  "spec_version": "0.7.0",
   "sections": [
     { "slug": "readme", "title": "README", "level": 1, "parent_slug": null },
     { "slug": "p1-non-interactive-by-default", "title": "Non-interactive by default", "level": 2, "parent_slug": "principles" },
@@ -407,7 +408,7 @@ look up exactly which requirement a finding maps to.
   "section": {
     "slug": "scoring", "title": "Scoring",
     "body_markdown": "...",
-    "spec_version": "2026.05"
+    "spec_version": "0.7.0"
   }
 }
 ```
@@ -536,8 +537,12 @@ resolve unequal preferences. Absent or `*/*` Accept → JSON. Only a request tha
 | `application/json;q=0.5, text/event-stream;q=0.9` | `text/event-stream` (higher q-value wins) |
 | any value with neither type acceptable            | `406 Not Acceptable` (plain text)         |
 
-`subscriptions/listen` is the exception: it always answers `text/event-stream`, whatever the `Accept` value, with a
-stream that stays open and carries keep-alives until the client closes it. The table applies to every other method.
+A `subscriptions/listen` with a valid `notifications` filter is the exception: it answers `text/event-stream`, whatever
+the `Accept` value, and without a valid filter it answers a `-32602` error as JSON. The server declares
+`listChanged: false` for tools and resources and never publishes a list change, so the stream carries an empty
+acknowledgement and ends. A client learns of a changed list from its next list call: on the modern lane, `tools/list`,
+`resources/list`, and `resources/templates/list` carry `ttlMs: 300000`, and `resources/read` carries `ttlMs: 3600000`.
+The table applies to every other method.
 
 **Discovery siblings.**
 

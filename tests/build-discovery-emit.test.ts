@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import Ajv2020 from 'ajv/dist/2020';
 import addFormats from 'ajv-formats';
 import { emitAgentReadiness, emitDiscovery } from '../src/build/11a-discovery-emit.mjs';
+import { loadWebSeed } from '../src/build/14-web-scorecards-emit.mjs';
 import { readCardSchema } from '../src/build/web-audit-card-schema.mjs';
 import { distAssetsEnv } from './helpers/dist';
 import { mcpInitialize, resetMcpTestState } from './helpers/mcp-rpc';
@@ -97,11 +98,7 @@ describe('MCP server card seed (built dist/)', () => {
       protocolVersion: string;
       url: string;
       transport: { type: string; endpoint: string };
-      capabilities: {
-        tools: { listChanged: boolean };
-        resources: { subscribe: boolean; listChanged: boolean };
-        prompts: { listChanged: boolean };
-      };
+      capabilities: Record<string, unknown>;
       authentication: { required: boolean; schemes: string[]; documentation: string };
     };
     expect(parsed).not.toHaveProperty('$schema');
@@ -111,8 +108,10 @@ describe('MCP server card seed (built dist/)', () => {
     expect(parsed.transport.type).toBe('streamable-http');
     expect(parsed.transport.endpoint).toBe('https://anc.dev/mcp');
     expect(parsed.url).toBe('https://anc.dev/mcp');
-    expect(parsed.capabilities.tools.listChanged).toBe(false);
-    expect(parsed.capabilities.resources.subscribe).toBe(false);
+    expect(parsed.capabilities).toEqual({
+      tools: { listChanged: false },
+      resources: { subscribe: false, listChanged: false },
+    });
     expect(parsed.authentication.required).toBe(false);
     expect(parsed.authentication.schemes).toEqual([]);
     expect(parsed.authentication.documentation).toBe('https://anc.dev/auth.md');
@@ -268,6 +267,36 @@ describe('emitDiscovery() in isolation', () => {
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+describe('llms.txt Website scorecards section (built dist/)', () => {
+  test('lists every curated website once, as a markdown twin link, in seed order', async () => {
+    const llms = await readFile(join(DIST_DIR, 'llms.txt'), 'utf8');
+    const seed = await loadWebSeed(join(REPO_ROOT, 'src', 'data', 'web-audit', 'seed.yaml'));
+    const start = llms.indexOf('\n## Website scorecards\n');
+    expect(start).toBeGreaterThan(llms.indexOf('\n## Scorecards\n'));
+    const links = llms
+      .slice(start)
+      .split('\n')
+      .filter((line) => line.startsWith('- ['));
+    expect(links).toEqual(seed.entries.map((e) => `- [${e.domain}](https://anc.dev/score/${e.domain}/md)`));
+  });
+
+  test('no two scorecard links share their text across the CLI and website sections', async () => {
+    const llms = await readFile(join(DIST_DIR, 'llms.txt'), 'utf8');
+    const section = llms.slice(llms.indexOf('\n## Scorecards\n'));
+    const texts = [...section.matchAll(/^- \[([^\]]+)\]\(/gm)].map((match) => match[1]);
+    expect(texts.length).toBeGreaterThan(1);
+    expect(texts.filter((text, i) => texts.indexOf(text) !== i)).toEqual([]);
+  });
+
+  test('keeps the CLI list free of website hosts', async () => {
+    const llms = await readFile(join(DIST_DIR, 'llms.txt'), 'utf8');
+    const seed = await loadWebSeed(join(REPO_ROOT, 'src', 'data', 'web-audit', 'seed.yaml'));
+    const cli = llms.slice(llms.indexOf('\n## Scorecards\n'), llms.indexOf('\n## Website scorecards\n'));
+    expect(cli).toContain('https://anc.dev/score/ripgrep/md');
+    for (const entry of seed.entries) expect(cli).not.toContain(`/score/${entry.domain}/`);
   });
 });
 

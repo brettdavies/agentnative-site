@@ -68,6 +68,12 @@ describe('POST /api/score: request contract', () => {
     expect(error.cta.length).toBeGreaterThan(0);
   });
 
+  test('a target named like an inherited object property is refused as unrecognized input', async () => {
+    const { res } = await call(post({ target: 'constructor', turnstile_token: 'x' }), makeEnv());
+    expect(res.status).toBe(400);
+    expect((await errorOf(res)).code).toBe('unrecognized_input');
+  });
+
   test('the body names its subject with target; the retired input key is not a target', async () => {
     const viaTarget = await call(post({ target: 'ripgrep', turnstile_token: 'x' }), makeEnv());
     expect(viaTarget.res.status).toBe(200);

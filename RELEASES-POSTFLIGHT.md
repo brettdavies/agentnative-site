@@ -271,7 +271,7 @@ binary without bypass (asserts `source=live-cache`). Both paths must produce the
     -d "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/list\",\"params\":{${META}}}" \
     https://anc.dev/mcp \
     | jq '{count: (.result.tools | length), ttlMs: .result.ttlMs, cacheScope: .result.cacheScope}'
-  # expect: count: 14, ttlMs: 3600000, cacheScope: "public"
+  # expect: count: 14, ttlMs: 300000, cacheScope: "public"
   ```
 
   A 503 / kill-switch envelope means the production `MCP_ENABLED` secret is unset or not `"true"`. Fix it with
