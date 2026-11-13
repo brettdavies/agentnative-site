@@ -79,16 +79,17 @@ so the tool result and the page you follow it to cannot disagree.
   "markdown_url": "https://anc.dev/score/ripgrep/md",
   "json_url": "https://anc.dev/score/ripgrep/json",
   "freshness": { "cached": true, "scored_at": "2026-10-28T15:52:55.243773537Z", "refresh_after": null },
-  "spec_version": "0.7.0",
+  "spec_version": "0.6.0",
   "scorecard": { "...": "..." },
-  "score_pct": 87,
-  "anc_version": "0.7.2"
+  "score_pct": 78,
+  "anc_version": "0.7.0"
 }
 ```
 
 Use `tier` as your cost signal: `registry` means curated and committed, `cache` means a prior audit cached the result,
 and `live` means this call produced it. A curated result carries no `refresh_after`: it changes when the registry does,
-not on a clock. Its `scored_at` is when the committed scorecard was taken.
+not on a clock. Its `scored_at` is when the committed scorecard was taken, and its `spec_version` is the spec that
+scorecard was scored against, which can trail the version the server declares.
 
 ### "Is this binary in the live-score cache?"
 
