@@ -184,7 +184,9 @@ export type RegistryEnvelopeInput = {
  * score beside an attached scorecard is that scorecard's own, so the
  * headline number and `scorecard.badge.score_pct` cannot disagree inside
  * one envelope; the entry's score stands in only when no scorecard is
- * attached.
+ * attached. `scored_at` is that scorecard's run start, and `refresh_after`
+ * stays null because a curated result changes with the registry, not on a
+ * clock.
  */
 export function buildRegistryEnvelope(input: RegistryEnvelopeInput): AuditEnvelope {
   const { entry, origin } = input;
@@ -193,7 +195,7 @@ export function buildRegistryEnvelope(input: RegistryEnvelopeInput): AuditEnvelo
     tier: 'registry',
     target: entry.name,
     ...urlsFor(origin, entry.name),
-    freshness: freshnessFor('cli', true, null),
+    freshness: { cached: true, scored_at: cliScoredAt({ scorecard: input.scorecard }), refresh_after: null },
     spec_version: input.specVersion,
     scorecard: input.scorecard ?? null,
   };

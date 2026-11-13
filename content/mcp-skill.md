@@ -78,8 +78,8 @@ so the tool result and the page you follow it to cannot disagree.
   "scorecard_url": "https://anc.dev/score/ripgrep",
   "markdown_url": "https://anc.dev/score/ripgrep/md",
   "json_url": "https://anc.dev/score/ripgrep/json",
-  "freshness": { "cached": true, "scored_at": null, "refresh_after": null },
-  "spec_version": "2026.05",
+  "freshness": { "cached": true, "scored_at": "2026-10-28T15:52:55.243773537Z", "refresh_after": null },
+  "spec_version": "0.7.0",
   "scorecard": { "...": "..." },
   "score_pct": 87,
   "anc_version": "0.7.2"
@@ -88,7 +88,7 @@ so the tool result and the page you follow it to cannot disagree.
 
 Use `tier` as your cost signal: `registry` means curated and committed, `cache` means a prior audit cached the result,
 and `live` means this call produced it. A curated result carries no `refresh_after`: it changes when the registry does,
-not on a clock.
+not on a clock. Its `scored_at` is when the committed scorecard was taken.
 
 ### "Is this binary in the live-score cache?"
 
@@ -107,7 +107,7 @@ audited says so; a miss returns a typed redirect. None of the three is an error.
   "markdown_url": "https://anc.dev/score/cowsay/md",
   "json_url": "https://anc.dev/score/cowsay/json",
   "freshness": { "cached": true, "scored_at": "2026-09-14T18:02:11.000Z", "refresh_after": "2026-09-21T18:02:11.000Z" },
-  "spec_version": "2026.05",
+  "spec_version": "0.7.0",
   "scorecard": { "...": "..." },
   "anc_version": "0.7.2"
 }
@@ -124,7 +124,7 @@ audited says so; a miss returns a typed redirect. None of the three is an error.
 {
   "found": false,
   "next_tool": "score_cli",
-  "spec_version": "2026.05",
+  "spec_version": "0.7.0",
   "message": "no cached scorecard for this input. Call score_cli with the same arguments to run a fresh audit (subject to the audit rate limit and the operator-controlled live-scoring kill switch)."
 }
 ```
@@ -152,7 +152,7 @@ container run, no cost). On a true cache miss it runs a metered audit and return
   "markdown_url": "https://anc.dev/score/some-new-cli/md",
   "json_url": "https://anc.dev/score/some-new-cli/json",
   "freshness": { "cached": true, "scored_at": "2026-09-14T18:02:11.000Z", "refresh_after": "2026-09-21T18:02:11.000Z" },
-  "spec_version": "2026.05",
+  "spec_version": "0.7.0",
   "scorecard": { "...": "..." },
   "message": "a cached live-score result already exists; call get_scorecard for the inline record."
 }
@@ -168,7 +168,7 @@ container run, no cost). On a true cache miss it runs a metered audit and return
   "markdown_url": "https://anc.dev/score/some-new-cli/md",
   "json_url": "https://anc.dev/score/some-new-cli/json",
   "freshness": { "cached": false, "scored_at": "2026-09-14T18:09:02.000Z", "refresh_after": "2026-09-21T18:09:02.000Z" },
-  "spec_version": "2026.05",
+  "spec_version": "0.7.0",
   "scorecard": { "...": "..." },
   "anc_version": "0.7.2"
 }
@@ -393,7 +393,7 @@ look up exactly which requirement a finding maps to.
 
 // tools/call list_spec_sections
 {
-  "spec_version": "2026.05",
+  "spec_version": "0.7.0",
   "sections": [
     { "slug": "readme", "title": "README", "level": 1, "parent_slug": null },
     { "slug": "p1-non-interactive-by-default", "title": "Non-interactive by default", "level": 2, "parent_slug": "principles" },
@@ -407,7 +407,7 @@ look up exactly which requirement a finding maps to.
   "section": {
     "slug": "scoring", "title": "Scoring",
     "body_markdown": "...",
-    "spec_version": "2026.05"
+    "spec_version": "0.7.0"
   }
 }
 ```

@@ -344,6 +344,24 @@ describe('review fixtures: envelope composition', () => {
     expect(curated).toMatchObject({ score_pct: 92, anc_version: '0.4.9', tool_version: '14.0.0' });
   });
 
+  test('a curated envelope takes scored_at from the attached scorecard run start and advertises no refresh', () => {
+    const entry = registry.by_slug.ripgrep;
+    const attached = buildRegistryEnvelope({
+      entry,
+      origin: ORIGIN,
+      specVersion: SPEC_VERSION,
+      scorecard: cliScorecard('rg'),
+    });
+    expect(attached.freshness).toEqual({ cached: true, scored_at: SCORED_AT, refresh_after: null });
+    const unstamped = buildRegistryEnvelope({
+      entry,
+      origin: ORIGIN,
+      specVersion: SPEC_VERSION,
+      scorecard: { badge: { score_pct: 80 } },
+    });
+    expect(unstamped.freshness).toEqual({ cached: true, scored_at: null, refresh_after: null });
+  });
+
   test('input resolution and result classification order the slug and binary checks differently', () => {
     // resolveCuratedSlug reads user text, where a slug names its tool;
     // the envelope reads a resolved binary, where a slug it did not earn is a shadow.

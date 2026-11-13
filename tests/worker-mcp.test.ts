@@ -617,6 +617,49 @@ describe('MCP score_cli kill switch (real implementation lands in U5a)', () => {
   });
 });
 
+describe('MCP get_scorecard on a curated slug', () => {
+  test('freshness.scored_at is the attached scorecard run start and refresh_after is null', async () => {
+    const env = makeEnv();
+    const assets = env.ASSETS;
+    const startedAt = '2026-10-28T15:52:55.243773537Z';
+    env.ASSETS = {
+      async fetch(req: Request) {
+        if (new URL(req.url).pathname === '/score/ripgrep.json') {
+          const baked = {
+            spec_version: SPEC_VERSION,
+            scorecard: { badge: { score_pct: 85 }, run: { started_at: startedAt } },
+          };
+          return new Response(JSON.stringify(baked), { status: 200 });
+        }
+        return assets.fetch(req);
+      },
+    } as unknown as Fetcher;
+    await initialize(env);
+    const result = await rpc(env, {
+      jsonrpc: '2.0',
+      id: 32,
+      method: 'tools/call',
+      params: { name: 'get_scorecard', arguments: { slug: 'ripgrep' } },
+    });
+    const body = getJsonContent(result) as { tier: string; freshness: unknown };
+    expect(body.tier).toBe('registry');
+    expect(body.freshness).toEqual({ cached: true, scored_at: startedAt, refresh_after: null });
+  });
+
+  test('a registry entry with no scorecard asset keeps scored_at null', async () => {
+    const env = makeEnv();
+    await initialize(env);
+    const result = await rpc(env, {
+      jsonrpc: '2.0',
+      id: 33,
+      method: 'tools/call',
+      params: { name: 'get_scorecard', arguments: { slug: 'ripgrep' } },
+    });
+    const body = getJsonContent(result) as { freshness: unknown };
+    expect(body.freshness).toEqual({ cached: true, scored_at: null, refresh_after: null });
+  });
+});
+
 describe("MCP lookups by key read only the table's own keys", () => {
   test('get_scorecard with a slug that names an inherited object property is refused as unrecognized input', async () => {
     const env = makeEnv();

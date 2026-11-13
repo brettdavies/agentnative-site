@@ -70,6 +70,7 @@ const CURATED_SCORECARD = {
   spec_version: SPEC_VERSION,
   tool: { name: 'ripgrep', binary: 'rg', version: '15.1.0' },
   badge: { score_pct: 92, eligible: true, embed_markdown: '![badge](/badge/ripgrep.svg)' },
+  run: { started_at: '2026-10-28T15:52:55.243773537Z' },
   results: [],
 };
 const CURATED_HTML = `<!doctype html><html><head><title>ripgrep</title>
@@ -302,6 +303,7 @@ describe('curated slugs (registry first)', () => {
     expect(body).toMatchObject({ kind: 'cli', tier: 'registry', target: 'ripgrep', score_pct: 92 });
     expect(body.scorecard_url).toBe(`${ORIGIN}${scorePath('ripgrep')}`);
     expect(body.json_url).toBe(`${ORIGIN}${scoreJsonPath('ripgrep')}`);
+    expect(body.freshness).toEqual({ cached: true, scored_at: '2026-10-28T15:52:55.243773537Z', refresh_after: null });
     expect(env._r2Gets).toEqual([]);
     for (const [path, target] of [
       ['/score/rg/json', '/score/ripgrep/json'],
