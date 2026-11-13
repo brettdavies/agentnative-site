@@ -3454,13 +3454,14 @@ describe('llms.txt scorecard links', () => {
     ]);
   });
 
-  test('each curated website links its markdown twin, in seed order, named by its seed label', () => {
-    const links = websiteScorecardLinks([
+  test('each curated website links its markdown twin, in seed order, named by its domain', () => {
+    const seedEntries = [
       { domain: 'zeta.dev', name: 'Zeta' },
       { domain: 'alpha.dev', name: 'alpha.dev' },
-    ]);
+    ];
+    const links = websiteScorecardLinks(seedEntries);
     expect(links).toEqual([
-      { name: 'Zeta', path: '/score/zeta.dev/md' },
+      { name: 'zeta.dev', path: '/score/zeta.dev/md' },
       { name: 'alpha.dev', path: '/score/alpha.dev/md' },
     ]);
   });

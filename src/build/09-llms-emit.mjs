@@ -50,13 +50,13 @@ export function scorecardTwinLinks(leaderboard) {
 }
 
 /**
- * Each curated website's markdown twin, in seed order and named by the seed's
- * display label.
- * @param {Array<{domain: string, name: string}>} entries
+ * Each curated website's markdown twin, in seed order and named by its domain,
+ * so no link text repeats one in the CLI list (a display label can: "anc").
+ * @param {Array<{domain: string}>} entries
  * @returns {Array<{name: string, path: string}>}
  */
 export function websiteScorecardLinks(entries) {
-  return entries.map((e) => ({ name: e.name, path: scoreMarkdownPath(e.domain) }));
+  return entries.map((e) => ({ name: e.domain, path: scoreMarkdownPath(e.domain) }));
 }
 
 export async function emitLlmsSurface({

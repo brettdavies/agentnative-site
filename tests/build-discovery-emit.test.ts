@@ -280,7 +280,15 @@ describe('llms.txt Website scorecards section (built dist/)', () => {
       .slice(start)
       .split('\n')
       .filter((line) => line.startsWith('- ['));
-    expect(links).toEqual(seed.entries.map((e) => `- [${e.name}](https://anc.dev/score/${e.domain}/md)`));
+    expect(links).toEqual(seed.entries.map((e) => `- [${e.domain}](https://anc.dev/score/${e.domain}/md)`));
+  });
+
+  test('no two scorecard links share their text across the CLI and website sections', async () => {
+    const llms = await readFile(join(DIST_DIR, 'llms.txt'), 'utf8');
+    const section = llms.slice(llms.indexOf('\n## Scorecards\n'));
+    const texts = [...section.matchAll(/^- \[([^\]]+)\]\(/gm)].map((match) => match[1]);
+    expect(texts.length).toBeGreaterThan(1);
+    expect(texts.filter((text, i) => texts.indexOf(text) !== i)).toEqual([]);
   });
 
   test('keeps the CLI list free of website hosts', async () => {
