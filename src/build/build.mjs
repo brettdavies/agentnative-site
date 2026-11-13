@@ -1,7 +1,8 @@
 // Orchestrator — turn content/ into dist/.
 //
 // Pipeline:
-//   0. Regenerate src/worker/spec-version.gen.ts from VERSION files.
+//   0. Regenerate src/worker/spec-version.gen.ts from VERSION files and
+//      src/shared/principle-names.gen.mjs from the principle page titles.
 //   1. Copy static assets + bundle client JS (→ css/, fonts/, js/,
 //      og-image.png, robots.txt).
 //   2. sortedGlob principle files in numeric order.
@@ -177,6 +178,8 @@ export async function build() {
   // verbatim into the bundle even when the VERSION files have advanced. The
   // drift test (tests/spec-version-gen.test.ts) is the second guardrail.
   await generateSpecVersionModule();
+  // The renderers imported principle-names.gen.mjs before this line, so a stale
+  // copy stops the build here instead of rendering the old names.
   await generatePrincipleNamesModule();
 
   // 1. Copy static assets + bundle client JS. themeInit inlined into every shell.

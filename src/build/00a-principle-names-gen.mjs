@@ -5,10 +5,12 @@
 // principle page it links to name the principle the same way. The emitted
 // module is committed so the Worker bundle and the type check need no build
 // step; tests/principle-names-gen.test.ts re-reads the titles in memory and
-// fails when a title changes and the module does not.
+// fails when a title changes and the module does not. The build stops when it
+// had to rewrite the module, because the modules it already imported hold the
+// old names.
 
 import { readdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
@@ -60,10 +62,22 @@ ${rows}
 `;
 }
 
-export async function generatePrincipleNamesModule() {
-  const content = renderPrincipleNamesModule(await readPrincipleNames());
-  await writeFile(GEN_PATH, content);
-  return { content, path: GEN_PATH };
+/**
+ * Writes the module from the principle page titles. Throws after writing when
+ * the file on disk differed: the scorecard renderers import it before this
+ * runs, so that run would render the old names.
+ */
+export async function generatePrincipleNamesModule({ principlesDir = PRINCIPLES_DIR, genPath = GEN_PATH } = {}) {
+  const content = renderPrincipleNamesModule(await readPrincipleNames(principlesDir));
+  const onDisk = await readFile(genPath, 'utf8').catch(() => null);
+  await writeFile(genPath, content);
+  if (onDisk !== content) {
+    throw new Error(
+      `principle-names-gen: ${relative(REPO_ROOT, genPath)} was out of date and has been rewritten from the principle page titles; ` +
+        'run the build again and commit the file',
+    );
+  }
+  return { content, path: genPath };
 }
 
 export async function computeExpectedPrincipleNamesModule(dir = PRINCIPLES_DIR) {

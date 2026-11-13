@@ -4,6 +4,8 @@
 // H1 of its page under content/principles/. The generated module is committed
 // so the Worker bundle and the type check need no build step; this test
 // re-reads the titles and fails when a title changes and the module does not.
+// The build runs the same generator and stops when it had to rewrite the
+// module, because the modules it already imported hold the old names.
 
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -11,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   computeExpectedPrincipleNamesModule,
+  generatePrincipleNamesModule,
   readPrincipleNames,
   renderPrincipleNamesModule,
 } from '../src/build/00a-principle-names-gen.mjs';
@@ -49,6 +52,20 @@ describe('principle-names-gen drift guard', () => {
     scratch.push(dir);
     await writeFile(join(dir, 'p1-slug.md'), '# Untitled\n');
     await expect(readPrincipleNames(dir)).rejects.toThrow('p1-slug.md');
+  });
+
+  test('a stale module is rewritten and the run stops, then the next run passes', async () => {
+    const principles = await principlesDir({ 1: 'Name One' });
+    const genDir = await mkdtemp(join(tmpdir(), 'anc-principle-names-'));
+    scratch.push(genDir);
+    const genPath = join(genDir, 'principle-names.gen.mjs');
+    await writeFile(genPath, 'export const PRINCIPLE_NAMES = {};\n');
+
+    await expect(generatePrincipleNamesModule({ principlesDir: principles, genPath })).rejects.toThrow('out of date');
+    expect(await readFile(genPath, 'utf8')).toContain("P1: 'Name One'");
+
+    const second = await generatePrincipleNamesModule({ principlesDir: principles, genPath });
+    expect(second.path).toBe(genPath);
   });
 
   test('a name with a single quote is written with double quotes', () => {
