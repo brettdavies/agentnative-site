@@ -744,8 +744,8 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
       const limited = jsonRpcError(-32099, 'rate limit exceeded', jsonRpcId(parsedBody));
       logMcpRequest({
         era,
-        method: headerMcpMethod(request) ?? (legacyEra ? 'tools/call' : null),
-        name: headerMcpName(request),
+        method: headerMcpMethod(request) ?? classifyRpcMethod(parsedBody),
+        name: headerMcpName(request) ?? classifyToolName(parsedBody),
         client_name: extractClientNameFromBody(parsedBody),
         protocol_version: extractProtocolVersion(parsedBody, request),
         host,

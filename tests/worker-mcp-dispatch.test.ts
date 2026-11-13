@@ -607,6 +607,25 @@ describe('POST /mcp — mcp.request telemetry fires after the gate decision', ()
     expect(payload.outcome).toBe('rate_limited');
     expect(payload.error_code).toBe(-32099);
   });
+
+  test('the rate_limited line names the method and tool the request carries', async () => {
+    const cases: Array<{ body: object; method: string; name: string | null }> = [
+      { body: initBody(), method: 'initialize', name: null },
+      { body: { jsonrpc: '2.0', id: 2, method: 'tools/list' }, method: 'tools/list', name: null },
+      {
+        body: { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'get_scorecard', arguments: {} } },
+        method: 'tools/call',
+        name: 'get_scorecard',
+      },
+    ];
+    for (const { body, method, name } of cases) {
+      const limiter: RateStub = { calls: 0, shouldSucceed: false };
+      const env = makeEnv({ limiter });
+      const { lines } = await captureMcpRequestLogs(() => postMcp(env, 'application/json', body));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatchObject({ era: 'legacy', outcome: 'rate_limited', method, name });
+    }
+  });
 });
 
 describe('POST /mcp — response_format records the served format', () => {
