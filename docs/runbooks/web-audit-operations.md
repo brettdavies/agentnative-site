@@ -270,7 +270,8 @@ whose stored listing changed, so `www.<domain>` folded onto `<domain>` logs `<do
 stored), and `surface` (`mcp`). A call that finds the value already stored, a curated site, a refusal, and a change that
 fails to save write no such record; the request's `mcp.request` line (`name: set_website_public_listing`) records the
 call and its transport outcome, not the tool's answer. The browser form's listing-only change logs an `audit.request`
-row with `outcome: patched`, so counting every listing-only change reads both.
+row with `outcome: patched`, keyed on the requested host and also written when the re-read finds the value already
+stored, so a count of every listing-only change reads both and its browser side can run slightly high.
 
 ### The declared-domain budget
 
