@@ -123,6 +123,12 @@ Conforming non-SDK servers may put this in the invalid-request family instead, s
 `-32602` (`src/worker/audit-web/handlers/mcp.ts#accept: [-32602, -32600]`;
 `tests/web-audit-handlers.test.ts#modern-clientcaps also passes on -32600 (invalid-request family)`).
 
+An argument a tool does not declare is not a `-32602`. Every tool's input is a strict object, so the SDK refuses the
+call inside the tool layer, before the handler runs: the answer is a successful envelope around a `CallToolResult` with
+`isError: true` and the text `Input validation error: Invalid arguments for tool <name>: ...` naming the key, at HTTP
+200 (`tests/mcp-tool-contract.test.ts#rule 2: advertises additionalProperties: false and refuses an undeclared argument
+before the handler runs`).
+
 ### `-32022`: one code, two producers, two statuses
 
 This is the split most likely to be documented wrong, because the code alone does not identify the condition.

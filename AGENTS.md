@@ -128,6 +128,14 @@ relation the AI Catalog spec defines. A new discovery document goes into that li
 Resources: `anc://registry` (concrete) plus four templates `anc://tool/{slug}`, `anc://principle/{n}`,
 `anc://spec/{section}`, `anc://scorecard/{binary}`.
 
+**One contract for every tool.** `tests/mcp-tool-contract.test.ts` reads the served `tools/list` in the PR gate and
+holds each tool to the same rules, so a new tool is covered without touching it: all four behavior hints as booleans, a
+strict input (`additionalProperties: false`, with an undeclared argument refused as `isError: true` before the handler
+runs), a description on every input property, a name the 2026-07-28 spec allows, a byte budget on the `tools` array, a
+mention in `content/mcp-skill.md`, and an `outputSchema` unless the tool is on the test's pending list. A new tool
+registers its input with `z.strictObject` and records its hints in `EXPECTED_TOOL_ANNOTATIONS`
+(`tests/helpers/mcp-tools.ts`).
+
 **Five rate limits, two cost profiles.** `MCP_LIMITER` gates every `POST /mcp` at 60 requests per 60 seconds per IP and
 falls back to a shared `anon` bucket on missing `cf-connecting-ip`. `MCP_AUDIT_LIMITER` gates `score_cli` cache-miss
 audits only, at 5 fresh audits per 60 minutes per IP, with **no anon fallback**. `audit_website` fresh audits key
