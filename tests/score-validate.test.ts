@@ -20,6 +20,10 @@ describe('validateInput — slug', () => {
     expect(validateInput('not-a-real-tool', REGISTRY)).toEqual({ kind: 'unknown', error: 'unrecognized_input' });
   });
 
+  test('a slug-shaped name that is an inherited object property, not a registry key → unrecognized_input', () => {
+    expect(validateInput('constructor', REGISTRY)).toEqual({ kind: 'unknown', error: 'unrecognized_input' });
+  });
+
   test('uppercase rejected (slug regex is lowercase only)', () => {
     expect(validateInput('Ripgrep', REGISTRY)).toEqual({ kind: 'unknown', error: 'unrecognized_input' });
   });

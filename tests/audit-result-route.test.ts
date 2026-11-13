@@ -347,6 +347,15 @@ describe('curated slugs (registry first)', () => {
     expect(await res.text()).not.toContain('not found page');
   });
 
+  test('a name that is an inherited object property and not a registry key answers 404 not_found', async () => {
+    const env = await seededEnv();
+    for (const target of ['constructor', 'toString']) {
+      const res = await route(`/score/${target}/json`, env);
+      expect(res.status).toBe(404);
+      expect(((await res.json()) as { error: { code: string } }).error.code).toBe('not_found');
+    }
+  });
+
   test('a registry entry without a committed scorecard is not a curated hit and a metadata-only slug resolves like a live target', async () => {
     const env = await seededEnv();
     const res = await route('/score/bare', env);

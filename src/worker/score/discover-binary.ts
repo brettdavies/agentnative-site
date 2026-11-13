@@ -234,7 +234,7 @@ export async function discoverBinary(ctx: DiscoverContext): Promise<DiscoveryRes
 // ── helpers ─────────────────────────────────────────────────────────────
 
 function lookupHint(hintsIndex: DiscoveryHintsIndex, ownerRepo: string) {
-  const direct = hintsIndex.by_owner_repo[ownerRepo];
+  const direct = Object.hasOwn(hintsIndex.by_owner_repo, ownerRepo) ? hintsIndex.by_owner_repo[ownerRepo] : undefined;
   if (direct) return direct;
   const lower = ownerRepo.toLowerCase();
   for (const k of Object.keys(hintsIndex.by_owner_repo)) {

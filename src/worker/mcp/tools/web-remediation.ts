@@ -72,7 +72,7 @@ export function registerWebRemediationTool(server: McpServer, env: WebRemediatio
           isError: true,
         };
       }
-      const entry = catalog[check_id];
+      const entry = Object.hasOwn(catalog, check_id) ? catalog[check_id] : undefined;
       if (!entry) {
         return textContent({ found: false, message: `no remediation for check id: ${check_id}` });
       }

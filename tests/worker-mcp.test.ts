@@ -617,6 +617,21 @@ describe('MCP score_cli kill switch (real implementation lands in U5a)', () => {
   });
 });
 
+describe("MCP lookups by key read only the table's own keys", () => {
+  test('get_scorecard with a slug that names an inherited object property is refused as unrecognized input', async () => {
+    const env = makeEnv();
+    await initialize(env);
+    const result = await rpc(env, {
+      jsonrpc: '2.0',
+      id: 31,
+      method: 'tools/call',
+      params: { name: 'get_scorecard', arguments: { slug: 'constructor' } },
+    });
+    expect(result.result?.isError).toBe(true);
+    expect(getJsonContent(result)).toEqual({ error: 'invalid_input', code: 'unrecognized_input' });
+  });
+});
+
 describe('MCP resources/list + templates/list', () => {
   test('resources/list returns exactly one concrete resource anc://registry', async () => {
     const env = makeEnv();

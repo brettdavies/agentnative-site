@@ -97,7 +97,7 @@ export function _resetRegistryIndexCache(): void {
  * which is what a caller should send the visitor to.
  */
 export function resolveCuratedSlug(binary: string, registryIndex: RegistryIndex): string | null {
-  const direct = registryIndex.by_slug[binary];
+  const direct = Object.hasOwn(registryIndex.by_slug, binary) ? registryIndex.by_slug[binary] : undefined;
   if (direct) return direct.name;
   return curatedEntryForBinary(binary, registryIndex)?.name ?? null;
 }
@@ -116,7 +116,7 @@ export type RegistryLookupResult =
 // Case-insensitive owner/repo lookup over a record. The entry-count is
 // small (<200) so an O(n) fallback after a direct-hit miss is negligible.
 function lookupOwnerRepo<T>(map: Record<string, T>, key: string): T | undefined {
-  const direct = map[key];
+  const direct = Object.hasOwn(map, key) ? map[key] : undefined;
   if (direct) return direct;
   const keyLower = key.toLowerCase();
   for (const k of Object.keys(map)) {
@@ -131,7 +131,7 @@ export function lookupRegistry(
   hintsIndex: DiscoveryHintsIndex,
 ): RegistryLookupResult {
   if (input.kind === 'slug') {
-    const entry = registryIndex.by_slug[input.slug];
+    const entry = Object.hasOwn(registryIndex.by_slug, input.slug) ? registryIndex.by_slug[input.slug] : undefined;
     return entry ? { kind: 'registry', entry } : { kind: 'miss' };
   }
   if (input.kind === 'github-url') {
@@ -154,7 +154,8 @@ export function lookupRegistry(
     // not the package name) still falls through; an explicit by_binary
     // map would catch that but isn't worth the index churn for the
     // current corpus.
-    const entry = registryIndex.by_slug[input.spec.binary];
+    const binary = input.spec.binary;
+    const entry = Object.hasOwn(registryIndex.by_slug, binary) ? registryIndex.by_slug[binary] : undefined;
     if (entry) return { kind: 'registry', entry };
     return { kind: 'miss' };
   }
