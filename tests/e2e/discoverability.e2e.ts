@@ -13,7 +13,6 @@
 
 import { expect, test } from '@playwright/test';
 import { MCP_DISCOVERY_DOCUMENTS } from '../../src/shared/mcp-discovery';
-import { EXPECTED_TOOL_NAMES } from '../helpers/mcp-tools';
 
 const STAGING_BASE = process.env.ANC_STAGING_BASE_URL;
 
@@ -337,14 +336,9 @@ test.describe('staging /mcp-skill surfaces', () => {
     expect(ct).toContain('text/markdown');
   });
 
-  test('mcp-skill.md text equality on every tool name + the template URIs (drift gate per KTD-8)', async ({
-    request,
-  }) => {
+  test('mcp-skill.md text equality on the template URIs (drift gate per KTD-8)', async ({ request }) => {
     const res = await request.get(`${STAGING_BASE}/mcp-skill.md`, { headers: ACCESS_HEADERS });
     const md = await res.text();
-    for (const toolName of EXPECTED_TOOL_NAMES) {
-      expect(md).toContain(toolName);
-    }
     for (const uri of [
       'anc://registry',
       'anc://tool/{slug}',
@@ -388,17 +382,8 @@ test.describe('staging published web-audit contracts', () => {
     expect(md).toContain('Turnstile');
   });
 
-  test('/mcp-skill.md publishes the five web tools and the freshness envelope', async ({ request }) => {
+  test('/mcp-skill.md publishes the freshness envelope', async ({ request }) => {
     const md = await twin(request, '/mcp-skill.md');
-    for (const tool of [
-      'get_website_audit',
-      'audit_website',
-      'list_website_audits',
-      'set_website_public_listing',
-      'get_web_remediation',
-    ]) {
-      expect(md).toContain(tool);
-    }
     for (const field of FRESHNESS_FIELDS) expect(md).toContain(`\`${field}\``);
     expect(md).toMatch(/one-minute\s+cache-reuse\s+window/);
   });

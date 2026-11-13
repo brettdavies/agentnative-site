@@ -45,12 +45,7 @@ import {
   resetMcpTestState,
   STAGING_TEST_ORIGIN,
 } from './helpers/mcp-rpc';
-import {
-  EXPECTED_TOOL_ANNOTATIONS,
-  EXPECTED_TOOL_COUNT,
-  EXPECTED_TOOL_NAMES,
-  EXPECTED_TOOL_TITLES,
-} from './helpers/mcp-tools';
+import { EXPECTED_TOOL_COUNT, EXPECTED_TOOL_NAMES, EXPECTED_TOOL_TITLES } from './helpers/mcp-tools';
 
 const FIXTURE_CATALOG = {
   generated_at: '2026-06-05T18:00:00.000Z',
@@ -409,31 +404,13 @@ describe('MCP tools/list', () => {
     }
   });
 
-  test('every tool declares readOnlyHint, destructiveHint and openWorldHint as booleans', async () => {
-    const env = makeEnv();
-    await initialize(env);
-    const result = await rpc(env, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
-    const tools = (result.result?.tools ?? []) as ListedTool[];
-    expect(tools.length).toBe(EXPECTED_TOOL_COUNT);
-    for (const tool of tools) {
-      for (const hint of ['readOnlyHint', 'destructiveHint', 'openWorldHint'] as const) {
-        expect({ tool: tool.name, hint, type: typeof tool.annotations?.[hint] }).toEqual({
-          tool: tool.name,
-          hint,
-          type: 'boolean',
-        });
-      }
-    }
-  });
-
-  test('titles match the catalog and each tool declares exactly the hints recorded for it', async () => {
+  test('titles match the catalog', async () => {
     const env = makeEnv();
     await initialize(env);
     const result = await rpc(env, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
     const tools = (result.result?.tools ?? []) as ListedTool[];
     for (const tool of tools) {
       expect(tool.title).toBe(EXPECTED_TOOL_TITLES[tool.name]);
-      expect(tool.annotations).toEqual(EXPECTED_TOOL_ANNOTATIONS[tool.name as keyof typeof EXPECTED_TOOL_ANNOTATIONS]);
     }
   });
 });

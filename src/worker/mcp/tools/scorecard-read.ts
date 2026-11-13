@@ -70,13 +70,13 @@ export function registerScorecardReadTool(server: McpServer, _catalog: Catalog, 
         'started_at }; a miss returns { found: false, next_tool: "score_cli" }. isError: true is reserved for ' +
         'validator rejection or an infrastructure error. The companion tool score_cli runs a fresh container audit on ' +
         'a miss.',
-      inputSchema: {
+      inputSchema: z.strictObject({
         slug: z.string().optional().describe('Registry slug, e.g. "ripgrep".'),
         binary: z.string().optional().describe('CLI binary name. Treated as a slug for the registry lookup.'),
         install: z.string().optional().describe('Full install command, e.g. "brew install ripgrep".'),
         github_url: z.string().optional().describe('GitHub URL (https://github.com/owner/repo, branch URLs accepted).'),
-      },
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async (args) => {
       const origin = siteOrigin();
