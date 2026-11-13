@@ -1,6 +1,6 @@
 // The one test-side expectation for the MCP tool surface, shared by the
-// bun unit layer (tests/worker-mcp.test.ts) and the live staging specs
-// (tests/e2e/mcp.e2e.ts, tests/e2e/discoverability.e2e.ts). Deliberately
+// bun unit layer (tests/worker-mcp.test.ts, tests/mcp-tool-contract.test.ts)
+// and the live staging spec (tests/e2e/mcp.e2e.ts). Deliberately
 // NOT derived from src/worker/mcp — the registrations are the system
 // under test, and an expectation computed from them would pass no matter
 // what they register. Changing the tool surface means updating this list,
@@ -45,7 +45,9 @@ export const EXPECTED_TOOL_TITLES: Record<string, string> = {
   get_web_remediation: 'Get web-audit remediation guidance',
 };
 
-const READ_ONLY = { readOnlyHint: true, destructiveHint: false, openWorldHint: false } as const;
+// The read tools write nothing a client can read. Their one effect is evicting
+// a cache entry that no reader could parse, so a repeat call changes nothing more.
+const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
 
 // score_cli and audit_website reach external systems and write cache /
 // leaderboard state, so readOnlyHint is false and openWorldHint true.

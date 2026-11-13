@@ -157,7 +157,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         'earliest time the entry leaves the 1-minute cache-reuse window, which is eligibility only, not a promise a ' +
         'fresh audit will be available, since kill switches, rate limits, and service failures still apply. The ' +
         'companion tool audit_website runs a fresh audit on a miss.',
-      inputSchema: {
+      inputSchema: z.strictObject({
         url: z
           .string()
           .describe(
@@ -167,8 +167,8 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
               'scorecard_url then name <domain>. Otherwise www.<domain> is its own site, and a miss there may mean ' +
               'the pair has not been audited since folds were recorded.',
           ),
-      },
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ url }) => {
       const siteUrl = siteOrigin();
@@ -355,7 +355,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         `view "all" adds the user-submitted domains that opted in to public listing, bounded to the first ${LIST_ALL_MAX_USER_ROWS}. ` +
         'A site whose bare or www. host redirects to the other is listed once, under the bare domain. ' +
         'An empty list means the board is mid-rescore; get_website_audit still serves per-domain results.',
-      inputSchema: {
+      inputSchema: z.strictObject({
         view: z
           .enum(['curated', 'all'])
           .optional()
@@ -363,8 +363,8 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
             'Which board to return: "curated" (default) for the curated leaderboard only, or "all" to also include ' +
               `user-submitted domains that opted in to public listing. Mirrors ${leaderboardPath({ lane: 'web', view: 'all' })}.`,
           ),
-      },
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ view }) => {
       const siteUrl = siteOrigin();

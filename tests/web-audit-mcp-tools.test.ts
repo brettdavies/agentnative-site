@@ -1049,18 +1049,17 @@ describe('audit_website never changes the listing', () => {
     expect((await bucket.metadataOf(TARGET))?.public_listing).toBe('false');
   });
 
-  test('tools/list: audit_website declares no public_listing, refuses undeclared keys, and says an audit never lists', async () => {
+  test('tools/list: audit_website declares no public_listing and says an audit never lists', async () => {
     const env = await makeEnv();
     const { body } = await mcpRpc(env, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
     const tools = (body.result?.tools ?? []) as Array<{
       name: string;
       description?: string;
-      inputSchema: { properties: Record<string, unknown>; additionalProperties?: unknown };
+      inputSchema: { properties: Record<string, unknown> };
     }>;
     const tool = tools.find((t) => t.name === 'audit_website');
     expect(tool?.inputSchema.properties).not.toHaveProperty('public_listing');
     expect(Object.keys(tool?.inputSchema.properties ?? {})).toEqual(['url', 'site_type', 'follow_declarations']);
-    expect(tool?.inputSchema.additionalProperties).toBe(false);
     expect(tool?.description).toContain(
       `${FOLLOW_DISCLOSURE_SHORT} An audit never changes the site's leaderboard listing: a first audit saves the site unlisted, and later audits keep the stored choice; set_website_public_listing changes it.`,
     );

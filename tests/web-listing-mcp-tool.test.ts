@@ -629,8 +629,7 @@ describe('set_website_public_listing: the input and what it advertises', () => {
     name: string;
     title?: string;
     description?: string;
-    annotations?: Record<string, unknown>;
-    inputSchema: { properties: Record<string, unknown>; required?: string[]; additionalProperties?: unknown };
+    inputSchema: { properties: Record<string, unknown>; required?: string[] };
   };
 
   async function listed(): Promise<Listed> {
@@ -658,18 +657,11 @@ describe('set_website_public_listing: the input and what it advertises', () => {
     expect(spent(f)).toEqual(NOTHING_SPENT);
   });
 
-  test('tools/list: both arguments are required, nothing else is accepted, and the hints say a repeatable overwrite', async () => {
+  test('tools/list: both arguments are required and the title names the tool', async () => {
     const tool = await listed();
     expect(Object.keys(tool.inputSchema.properties)).toEqual(['url', 'public_listing']);
     expect(tool.inputSchema.required).toEqual(['url', 'public_listing']);
-    expect(tool.inputSchema.additionalProperties).toBe(false);
     expect(tool.title).toBe("Set a website's public listing");
-    expect(tool.annotations).toEqual({
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: true,
-      openWorldHint: false,
-    });
   });
 
   test('the description leads with what the tool does, then says to call it only when the user asks', async () => {

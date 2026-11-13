@@ -36,7 +36,8 @@ export function registerPrincipleTools(server: McpServer, catalog: Catalog): voi
       description:
         'Return summaries of every agent-native CLI principle. Each entry carries n (1-based), slug, title, and a ' +
         'level_summary object with counts of MUST / SHOULD / MAY requirements at the principle level.',
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      inputSchema: z.strictObject({}),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async () => textContent(catalog.principles.map(summary)),
   );
@@ -49,8 +50,8 @@ export function registerPrincipleTools(server: McpServer, catalog: Catalog): voi
         'Return the full record for a single principle by ordinal number. Fields: n, slug, title, body_markdown, and ' +
         'requirements (each carrying id, level: must/should/may, summary, and audit_ids — the verifier identifiers ' +
         'the anc CLI emits when auditing a binary).',
-      inputSchema: { n: z.number().int().min(1).describe('Principle ordinal, 1-based.') },
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      inputSchema: z.strictObject({ n: z.number().int().min(1).describe('Principle ordinal, 1-based.') }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ n }) => {
       const principle = catalog.principles.find((p) => p.n === n);
