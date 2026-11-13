@@ -4,6 +4,7 @@ execution: code
 product_contract_source: ce-plan-bootstrap
 title: "One operation layer for every anc.dev entry point, and the 0.2.0 MCP release - Plan"
 type: feat
+status: proposed
 date: 2026-11-12
 topic: mcp-operation-layer
 ---
