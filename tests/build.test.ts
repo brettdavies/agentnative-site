@@ -9,7 +9,7 @@ import {
   curatedResultEnvelope,
   REAPABLE_SCORE_FILE_RE,
 } from '../src/build/08-scorecards-emit.mjs';
-import { scorecardTwinLinks } from '../src/build/09-llms-emit.mjs';
+import { scorecardTwinLinks, websiteScorecardLinks } from '../src/build/09-llms-emit.mjs';
 import { badgeColor, badgeFormat, renderBadgeSvg } from '../src/build/badge.mjs';
 import { runInvariantChecks } from '../src/build/build.mjs';
 import { extractDescription, extractTitle } from '../src/build/content.mjs';
@@ -3452,5 +3452,41 @@ describe('llms.txt scorecard links', () => {
       { name: 'bat', path: '/score/bat/md' },
       { name: 'ripgrep', path: '/score/ripgrep/md' },
     ]);
+  });
+
+  test('each curated website links its markdown twin, in seed order, named by its seed label', () => {
+    const links = websiteScorecardLinks([
+      { domain: 'zeta.dev', name: 'Zeta' },
+      { domain: 'alpha.dev', name: 'alpha.dev' },
+    ]);
+    expect(links).toEqual([
+      { name: 'Zeta', path: '/score/zeta.dev/md' },
+      { name: 'alpha.dev', path: '/score/alpha.dev/md' },
+    ]);
+  });
+
+  test('the website section follows the CLI Scorecards section and is absent without links', () => {
+    const base = {
+      introTitle: 'The agent-native standard',
+      summary: 'One bar for agent-readiness.',
+      principles: [{ n: 1, slug: 'p1-non-interactive-by-default', title: 'P1 — Non-Interactive by Default' }],
+      scorecardLinks: [{ name: 'Leaderboard', path: '/scorecards.md' }],
+    };
+    expect(buildLlmsIndex(base)).not.toContain('## Website scorecards');
+    const out = buildLlmsIndex({ ...base, websiteScorecardLinks: [{ name: 'Zeta', path: '/score/zeta.dev/md' }] });
+    expect(
+      out.endsWith(
+        [
+          '## Scorecards',
+          '',
+          '- [Leaderboard](https://anc.dev/scorecards.md)',
+          '',
+          '## Website scorecards',
+          '',
+          '- [Zeta](https://anc.dev/score/zeta.dev/md)',
+          '',
+        ].join('\n'),
+      ),
+    ).toBe(true);
   });
 });

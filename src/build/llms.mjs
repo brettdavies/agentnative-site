@@ -15,6 +15,9 @@
 //   ## Scorecards
 //   - [Leaderboard](/scorecards.md)
 //
+//   ## Website scorecards
+//   - [example.com](/score/example.com/md)
+//
 // llms-full.txt layout (A5 format): each section is
 //   # <Title>
 //
@@ -38,6 +41,7 @@ import { resolveBaseUrl } from './util.mjs';
  * @param {Array<{ n: number, slug: string, title: string }>} args.principles
  * @param {Array<{ name: string, title: string }>=} args.subPages
  * @param {Array<{ name: string, path: string }>=} args.scorecardLinks
+ * @param {Array<{ name: string, path: string }>=} args.websiteScorecardLinks
  * @param {Array<{ name: string, path: string }>=} args.skillLinks
  * @param {Array<{ label: string, path: string }>=} args.programmaticAccess
  *        Optional Programmatic access section (U6 of the MCP plan).
@@ -50,6 +54,7 @@ export function buildLlmsIndex({
   principles,
   subPages = [],
   scorecardLinks = [],
+  websiteScorecardLinks = [],
   skillLinks = [],
   programmaticAccess = [],
   baseUrl,
@@ -104,6 +109,14 @@ export function buildLlmsIndex({
     lines.push('## Scorecards');
     lines.push('');
     for (const s of scorecardLinks) {
+      lines.push(`- [${s.name}](${base}${s.path})`);
+    }
+  }
+  if (websiteScorecardLinks.length > 0) {
+    lines.push('');
+    lines.push('## Website scorecards');
+    lines.push('');
+    for (const s of websiteScorecardLinks) {
       lines.push(`- [${s.name}](${base}${s.path})`);
     }
   }

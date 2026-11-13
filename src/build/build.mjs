@@ -320,6 +320,7 @@ export async function build() {
     principles,
     subPageData,
     leaderboard,
+    webSeedEntries: webSeed.entries,
     coverageMarkdown,
     skillData,
     skillMarkdown,

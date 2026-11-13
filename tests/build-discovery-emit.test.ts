@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import Ajv2020 from 'ajv/dist/2020';
 import addFormats from 'ajv-formats';
 import { emitAgentReadiness, emitDiscovery } from '../src/build/11a-discovery-emit.mjs';
+import { loadWebSeed } from '../src/build/14-web-scorecards-emit.mjs';
 import { readCardSchema } from '../src/build/web-audit-card-schema.mjs';
 import { distAssetsEnv } from './helpers/dist';
 import { mcpInitialize, resetMcpTestState } from './helpers/mcp-rpc';
@@ -266,6 +267,28 @@ describe('emitDiscovery() in isolation', () => {
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+describe('llms.txt Website scorecards section (built dist/)', () => {
+  test('lists every curated website once, as a markdown twin link, in seed order', async () => {
+    const llms = await readFile(join(DIST_DIR, 'llms.txt'), 'utf8');
+    const seed = await loadWebSeed(join(REPO_ROOT, 'src', 'data', 'web-audit', 'seed.yaml'));
+    const start = llms.indexOf('\n## Website scorecards\n');
+    expect(start).toBeGreaterThan(llms.indexOf('\n## Scorecards\n'));
+    const links = llms
+      .slice(start)
+      .split('\n')
+      .filter((line) => line.startsWith('- ['));
+    expect(links).toEqual(seed.entries.map((e) => `- [${e.name}](https://anc.dev/score/${e.domain}/md)`));
+  });
+
+  test('keeps the CLI list free of website hosts', async () => {
+    const llms = await readFile(join(DIST_DIR, 'llms.txt'), 'utf8');
+    const seed = await loadWebSeed(join(REPO_ROOT, 'src', 'data', 'web-audit', 'seed.yaml'));
+    const cli = llms.slice(llms.indexOf('\n## Scorecards\n'), llms.indexOf('\n## Website scorecards\n'));
+    expect(cli).toContain('https://anc.dev/score/ripgrep/md');
+    for (const entry of seed.entries) expect(cli).not.toContain(`/score/${entry.domain}/`);
   });
 });
 
