@@ -15,14 +15,14 @@ topic: mcp-operation-layer
 
 - **Objective:** an agent or a person who asks anc.dev about a CLI or a website gets the same answer from every entry point (the scorecard page and its twin, the JSON route, `POST /api/score`, the MCP tools and resources, WebMCP). Each answer leads with what the reader acts on: the score, the counts, and the fixes worth the most points. A store that cannot be read is reported as unavailable, never as "never audited", and no surface declares a capability the server does not have.
 - **Means:** one operation module, `src/worker/ops/`, whose zod result schemas are also the MCP `outputSchema` and the JSON bodies, held by one parity test across every adapter (KTD1 to KTD4); the MCP scoring surface cut to `get_scorecard` and `run_audit` at server version `0.2.0` in one stacked set (KTD10).
-- **Authority:** the Key Decisions (Brett's answers) bind. Requirements win on behavior, KTDs on mechanism, and units override neither. Each owner decision OD1 to OD17 binds once Brett answers it; until then the unit carries the recommended default and does not merge.
+- **Authority:** the Key Decisions (Brett's answers) bind. Requirements win on behavior, KTDs on mechanism, and units override neither. Each owner decision OD1 to OD18 binds once Brett answers it; until then the unit carries the recommended default and does not merge.
 - **Execution profile:** code, nine PRs in four waves, each from a `feat/` or `fix/` branch cut from `dev` and squash-merged to `dev` (`RELEASES.md` § Daily development). PR4 to PR8 are one `gh stack`, merged together with `gh stack merge <top-pr> --squash --yes`. PR9 is cut from `dev` once the stack has merged. Under OD17's default, the release to `main` carries the stack and PR9 together, so agents meet one break.
 - **Stop conditions:**
   - Brett answers an owner decision with an option this plan does not describe: re-plan the affected units before building.
-  - #582 lands with a byte budget or a pending list other than the ones this plan measures against (36,864 bytes; all 14 tools pending): re-measure the byte table before PR3.
+  - A change on `dev` moves `TOOLS_LIST_BYTE_BUDGET` or the pending list off the figures this plan measures against (36,864 bytes; all 14 tools pending, as #582 merged them): re-measure the byte table before the next PR.
   - The compact `tools` array measures over 36,864 bytes at the longest allowed origin in any PR: stop and report. Do not raise `TOOLS_LIST_BYTE_BUDGET` without Brett.
   - A tool description or the server instructions exceed a `cut` record in `src/worker/mcp/client-limits.ts`, or a critical item ends past a `warn` record: stop and report.
-  - A unit would change a rate limit's value, key, order, or anon posture, a kill switch's scope, or give any MCP call a way to skip a stored result: stop; that is an owner decision (R27).
+  - A unit would change a rate limit's value, key, order, or anon posture, a kill switch's scope, or give any MCP call a new way to skip a stored result (the `follow_declarations: false` run skips it today and keeps doing so): stop; that is an owner decision (R27).
   - Evidence shows a settled decision cannot work as stated: stop that part and report it with the evidence.
   - Production and staging stay read-only for every planning and build session: no crafted request and no audit against production.
 - **Who finishes:** agentnative-site sessions build each PR and run the reviews its group names, then hand it to Brett, who approves every merge. The release from `dev` to `main` is the operator's (`RELEASES.md` § Releasing dev to main).
@@ -60,7 +60,7 @@ An audit of every entry point on `dev` at `028e403` found 17 drifts (D1 to D17) 
 
 **Errors and in-progress state**
 
-- R12. Every refusal and miss carries `{ reason, message, value, suggestions?, next_step: { action, command, docs } }`, where `reason` comes from one closed set and `command` is a verbatim call safe to run headless. On HTTP it is added beside the keys served today; on MCP it replaces the bare refusal in `0.2.0`. Two refusals keep their own shape (KTD9): the SDK's input-validation text for an undeclared or retired argument, and the `-32099` budget refusals.
+- R12. Every refusal and miss carries `{ reason, message, value, suggestions?, retry_after?, next_step: { action, command, docs } }`, where `reason` comes from one closed set, `command` is a verbatim call safe to run headless or `null` when no such call exists, and `retry_after` is present whenever the step is a retry. On HTTP it is added beside the keys served today; on MCP it replaces the bare refusal in `0.2.0`. The SDK's input-validation text for an undeclared or retired argument keeps its own shape, and the in-tool `-32099` budget refusals keep their layer and carry the shape's keys inside it (KTD9).
 - R13. During a re-audit, `json_url` serves the stored scorecard with `in_progress: { started_at }`, and answers 202 only when nothing is stored (D5).
 
 **Capabilities and discovery**
@@ -73,12 +73,12 @@ An audit of every entry point on `dev` at `028e403` found 17 drifts (D1 to D17) 
 **MCP 0.2.0 scoring tools**
 
 - R18. `get_scorecard { kind, target }` reads a stored scorecard of either lane and never audits; it is read-only and idempotent.
-- R19. `run_audit { kind, target, site_type?, follow_declarations? }` returns a stored scorecard inline when a usable one exists and audits only otherwise; `site_type` and `follow_declarations` apply to `kind: "web"` only and are refused on `kind: "cli"`, naming the field. A branch-scoped target (`owner/repo@branch`) is never usable on the run path: `run_audit` and `POST /api/score` audit it fresh, as every run path does today, and only `get_scorecard` and the page read its stored record. While a lane's audit switch is off, a stored record of the target is served with `audited: false` whatever its age (R21 on the CLI lane; the web lane does this today).
+- R19. `run_audit { kind, target, site_type?, follow_declarations? }` returns a stored scorecard inline when a usable one exists and audits only otherwise; `site_type` and `follow_declarations` apply to `kind: "web"` only and are refused on `kind: "cli"`, naming the field. A branch-scoped target (`owner/repo@branch`) is never usable on the run path: `run_audit` and `POST /api/score` audit it fresh, as every run path does today, and only `get_scorecard` and the page read its stored record. While a lane's audit switch is off, a stored record of the target is served with `audited: false` whatever its age (R21 on the CLI lane; the web lane does this today), and adds a `message` saying fresh audits are off. A website run with `follow_declarations: false` reads no stored record, attaches to no run in flight, and writes nothing, as today; it draws the same limiter units and answers the projection with `null` `scorecard_url`, `markdown_url`, and `json_url`.
 - R20. A target whose shape names the other lane is refused before any gate and spends nothing (D16); `kind: "web"` with an explicit `http(s)://` URL is always a website.
 - R21. While live CLI scoring is off, `run_audit` serves a stored CLI scorecard, and answers `audited: false` with a message only when nothing is stored (D17).
 - R22. `bypass_cache` and `MCP_CACHE_BYPASS_ALLOWED` are removed; the release smoke deletes the staging record before its fresh-audit call.
 - R23. The cut is hard: `score_cli`, `get_website_audit`, and `audit_website` are removed in the same release that changes `get_scorecard`'s input and sets `MCP_SERVER_VERSION` to `0.2.0`; a retired argument is refused with a message naming the call to send instead.
-- R24. `next_tool` appears only on a read miss (`get_scorecard`, and `set_website_public_listing`'s miss), with the value `"run_audit"`; `source` is removed.
+- R24. `next_tool` appears only on a read miss (`get_scorecard`, and `set_website_public_listing`'s miss), with the value `"run_audit"`, and only when the run path would accept the target (KTD9); `source` is removed. An in-progress answer with nothing stored carries a `retry` step and no `next_tool`.
 
 **Output schemas**
 
@@ -134,24 +134,33 @@ The full table is in the Planning Contract, `### Owner decisions`. Each unit it 
 - KTD2. **One zod schema per answer is the source for the MCP `outputSchema`, the JSON bodies, and the TypeScript types.** Every object is `z.looseObject`, `scorecard` stays an open object, and types come from `z.infer`, per `docs/solutions/best-practices/mcp-sdk-v2-enforces-a-declared-output-schema-on-every-successful-tool-call.md`. HTTP adapters serialize the same built value MCP returns; they do not parse it at runtime. The parity test parses every adapter's output with the schema, so drift fails the PR gate on every lane. Covers R1, R25.
 - KTD3. **Adapters map outcomes onto their transport and do nothing else.** No adapter resolves, reads, ranks, or shapes an answer. The outcome map is the table in High-Level Technical Design. A new entry point is a new column in the parity test. Covers R1.
 - KTD4. **Reads are strict; transact paths stay tolerant.** `readScorecard` uses the strict reads that exist (`score/cache.ts#getForRequest`, `audit-web/cache.ts#getForRequest`) and returns `Unavailable` as its own outcome. The swallowing reads stay on `POST /api/score`'s transact path and `run_audit`, where a fresh audit can still produce a result; there a failed read is a miss that proceeds to admission, and the parity table pins that column as an intended offset (KTD12). Probe in the Appendix: today the same R2 failure answers 503 `cache_unavailable` on `/score/<t>/json` and `found: false` with an audit `next_tool` on both MCP reads. Covers R3.
-- KTD5. **`resolveTarget(kind | null, raw)` merges the result route's order with the input validator's, and every keyed lookup uses `Object.hasOwn`.** The route (`serveCli` in `src/worker/audit/result.ts`) reads the registry slug, then the binary alias, then the in-flight flag and the stored record. The validator (`validateInput` and `lookupRegistry` under `src/worker/score/`) adds the install command (its binary checked against `by_slug`), the repository (`by_owner_repo`), and the discovery hint. Merged CLI order: registry slug, registry binary alias, registry repository, install command, discovery hint, stored record by name, branch record. A slug that equals another tool's binary resolves to the slug, because both paths read `by_slug` first today. The resolver returns the canonical target and the redirect it implies. Web: `siteTarget`, the SSRF gate, then `resolveWebTarget` (the `www.` fold). With `kind` given, a target the classifier reads as the other lane is a `lane_mismatch` refusal, except `kind: "web"` with an explicit `http(s)://` URL. The page answers a registry repository with a 301 to `/score/<slug>`, as it does a binary alias (OD16). Covers R2, R4, R20.
+- KTD5. **`resolveTarget(kind | null, raw)` merges the result route's order with the input validator's, and every keyed lookup uses `Object.hasOwn`.** The route (`serveCli` in `src/worker/audit/result.ts`) reads the registry slug, then the binary alias, then the in-flight flag and the stored record. The validator (`validateInput` and `lookupRegistry` under `src/worker/score/`) adds the install command (its binary checked against `by_slug`), the repository (`by_owner_repo`), and the discovery hint. Merged CLI order: registry slug, registry binary alias, registry repository, install command, discovery hint, stored record by name, branch record. A slug that equals another tool's binary resolves to the slug, because both paths read `by_slug` first today. The resolver returns the canonical target and the redirect it implies. An unresolved bare name is a `not_found` miss with suggestions on every read adapter (page, `json_url`, `get_scorecard`, the scorecard resource) and an `unrecognized_input` refusal with the same suggestions on every run adapter (`run_audit`, `POST /api/score`), so a typo gets the same suggestions on every entry point. Web: `siteTarget`, the SSRF gate, then `resolveWebTarget` (the `www.` fold). With `kind` given, a target the classifier reads as the other lane is a `lane_mismatch` refusal, except `kind: "web"` with an explicit `http(s)://` URL. The page answers a registry repository with a 301 to `/score/<slug>`, as it does a binary alias (OD16). Covers R2, R4, R20.
 - KTD6. **`runAudit(resolved, opts, admission)` composes the cores as they are; each adapter passes its own admission policy.** The browser policy carries the Turnstile session, the session limiter keys, and its metered `refresh`; the MCP policy carries the IP limiters and the hour buckets. The policy object owns gate order, so moving a gate is a diff to one object, which the carry-through table below pins. The MCP policy has no `refresh` field, and `run_audit`'s strict input has no key that reaches one. A branch-scoped target is never usable on the run path (`isBranchScoped` in `src/worker/score/core.ts`), and with a lane's audit switch off, a stored record of any age is served with `audited: false`. Covers R19, R21, R27.
 - KTD7. **`presentScorecard(envelope, rankedFixes)` in `src/shared/present-scorecard.ts` is pure and is the only producer of answer order.** It copies `summary` and `coverage` (the inner `coverage_summary`) up, adds `top_fixes` and `fixes_total` from the lane's ranked fixes, and re-orders the inner scorecard: CLI `schema_version, spec_version, tool, target, summary, coverage_summary, audience, audience_reason, audit_profile, badge, results, anc, run`; web `schema_version, spec_version, target_url, tool, site_type, audience, audit_profile, score_pct, score, summary, coverage_summary, categories, public_listing, vantage, follow_declarations, declared_hosts, results, mcp_endpoint, mcp_discovery, registry_fingerprint`. Unknown inner keys keep their producer order after the known ones, so a new producer field never disappears. `results` keeps producer row order. Covers R9.
 - KTD8. **Ranking follows each lane's published score model.**
-  - **Web** (`src/worker/ops/rank-web.ts`): a row's gain is the rise in `score.relative` when that row alone is re-scored as a pass through `scoreWebAudit` (`src/worker/audit-web/score.ts`), over the rows `isRemediable` selects; an alternative group ranks once, as its best member. That is exact under the model's half-weight absent rows, its `broken` penalty, partial `noncompliant` credit, and alternative groups, and it costs at most about 100 re-scores. The fix text is the remediation `goal`, and the link is its `/fix/<id>` page.
+  - **Web** (`src/worker/ops/rank-web.ts`): a row's gain is the rise in the unrounded relative score when that row alone is re-scored as a pass through `scoreWebAudit` (`src/worker/audit-web/score.ts`), over the rows `isRemediable` selects; an alternative group ranks once, as its best member. That is exact under the model's half-weight absent rows, its `broken` penalty, partial `noncompliant` credit, and alternative groups, and it costs at most about 100 re-scores. The fix text is the remediation `goal`, and the link is its `/fix/<id>` page.
   - **CLI** (`src/shared/rank-cli.ts`): credit is pass 1, warn 0.5, fail and opt_out 0 over behavioral rows (`src/data/spec/principles/scoring.md`). An `opt_out` row ranks as a fix with `status: "opt_out"`, because the published formula gives it no credit. Source- and project-layer rows rank after every behavioral row. The fix text is the row's `label`, which `anc` writes from its check catalog, so no text the audited tool printed reaches the lead of the answer; evidence stays inside `scorecard`. The link is the principle page.
+  - `gain` is in percentage points of `score_pct` on both lanes, from the unrounded ratio, given to one decimal: web `100 * (earned after - earned before) / applicable maximum`, with the re-scored denominator; CLI `100 * (credit after - credit before) / behavioral row count`. Ranking uses the unrounded value, and a row whose re-score raises nothing does not rank, so a fix that raises the score never reads as worth 0.
+  - Each `top_fixes` field's schema description states its unit or value set: `tier` is `must`, `should`, or `may` (the stored rows' own key); `status` is the lane's closed status set; on the CLI lane `fix` equals `label`.
   - `fixes_total` counts every row that ranks.
   - A score-formula parity test recomputes every curated CLI scorecard's `badge.score_pct` as `Math.round((sum of credit / behavioral row count) * 100)`, ratio first, 0 for an empty denominator. `yazi` pins the order: its exact score is 57.5, the ratio-first form gives 57 as its badge does, and the `100 * credit / count` form gives 58.
   - Covers R10.
-- KTD9. **The error shape takes its `reason` values from `AuditErrorCode` in `src/shared/audit-events.ts`, extended.** One closed set for HTTP and MCP, so HTTP's new `reason` equals its `error.code` (OD3, OD4). `suggestions` reuses the result route's item shape, `{ target, scorecard_url }`. `command` follows one grammar: `<tool name> <compact JSON arguments>` for `call_tool` and `fix_input` (`run_audit {"kind":"cli","target":"figlet"}`), and `curl -s <absolute url>` for `fetch`. It is built from a resolved target or a suggestion; a `fix_input` refusal with neither carries the tool name with `"target":"<target>"`, and its `docs` points at the guide's accepted input forms. `value` carries the offending input only as a JSON string value, never inside `message`, markdown, or HTML unescaped. The settled shape has no `exit_code`: no process exits, and the HTTP status and the MCP `isError` carry the class. Two kinds of error keep their own shape. SDK input-validation errors stay the SDK's text, which #582's rule 2 pins: an argument a tool does not declare is refused before the handler runs. The budget refusals stay a `-32099` object inside an `isError` text block, the layer split `docs/runbooks/mcp-wire-protocol.md` § `-32099` records. A retired argument (`slug`, `binary`, `install`, `github_url`, `url`, `bypass_cache`) gets a custom unknown-key message naming the call to send, with the pattern #579 used for `public_listing` (`src/worker/mcp/tools/web-audit.ts`, the `unrecognized_keys` issue map). Covers R12, R23.
+- KTD9. **The error shape takes its `reason` values from `AuditErrorCode` in `src/shared/audit-events.ts`, extended.** One closed set for HTTP and MCP, so HTTP's new `reason` equals its `error.code` (OD3, OD4).
+  - **Keys.** `suggestions` reuses the result route's item shape, `{ target, scorecard_url }`. `retry_after` (integer seconds) is present whenever `next_step.action` is `retry`; on HTTP it equals the `Retry-After` header. The settled shape has no `exit_code`: no process exits, and the HTTP status and the MCP `isError` carry the class.
+  - **`command`.** One grammar: `<tool name> <compact JSON arguments>` for `call_tool`, `fix_input`, and `retry` (`run_audit {"kind":"cli","target":"figlet"}`), and `curl -s <absolute url>` for `fetch`. It is built from a resolved target or a suggestion, never from raw input, and it names a call the PR's served tools accept, so PR6 changes the builder with the cut. With neither a target nor a suggestion, `command` is `null` and `docs` points at the guide's accepted input forms (OD5), because a placeholder is not a call an agent can send as written.
+  - **Next step on a miss.** A read miss carries `next_tool: "run_audit"` and a `call_tool` step only when the run path's validator accepts the target. Otherwise its step is `fix_input` built from the first suggestion (`get_scorecard {"kind":"cli","target":"ripgrep"}` for `ripgrap`), or the `null` command above. No step an answer names gets a validation refusal when sent as written, and `next_tool`, when present, equals the tool name at the head of `next_step.command`. Unavailable and in progress with nothing stored are `retry` steps.
+  - **`value` and `message`.** `value` carries the offending input only as a JSON string value. `message` may name the target as the resolver normalized it and never the raw input, and no markdown or HTML surface prints `value` unescaped.
+  - **Input-validation refusals keep the SDK's shape.** The SDK refuses an argument a tool does not declare before the handler runs, which #582's rule 2 pins. A retired argument (`slug`, `binary`, `install`, `github_url`, `url`, `bypass_cache`) gets a custom unknown-key message, with the pattern #579 used for `public_listing` (`src/worker/mcp/tools/web-audit.ts`, the `unrecognized_keys` issue map). The SDK joins every issue into one line and lists the missing `kind` and `target` before the unknown key, so the message stands alone: it names the whole replacement call with `kind` filled (`"cli"` for `slug`, `binary`, `install`, and `github_url`; `"web"` for `url`) and ends by telling a client that still lists the `0.1.0` tools to reconnect and refresh `tools/list`.
+  - **Budget refusals keep their layer and gain the keys.** The in-tool budget refusals stay a `-32099` object inside an `isError` text block, the layer split `docs/runbooks/mcp-wire-protocol.md` § `-32099` records, and keep `jsonrpc` and `error.code`. Inside that object they add `reason`, `retry_after` (the burst window, the time to the hour boundary, or the 2 seconds of a contended window, from `src/worker/audit-web/limiter.ts`), and `next_step` (`retry` with the same call; for a missing `cf-connecting-ip`, no retry and `docs` pointing at the guide). The runbook pins the layer, not the keys, and the settled shape replaces the bare MCP refusal in `0.2.0`, so an agent schedules a retry from fields rather than message text.
+  - Covers R12, R23, R24.
 - KTD10. **The 0.2.0 cut is one stack of five PRs merged together.** Each PR passes the PR gate alone; prose that a test pins (the instructions, the guide's tool names under #582's rule 6, `EXPECTED_TOOL_NAMES`, AGENTS.md's tool count) moves with the tool change in PR6. The release to `main` carries the whole stack, so production sees one break. Covers R23.
 - KTD11. **One capabilities constant.** `MCP_SERVER_CAPABILITIES = { tools: { listChanged: false }, resources: { subscribe: false, listChanged: false } }` in `src/shared/mcp-discovery.ts` beside `MCP_SERVER_VERSION`. `src/worker/mcp/server.ts` passes it and `src/build/11a-discovery-emit.mjs` writes it into the SEP-1649 card, replacing the literal that declares `prompts`. The SDK keeps an explicit `false` (it fills `true` only for an absent key), and with `false` its listen router honors nothing, writes the acknowledgement and then a `complete` result, and closes the stream (the listen router of `@modelcontextprotocol/server` 2.4.0, the version `package.json` pins). Covers R14.
-- KTD12. **The parity test is one table per operation, in `tests/entry-point-parity.test.ts` plus one helper per operation under `tests/helpers/parity/`.** Rows are inputs and columns are adapters, in-process with seeded R2 and KV. An intended difference between two adapters is pinned as its own row, never left out, per `docs/solutions/design-patterns/parity-test-for-source-derived-resolvers-asserts-cross-env-union-and-twin-offsets.md`. The MCP board's default view (OD11), `POST /api/score` on a failed store read (a miss that proceeds to admission, KTD4), and the curated twin's canonical links on staging are those rows. Covers R1.
+- KTD12. **The parity test is one table per operation, in `tests/entry-point-parity.test.ts` plus one helper per operation under `tests/helpers/parity/`.** Rows are inputs and columns are adapters, in-process with seeded R2 and KV. An intended difference between two adapters is pinned as its own row, never left out, per `docs/solutions/design-patterns/parity-test-for-source-derived-resolvers-asserts-cross-env-union-and-twin-offsets.md`. The MCP board's default view (OD11), `POST /api/score` on a failed store read (a miss that proceeds to admission, KTD4), an unresolved bare name (a miss on read adapters and a refusal on run adapters, KTD5), a website run with `follow_declarations: false` on `run_audit` and `POST /api/score` (no stored read, nothing written, `null` URLs), and the curated twin's canonical links on staging are those rows. Covers R1.
 - KTD13. **Settled findings decided from evidence in this plan.**
   - **D6, the two HTTP-only keys:** the projection carries `site_spec_version` and `auditor_url` on every representation, MCP included (OD8 records the alternative). Evidence: `scripts/smoke-api-score.sh`, `tests/e2e/homepage-score-live.e2e.ts`, and `tests/regression.test.ts` read both on HTTP, so dropping them from HTTP would break the additive rule; one body builder needs one key set.
   - **D7, curated `scored_at`:** filled from `run.started_at` through `cliScoredAt`, with `refresh_after` kept `null`. Evidence: all 98 committed scorecards carry `run.started_at`; the page already prints "audited 2026-10-28" for `ripgrep` from it; and the guide documents a `null` `refresh_after` for curated results, not a `null` `scored_at`.
   - **D15, WebMCP on CLI pages:** stays out of `0.2.0`. Evidence: the four result tools read website-only page structure (`.web-check` rows, the seven website statuses, fix prompts from the remediation catalog), and the CLI lane has none of those, so loading the script on a CLI page would register tools that answer an empty list. OD9 records the alternative.
-- KTD14. **Byte figures are measured, and #582's rule 5 is the gate.** Method: the compact `tools` array served at `https://agentnative-site-staging.brettdavies.workers.dev:65535` (rule 5's longest origin) on #582's head `c30dfed`, which reproduces #582's 18,971 bytes (its later heads, up to `6b80c58`, rebase onto #580 and #581 and change no tool text and no contract rule; PR3 re-measures at the head that merges), plus each draft schema converted through zod's output-mode JSON Schema as the SDK does. Every PR that adds a schema re-measures with rule 5; the table below is the plan's expectation, not the gate. Covers R26.
+- KTD14. **Byte figures are measured, and #582's rule 5 is the gate.** Method: the compact `tools` array served at `https://agentnative-site-staging.brettdavies.workers.dev:65535` (rule 5's longest origin) on #582's head `c30dfed`, which reproduces #582's 18,971 bytes (#582 merged as `fec4378` with the same tool texts and contract rules), plus each draft schema converted through zod's output-mode JSON Schema as the SDK does. Every PR that adds a schema re-measures with rule 5; the table below is the plan's expectation, not the gate. Covers R26.
 - KTD15. **The scorecard resource reads curated scorecards through the resolver (OD6 default).** `anc://scorecard/{binary}` resolves a slug or a binary through `resolveTarget('cli', ...)` from PR2 and keeps the registry entry shape it serves today. In the `0.2.0` stack (U18) it serves the projection of a registry-tier hit, so its shape changes with the release's one break. Anything else answers `-32602` naming `get_scorecard`. Every resource then stays build-time data, so the 1-hour `resources/read` hint stays true. Covers R2.
 
 ### Owner decisions
@@ -161,15 +170,15 @@ Each row names what only Brett can decide, the options, the recommendation, and 
 | # | Decision | Options | Recommendation | Evidence |
 | --- | --- | --- | --- | --- |
 | OD1 | Where `summary` and `coverage` live in the answer | (a) copied up to the top level, inner scorecard re-ordered too; (b) only inside the scorecard, re-ordered so they lead it | (a) | Measured copy cost per answer: `ripgrep` 81 + 105 bytes compact, a website fixture 74 + 102; about 325 bytes in the pretty-printed text block plus about 185 in `structuredContent`. (b) puts the counts after the identity, URL, and freshness keys, near byte 600 instead of 85 |
-| OD2 | The new answer field names (table below, rows marked open) | approve as drafted, or rename | approve | Names reuse keys the stored scorecards and the result route already use (`summary`, `coverage_summary` shortened to `coverage`, `tier`, `status`, `label`, `scorecard_url`) |
+| OD2 | The new answer field names (table below, rows marked open) | approve as drafted, or rename | approve | Names reuse keys the stored scorecards and the result route already use (`summary`, `coverage_summary` shortened to `coverage`, `tier`, `status`, `label`, `scorecard_url`); each `top_fixes` field's schema description states its unit or value set (KTD8), and `retry_after` is integer seconds |
 | OD3 | Casing of `reason` values | (a) snake_case, the `AuditErrorCode` values HTTP serves in `error.code` today; (b) kebab-case, the global error contract and the og scripts' `reason` set | (a) | With (b), HTTP would carry one code in two spellings (`error.code: "not_found"` beside `reason: "not-found"`). (a) departs from the global error contract's kebab-case `reason`, recorded here so the departure is a decision |
 | OD4 | The `reason` closed set | the existing `AuditErrorCode` values plus `cache_unavailable`, `lane_mismatch`, `web_only_argument` | approve | `cache_unavailable` is served by the result route today but missing from the union; the other two name refusals `0.2.0` adds. A retired argument is refused by the SDK's input validation, which carries no `reason` (KTD9) |
-| OD5 | `next_step.action` closed set and `command` form | `call_tool` (command: the MCP call, `run_audit {"kind":"cli","target":"figlet"}`), `fix_input` (the corrected call, or the call with a `<target>` placeholder when no correction exists; grammar in KTD9), `retry` (the same call, with `retry_after`), `fetch` (a `curl -s <url>` read) | approve | The HTTP `audit_url` is a browser page behind Turnstile, not a headless command, so an HTTP miss points at `run_audit` or a `fetch` |
+| OD5 | `next_step.action` closed set and `command` form | `call_tool` (command: the MCP call, `run_audit {"kind":"cli","target":"figlet"}`), `fix_input` (the corrected call; `command: null` with the accepted-forms `docs` anchor when no correction exists, since a placeholder is not a call an agent can send as written; grammar in KTD9), `retry` (the same call, with `retry_after`), `fetch` (a `curl -s <url>` read) | approve | The HTTP `audit_url` is a browser page behind Turnstile, not a headless command, so an HTTP miss points at `run_audit` or a `fetch` |
 | OD6 | `anc://scorecard/{binary}` | (a) keep the URI, read curated scorecards through the resolver, answer `-32602` naming `get_scorecard` otherwise; (b) retire it in `0.2.0`; (c) also read stored live results, with the `resources/read` hint cut to 5 minutes for every resource | (a) | (c) puts R2 data behind a 1-hour public hint or shortens it for all four templates, which are all build-time data; (a) keeps the hint true |
 | OD7 | The in-progress field | `in_progress: { started_at }` on the MCP hit and miss and on the HTTP 200; the HTTP 202 body keeps `in_progress: true, started_at` | approve | The HTTP 202 is additive-only; MCP is a hard cut and can take the object form everywhere |
 | OD8 | D6: `site_spec_version` and `auditor_url` on MCP answers | (a) add to MCP; (b) drop from HTTP | (a) | KTD13 |
 | OD9 | D15: WebMCP on CLI scorecard pages | (a) defer; (b) add a CLI `get_audit_summary` reading the projection in PR9 | (a) | KTD13; (b) is a new public WebMCP tool |
-| OD10 | When the list hints drop to 5 minutes | (a) in the `0.2.0` cut, as decided; (b) one release earlier, in PR1 | (a), with the note | A `tools/list` fetched in the hour before the `0.2.0` deploy carries a 1-hour `ttlMs`, so a shared cache may serve the old list for up to an hour after the cut under (a), and 5 minutes under (b) |
+| OD10 | When the list hints drop to 5 minutes | (a) in the `0.2.0` cut, as the brief settles it; (b) one release earlier, in PR1 | settled (a); listed for its cost, and (b) needs Brett to re-open it | A `tools/list` fetched in the hour before the `0.2.0` deploy carries a 1-hour `ttlMs`, so a shared cache may serve the old list for up to an hour after the cut under (a), and 5 minutes under (b). The devex review recommends (b): PR1 reaches production first, at a cost of at most 11 more `tools/list` calls per client per hour |
 | OD11 | `list_website_audits` default view | (a) keep `curated`, its documented default; (b) `all`, the page's default | (a) | The tool's default is published text agents read; KTD12 pins the difference as an intended offset |
 | OD12 | Tool titles | "Get a stored scorecard", "Run a live audit" | approve | The titles mirror the read and live split of the two tool names |
 | OD13 | Public text: the two descriptions, the field descriptions, the retired-argument messages, the hero card line, and the guide's rewritten sections | Brett reads the final text before the builds' reviews | read before PR6 and PR8 reviews | Drafts measured: `get_scorecard` 601 characters, `run_audit` 1,590, inside every `cut` and `warn` record |
@@ -177,6 +186,7 @@ Each row names what only Brett can decide, the options, the recommendation, and 
 | OD15 | The `llms.txt` website section heading and order | `## Website scorecards`, seed order, after the CLI list | approve | Mirrors the CLI section the build emits in `src/build/09-llms-emit.mjs` |
 | OD16 | D2: `/score/BurntSushi/ripgrep` | (a) 301 to `/score/ripgrep`, as a binary alias does; (b) serve the registry scorecard at the repository path | (a) | One canonical URL per scorecard; the sitemap and `llms.txt` already list the slug path |
 | OD17 | Does the `0.2.0` release to `main` wait for PR9 | (a) yes: the release carries the stack and PR9, so the JSON order and the twin and page order ship together; (b) no: the release carries the stack, and PR9 ships in the next release | (a) | The twin is an agent-facing output; under (b), for one release the JSON answer leads with `top_fixes` while the twin of the same scorecard does not |
+| OD18 | What a call to a retired tool name answers | (a) the SDK's `-32602` "Tool score_cli not found", with the `0.2.0` entry on `content/changelog.md` as the pointer; (b) for one release, the dispatch shell answers `tools/call` for the three retired names with `-32602`, a message naming the replacement call, and `data: { replacement }`, running nothing; (c) one sentence about the cut in `initialize.instructions` for one release | (a) | The SDK refuses an unknown tool before any handler runs, so (b) is a new shell branch, on the pattern of the disabled legacy lane's `-32022`; the hard cut rests on minimal traffic on the old names, and (a) adds no mechanism. The devex review recommends (b) |
 
 ### Public names the release adds or changes
 
@@ -206,6 +216,10 @@ Each row names what only Brett can decide, the options, the recommendation, and 
 | Error | `suggestions[]` keys `target`, `scorecard_url` | reused from the result route's 404 body | open, OD2 |
 | Error | `reason` values | the closed set | open, OD3, OD4 |
 | Error | `next_step.action` values | the closed set | open, OD5 |
+| Error | `retry_after` | added, integer seconds, whenever the step is `retry` | open, OD2 |
+| Error | the in-tool `-32099` object | gains `reason`, `retry_after`, and `next_step` beside `jsonrpc` and `error.code` | settled (one error shape) |
+| Answer | `message` on a record served while audits are off | added | settled (R21) |
+| Page | `content/changelog.md` `0.2.0` entry | added | settled (hard cut) |
 | Resource | `anc://scorecard/{binary}` | reads curated scorecards through the resolver (PR2); serves the projection in place of the registry entry in `0.2.0` | open, OD6 |
 | Capabilities | `tools.listChanged`, `resources.listChanged` | `false` on both lanes | settled |
 | Server card | `capabilities.prompts` | removed | settled |
@@ -231,6 +245,7 @@ Each row is unchanged in value, key, order, and anon posture unless the last col
 | `MCP_LIVE_SCORING_ENABLED`, `scoring_disabled` | MCP admission policy, CLI lane, after the read tier | moved after the read tier on MCP (settled, R21); `POST /api/score` already checks after it |
 | `WEB_AUDIT_ENABLED` | both policies, web lane, after the read tier; with it off, a stored record of any age is served with `audited: false`, as `audit_website` does today; the listing change | none |
 | Branch-scoped targets (`owner/repo@branch`) | `ops/run.ts`: never usable on the run path | none: every run path audits them fresh today |
+| A website run with `follow_declarations: false` | `ops/run.ts`, web lane: no stored read, no attach, no write; the same limiter units | none |
 | `WEB_AUDIT_FOLLOW_ENABLED` | the web audit core | none |
 | `OG_VIDEO_ENABLED` | render requests from the audit hooks | none |
 | Cost gate: a stored CLI result is never re-audited before it expires; a website record is reused under 1 minute | `ops/read.ts` read tier, ahead of every admission policy | the staging-only `bypass_cache` path that skipped it is removed (settled, R22) |
@@ -291,6 +306,8 @@ flowchart TB
   A[strict input, retired-argument refusals] --> B[resolveTarget with kind: lane check]
   B -->|refused| R1[Refusal, nothing spent]
   B --> C[read tier: registry, then stored record]
+  B -->|web, follow_declarations false| O[no stored read, no attach, no write, null URLs]
+  O --> F
   C -->|usable stored result| H[audited: false, projection]
   C -->|miss, stale, or branch target| D{lane}
   D -->|cli| E[MCP_LIVE_SCORING_ENABLED, scoring_disabled]
@@ -312,9 +329,9 @@ Outcome map per adapter (KTD3):
 | Hit | 200 projection, page, twin | 200 projection | `isError: false`, text and `structuredContent` | contents | `ok: true` |
 | Redirect (alias, fold, repository) | 301 | answers for the canonical target | answers for the canonical target | contents | n/a |
 | In progress, something stored | 200 with `in_progress` | 200 with `in_progress` | hit with `in_progress` | contents | page as rendered |
-| In progress, nothing stored | 202 | 202 or attach | `found: false, in_progress` | `-32602` | n/a |
+| In progress, nothing stored | 202 | 202 or attach | `found: false, in_progress` with a `retry` step and `retry_after`, no `next_tool` | `-32602` | n/a |
 | Miss | 404 with suggestions and the error shape | proceeds to admission | `found: false` with the error shape | `-32602` | `found: false` |
-| Unavailable | 503, `Retry-After` | a miss that proceeds to admission (KTD4) | `get_scorecard`: `isError: true`, `reason: "cache_unavailable"`; `run_audit`: a miss (KTD4) | `-32603` | `ok: false` |
+| Unavailable | 503, `Retry-After`, a `retry` step | a miss that proceeds to admission (KTD4) | `get_scorecard`: `isError: true`, `reason: "cache_unavailable"`, a `retry` step with `retry_after`; `run_audit`: a miss (KTD4) | `-32603` | `ok: false` |
 | Refusal | 404 (path) | 400 | `isError: true` with the error shape | `-32602` | `ok: false` |
 
 The answer, every representation (R9; inner order in KTD7):
@@ -335,7 +352,6 @@ PR order and waits:
 
 ```mermaid
 flowchart TB
-  X582[#582 tool contract] --> PR3
   PR1[PR1 independent fixes] -.merge order.-> PR2
   PR2[PR2 scorecard read layer] --> PR3[PR3 catalog operations, outputSchema phases 1 and 2]
   PR3 --> PR4
@@ -351,13 +367,14 @@ Measured per KTD14 against #582's 36,864-byte budget. The phase rows use draft s
 
 | After | Added | `tools` array | Under budget by |
 | --- | --- | --- | --- |
-| #582 (`c30dfed`, 14 tools, no schemas) | | 18,971 | 17,893 |
-| PR3, phase 1 (`list_spec_sections` 377, `list_website_audits` 849, `get_tool` 1,265, `get_principle` 1,308, `get_spec_section` 1,070, `get_web_remediation` 1,157) | 6,026 | 24,997 | 11,867 |
-| PR3, phase 2 (`list_tools` 532, `search_tools` 532, `list_principles` 311) | 1,375 | 26,372 | 10,492 |
-| PR6, the cut (four entries out, 9,825 with their separators; `get_scorecard` 1,541 and `run_audit` 4,641 in, plus one separator each) | -3,641 | 22,731 | 14,133 |
-| PR6, phases 3 and 4 (`get_scorecard` 3,043, `run_audit` 2,565, `set_website_public_listing` 1,031) | 6,639 | 29,370 | 7,494 |
+| `dev` with #582 (`fec4378`, 14 tools, no schemas) | | 18,971 | 17,893 |
+| PR3, phase 1 (`list_spec_sections` 377, `list_website_audits` 849, `get_tool` 830, `get_principle` 873, `get_spec_section` 635, `get_web_remediation` 722; misses stay `{ found: false, message }`) | 4,286 | 23,257 | 13,607 |
+| PR3, phase 2 (`list_tools` 532, `search_tools` 532, `list_principles` 311) | 1,375 | 24,632 | 12,232 |
+| PR5, the four catalog misses gain the error shape (496 bytes each) | 1,984 | 26,616 | 10,248 |
+| PR6, the cut (four entries out, 9,825 with their separators; `get_scorecard` 1,541 and `run_audit` 4,641 in, plus one separator each) | -3,641 | 22,975 | 13,889 |
+| PR6, phases 3 and 4 (`get_scorecard` 3,344, `run_audit` 2,602, `set_website_public_listing` 1,092) | 7,038 | 30,013 | 6,851 |
 
-Phase 1 adds more than an estimate without the error shape (about 4,200), because each found-or-miss union carries the full error shape. The peak is 29,370, after the stack. `run_audit`'s entry is mostly `follow_declarations`' disclosure (about 1,700 characters), carried over unchanged.
+The catalog misses gain the error shape in PR5 with the scorecard misses, so the shape reaches every MCP answer in the release that documents it; the shape measured here carries `retry_after` and a nullable `command`. The peak is 30,013, after the stack. `run_audit`'s entry is mostly `follow_declarations`' disclosure (about 1,700 characters), carried over unchanged.
 
 ### Answer growth from the projection
 
@@ -369,17 +386,16 @@ Phase 1 adds more than an estimate without the error shape (about 4,200), becaus
 
 ### Assumptions
 
-- #582 merges with its budget (36,864) and pending list as of `c30dfed`; PR3 rebases onto whatever lands and re-measures.
-- #581 merges before PR3 (#580 is on dev); PR3 moves `src/worker/mcp/tools/web-listing.ts` and `src/worker/audit-web/held-run.ts` callers as they stand after them.
+- #580, #581, and #582 are on `dev`; PR3 moves `src/worker/mcp/tools/web-listing.ts` and `src/worker/audit-web/held-run.ts` callers as they stand after them.
 - Brett answers the owner decisions in one batch before PR2 merges; PR1 depends on none of them except OD10 and OD15.
-- The operator's wrangler token can delete objects in `anc-score-cache-staging`, which PR7's smoke needs.
+- The operator's wrangler token can delete objects in `anc-score-cache-staging`, which PR7's smoke needs; the smoke's own gate line reports a token that cannot.
 
 ### Risks
 
 | Risk | Mitigation |
 | --- | --- |
 | A client reopens `subscriptions/listen` in a loop once the stream closes after an empty acknowledgement | The closure is the SDK's spec response for an empty honored set; after PR1 deploys, read `mcp.request` counts for `subscriptions/listen` on staging and report a rise before release |
-| A shared cache serves the `0.1.0` tool list after the cut | OD10; the `0.2.0` changelog and the guide name the new calls; `serverInfo.version` changes on every modern result |
+| A shared cache serves the `0.1.0` tool list after the cut, for up to an hour (the settled hint change ships with the cut, OD10) | the `0.2.0` entry on `content/changelog.md` and the guide map every old call to its new call; `serverInfo.version` changes on every modern result; OD18 |
 | A schema drift turns a correct answer into "Output validation error" for every client | KTD2: the parity test parses every adapter's output, and one handler test per success variant asserts `isError` is not true |
 | Moving the result route onto the resolver changes what an existing URL serves | KTD12 rows for every target the route serves today, written first against the current route (characterization) and kept green through PR2 |
 | A stored record from an older producer lacks a key the projection reads | `presentScorecard` treats every inner key as optional and keeps unknown keys; a row for an old-shape record in the parity table |
@@ -411,7 +427,7 @@ Phase 1 adds more than an estimate without the error shape (about 4,200), becaus
 | U10 | `readScorecard` with strict reads | `src/worker/ops/read.ts` | U9 |
 | U11 | Scorecard read adapters onto the layer | `src/worker/audit/result.ts`, `src/worker/audit/api.ts`, `src/worker/mcp/tools/scorecard-read.ts`, `src/worker/mcp/tools/web-audit.ts`, `src/worker/mcp/resources.ts` | U10 |
 | U12 | Parity test harness and scorecard rows | `tests/entry-point-parity.test.ts`, `tests/helpers/parity/` | U11 |
-| U13 | Catalog operations and their schemas | `src/worker/ops/catalog.ts`, `src/worker/mcp/tools/{registry,principles,spec}.ts` | U12, #582 |
+| U13 | Catalog operations and their schemas | `src/worker/ops/catalog.ts`, `src/worker/mcp/tools/{registry,principles,spec}.ts` | U12 |
 | U14 | Board operation | `src/worker/ops/board.ts`, `src/worker/mcp/tools/web-audit.ts` | U12 |
 | U15 | Remediation and listing operations | `src/worker/ops/{remediation,listing}.ts`, `src/worker/mcp/tools/{web-remediation,web-listing}.ts` | U12 |
 | U16 | Catalog parity rows | `tests/entry-point-parity.test.ts` | U13, U14, U15 |
@@ -463,8 +479,8 @@ Reviews: `ce-code-review`, `/devex-review` (the handshake capabilities, the card
 - **Approach:** `Object.hasOwn` at each keyed read, the pattern the result route uses.
 - **Test scenarios:**
   - `get_web_remediation { check_id: "constructor" }` and `"toString"` answer `found: false`, not `isError`.
-  - `get_scorecard { slug: "constructor" }` is a refusal or miss whose next step is not an audit.
-  - `POST /api/score { target: "constructor" }` answers the same class as `/score/constructor`.
+  - `get_scorecard { slug: "constructor" }` is a `not_found` miss whose next step is not an audit.
+  - `/score/constructor` answers 404 `not_found`, and `POST /api/score { target: "constructor" }` answers 400 `unrecognized_input`: the read-and-run pair KTD5 names.
 - **Verification:** each test observed failing on the unfixed code.
 
 #### U4. Curated `scored_at` and the guide's example versions
@@ -534,7 +550,7 @@ Reviews: `ce-code-review`, `/devex-review` (more targets resolve and the outage 
   - `owner/repo@branch` (seeded) resolves to the branch record.
   - `RipGrep` gets the same outcome it gets on the page today.
   - `example.com`, `https://example.com/`, `EXAMPLE.com` resolve to `example.com`; a seeded fold resolves `www.<host>` to the apex.
-  - `constructor`, `toString` are a refusal or miss.
+  - `constructor` and `toString` are a `not_found` miss on read and an `unrecognized_input` refusal on run, with the same suggestions.
   - With `kind: "web"`, `ripgrep` is `lane_mismatch`, and `https://github.com/owner/repo` is the website `github.com`.
 - **Verification:** the route tests in `tests/audit-result-route.test.ts` stay green.
 
@@ -551,7 +567,7 @@ Reviews: `ce-code-review`, `/devex-review` (more targets resolve and the outage 
 
 #### U11. Scorecard read adapters onto the layer
 
-- **Goal:** the result route, the read tier of `POST /api/score`, `get_scorecard`, `get_website_audit`, and `anc://scorecard/{binary}` call the layer, with no MCP tool name or answer shape change (R2, R3).
+- **Goal:** the result route, the read tier of `POST /api/score`, `get_scorecard`, `get_website_audit`, and `anc://scorecard/{binary}` call the layer, with no MCP tool name change; the outage answer becomes the `isError` the published `get_scorecard` description already promises for an infrastructure error (R2, R3).
 - **Requirements:** R2, R3, KTD15, OD6, OD16.
 - **Files:** `src/worker/audit/result.ts`, `src/worker/audit/api.ts`, `src/worker/mcp/tools/scorecard-read.ts`, `src/worker/mcp/tools/web-audit.ts`, `src/worker/mcp/resources.ts`; tests in `tests/audit-result-route.test.ts`, `tests/audit-api.test.ts`, `tests/worker-mcp.test.ts`, `tests/web-audit-mcp-tools.test.ts`.
 - **Approach:** `get_scorecard`'s four fields still feed one raw string, now through `resolveTarget('cli', ...)`; an unavailable read answers `isError: true` with the `cache_unavailable` text the folded read already uses. The page answers a registry repository with a 301 (OD16).
@@ -577,7 +593,7 @@ Reviews: `ce-code-review`, `/devex-review` (more targets resolve and the outage 
 
 ### PR3: Catalog operations and `outputSchema` phases 1 and 2
 
-Waits on: #582, needed before start (its pending list and budget are the gate); PR2, needed before start (it creates the ops module and the parity harness); #581, merge order only (`held-run.ts`).
+Waits on: PR2, needed before start (it creates the ops module and the parity harness). #580, #581, and #582 are on `dev`.
 
 Separate PR because: Brett reviews each PR, and the nine tool schemas plus five operations would make PR2 too large for one sitting.
 
@@ -588,7 +604,7 @@ Reviews: `ce-code-review`, `/devex-review` (nine tools gain `outputSchema` and `
 - **Goal:** the registry, principle, and spec-section reads go through `ops/catalog.ts`, with absolute URLs and links, and their tools declare `outputSchema` (R5, R6, R25).
 - **Requirements:** R6, R25, D12, D14.
 - **Files:** `src/worker/ops/catalog.ts`, `src/shared/ops-schemas/catalog.ts`, `src/worker/mcp/tools/registry.ts`, `src/worker/mcp/tools/principles.ts`, `src/worker/mcp/tools/spec.ts`, `src/worker/mcp/resources.ts`, `tests/mcp-tool-contract.test.ts` (seven names leave `OUTPUT_SCHEMA_PENDING`); tests in `tests/worker-mcp.test.ts`.
-- **Approach:** `scorecard_url` and principle-body links are made absolute from the request origin at serve time, as every scorecard answer's are; the miss answers keep `found: false` and `message` and add the error shape's keys (R12, additive). Bare arrays stay arrays.
+- **Approach:** `scorecard_url` and principle-body links are made absolute from the request origin at serve time, as every scorecard answer's are; the miss answers stay `{ found: false, message }`, loose, and gain the error shape's keys in U19 with the scorecard misses, so the shape reaches every MCP answer in the release that documents it. Bare arrays stay arrays.
 - **Test scenarios:**
   - `list_tools` entries carry `https://<origin>/score/<slug>`.
   - `get_principle { n: 4 }` body links are absolute on the request origin, staging included.
@@ -643,7 +659,7 @@ Reviews: `ce-code-review`, `/devex-review` (every scorecard answer's order and k
 - **Test scenarios:**
   - `ripgrep`'s top fixes are `p4-must-actionable-errors`, `p2-must-json-errors`, `p7-should-verbose`, `p1-should-defaults-in-help`, `p4-should-json-error-output`, each with its row's `label` as the fix text, and `fixes_total` equal to its fail, warn, and opt_out count.
   - `yazi`'s `p2-must-output-flag` (`opt_out`) ranks with its fails, and the formula test recomputes its score as 57.
-  - `example.com`'s top five are ranked by the rise in `score.relative` each re-scored row gives, then producer order; an alternative group appears once.
+  - `example.com`'s top five are ranked by gain, then producer order; an alternative group appears once; every row's `gain` is above 0, in percentage points to one decimal.
   - A scorecard with no fixable row gives `top_fixes: []`, `fixes_total: 0`.
   - An inner key the projection does not know survives after the known keys.
   - The formula test recomputes `badge.score_pct` for all 98 curated scorecards.
@@ -660,6 +676,7 @@ Reviews: `ce-code-review`, `/devex-review` (every scorecard answer's order and k
   - `/score/figlet/json` with the flag set and a stored record answers 200 with `in_progress.started_at`.
   - With no stored record it answers 202 with today's body.
   - The in-progress 200 carries `Cache-Control: no-store` and the MISS class.
+  - Both `json_url` bodies are pinned: the 202's boolean `in_progress` and the 200's object form.
   - `anc://scorecard/rg` serves the projection.
   - The MCP text block, parsed, equals the JSON route's body byte for byte apart from the MCP wrapper keys.
   - The parity table's in-flight rows drop their offset pin.
@@ -678,9 +695,12 @@ Reviews: `ce-code-review`, `/devex-review` (the error contract agents branch on)
 - **Goal:** every refusal and miss carries the shape, from one closed `reason` set (R12, KTD9).
 - **Requirements:** R12, OD3, OD4, OD5.
 - **Files:** `src/worker/ops/errors.ts`, `src/shared/ops-schemas/errors.ts`, `src/shared/audit-events.ts` (the extended union), `src/worker/audit/result.ts` (the 404 body), `src/worker/audit/api.ts` (the 400 bodies), the MCP read tools; tests `tests/ops-errors.test.ts`, `tests/audit-result-route.test.ts`, `tests/worker-mcp.test.ts`.
-- **Approach:** HTTP keeps `error.code`, `message`, `audit_url`, and `suggestions` and adds the shape's keys; MCP refusals become the shape. `value` is the offending input, truncated to the bound the route already applies to `details` (200 characters). `command` strings are built from the resolved target, never by echoing raw input into a command.
+- **Approach:** HTTP keeps `error.code`, `message`, `audit_url`, and `suggestions` and adds the shape's keys; MCP refusals become the shape, and the catalog misses U13 left as `{ found: false, message }` gain its keys too. `value` is the offending input, truncated to the bound the route already applies to `details` (200 characters). `command`, `next_tool`, `retry_after`, and the `-32099` keys follow KTD9.
 - **Test scenarios:**
-  - `/score/ripgrap/json` carries `reason: "not_found"`, `value: "ripgrap"`, a `ripgrep` suggestion, and a `next_step` whose `command` is a runnable call.
+  - `/score/ripgrap/json` carries `reason: "not_found"`, `value: "ripgrap"`, a `ripgrep` suggestion, and a `fix_input` step built from that suggestion; the MCP miss for `ripgrap` carries no `next_tool`, since the run path refuses `ripgrap`.
+  - A walker test over every emitted error shape: a `call_tool`, `fix_input`, or `retry` command splits at its first space into a served tool name and arguments that `JSON.parse` and pass that tool's served `inputSchema`; a `fetch` command carries an absolute URL on the request origin; every `docs` URL is absolute and its fragment exists in the built `/mcp-skill` page; `next_tool`, when present, equals the command's tool name.
+  - For every miss row in the parity table, the command it names, sent to its adapter, is not a validation refusal.
+  - A refusal with no resolved target and no suggestion carries `command: null` and the accepted-forms `docs` anchor.
   - The MCP refusal for an unparseable CLI target carries `reason: "unrecognized_input"` and a `fix_input` step.
   - Every `reason` an adapter emits is in the closed set (a test walks every refusal path).
   - A 10,000-character input yields a `value` no longer than the bound.
@@ -707,7 +727,9 @@ Reviews: `ce-code-review`, `/devex-review` (the tool contract), `/cso` (the admi
   - A cached CLI target never reaches the container (the cost-gate test `RELEASES.md` names keeps passing).
   - Missing `cf-connecting-ip` on a miss answers the `-32099` text and spends nothing.
   - `run_audit { kind: "cli", target: "owner/repo@branch" }` with a seeded branch record reaches the claim and runs fresh.
-  - A website record 2 minutes old with `WEB_AUDIT_ENABLED` off answers `audited: false` with the record.
+  - A website record 2 minutes old with `WEB_AUDIT_ENABLED` off answers `audited: false` with the record and a `message` saying fresh audits are off; so does a stored CLI record with live scoring off.
+  - Each budget refusal cause (burst, hour full, contended, missing `cf-connecting-ip`) answers its own `reason`, and every cause but the missing address carries `retry_after` and a `retry` step.
+  - A website run with `follow_declarations: false` reads no stored record, attaches to nothing, writes nothing, and answers `null` URLs.
 - **Verification:** `tests/worker-mcp-audit.test.ts`'s cost-gate assertion stays green.
 
 #### U21. The tool cut
@@ -720,7 +742,7 @@ Reviews: `ce-code-review`, `/devex-review` (the tool contract), `/cso` (the admi
   - `get_scorecard { kind: "cli", target: "rg" }` answers `found: true` for `ripgrep`; `{ kind: "web", target: "ripgrep" }` is `lane_mismatch` and spends nothing.
   - `run_audit { kind: "cli", target: "ripgrep" }` answers `audited: false`, tier registry, scorecard inline.
   - `run_audit { kind: "web", target: "https://github.com/owner/repo" }` reads as the website `github.com`.
-  - `get_scorecard { slug: "ripgrep" }` is refused with `Input validation error`, the key, and the new call.
+  - The full served text is pinned for `get_scorecard {"slug":"ripgrep"}`, `{"binary":"rg"}`, and `{"url":"example.com"}`, and for `run_audit` with `bypass_cache`: each names the whole replacement call with `kind` filled and ends with the reconnect sentence (KTD9); the `kind` field's own message lists both values.
   - `tools/call score_cli` answers `-32602` "Tool score_cli not found".
   - `set_website_public_listing`'s miss carries `next_tool: "run_audit"`.
   - `wrangler.jsonc` declares no `MCP_CACHE_BYPASS_ALLOWED` in any block.
@@ -735,17 +757,18 @@ Reviews: `ce-code-review`, `/devex-review` (the tool contract), `/cso` (the admi
   - `get_scorecard` hit, in progress, and miss;
   - `run_audit` stored, fresh, attached, disabled with nothing stored;
   - the listing tool's changed, already stored, curated, and disabled answers.
-- **Verification:** rule 5 measures at or under 29,370 bytes plus the drift between draft and built schemas; any figure over 36,864 stops the PR.
+- **Verification:** rule 5 measures at or under 30,013 bytes plus the drift between draft and built schemas; any figure over 36,864 stops the PR.
 
 #### U23. Version, hints, instructions, and pinned prose
 
 - **Goal:** the release announces itself and every test-pinned text names the new tools (R15, R23).
 - **Requirements:** R15, R23, OD10, OD13.
-- **Files:** `src/shared/mcp-discovery.ts` (`MCP_SERVER_VERSION`), `src/worker/mcp/server.ts` (`CACHE_HINTS`), `src/worker/mcp/instructions.ts`, `tests/helpers/mcp-tools.ts` (`EXPECTED_TOOL_NAMES`, titles, annotations), `AGENTS.md` § MCP server (tool count and the tool list, the `MCP_LIVE_SCORING_ENABLED` line), `content/mcp-skill.md` (each tool named, for rule 6); tests `tests/mcp-client-limits.test.ts`, `tests/worker-mcp.test.ts` (hints read from a live `tools/list`).
+- **Files:** `src/shared/mcp-discovery.ts` (`MCP_SERVER_VERSION`), `src/worker/mcp/server.ts` (`CACHE_HINTS`), `src/worker/mcp/instructions.ts`, `tests/helpers/mcp-tools.ts` (`EXPECTED_TOOL_NAMES`, titles, annotations), `AGENTS.md` § MCP server (tool count and the tool list, the `MCP_LIVE_SCORING_ENABLED` line), `content/mcp-skill.md` (each tool named, for rule 6, and every `tools/call` example rewritten to `{ kind, target }`); tests `tests/mcp-client-limits.test.ts`, `tests/worker-mcp.test.ts` (hints read from a live `tools/list`), `tests/content-mcp-skill.test.ts`.
 - **Test scenarios:**
   - The handshake and both cards carry `0.2.0`.
   - The three list methods carry `ttlMs: 300000`; `resources/read` keeps 3,600,000.
   - The instructions fit every `cut` record and keep their critical items inside every `warn` record.
+  - Every `tools/call` example in `content/mcp-skill.md` (name and `arguments`) passes the served tool's `inputSchema` through the in-process server.
 - **Verification:** `tests/mcp-client-limits.test.ts` green at the longest origin.
 
 ### PR7: Release smoke and e2e suites (0.2.0 stack)
@@ -760,12 +783,20 @@ Reviews: `ce-code-review`, `/devex-review` (release commands the operator runs),
 
 - **Goal:** the release gates call the `0.2.0` tools and test the fresh path a production caller takes (R22).
 - **Requirements:** R22.
-- **Files:** `scripts/release/mcp-smoke.sh`, `scripts/release/preflight.sh`, `scripts/release/postflight.sh`, `tests/e2e/mcp.e2e.ts`, `tests/e2e/discoverability.e2e.ts`, `tests/e2e/web-audit.e2e.ts`, `tests/e2e/og-cards.e2e.ts`, `playwright.config.ts`; tests for the script's argument handling where one exists.
-- **Approach:** with `--full-cache-coverage` (staging only; the production refusal stays), the smoke runs `bun x wrangler r2 object delete "anc-score-cache-staging/scores/<binary>/<SPEC_VERSION>.json" --remote`, with the bucket name as a literal in the script. Without `--remote`, wrangler 4 deletes from local storage and the staging record stays, which is why `scripts/staging-cache-smoke.sh` passes it. The smoke then calls `run_audit` and grades it on `audited: true` with `freshness.cached: false`, then calls it again and grades `audited: false` with `tier: "cache"`. These replace today's grading on `source` (`fresh-audit` against `live-cache`), which R24 removes. Without the flag, one call passes on either answer. The symmetry gate becomes `get_scorecard` and `run_audit` on a curated CLI both answering tier registry with the same scorecard.
+- **Files:** `scripts/release/mcp-smoke.sh`, `scripts/release/preflight.sh`, `scripts/release/postflight.sh`, `RELEASES-PREFLIGHT.md` and `RELEASES-POSTFLIGHT.md` (their copy-paste tool calls), `tests/e2e/mcp.e2e.ts`, `tests/e2e/discoverability.e2e.ts`, `tests/e2e/web-audit.e2e.ts`, `tests/e2e/og-cards.e2e.ts`, `playwright.config.ts`; tests for the script's argument handling where one exists.
+- **Approach:** checks 3, 4, and 6 of `scripts/release/mcp-smoke.sh` move to the `0.2.0` tools: the count becomes 12, the required names become `get_scorecard`, `run_audit`, and `list_principles`, and every call takes `{ kind, target }`; the copy-paste commands in the two release docs move with them. With `--full-cache-coverage` (the production refusal stays), the fresh-audit gate runs in four steps, and it runs the audit only after the deployment under test reports the record gone:
+  1. Read `target` and `spec_version` from a `get_scorecard { kind: "cli", target: "npm install -g <binary>" }` answer on the base URL itself, so the key is the one that deployment writes (`keyFor` in `src/shared/audit-routes.ts`). On `found: false`, skip the delete.
+  2. Delete `scores/<target>/<spec_version>.json`. On a staging host: `bun x wrangler r2 object delete "anc-score-cache-staging/scores/<target>/<spec_version>.json" --remote`, with the bucket name a literal in the script; without `--remote`, wrangler 4 deletes from local storage, which is why `scripts/staging-cache-smoke.sh` passes it. On localhost: the same delete against the local dev session's state (`-c wrangler.jsonc --env staging`, no `--remote`).
+  3. Call `get_scorecard` again. Anything but `found: false` fails with its own gate line naming the delete (the wrangler token's R2 write scope, or the key).
+  4. Call `run_audit` and grade `audited: true` with `freshness.cached: false`; call it again and grade `audited: false` with `tier: "cache"`.
+
+  These replace today's grading on `source` (`fresh-audit` against `live-cache`), which R24 removes, and the failure hints that name `MCP_CACHE_BYPASS_ALLOWED`. Without the flag, one call passes on either answer. The symmetry gate becomes `get_scorecard` and `run_audit` on a curated CLI both answering tier registry with the same scorecard.
 - **Test scenarios:**
   - The script refuses `--full-cache-coverage` against a production host.
   - The bucket name cannot come from an argument or an environment variable.
-  - The delete command carries `--remote`.
+  - A staging base URL produces a delete with `--remote`; a localhost base URL never does.
+  - A deployment that still answers `found: true` after the delete fails the gate before any audit.
+  - Checks 3, 4, and 6 pass against the `0.2.0` tool list.
   - Each e2e spec's tool calls use only the 12 served names.
 - **Verification:** the operator runs `scripts/release/preflight.sh e2e` against the deployed release build; this plan's sessions do not run it against staging.
 
@@ -781,9 +812,9 @@ Reviews: `ce-code-review`, `/devex-review` (the client guide is the setup docume
 
 - **Goal:** every document an agent or operator reads describes the two tools, the answer order, and the error shape.
 - **Requirements:** R9, R12, R18 to R24.
-- **Files:** `content/mcp-skill.md` (scorecard sections rewritten; "the tools are symmetric" paragraph replaced; failure table), `content/mcp-docs.md` (opening sentence names both surfaces), `docs/runbooks/mcp-wire-protocol.md`, `docs/runbooks/mcp-operator.md`, `docs/runbooks/web-audit-operations.md`, `RELEASES.md`, `RELEASES-PREFLIGHT.md`, `RELEASES-POSTFLIGHT.md`, `RELEASES-RATIONALE.md`, `AGENTS.md` (the rest of § MCP server, including the website hour-window key, which the code writes as `audit:web:<ip>:<hour>`; § og:video untouched), `CONCEPTS.md`.
+- **Files:** `content/changelog.md` (a `0.2.0` entry mapping every retired tool and argument to its new call, `source` to `audited` plus `tier`, and `next_tool: "score_cli"` or `"audit_website"` to `"run_audit"`), `content/mcp-skill.md` (scorecard sections rewritten; "the tools are symmetric" paragraph replaced; the failure table, whose `-32602` row links the changelog entry; a `json_url` note that the 202 is the only boolean `in_progress` form, told apart by its status, and that `in_progress` there can lag by the HIT-min window), `content/mcp-docs.md` (opening sentence names both surfaces), `docs/runbooks/mcp-wire-protocol.md`, `docs/runbooks/mcp-operator.md`, `docs/runbooks/web-audit-operations.md`, `RELEASES.md`, `RELEASES-PREFLIGHT.md`, `RELEASES-POSTFLIGHT.md`, `RELEASES-RATIONALE.md`, `AGENTS.md` (the rest of § MCP server, including the website hour-window key, which the code writes as `audit:web:<ip>:<hour>`; § og:video untouched), `CONCEPTS.md`.
 - **Test expectation:** none beyond the prose gate, `tests/runbook-citations.test.ts`, and the contract test's rule 6.
-- **Verification:** `rg -n 'score_cli|get_website_audit|audit_website|bypass_cache'` over the tree finds only `content/changelog.md`, `CHANGELOG.md`, `docs/plans/`, and the retired-argument messages.
+- **Verification:** `rg -n 'score_cli|get_website_audit|audit_website|bypass_cache'` and `rg -n '(get_scorecard|run_audit)[^\n]*"(slug|binary|install|github_url|url)"'` over the tree find only `content/changelog.md`, `CHANGELOG.md`, `docs/plans/`, and the retired-argument messages.
 
 #### U26. Pages, copy, and the issue template
 
@@ -845,7 +876,7 @@ Reviews: `ce-code-review`, `/devex-review` (the twin is an agent-facing output),
 - The parity table holds a row for every operation's adapters, and every intended difference is pinned as its own row.
 - `tools/list` serves 12 tools, every one with an `outputSchema`, at or under 36,864 bytes at the longest origin.
 - Every owner decision a merged unit depends on is answered, and the unit follows the answer.
-- No retired name survives outside the change records and the retired-argument messages.
+- No retired name or retired argument survives outside the change records and the retired-argument messages, and every tool call the guide, the release docs, or the smoke prints passes the served `inputSchema` as written.
 - Each PR's reviews ran one round each, with verdicts in PR comments, and every in-brief finding is fixed.
 - No probe file, seeded local state, or abandoned approach is left in any diff.
 
@@ -890,7 +921,7 @@ All 98 committed scorecards under `scorecards/` carry `run.started_at`.
 - `docs/solutions/best-practices/mcp-sdk-v2-enforces-a-declared-output-schema-on-every-successful-tool-call.md`: validation on every successful call, loose objects, the text block, no external `$ref`.
 - `docs/solutions/design-patterns/derive-cached-record-display-metadata-at-read-time.md`: presentation fields derived at read time, stored fields untouched.
 - `docs/solutions/design-patterns/parity-test-for-source-derived-resolvers-asserts-cross-env-union-and-twin-offsets.md`: pin intended offsets as their own rows.
-- Issue #498; PRs #580, #581, #582 (`c30dfed`).
+- Issue #498; PRs #580, #581, and #582 (measured at `c30dfed`, merged as `fec4378`).
 
 ## Review log
 
@@ -898,3 +929,4 @@ All 98 committed scorecards under `scorecards/` carry `run.started_at`.
 - 2026-11-12: `/plan-eng-review` round 1 started, in its own process from a clone of the pushed plan.
 - 2026-11-12: `/plan-eng-review` round 1 ended: ready with fixes (P0 0, P1 4, P2 10, P3 9). All 23 findings applied. Decided from evidence: the transact path stays tolerant and is pinned as an intended offset (KTD4); branch targets stay fresh on the run path and a stored record is served while an audit switch is off, as today (KTD6); the projection and the CLI ranker move to `src/shared/` (KTD1); web gain is an exact re-score and CLI fix text is the row's `label` (KTD8); `opt_out` rows rank as fixes under the published formula (KTD8); the settled error shape has no `exit_code` (KTD9); the in-progress 200 is `no-store` (U18); PR1 and PR3 add `/cso`. One owner decision added: OD17, whether the release waits for PR9.
 - 2026-11-12: `/plan-devex-review` round 1 started, in its own process from a clone of the plan with the eng review applied.
+- 2026-11-12: `/plan-devex-review` round 1 ended: ready with fixes (P0 0, P1 7, P2 6, P3 5). All 18 findings applied. Decided from evidence: the guide's and the smoke's calls are held to the served `inputSchema` (U23, U24); the smoke deletes the key the deployment reports and checks the delete before auditing (U24); the opted-out website run keeps today's path (R19); a miss points at `run_audit` only when the run path accepts the target (KTD9); catalog misses gain the error shape in PR5, with the byte table re-measured; the in-tool `-32099` object gains `reason`, `retry_after`, and `next_step`, since the settled shape replaces the bare refusal; `gain` is in percentage points. OD10 is marked settled as the brief states it, with the review's case for PR1 recorded. Added OD18 (what a retired tool name answers); OD5 now carries `command: null` for an input with no correction.
