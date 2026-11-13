@@ -3,9 +3,8 @@
 // (the SEP-2127 card and the AI catalog, .well-known/mcp, security.txt,
 // ai.txt, plus the llms.txt Programmatic access section) AND the mcp-skill HTML + .md
 // twin pages U2 ships, with cross-surface drift assertions so a change
-// in any one (the JSON pointer's documentation URL, the docs page's
-// tool list, the well-known + handshake spec revision) breaks the
-// suite.
+// in any one (the JSON pointer's documentation URL, the well-known +
+// handshake spec revision) breaks the suite.
 //
 // Run with:
 //   ANC_STAGING_BASE_URL=https://agentnative-site-staging.brettdavies.workers.dev \

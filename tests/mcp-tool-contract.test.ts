@@ -142,7 +142,7 @@ describe('MCP tool contract: every served tool', () => {
       }
       const recorded = (EXPECTED_TOOL_ANNOTATIONS as Record<string, Record<string, boolean>>)[tool.name];
       if (recorded === undefined) {
-        violations.push(`rule 1: ${tool.name}: no entry in EXPECTED_TOOL_ANNOTATIONS`);
+        violations.push(`rule 1: ${tool.name}: no entry in EXPECTED_TOOL_ANNOTATIONS (tests/helpers/mcp-tools.ts)`);
       } else if (sortedEntries(tool.annotations) !== sortedEntries(recorded)) {
         violations.push(
           `rule 1: ${tool.name}: serves ${JSON.stringify(tool.annotations)}, recorded ${JSON.stringify(recorded)}`,
@@ -157,12 +157,14 @@ describe('MCP tool contract: every served tool', () => {
     for (const tool of tools) {
       if (tool.inputSchema?.additionalProperties !== false) {
         violations.push(
-          `rule 2: ${tool.name}: inputSchema.additionalProperties is ${JSON.stringify(tool.inputSchema?.additionalProperties)}, not false`,
+          `rule 2: ${tool.name}: inputSchema.additionalProperties is ${JSON.stringify(tool.inputSchema?.additionalProperties)}, not false; register the input with z.strictObject`,
         );
       }
       const { args, unbuilt } = minimalArguments(tool);
       if (unbuilt.length > 0) {
-        violations.push(`rule 2: ${tool.name}: no minimal value for required ${unbuilt.join(', ')}`);
+        violations.push(
+          `rule 2: ${tool.name}: no minimal value for required ${unbuilt.join(', ')}; extend minimalValue() for its type`,
+        );
         continue;
       }
       resetMcpTestState();
@@ -230,7 +232,8 @@ describe('MCP tool contract: every served tool', () => {
     for (const tool of tools) {
       const pending = OUTPUT_SCHEMA_PENDING.includes(tool.name);
       const declared = tool.outputSchema !== undefined;
-      if (!pending && !declared) violations.push(`rule 7: ${tool.name}: declares no outputSchema and is not pending`);
+      if (!pending && !declared)
+        violations.push(`rule 7: ${tool.name}: declares no outputSchema and is not on OUTPUT_SCHEMA_PENDING`);
       if (pending && declared)
         violations.push(`rule 7: ${tool.name}: declares an outputSchema; remove it from the pending list`);
     }
