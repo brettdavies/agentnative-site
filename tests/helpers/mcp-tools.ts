@@ -1,6 +1,6 @@
 // The one test-side expectation for the MCP tool surface, shared by the
-// bun unit layer (tests/worker-mcp.test.ts) and the live staging specs
-// (tests/e2e/mcp.e2e.ts, tests/e2e/discoverability.e2e.ts). Deliberately
+// bun unit layer (tests/worker-mcp.test.ts, tests/mcp-tool-contract.test.ts)
+// and the live staging spec (tests/e2e/mcp.e2e.ts). Deliberately
 // NOT derived from src/worker/mcp — the registrations are the system
 // under test, and an expectation computed from them would pass no matter
 // what they register. Changing the tool surface means updating this list,
@@ -22,6 +22,7 @@ export const EXPECTED_TOOL_NAMES = [
   'get_website_audit',
   'audit_website',
   'list_website_audits',
+  'set_website_public_listing',
   'get_web_remediation',
 ] as const;
 
@@ -40,9 +41,41 @@ export const EXPECTED_TOOL_TITLES: Record<string, string> = {
   get_website_audit: 'Get a cached website audit',
   audit_website: 'Run a live website audit',
   list_website_audits: 'List cached website audits',
+  set_website_public_listing: "Set a website's public listing",
   get_web_remediation: 'Get web-audit remediation guidance',
 };
 
+// The read tools write nothing a client can read. Their one effect is evicting
+// a cache entry that no reader could parse, so a repeat call changes nothing more.
+const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
+
 // score_cli and audit_website reach external systems and write cache /
 // leaderboard state, so readOnlyHint is false and openWorldHint true.
-export const NON_READ_TOOL_NAMES = new Set(['score_cli', 'audit_website']);
+const AUDIT = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } as const;
+
+// set_website_public_listing overwrites one stored choice in place and reaches
+// only anc's own bindings: not read-only, destructive, repeatable, closed-world.
+const LISTING_WRITE = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: true,
+  openWorldHint: false,
+} as const;
+
+// The exact hints each tool declares on tools/list.
+export const EXPECTED_TOOL_ANNOTATIONS: Record<(typeof EXPECTED_TOOL_NAMES)[number], Record<string, boolean>> = {
+  list_tools: READ_ONLY,
+  get_tool: READ_ONLY,
+  search_tools: READ_ONLY,
+  list_principles: READ_ONLY,
+  get_principle: READ_ONLY,
+  list_spec_sections: READ_ONLY,
+  get_spec_section: READ_ONLY,
+  get_scorecard: READ_ONLY,
+  score_cli: AUDIT,
+  get_website_audit: READ_ONLY,
+  audit_website: AUDIT,
+  list_website_audits: READ_ONLY,
+  set_website_public_listing: LISTING_WRITE,
+  get_web_remediation: READ_ONLY,
+};

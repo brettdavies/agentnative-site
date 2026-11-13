@@ -37,7 +37,8 @@ export function registerRegistryTools(server: McpServer, catalog: Catalog): void
         'Return summaries of every scored CLI in the anc.dev registry. Each entry carries slug, name, binary, install ' +
         'command, version (when a scorecard has been committed), score_pct (percentage pass rate of the latest audit), ' +
         'scorecard_url (path under anc.dev), and audit_profile (when the tool opts out of the default profile).',
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      inputSchema: z.strictObject({}),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async () => textContent(catalog.registry.map(summary)),
   );
@@ -51,8 +52,8 @@ export function registerRegistryTools(server: McpServer, catalog: Catalog): void
         '(when set), repo (when a GitHub owner/repo is parseable), version, anc_version, scorecard_url, score_pct. ' +
         'Look-not-found returns isError: false with a typed { found: false, message } body because absence is data, ' +
         'not failure.',
-      inputSchema: { slug: z.string().describe('The CLI slug, e.g. "ripgrep" or "curl".') },
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      inputSchema: z.strictObject({ slug: z.string().describe('The CLI slug, e.g. "ripgrep" or "curl".') }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ slug }) => {
       const entry = catalog.registry.find((e) => e.slug === slug);
@@ -77,20 +78,13 @@ export function registerRegistryTools(server: McpServer, catalog: Catalog): void
       description:
         'Filter the registry by one or more criteria. All filters AND together. score_min / score_max are inclusive ' +
         'bounds on score_pct (rows without a committed scorecard are excluded when either bound is set). ' +
-        'audit_profile is an exact match. principle_min_score is reserved for a future per-principle score filter and ' +
-        'is currently a no-op (the catalog projection does not yet carry per-principle scores).',
-      inputSchema: {
+        'audit_profile is an exact match.',
+      inputSchema: z.strictObject({
         score_min: z.number().min(0).max(100).optional().describe('Inclusive lower bound on score_pct.'),
         score_max: z.number().min(0).max(100).optional().describe('Inclusive upper bound on score_pct.'),
         audit_profile: z.string().optional().describe('Exact audit_profile match.'),
-        principle_min_score: z
-          .number()
-          .min(0)
-          .max(100)
-          .optional()
-          .describe('Reserved for a future per-principle filter; no-op today.'),
-      },
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ score_min, score_max, audit_profile }) => {
       const matches = catalog.registry.filter((entry) => {

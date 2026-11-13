@@ -369,7 +369,7 @@ Driven by `scripts/release/preflight.sh do-smoke`. The fresh-binary picker is th
 
 The MCP transport surface composes the same orchestrator core (`lookupOnly` for the read tier, `runFreshOnly` for the
 run-fresh tier) as the HTTP `/api/score` handler. What this section covers and the HTTP smoke above does not: transport
-wiring, the 13-tool dual-stack surface (legacy + modern SEP-2243), MCP kill switches (`MCP_ENABLED`,
+wiring, the 14-tool dual-stack surface (legacy + modern SEP-2243), MCP kill switches (`MCP_ENABLED`,
 `MCP_LIVE_SCORING_ENABLED`, `MCP_LEGACY_ENABLED`), and the orchestrator's MCP-side result envelope (`next_tool`
 bouncing, `source: "registry" | "live-cache" | "live"`).
 
@@ -416,7 +416,7 @@ The curl recipes below show the **staging** shape (with CF Access headers). For 
     | jq '{server: .result.serverInfo.name, instructions: (.result.instructions | contains("2026-07-28"))}'
   # expect: server: "anc", instructions: true
 
-  # Legacy tools/list — 13 tools
+  # Legacy tools/list — 14 tools
   curl -fsSL -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
@@ -424,7 +424,7 @@ The curl recipes below show the **staging** shape (with CF Access headers). For 
     -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
     https://agentnative-site-staging.brettdavies.workers.dev/mcp \
     | jq '.result.tools | length'
-  # expect: 13
+  # expect: 14
 
   META='"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"preflight","version":"1"},"io.modelcontextprotocol/clientCapabilities":{}}'
   # Modern tools/list — no initialize; cache hints on result
@@ -436,12 +436,12 @@ The curl recipes below show the **staging** shape (with CF Access headers). For 
     -d "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/list\",\"params\":{${META}}}" \
     https://agentnative-site-staging.brettdavies.workers.dev/mcp \
     | jq '{count: (.result.tools | length), ttlMs: .result.ttlMs, cacheScope: .result.cacheScope}'
-  # expect: count: 13, ttlMs: 3600000, cacheScope: "public"
+  # expect: count: 14, ttlMs: 3600000, cacheScope: "public"
   ```
 
   A 503 or `MCP_ENABLED` kill-switch envelope means the switch is unset or not `"true"` on the staging Worker. It is a
   secret and appears in no wrangler env block: read it with `wrangler secret list --env staging` and set it with
-  `wrangler secret put MCP_ENABLED --env staging`. A non-13 tool count is a tool-wiring regression: block.
+  `wrangler secret put MCP_ENABLED --env staging`. A non-14 tool count is a tool-wiring regression: block.
 
 - [ ] **Symmetry contract: registry tier returns matching envelopes from both scorecard tools.** Exercises the
   curated-registry branch shared by `lookupOnly` and `runFreshOnly`. No cache write, no container invocation, no audit

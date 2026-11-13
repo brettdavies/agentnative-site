@@ -6,6 +6,10 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import type { AuditEvent } from '../src/shared/audit-events';
 import { rowHostPhrase } from '../src/shared/scoring-copy';
 import { sha256Hex, keyFor as webKeyFor } from '../src/worker/audit-web/cache';
+import type { WebScorecard } from '../src/worker/audit-web/scorecard';
+import type { PairReport } from '../src/worker/audit-web/site-pair';
+import { planSiteRecord } from '../src/worker/audit-web/site-record';
+import { targetOfHost } from '../src/worker/audit-web/web-target';
 import { _resetIndexCache } from '../src/worker/score/core';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
@@ -425,5 +429,100 @@ describe('POST /api/score: a recorded fold', () => {
     expect(await h.storedRecord('a.test')).toBeNull();
     expect(await h.storedRecord('www.a.test')).not.toBeNull();
     expect(purged).toEqual([]);
+  });
+});
+
+describe('planSiteRecord: the listing a save with no explicit choice carries', () => {
+  const FOLD = ['a.test', 'www.a.test'];
+  const unfolded: PairReport = { outcome: 'unfolded', requestedStatus: 200, siblingStatus: 200 };
+  const noAnswer: PairReport = { outcome: 'no-answer', requestedStatus: 200, siblingStatus: null };
+  const scorecardOf = (listing: boolean) =>
+    ({ target_url: 'https://a.test/', score_pct: 64, results: [], public_listing: listing }) as unknown as WebScorecard;
+
+  async function store(records: Record<string, Stored>, opts: { reads?: 'fail' } = {}) {
+    const objects = new Map<string, string>();
+    for (const [host, record] of Object.entries(records)) objects.set(await keyOf(host), JSON.stringify(record));
+    const SCORE_CACHE = {
+      async get(key: string) {
+        if (opts.reads === 'fail') throw new Error('r2 unavailable');
+        const value = objects.get(key);
+        return value ? { json: async () => JSON.parse(value) } : null;
+      },
+    } as unknown as R2Bucket;
+    return { SCORE_CACHE };
+  }
+
+  function plan(
+    env: { SCORE_CACHE: R2Bucket },
+    input: { pair: PairReport | null; explicit?: boolean; listing: boolean; target?: string; requested?: string },
+  ) {
+    const requested = targetOfHost(input.requested ?? 'a.test');
+    return planSiteRecord(env, {
+      target: targetOfHost(input.target ?? input.requested ?? 'a.test'),
+      requested,
+      pair: input.pair,
+      scorecard: scorecardOf(input.listing),
+      explicit: input.explicit,
+      listing: input.listing,
+    });
+  }
+
+  test('a blank save takes the listing stored when it writes, in the plan and in the scorecard', async () => {
+    const env = await store({ 'a.test': stored('a.test', { listing: false }) });
+    const site = await plan(env, { pair: null, listing: true });
+    expect(site.listing).toBe(false);
+    expect(site.scorecard.public_listing).toBe(false);
+  });
+
+  test('an explicit choice is written as given over a different stored listing', async () => {
+    const env = await store({ 'a.test': stored('a.test', { listing: false }) });
+    const site = await plan(env, { pair: unfolded, explicit: true, listing: true });
+    expect(site.listing).toBe(true);
+    expect(site.scorecard.public_listing).toBe(true);
+  });
+
+  test('with no stored record the plan carries the listing resolved before the run', async () => {
+    const site = await plan(await store({}), { pair: null, listing: true });
+    expect(site.listing).toBe(true);
+    expect(site.scorecard.public_listing).toBe(true);
+  });
+
+  test('a pair that could not be told apart, with the fold recorded, carries the stored listing', async () => {
+    const env = await store({ 'a.test': stored('a.test', { listing: false, siteHosts: FOLD }) });
+    const site = await plan(env, { pair: noAnswer, listing: true });
+    expect(site.target.host).toBe('a.test');
+    expect(site.listing).toBe(false);
+    expect(site.scorecard.public_listing).toBe(false);
+  });
+
+  test('an unfolded pair saved at the requested host carries that host stored listing', async () => {
+    const env = await store({ 'a.test': stored('a.test', { listing: false }) });
+    const site = await plan(env, { pair: unfolded, listing: true });
+    expect(site.listing).toBe(false);
+    expect(site.scorecard.public_listing).toBe(false);
+  });
+
+  test('a save-time read that fails leaves the listing resolved before the run, and the save still plans', async () => {
+    const env = await store({ 'a.test': stored('a.test', { listing: false }) }, { reads: 'fail' });
+    const site = await plan(env, { pair: null, listing: true });
+    expect(site.listing).toBe(true);
+    expect(site.scorecard.public_listing).toBe(true);
+  });
+
+  test('a www host saved as its own site after a recorded fold is unlisted when it has no record of its own', async () => {
+    const env = await store({ 'a.test': stored('a.test', { listing: true, siteHosts: FOLD }) });
+    const site = await plan(env, { pair: unfolded, listing: true, target: 'a.test', requested: 'www.a.test' });
+    expect(site.target.host).toBe('www.a.test');
+    expect(site.listing).toBe(false);
+    expect(site.scorecard.public_listing).toBe(false);
+  });
+
+  test('a www host saved as its own site takes the listing its own record stores', async () => {
+    const env = await store({
+      'a.test': stored('a.test', { listing: true, siteHosts: FOLD }),
+      'www.a.test': stored('www.a.test', { listing: true }),
+    });
+    const site = await plan(env, { pair: unfolded, listing: false, target: 'a.test', requested: 'www.a.test' });
+    expect(site.listing).toBe(true);
   });
 });

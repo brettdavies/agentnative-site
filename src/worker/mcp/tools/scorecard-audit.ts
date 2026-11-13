@@ -168,7 +168,7 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
         'audit whose ' +
         'scorecard reports summary.error above 0 is returned but not saved: its URLs and freshness.refresh_after ' +
         'are null, and the next call runs a fresh audit.',
-      inputSchema: {
+      inputSchema: z.strictObject({
         slug: z.string().optional().describe('Registry slug, e.g. "ripgrep".'),
         binary: z.string().optional().describe('CLI binary name.'),
         install: z.string().optional().describe('Full install command, e.g. "brew install ripgrep".'),
@@ -181,7 +181,7 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
               '(staging env only), skip the R2 read tier so the live container DO path is always exercised. ' +
               'Silently ignored when the env binding is absent (prod). Rate limiters still apply.',
           ),
-      },
+      }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
     async (args, extra) => {

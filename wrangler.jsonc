@@ -196,8 +196,8 @@
     },
     // WEB_AUDIT_LIMITER_IP — coarse per-IP fallback (30/60s) that catches a
     // client swapping the session cookie to dodge WEB_AUDIT_LIMITER. The
-    // audit_website MCP tool (no cookies) keys this binding directly as its
-    // per-IP burst limiter. Distinct namespace so the per-session and
+    // audit_website and set_website_public_listing MCP tools (no cookies) key
+    // this binding directly as their per-IP burst limiter. Distinct namespace so the per-session and
     // per-IP windows don't share counters. NO anon fallback at the MCP
     // tier: a request without cf-connecting-ip is gated immediately, since
     // the 32-probe fan-out is non-trivial and a shared anon bucket would be
@@ -481,8 +481,8 @@
       // intentionally absent from the top-level `vars` block, so the same
       // bypass argument against prod is silently ignored. Not a secret
       // (no auth value to protect; the staging-only binding IS the gate).
-      // WEB_AUDIT_ENABLED gates the /api/audit-web streaming route and the
-      // audit_website MCP fresh path. Bound "true" here so the staging host
+      // WEB_AUDIT_ENABLED gates the /api/audit-web streaming route, the
+      // audit_website MCP fresh path, and set_website_public_listing. Bound "true" here so the staging host
       // serves the web audit end-to-end during soak and e2e; production
       // stays gated (no top-level var) and flips on via `wrangler secret
       // put WEB_AUDIT_ENABLED` at promotion (production is the top-level

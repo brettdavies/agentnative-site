@@ -27,6 +27,8 @@ import {
   deepFindFirst,
   modernResourcesReadBody,
   modernResourcesReadHeaders,
+  modernServerDiscoverBody,
+  modernServerDiscoverHeaders,
   modernToolCallBody,
   modernToolCallBodyMissingCapabilities,
   modernToolCallHeaders,
@@ -34,19 +36,16 @@ import {
   modernToolsListHeaders,
 } from './helpers/mcp-modern';
 import {
+  CANONICAL_TEST_ORIGIN,
   getJsonToolContent,
   type JsonRpcBody,
   mcpInitialize,
   mcpRpc,
   mcpRpcExpect200,
   resetMcpTestState,
+  STAGING_TEST_ORIGIN,
 } from './helpers/mcp-rpc';
-import {
-  EXPECTED_TOOL_COUNT,
-  EXPECTED_TOOL_NAMES,
-  EXPECTED_TOOL_TITLES,
-  NON_READ_TOOL_NAMES,
-} from './helpers/mcp-tools';
+import { EXPECTED_TOOL_COUNT, EXPECTED_TOOL_NAMES, EXPECTED_TOOL_TITLES } from './helpers/mcp-tools';
 
 const FIXTURE_CATALOG = {
   generated_at: '2026-06-05T18:00:00.000Z',
@@ -182,6 +181,28 @@ function getJsonContent(body: JsonRpcBody): unknown {
   return getJsonToolContent(body);
 }
 
+// Written out rather than imported: a test that reads the constant it checks
+// cannot notice the constant changing.
+function expectedServerInfo(origin: string) {
+  return {
+    name: 'anc',
+    version: '0.1.0',
+    title: 'anc.dev agent-native standard',
+    description: 'Score CLIs and websites against the agent-native standard, read its principles, search leaderboards',
+    websiteUrl: `${origin}/mcp-skill`,
+    icons: [
+      { src: `${origin}/apple-touch-icon-180.png`, mimeType: 'image/png', sizes: ['180x180'] },
+      { src: `${origin}/favicon.svg`, mimeType: 'image/svg+xml', sizes: ['any'] },
+    ],
+  };
+}
+
+async function discoverServerInfo(env: McpEnv, origin?: string): Promise<unknown> {
+  const body = await mcpRpcExpect200(env, modernServerDiscoverBody(), modernServerDiscoverHeaders(), { origin });
+  expect(body.error).toBeUndefined();
+  return (body.result?._meta as Record<string, unknown> | undefined)?.['io.modelcontextprotocol/serverInfo'];
+}
+
 beforeEach(() => {
   resetMcpTestState();
 });
@@ -197,6 +218,30 @@ describe('MCP handshake', () => {
     expect(result.error).toBeUndefined();
     expect(result.result?.serverInfo?.name).toBe('anc');
     expect(result.result?.serverInfo?.version).toBe('0.1.0');
+  });
+
+  test('initialize returns the server title, description, website, and icons in serverInfo', async () => {
+    const result = await initialize(makeEnv());
+    expect(result.error).toBeUndefined();
+    expect(result.result?.serverInfo).toEqual(expectedServerInfo(CANONICAL_TEST_ORIGIN));
+  });
+
+  test('server/discover and tools/list carry the same serverInfo under the result _meta key', async () => {
+    const env = makeEnv();
+    expect(await discoverServerInfo(env)).toEqual(expectedServerInfo(CANONICAL_TEST_ORIGIN));
+    const list = await mcpRpcExpect200(env, modernToolsListBody(), modernToolsListHeaders());
+    expect((list.result?._meta as Record<string, unknown> | undefined)?.['io.modelcontextprotocol/serverInfo']).toEqual(
+      expectedServerInfo(CANONICAL_TEST_ORIGIN),
+    );
+  });
+
+  test('serverInfo website and icon URLs follow the origin the request arrived on, on both lanes', async () => {
+    const env = makeEnv();
+    const canonical = await mcpInitialize(env, { origin: CANONICAL_TEST_ORIGIN });
+    expect(canonical.result?.serverInfo).toEqual(expectedServerInfo(CANONICAL_TEST_ORIGIN));
+    const legacy = await mcpInitialize(env, { origin: STAGING_TEST_ORIGIN });
+    expect(legacy.result?.serverInfo).toEqual(expectedServerInfo(STAGING_TEST_ORIGIN));
+    expect(await discoverServerInfo(env, STAGING_TEST_ORIGIN)).toEqual(expectedServerInfo(STAGING_TEST_ORIGIN));
   });
 
   test('initialize advertises declared spec revision in instructions', async () => {
@@ -224,6 +269,9 @@ describe('MCP instructions string (drift gate per KTD-8)', () => {
     expect(instructions.length).toBeGreaterThan(0);
     expect(instructions).toContain(`${EXPECTED_TOOL_COUNT} tools`);
     expect(instructions).toContain('5 resources');
+    expect(instructions).toContain(
+      "and the web leaderboard with list_website_audits; change a site's leaderboard listing with set_website_public_listing, only when the user asks; read the standard with",
+    );
     expect(instructions).toContain('60 requests per 60 seconds');
     expect(instructions).toContain('5 fresh audits per 60 minutes');
     expect(instructions).toContain('2026-07-28');
@@ -322,17 +370,6 @@ describe('MCP tools/list', () => {
     inputSchema?: unknown;
   }
 
-  const READ_ONLY_ANNOTATIONS = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
-
-  // score_cli and audit_website reach external systems and write cache /
-  // leaderboard state, so readOnlyHint is false and openWorldHint true.
-  const NON_READ_ANNOTATIONS = {
-    readOnlyHint: false,
-    destructiveHint: false,
-    idempotentHint: false,
-    openWorldHint: true,
-  };
-
   test('returns the full tool surface in registration order', async () => {
     const env = makeEnv();
     await initialize(env);
@@ -367,33 +404,13 @@ describe('MCP tools/list', () => {
     }
   });
 
-  test('every tool declares readOnlyHint, destructiveHint and openWorldHint as booleans', async () => {
-    const env = makeEnv();
-    await initialize(env);
-    const result = await rpc(env, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
-    const tools = (result.result?.tools ?? []) as ListedTool[];
-    expect(tools.length).toBe(EXPECTED_TOOL_COUNT);
-    for (const tool of tools) {
-      for (const hint of ['readOnlyHint', 'destructiveHint', 'openWorldHint'] as const) {
-        expect({ tool: tool.name, hint, type: typeof tool.annotations?.[hint] }).toEqual({
-          tool: tool.name,
-          hint,
-          type: 'boolean',
-        });
-      }
-    }
-  });
-
-  test('titles match the catalog and annotations pin each tool read-only posture', async () => {
+  test('titles match the catalog', async () => {
     const env = makeEnv();
     await initialize(env);
     const result = await rpc(env, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
     const tools = (result.result?.tools ?? []) as ListedTool[];
     for (const tool of tools) {
       expect(tool.title).toBe(EXPECTED_TOOL_TITLES[tool.name]);
-      expect(tool.annotations).toEqual(
-        NON_READ_TOOL_NAMES.has(tool.name) ? NON_READ_ANNOTATIONS : READ_ONLY_ANNOTATIONS,
-      );
     }
   });
 });
