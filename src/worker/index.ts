@@ -85,6 +85,7 @@ import { handleCuratedPass, runCuratedPass } from './og/curated-pass';
 import type { OgVideoEnv } from './og/render-request';
 import { handleOgRendered } from './og/rendered-consumer';
 import { handleScoreOg } from './og/route';
+import { retiredFixRedirect } from './retired-fix-redirect';
 import { SITEMAP_PATH, serveSitemap } from './sitemap';
 import { SPEC_VERSION } from './spec-version.gen';
 import { LAKE_FRESHNESS_CRON, type LakeFreshnessEnv, runLakeFreshnessCheck } from './telemetry/lake-freshness';
@@ -828,8 +829,9 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   }
   // A retired path with an exact destination redirects rather than 404s, so
   // an inbound link minted before the funnel merged still lands somewhere
-  // useful. The table in the route module decides which paths qualify.
-  const retiredTo = retiredRedirectFor(pathname);
+  // useful. The route module decides which paths qualify: a table, the shape
+  // of a website result path, and the shape of a fix page plus the catalog.
+  const retiredTo = retiredRedirectFor(pathname) ?? (await retiredFixRedirect(pathname, env));
   if (retiredTo) {
     return new Response(null, {
       status: 301,

@@ -68,6 +68,28 @@ export const RETIRED_REDIRECTS: Readonly<Record<string, string>> = {
 /** The retired website result path; its host is the target the result route serves. */
 const RETIRED_WEB_RESULT_RE = /^\/web\/([^/]+?)(\.md)?$/;
 
+/** The retired fix-page path: a check id in the registry's id shape, with an optional `.md` twin suffix. */
+const RETIRED_FIX_RE = /^\/web-audit\/skill\/([a-z0-9][a-z0-9-]*)(\.md)?$/;
+
+/** True when the path has the shape of a retired fix page, whether or not its id is a check. */
+export function isRetiredFixPath(pathname: string): boolean {
+  return RETIRED_FIX_RE.test(pathname);
+}
+
+/**
+ * The `/fix/` page a retired fix path redirects to, or null when the path is
+ * off the retired shape or names an id outside `catalogIds`. The destination
+ * is spelled from the catalog's own id, never from the request text.
+ */
+export function retiredFixRedirectFor(pathname: string, catalogIds: Iterable<string>): string | null {
+  const match = RETIRED_FIX_RE.exec(pathname);
+  if (!match) return null;
+  for (const id of catalogIds) {
+    if (id === match[1]) return `${fixPath(id)}${match[2] ?? ''}`;
+  }
+  return null;
+}
+
 /**
  * The destination a retired path redirects to, or null when it is a 404.
  *
