@@ -73,5 +73,5 @@ still refuse, and the cached scorecard is served as data when they do. Full cont
 
 ## See how sites score
 
-The [web leaderboard](/web) ranks a curated set of sites by their agent-readiness, and each row links to its scorecard
+The [web leaderboard](/scorecards?lane=web) ranks a curated set of sites by their agent-readiness, and each row links to its scorecard
 with full per-check evidence and fixes.

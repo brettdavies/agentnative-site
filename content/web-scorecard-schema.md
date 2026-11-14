@@ -1,13 +1,13 @@
 # Web scorecard schema
 
-A web scorecard is the structured output of the [website agent-readiness audit](/web-audit). It scores a website and its
+A web scorecard is the structured output of the [website agent-readiness audit](/audit?lane=web). It scores a website and its
 MCP server across six visible categories with a fairness-driven two-score model: a check that does not apply to a site
 is excluded from its headline score rather than counted against it, a present-but-broken surface costs more than an
 absent one, and a surface that works while violating a spec detail earns partial credit rather than the full penalty.
 This page documents every field a web scorecard carries.
 
 The web scorecard is site-owned. Its `schema_version` is **0.5**, independent of the CLI scorecard schema (currently
-0.9) and of the [agentnative spec](/principles) `spec_version`. The CLI scorecard schema is documented separately at
+0.9) and of the [agentnative spec](/) `spec_version`. The CLI scorecard schema is documented separately at
 [/scorecard-schema](/scorecard-schema).
 
 ## Top-level fields
@@ -218,7 +218,7 @@ verify; the engine computes them and consumers read the values straight from the
 
 - **`score.relative`** (the headline, mirrored at top-level `score_pct`) is earned points over the maximum achievable
   for **this site's applicable checks**, so a site perfect for its type approaches 100. `n_a`, `skip`, and `error` rows
-  are excluded from it. The [web leaderboard](/web) ranks by it.
+  are excluded from it. The [web leaderboard](/scorecards?lane=web) ranks by it.
 - **`score.global`** is earned points over the most a single site could earn (the maximum of a **maximally agent-ready
   site**): every check in the registry outside a group of alternatives, plus each alternative the site presents, or the
   largest when it presents none. Exposing and nailing more surfaces scores higher. It is the secondary number beside
@@ -470,6 +470,6 @@ structured evidence, which differs by handler:
 
 ## Relationship to the CLI scorecard and the spec
 
-The web scorecard is intentionally site-owned and not part of the [agentnative spec](/principles). Formalizing the web
+The web scorecard is intentionally site-owned and not part of the [agentnative spec](/). Formalizing the web
 shape into the spec is deferred until a second consumer exists. Until then, this page is the one published contract for
 the web scorecard JSON. The parallel CLI contract is [/scorecard-schema](/scorecard-schema).

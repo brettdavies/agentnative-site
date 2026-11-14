@@ -61,8 +61,8 @@ export const SUB_PAGES = [
   // /.well-known/mcp pointer's `documentation` field and by the MCP
   // server's handshake `instructions` string. The source filename
   // matches the URL stem; outputs are `dist/mcp-skill.html` +
-  // `dist/mcp-skill.md`. The canonical URL is `/mcp-skill/`, not
-  // `/mcp/` (which is the Worker-served JSON-RPC endpoint). Operator-
+  // `dist/mcp-skill.md`. The canonical URL is `/mcp-skill`, not
+  // `/mcp` (which is the Worker-served JSON-RPC endpoint). Operator-
   // facing material lives in the in-repo runbook at
   // `docs/runbooks/mcp-operator.md` and is not published.
   { name: 'mcp-skill', breadcrumb: 'MCP skill' },
