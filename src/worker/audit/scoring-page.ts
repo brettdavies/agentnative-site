@@ -24,6 +24,7 @@ import {
 } from '../../shared/audit-routes';
 import { escHtml } from '../../shared/esc-html';
 import { LANE_EXPECTATION, scoringHeadingHtml, scoringTitle, TITLE_SUFFIX } from '../../shared/scoring-copy';
+import { fitDescription } from '../../shared/search-head';
 import { detectPreference } from '../accept';
 import { loadWebAuditRegistry, type WebAuditRegistryEnv } from '../audit-web/registry';
 import { richMarkdown } from '../audit-web/rich-text';
@@ -146,7 +147,11 @@ async function progressPage(env: ScoringPageEnv, accepted: Accepted, refresh: bo
   <script defer src="${SCRIPT_SRC}"></script>
 </article>`;
   const kind = lane === 'cli' ? 'CLI' : 'website';
-  return { title: scoringTitle('running', target), description: `The live ${kind} audit of ${target}.`, body };
+  return {
+    title: scoringTitle('running', target),
+    description: fitDescription(`The live ${kind} audit of ${target}.`, `The live ${kind} audit in progress.`),
+    body,
+  };
 }
 
 function pointerPage(refused: string | null): Page {

@@ -62,6 +62,7 @@ import { resultAlternateLinks } from '../../shared/result-head';
 import { type ReauditControl, type ResultTier, type SpineInput, shortDate } from '../../shared/result-spine';
 import { brandName, cliOgIdentity, scoreOgAlt, scoreOgEdition, scoreOgKey, scoreOgUrl } from '../../shared/score-og';
 import { buildScorecardBody, buildScorecardMarkdown } from '../../shared/scorecard-format.mjs';
+import { fitDescription } from '../../shared/search-head';
 import { CANONICAL_SITE_URL } from '../../shared/site-url';
 import type { TwinMeta } from '../../shared/twin-frontmatter';
 import { detectResultPreference } from '../accept';
@@ -591,10 +592,11 @@ async function respond(ctx: RenderContext, rendered: Rendered): Promise<Response
   const { target, lane } = rendered.spine;
   const pct = rendered.envelope.score_pct;
   const title = `${target} — ${lane === 'web' ? 'Agent-Readiness Audit' : 'Agent-Native Scorecard'}`;
-  const description =
+  const verdict =
     lane === 'web'
-      ? `${target} scored ${pct ?? 0}% for agent-readiness against the agentnative web audit (spec ${rendered.envelope.spec_version}).`
-      : `${target} scored ${pct ?? 0}% against the agent-native CLI standard (spec ${rendered.envelope.spec_version}).`;
+      ? `${pct ?? 0}% for agent-readiness against the agentnative web audit (spec ${rendered.envelope.spec_version}).`
+      : `${pct ?? 0}% against the agent-native CLI standard (spec ${rendered.envelope.spec_version}).`;
+  const description = fitDescription(`${target} scored ${verdict}`, `Scored ${verdict}`);
   // Everything the page shows comes from this one scoring, so its day dates the page.
   const dateModified = shortDate(rendered.envelope.freshness.scored_at);
   if (representation === 'md') {

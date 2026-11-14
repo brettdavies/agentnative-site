@@ -2,6 +2,49 @@
 // markdown strings to extract structural content (titles, summaries,
 // descriptions, paragraphs). No filesystem or rendering side effects.
 
+import { DESCRIPTION_MAX } from '../shared/search-head.ts';
+
+/**
+ * Reduce inline Markdown to the text it renders: bold and emphasis markers,
+ * link and image labels, and code spans lose their syntax.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function stripInlineMarkdown(text) {
+  return text
+    .replace(/\*\*/g, '') // strip bold markers
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1') // strip links and images → label only
+    .replace(/`([^`]+)`/g, '$1') // strip inline code → content only
+    .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,;:!?]|$)/g, '$1$2') // strip *emphasis*
+    .replace(/(^|[\s(])_([^_\s][^_]*?)_(?=[\s).,;:!?]|$)/g, '$1$2'); // strip _emphasis_
+}
+
+const NON_TERMINAL_ABBREVIATION = /(?:e\.g|i\.e|vs|etc|cf)\.$/i;
+
+/**
+ * Split prose into sentences. A boundary is terminal punctuation, any
+ * closing quote or bracket, whitespace, then a capital, digit, or opening
+ * quote. A sentence that starts any other way stays joined to the one before
+ * it, so a split never lands inside a sentence.
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+function splitSentences(text) {
+  const sentences = [];
+  const boundary = /[.!?]["')\]]*\s+(?=["'([]?[A-Z0-9])/g;
+  let start = 0;
+  for (let match = boundary.exec(text); match !== null; match = boundary.exec(text)) {
+    const sentence = text.slice(start, match.index + match[0].trimEnd().length);
+    if (NON_TERMINAL_ABBREVIATION.test(sentence)) continue;
+    sentences.push(sentence);
+    start = match.index + match[0].length;
+  }
+  if (start < text.length) sentences.push(text.slice(start));
+  return sentences;
+}
+
 /**
  * Collect the first non-empty paragraph starting at line index `i`.
  * Returns the paragraph as a single joined string plus the new index.
@@ -76,9 +119,10 @@ export function extractIntroSummary(introMarkdown) {
 }
 
 /**
- * Extract the first paragraph after the H1 as a short description for
- * meta tags. Skips sub-headings to reach the first prose paragraph.
- * Caps at 180 chars for OG/description meta.
+ * Extract the first paragraph after the H1 as the plain-text description for
+ * meta tags. Skips sub-headings to reach the first prose paragraph. A
+ * paragraph longer than the search-description range keeps as many whole
+ * sentences as fit, so a description never ends mid-sentence.
  *
  * @param {string} markdown
  * @param {string} fallback
@@ -92,10 +136,21 @@ export function extractDescription(markdown, fallback = '') {
     i++;
   }
   const { text: full } = collectParagraph(lines, i);
-  const normalized = full.replace(/\s+/g, ' ').trim();
+  const normalized = stripInlineMarkdown(full).replace(/\s+/g, ' ').trim();
   if (normalized.length === 0) return fallback;
-  // Cap at 180 chars for OG/description meta.
-  return normalized.length <= 180 ? normalized : `${normalized.slice(0, 177).replace(/\s+\S*$/, '')}…`;
+  if (normalized.length <= DESCRIPTION_MAX) return normalized;
+  const [opening, ...rest] = splitSentences(normalized);
+  if (opening.length > DESCRIPTION_MAX) {
+    throw new Error(
+      `extractDescription: the opening sentence is ${opening.length} characters, over the ${DESCRIPTION_MAX} a description holds: "${opening}"`,
+    );
+  }
+  let description = opening;
+  for (const sentence of rest) {
+    if (description.length + 1 + sentence.length > DESCRIPTION_MAX) break;
+    description += ` ${sentence}`;
+  }
+  return description;
 }
 
 /**
@@ -111,8 +166,5 @@ export function extractDefinitionParagraph(markdown) {
   let i = 0;
   while (i < lines.length && !/^##\s+Definition/.test(lines[i])) i++;
   const { text } = collectParagraph(lines, i + 1);
-  return text
-    .replace(/\*\*/g, '') // strip bold markers
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // strip links → label only
-    .replace(/`([^`]+)`/g, '$1'); // strip inline code → content only
+  return stripInlineMarkdown(text);
 }

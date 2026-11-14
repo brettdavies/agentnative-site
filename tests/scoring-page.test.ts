@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { emitShellTemplate } from '../src/build/shell.mjs';
+import { TARGET_MAX_LENGTH } from '../src/shared/audit-routes';
 import {
   discoveryLine,
   inlineSubline,
@@ -255,5 +256,25 @@ describe('the progress page names where a website run reads', () => {
     expect(
       rowHostPhrase({ host: 'mcp.example.net', na_reason: 'reciprocity-refused' }, 'stripe.dev', 'mcp.stripe.com'),
     ).toBeNull();
+  });
+});
+
+describe('GET /scoring states a description search engines can show whole', () => {
+  const descriptionOf = (html: string) => html.match(/<meta name="description" content="([^"]*)"/)?.[1] ?? '';
+
+  test.each([
+    ['a CLI target of one character', '/scoring?target=x', 'The live CLI audit in progress.'],
+    ['a CLI target', '/scoring?target=ripgrep', 'The live CLI audit of ripgrep.'],
+    [
+      'a website target at the length cap',
+      `/scoring?target=${'a'.repeat(63)}.${'b'.repeat(TARGET_MAX_LENGTH - 66)}.c`,
+      `The live website audit of ${'a'.repeat(63)}.${'b'.repeat(TARGET_MAX_LENGTH - 66)}.c.`,
+    ],
+  ])('%s', async (_label, path, expected) => {
+    const { html } = await page(path);
+    const description = descriptionOf(html);
+    expect(description).toBe(expected);
+    expect(description.length).toBeGreaterThanOrEqual(25);
+    expect(description.length).toBeLessThanOrEqual(160);
   });
 });
