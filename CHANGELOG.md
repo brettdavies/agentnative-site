@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.1794552806-gcc795eb] - 2026-11-13
+
+### Added
+
+- Add `title`, `description`, `websiteUrl`, and `icons` to the MCP server's `serverInfo`, on the legacy `initialize` result and in every modern result's `_meta`. by @brettdavies in [#578](https://github.com/brettdavies/agentnative-site/pull/578)
+- Add `icons` to the SEP-2127 server card at `/mcp/server-card`.
+- Add the `set_website_public_listing` MCP tool, which opts a site in to or out of the public website leaderboard and does nothing else. by @brettdavies in [#579](https://github.com/brettdavies/agentnative-site/pull/579)
+- Add a `web-listing.change` log record for each listing change `set_website_public_listing` applies, so Workers Logs shows when and for which site a listing changed through MCP. by @brettdavies in [#580](https://github.com/brettdavies/agentnative-site/pull/580)
+
+### Changed
+
+- Change the MCP server's title and description, on both server cards and the handshake, to cover website scoring and the leaderboards alongside CLI scoring and the principles. by @brettdavies in [#578](https://github.com/brettdavies/agentnative-site/pull/578)
+- Change `audit_website` so it no longer accepts `public_listing`; a call that sends it is refused with a pointer to `set_website_public_listing`, and an audit never changes a site's listing. by @brettdavies in [#579](https://github.com/brettdavies/agentnative-site/pull/579)
+- Change `audit_website` to refuse any argument it does not declare, where it ignored one before.
+- Change every MCP tool to refuse an argument it does not declare, with `isError: true` and an `Input validation error` message naming the key, where the tool ignored the argument before. by @brettdavies in [#582](https://github.com/brettdavies/agentnative-site/pull/582)
+- Change the eleven read tools to declare `idempotentHint: true`.
+
+### Fixed
+
+- Fix a held followed website audit writing back a listing it resolved before the run, so it keeps the listing stored when it writes. by @brettdavies in [#581](https://github.com/brettdavies/agentnative-site/pull/581)
+
+### Removed
+
+- Remove `search_tools`' `principle_min_score`, which filtered nothing. by @brettdavies in [#582](https://github.com/brettdavies/agentnative-site/pull/582)
+
+**Full Changelog**: [v0.0.1794455323-g5392089...v0.0.1794552806-gcc795eb](https://github.com/brettdavies/agentnative-site/compare/v0.0.1794455323-g5392089...v0.0.1794552806-gcc795eb)
+
 ## [0.0.1794455323-g5392089] - 2026-11-12
 
 ### Added
