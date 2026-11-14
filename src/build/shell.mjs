@@ -128,11 +128,13 @@ const SOURCE_REPOS = [
 // Machine entry points listed in the <noscript> fallback. An agent or
 // fetch-only crawler that never runs the client bundle still reads an
 // explicit, in-body list of the structured surfaces instead of inferring
-// them. Mirrors the head links below.
+// them. Mirrors the head links below. An entry with `linked: false` is named
+// as code: GET /mcp answers 405, so an anchor to it sends every crawler that
+// follows it to an error, and the next entry links the endpoint's description.
 const MACHINE_ENTRY_POINTS = [
   { href: '/llms.txt', note: 'LLM-friendly index' },
   { href: '/llms-full.txt', note: 'full spec corpus' },
-  { href: '/mcp', note: 'Streamable-HTTP MCP endpoint (POST)' },
+  { href: '/mcp', note: 'Streamable-HTTP MCP endpoint (POST)', linked: false },
   { href: '/mcp-docs', note: 'MCP endpoint docs' },
   ...MCP_DISCOVERY_DOCUMENTS.map((d) => ({ href: d.path, note: d.label })),
   { href: '/skill.json', note: 'agent-native skill bundle' },
@@ -436,7 +438,7 @@ ${ogVideo ? `    ${ogVideo}\n` : ''}    <meta property="og:site_name" content="$
       <nav class="machine-entry-points" aria-label="Machine entry points">
         <p>Machine entry points for agents and non-JS clients:</p>
         <ul>
-${MACHINE_ENTRY_POINTS.map((e) => `          <li><a href="${e.href}">${e.href}</a> (${e.note})</li>`).join('\n')}
+${MACHINE_ENTRY_POINTS.map((e) => `          <li>${e.linked === false ? `<code>${e.href}</code>` : `<a href="${e.href}">${e.href}</a>`} (${e.note})</li>`).join('\n')}
         </ul>
       </nav>
     </noscript>

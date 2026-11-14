@@ -531,10 +531,12 @@ describe('emitShell — OG image alt text', () => {
     // a fetch-only agent that never runs the client bundle reads this in-body
     // list of the structured surfaces.
     expect(html).toContain('<noscript>');
+    // GET /mcp answers 405, so the endpoint is named as code rather than linked.
+    expect(html).toContain('<code>/mcp</code>');
+    expect(html).not.toContain('<a href="/mcp">');
     for (const href of [
       '/llms.txt',
       '/llms-full.txt',
-      '/mcp',
       '/mcp-docs',
       '/.well-known/mcp/server-card.json',
       '/mcp/server-card',
