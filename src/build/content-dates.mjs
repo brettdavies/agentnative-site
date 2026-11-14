@@ -5,7 +5,9 @@
 //
 // A file's date is the UTC committer day of the last commit that changed
 // it, read from one `git log` walk over the whole history; a file with
-// uncommitted changes dates to today.
+// uncommitted changes dates to today. The same walk gives the day a file
+// first appeared at its path, which is the day a page rendered from it
+// first existed at its URL.
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
@@ -60,6 +62,20 @@ export function newestDate(days) {
   return [...days].sort().at(-1);
 }
 
+/**
+ * The earliest of one or more `YYYY-MM-DD` days.
+ *
+ * @param {string[]} days
+ * @returns {string}
+ */
+export function earliestDate(days) {
+  if (days.length === 0) throw new Error('content date: a page needs at least one dated input');
+  for (const day of days) {
+    if (!isDay(day)) throw new Error(`content date: "${day}" is not a YYYY-MM-DD day`);
+  }
+  return [...days].sort()[0];
+}
+
 /** A refusal the build reports as its message alone, without a source frame. */
 export class ContentDateError extends Error {}
 
@@ -73,9 +89,11 @@ export class ContentDateError extends Error {}
  * committed at the clone's boundary, so it is refused rather than read.
  *
  * @param {string} repoRoot — absolute path to the checkout
- * @returns {(...paths: string[]) => string} the newest content day among the
- *   given files (absolute, or relative to `repoRoot`). Throws for a file git
- *   has no record of.
+ * @returns {((...paths: string[]) => string) & { published: (...paths: string[]) => string }}
+ *   the newest content day among the given files (absolute, or relative to
+ *   `repoRoot`), and on `.published` the earliest day any of them first
+ *   appeared at its path, today for a file with no commit. Both throw for a
+ *   file git has no record of.
  */
 export function loadFileDates(repoRoot) {
   let shallow;
@@ -109,6 +127,7 @@ export function loadFileDates(repoRoot) {
   // top level, which sits above `repoRoot` when the site is nested.
   const out = git(repoRoot, ['-c', 'core.quotePath=false', 'log', '--no-renames', '--name-only', '--format=%x00%ct']);
   const dayOf = new Map();
+  const firstDayOf = new Map();
   let day = null;
   for (const line of out.split('\n')) {
     if (line.startsWith('\0')) {
@@ -116,6 +135,8 @@ export function loadFileDates(repoRoot) {
     } else if (line !== '' && day !== null) {
       const known = dayOf.get(line);
       if (known === undefined || day > known) dayOf.set(line, day);
+      // The walk runs newest to oldest, so the last day a path appears on is its first.
+      firstDayOf.set(line, day);
     }
   }
   if (dayOf.size === 0) {
@@ -128,21 +149,25 @@ export function loadFileDates(repoRoot) {
   const today = utcDay(Date.now());
   const status = git(repoRoot, ['status', '--porcelain', '-z', '--untracked-files=all', '--no-renames']);
   for (const record of status.split('\0')) {
-    if (record.length > 3) dayOf.set(record.slice(3), today);
+    if (record.length > 3) {
+      const key = record.slice(3);
+      dayOf.set(key, today);
+      if (!firstDayOf.has(key)) firstDayOf.set(key, today);
+    }
   }
 
-  return (...paths) =>
-    newestDate(
-      paths.map((path) => {
-        const abs = isAbsolute(path) ? path : join(repoRoot, path);
-        const key = relative(toplevel, existsSync(abs) ? realpathSync(abs) : abs);
-        const known = dayOf.get(key);
-        if (known === undefined) {
-          throw new ContentDateError(
-            `content dates: git has no record of ${key}: no commit touched it and git status does not list it, so it is ignored or missing.`,
-          );
-        }
-        return known;
-      }),
-    );
+  const keyOf = (path) => {
+    const abs = isAbsolute(path) ? path : join(repoRoot, path);
+    const key = relative(toplevel, existsSync(abs) ? realpathSync(abs) : abs);
+    if (!dayOf.has(key)) {
+      throw new ContentDateError(
+        `content dates: git has no record of ${key}: no commit touched it and git status does not list it, so it is ignored or missing.`,
+      );
+    }
+    return key;
+  };
+
+  const fileDate = (...paths) => newestDate(paths.map((path) => dayOf.get(keyOf(path))));
+  fileDate.published = (...paths) => earliestDate(paths.map((path) => firstDayOf.get(keyOf(path))));
+  return fileDate;
 }

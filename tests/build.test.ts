@@ -3234,10 +3234,13 @@ describe('emitSubPages — twin frontmatter', () => {
       distDir,
       contentDir: CONTENT_DIR,
       themeInit: '/* theme */',
-      fileDate: (...paths: string[]) => {
-        datedInputs.set(paths[0], paths);
-        return STUB_FILE_DAY;
-      },
+      fileDate: Object.assign(
+        (...paths: string[]) => {
+          datedInputs.set(paths[0], paths);
+          return STUB_FILE_DAY;
+        },
+        { published: () => STUB_FILE_DAY },
+      ),
     });
   });
 

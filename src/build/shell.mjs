@@ -220,6 +220,10 @@ export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
  * @param {string=} args.dateModified        — the page's `YYYY-MM-DD` content date
  *     (content-dates.mjs), emitted as the TechArticle `dateModified` and as
  *     `article:modified_time`. Omitted on pages the build cannot date.
+ * @param {string=} args.datePublished       — the `YYYY-MM-DD` day the page's
+ *     source first appeared at its path (content-dates.mjs `published`), emitted
+ *     as the TechArticle `datePublished`. Omitted on pages with no single
+ *     authored source; never later than `dateModified`.
  * @returns {string} full HTML document.
  */
 export function emitShell({
@@ -243,9 +247,25 @@ export function emitShell({
   ogImageAlt = null,
   ogVideo = '',
   dateModified = null,
+  datePublished = null,
 }) {
   if (dateModified !== null && !isDay(dateModified)) {
     throw new Error(`emitShell: ${canonicalPath} dateModified "${dateModified}" is not a YYYY-MM-DD day`);
+  }
+  if (datePublished !== null) {
+    if (!isDay(datePublished)) {
+      throw new Error(`emitShell: ${canonicalPath} datePublished "${datePublished}" is not a YYYY-MM-DD day`);
+    }
+    if (dateModified === null) {
+      throw new Error(
+        `emitShell: ${canonicalPath} states a datePublished and needs a dateModified to order it against`,
+      );
+    }
+    if (datePublished > dateModified) {
+      throw new Error(
+        `emitShell: ${canonicalPath} datePublished ${datePublished} is after dateModified ${dateModified}`,
+      );
+    }
   }
   // Everything `base` feeds below is crawler-facing identity: the
   // canonical link, the OpenGraph/Twitter block, and the JSON-LD @id
@@ -288,6 +308,8 @@ export function emitShell({
         '@type': 'Organization',
         '@id': orgId,
         name: SITE_NAME,
+        description:
+          'Publishes the agent-native CLI standard, eight principles for command-line tools that AI agents operate, with a linter that audits a CLI against it and an audit of a website for agent readiness.',
         url: base,
         logo: `${base}/apple-touch-icon-180.png`,
         sameAs: SOURCE_REPOS.map((r) => r.url),
@@ -316,6 +338,7 @@ export function emitShell({
         description,
         url: canonical,
         image: resolvedOgImage,
+        ...(datePublished ? { datePublished } : {}),
         ...(jsonLdDate ? { dateModified: jsonLdDate } : {}),
         isPartOf: { '@id': siteId },
         author: {
@@ -352,6 +375,7 @@ export function emitShell({
         '@id': `${base}/#mcp-server`,
         name: 'anc.dev MCP server',
         applicationCategory: 'WebApplication',
+        operatingSystem: 'Any',
         description:
           'Streamable-HTTP MCP server exposing the agent-native CLI standard: scorecards, principles, vendored spec.',
         url: `${base}/mcp`,

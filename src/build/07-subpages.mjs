@@ -101,8 +101,9 @@ async function renderLanes(source, widget, contentDir) {
  * @param {string} args.distDir
  * @param {string} args.contentDir
  * @param {string} args.themeInit
- * @param {(...paths: string[]) => string} args.fileDate newest last-commit day
- *          among files (content-dates.mjs loadFileDates).
+ * @param {((...paths: string[]) => string) & { published: (...paths: string[]) => string }} args.fileDate
+ *          newest last-commit day among files, and on `.published` the day the
+ *          page's source first appeared (content-dates.mjs loadFileDates).
  * @returns {Promise<Array<{name: string, source: string, title: string, dateModified: string}>>}
  *          Per-page metadata (twin markdown) consumed by llms-full.txt assembly
  *          and the sitemap.
@@ -117,6 +118,7 @@ export async function emitSubPages({ distDir, contentDir, themeInit, fileDate })
       ...(widget?.lanes ? [join(contentDir, widget.lanes.web)] : []),
       ...(widget?.sources ?? []),
     );
+    const datePublished = fileDate.published(sourcePath);
     const title = extractTitle(source);
     const description = extractDescription(source);
     const { html, twinSource } = widget?.lanes
@@ -135,6 +137,7 @@ export async function emitSubPages({ distDir, contentDir, themeInit, fileDate })
         extraScripts: extraScripts ?? (name === 'mcp-docs' ? [WEBMCP_SCRIPT] : []),
         turnstileSitekey: name === 'web-audit' || name === 'audit',
         dateModified,
+        datePublished,
       }),
     );
     await writeFile(
