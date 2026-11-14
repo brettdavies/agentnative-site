@@ -1095,3 +1095,4 @@ All read 2026-11-14.
 ## Review log
 
 - 2026-11-14: plan written.
+- 2026-11-14: `/plan-eng-review` round 1 started on 3e2b4d7, in its own process from a clone of the pushed plan.
