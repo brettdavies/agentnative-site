@@ -558,6 +558,26 @@ function lastCommitDay(repoPath: string): string {
   return git(['log', '-1', '--no-merges', '--format=%cd', '--date=format-local:%Y-%m-%d', '--', repoPath]);
 }
 
+// The UTC day of the first commit that touched a path, which is the day its
+// page first existed at its URL. A path git has no commit for dates to today.
+function firstCommitDay(repoPath: string): string {
+  const out = execFileSync(
+    'git',
+    [
+      'log',
+      '--no-merges',
+      '--no-renames',
+      '--diff-filter=A',
+      '--format=%cd',
+      '--date=format-local:%Y-%m-%d',
+      '--',
+      repoPath,
+    ],
+    { cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, TZ: 'UTC' } },
+  ).trim();
+  return out === '' ? new Date().toISOString().slice(0, 10) : (out.split('\n').at(-1) as string);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -579,13 +599,15 @@ async function sitemapEntries(): Promise<Array<{ path: string; lastmod: string |
   ].map(([, path, lastmod]) => ({ path: path || '/', lastmod: lastmod ?? null }));
 }
 
-function techArticleDate(html: string): unknown {
+function techArticleField(html: string, field: 'dateModified' | 'datePublished'): unknown {
   const script = html.match(/<script type="?application\/ld\+json"?>([\s\S]*?)<\/script>/);
   const jsonLd: unknown = JSON.parse(script?.[1] ?? '{}');
   const graph: unknown[] = isRecord(jsonLd) && Array.isArray(jsonLd['@graph']) ? jsonLd['@graph'] : [];
   const article = graph.find((node) => isRecord(node) && node['@type'] === 'TechArticle');
-  return isRecord(article) ? article.dateModified : undefined;
+  return isRecord(article) ? article[field] : undefined;
 }
+
+const techArticleDate = (html: string) => techArticleField(html, 'dateModified');
 
 function frontmatterKeys(md: string): string[] {
   return [...md.slice(0, md.indexOf('\n---\n')).matchAll(/^([A-Za-z_]+):/gm)].map(([, key]) => key);
@@ -628,6 +650,32 @@ describe('regression #10 — one content date per page', () => {
     }
     // Every dated page's twin opens with the standard block.
     expect(twinsWithFrontmatter.sort()).toEqual(dated.map((d) => d.path).sort());
+  });
+
+  // The build has a publication day only for a page rendered from one authored
+  // source: the day that source first appeared at its path. Every other page
+  // states none rather than a guess.
+  test('a principle or sub-page article states the day its source first appeared, never after its modified day', async () => {
+    const pages: Array<[string, string]> = [
+      ...LOCKED_SLUGS.map((slug, i): [string, string] => [`p${i + 1}`, join('content', 'principles', `${slug}.md`)]),
+      ...['about', 'methodology', 'audit', 'install', 'contribute'].map((name): [string, string] => [
+        name,
+        join('content', `${name}.md`),
+      ]),
+    ];
+    for (const [stem, source] of pages) {
+      const html = await readFile(join(DIST, `${stem}.html`), 'utf8');
+      const published = techArticleField(html, 'datePublished');
+      expect({ stem, published }).toEqual({ stem, published: firstCommitDay(source) });
+      expect((published as string) <= (techArticleField(html, 'dateModified') as string)).toBe(true);
+    }
+  });
+
+  test('a page rendered from stored records or shared data states no publication day', async () => {
+    for (const stem of ['index', 'scorecards', 'coverage', 'fix/ai-catalog']) {
+      const html = await readFile(join(DIST, `${stem}.html`), 'utf8');
+      expect({ stem, published: techArticleField(html, 'datePublished') }).toEqual({ stem, published: undefined });
+    }
   });
 
   test('each tool page takes its audit day, read from its emitted envelope', async () => {

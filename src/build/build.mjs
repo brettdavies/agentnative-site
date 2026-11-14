@@ -208,7 +208,19 @@ export async function build() {
     const description = extractDescription(source);
     const shortDesc = extractDefinitionParagraph(source);
     const dateModified = fileDate(file);
-    principles.push({ n, slug, title, description, source, html, filename: file, shortDesc, dateModified });
+    const datePublished = fileDate.published(file);
+    principles.push({
+      n,
+      slug,
+      title,
+      description,
+      source,
+      html,
+      filename: file,
+      shortDesc,
+      dateModified,
+      datePublished,
+    });
   }
 
   // 4. Per-principle pages — the rendered markdown wrapped in the reading
@@ -216,7 +228,7 @@ export async function build() {
   // prev/next pager. The markdown twin keeps the authored source bytes
   // behind its frontmatter block.
   for (const [i, p] of principles.entries()) {
-    const { n, title, description, source, dateModified } = p;
+    const { n, title, description, source, dateModified, datePublished } = p;
     const tier = principleTier(n);
     const shortTitle = (t) => escHtml(t.replace(/^P\d+:\s*/, ''));
 
@@ -251,6 +263,7 @@ export async function build() {
       themeInitJs: themeInit,
       extraScripts: [WEBMCP_SCRIPT],
       dateModified,
+      datePublished,
     });
     await writeFile(join(DIST_DIR, `p${n}.html`), page);
 

@@ -4,7 +4,7 @@
 agent-native CLI standard registry. MCP clients POST JSON-RPC requests there. `GET /mcp` returns `405 Method Not
 Allowed` with `Allow: POST`. This page describes the endpoint. It is not the endpoint.
 
-- Endpoint: `POST` [/mcp](/mcp)
+- Endpoint: `POST /mcp`
 - Wire contract and tool catalog: [/mcp-skill](/mcp-skill)
 - JSON server card (SEP-1649): [/.well-known/mcp/server-card.json](/.well-known/mcp/server-card.json). Pointer aliases:
   `/.well-known/mcp`, `/mcp.json`.
