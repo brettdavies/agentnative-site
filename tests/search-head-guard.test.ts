@@ -1,12 +1,13 @@
 // Search-engine head guard over the built output. Bing's Site Scan and the
-// search-presence audit read each page's description as written: outside
-// 25-160 characters, cut off with an ellipsis, or carrying Markdown syntax
-// it fails. Run `bun run build` first; this reads dist/.
+// search-presence audit read each page's head as written: a description
+// outside 25-160 characters, cut off with an ellipsis, or carrying Markdown
+// syntax fails, and so does a title outside 15-70 characters or one that does
+// not name the brand. Run `bun run build` first; this reads dist/.
 
 import { beforeAll, describe, expect, test } from 'bun:test';
 import { readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
-import { DESCRIPTION_MAX, DESCRIPTION_MIN, SENTENCE_END } from '../src/shared/search-head';
+import { BRAND, DESCRIPTION_MAX, DESCRIPTION_MIN, SENTENCE_END, TITLE_MAX, TITLE_MIN } from '../src/shared/search-head';
 import { requireDistBuild } from './helpers/dist';
 
 const DIST = join(import.meta.dir, '..', 'dist');
@@ -102,6 +103,34 @@ describe('built pages state a description search engines can show whole', () => 
       violations((_label, text) => {
         const found = MARKDOWN_SYNTAX.find(({ pattern }) => pattern.test(text));
         return found ? `carries Markdown (${found.label})` : null;
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe('built pages state a title that names the brand', () => {
+  const titleOf = (page: Page) => {
+    const match = page.html.match(/<title>([^<]*)<\/title>/);
+    return match ? decodeEntities(match[1]) : null;
+  };
+
+  test(`every title is ${TITLE_MIN}-${TITLE_MAX} characters`, () => {
+    expect(
+      pages.flatMap((page) => {
+        const title = titleOf(page);
+        if (title === null) return [`${page.path}: no title`];
+        return title.length < TITLE_MIN || title.length > TITLE_MAX
+          ? [`${page.path}: title is ${title.length} characters: ${title}`]
+          : [];
+      }),
+    ).toEqual([]);
+  });
+
+  test(`every title contains ${BRAND}`, () => {
+    expect(
+      pages.flatMap((page) => {
+        const title = titleOf(page);
+        return title?.includes(BRAND) ? [] : [`${page.path}: ${title}`];
       }),
     ).toEqual([]);
   });

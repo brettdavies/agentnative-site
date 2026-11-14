@@ -330,7 +330,7 @@ export async function emitScorecardSurface({
   const coverageMarkdown = buildCoverageMarkdown(coverageMatrix);
   pageDates.set('/coverage', fileDate(coverageMatrixPath, moduleSource('./coverage.mjs'), THIS_MODULE));
   const coverageMeta = {
-    title: 'Spec Coverage Matrix — anc.dev',
+    title: 'Spec Coverage Matrix',
     description: 'Which agent-native CLI requirements have automated audits and which remain uncovered.',
     canonicalPath: '/coverage',
     dateModified: pageDates.get('/coverage'),

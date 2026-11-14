@@ -23,7 +23,7 @@ import {
   scoreMarkdownPath,
 } from '../../shared/audit-routes';
 import { escHtml } from '../../shared/esc-html';
-import { LANE_EXPECTATION, scoringHeadingHtml, scoringTitle, TITLE_SUFFIX } from '../../shared/scoring-copy';
+import { LANE_EXPECTATION, scoringHeadingHtml, scoringTitle } from '../../shared/scoring-copy';
 import { fitDescription } from '../../shared/search-head';
 import { detectPreference } from '../accept';
 import { loadWebAuditRegistry, type WebAuditRegistryEnv } from '../audit-web/registry';
@@ -159,7 +159,7 @@ function pointerPage(refused: string | null): Page {
     ? `\n  <p class="live-score__status live-score__status--error" role="alert">${escHtml(refused)}</p>`
     : '';
   return {
-    title: `Audit progress${TITLE_SUFFIX}`,
+    title: 'Audit progress',
     description: 'The progress page for an audit started from the audit page.',
     body: `<article class="container scorecard-page">
   <header class="scorecard-header">

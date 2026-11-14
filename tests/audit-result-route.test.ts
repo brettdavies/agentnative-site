@@ -1634,3 +1634,46 @@ describe('a Worker-rendered result page states a description search engines can 
     expect(description.length).toBeGreaterThanOrEqual(25);
   });
 });
+
+describe('a Worker-rendered result page states a title that names the brand', () => {
+  const realShell = { '/_internal/score-live-shell.html': emitShellTemplate() };
+  const longHost = `${'a'.repeat(63)}.${'b'.repeat(30)}.example.com`;
+
+  const headOf = (html: string) => ({
+    title: html.match(/<title>([^<]*)<\/title>/)?.[1] ?? '',
+    ogTitle: html.match(/<meta property="?og:title"? content="([^"]*)"/)?.[1] ?? '',
+  });
+
+  test('a website scorecard adds the brand to <title> and leaves og:title bare', async () => {
+    const env = await seededEnv({ assets: realShell });
+    const head = headOf(await (await route('/score/anc.dev', env, { accept: 'text/html' })).text());
+    expect(head).toEqual({
+      title: 'anc.dev — Agent-Readiness Audit · agentnative',
+      ogTitle: 'anc.dev — Agent-Readiness Audit',
+    });
+  });
+
+  test('a CLI scorecard adds the brand to <title>', async () => {
+    const env = await seededEnv({ assets: realShell });
+    const head = headOf(await (await route('/score/ouch', env, { accept: 'text/html' })).text());
+    expect(head.title).toBe('ouch — Agent-Native Scorecard · agentnative');
+  });
+
+  test('a 100-character host leaves the lane label out of <title> to stay within 70 characters', async () => {
+    const env = await makeEnv({
+      cache: { [await webKeyFor(`https://${longHost}/`, SPEC_VERSION)]: WEB_RECORD },
+      assets: realShell,
+    });
+    const head = headOf(await (await route(`/score/${longHost}`, env, { accept: 'text/html' })).text());
+    expect(head.title.length).toBeLessThanOrEqual(70);
+    expect(head.title).toContain('agentnative');
+    expect(head.title.startsWith(longHost.slice(0, 20))).toBe(true);
+    expect(head.ogTitle).toBe(`${longHost} — Agent-Readiness Audit`);
+  });
+
+  test('the not-audited page states its own title and the brand', async () => {
+    const env = await makeEnv({ assets: realShell });
+    const head = headOf(await (await route('/score/nosuchtool', env, { accept: 'text/html' })).text());
+    expect(head).toEqual({ title: 'Not audited yet · agentnative', ogTitle: 'Not audited yet' });
+  });
+});

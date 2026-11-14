@@ -62,7 +62,7 @@ import { resultAlternateLinks } from '../../shared/result-head';
 import { type ReauditControl, type ResultTier, type SpineInput, shortDate } from '../../shared/result-spine';
 import { brandName, cliOgIdentity, scoreOgAlt, scoreOgEdition, scoreOgKey, scoreOgUrl } from '../../shared/score-og';
 import { buildScorecardBody, buildScorecardMarkdown } from '../../shared/scorecard-format.mjs';
-import { fitDescription } from '../../shared/search-head';
+import { fitDescription, headTitle } from '../../shared/search-head';
 import { CANONICAL_SITE_URL } from '../../shared/site-url';
 import type { TwinMeta } from '../../shared/twin-frontmatter';
 import { detectResultPreference } from '../accept';
@@ -627,6 +627,7 @@ async function respond(ctx: RenderContext, rendered: Rendered): Promise<Response
   const clip = await pageClip(ctx.env, target, ogKey);
   const html = substituteShell(template, {
     title,
+    headTitle: headTitle(title, target),
     description,
     canonicalPath: scorePath(target),
     breadcrumb: target,
@@ -812,7 +813,7 @@ async function notFound(request: Request, env: ResultEnv, deps: ResultDeps, inpu
     });
   }
   const html = substituteShell(template, {
-    title: 'Not audited yet — anc.dev',
+    title: 'Not audited yet',
     description: message,
     canonicalPath: pathname,
     breadcrumb: input.target,
