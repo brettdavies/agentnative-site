@@ -2,11 +2,12 @@
 // redirect. /principles and /web have no page behind them, /mcp answers POST
 // only, and the other paths answer a redirect to the page a link should name.
 // No built page, markdown twin, or llms file links one, in the relative form
-// the source writes or the absolute form the twins carry. A <link> element is
-// a discovery declaration, not a followed link, so only anchors count, and
-// llms.txt lists the MCP endpoint because the llmstxt.org format is a list of
-// links to every entry, not a page a crawler walks. Reads dist/, so run
-// `bun run build` first.
+// the source writes or the absolute form the twins carry. Anchors and <link>
+// elements both count, because a crawler follows either. Two declarations name
+// the MCP endpoint on purpose and are skipped: the <link rel="mcp"> head entry,
+// which tells MCP clients where to POST, and llms.txt, whose llmstxt.org format
+// is a list of links to every entry, not a page a crawler walks. Reads dist/,
+// so run `bun run build` first.
 
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -30,13 +31,20 @@ function internalPath(target: string): string | null {
   return local.startsWith('/') ? (local.split(/[?#]/, 1)[0] ?? null) : null;
 }
 
-/** Every link target a file carries: anchor hrefs, which the minifier may leave unquoted, and markdown targets. */
-function linkTargets(path: string, text: string): string[] {
-  if (path.endsWith('.html')) {
-    return [...text.matchAll(/<a\s[^>]*?\bhref=(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g)].map(
-      ([, a, b, c]) => a ?? b ?? c ?? '',
-    );
+/** The hrefs of the anchors and <link> elements in an HTML page, which the minifier may leave unquoted. */
+function htmlTargets(text: string): string[] {
+  const targets: string[] = [];
+  for (const [, tag, attrs] of text.matchAll(/<(a|link)\s([^>]*)>/g)) {
+    if (tag === 'link' && /\brel=["']?mcp["']?(?:\s|$)/.test(attrs ?? '')) continue;
+    const href = /\bhref=(?:"([^"]*)"|'([^']*)'|([^\s>]+))/.exec(attrs ?? '');
+    if (href) targets.push(href[1] ?? href[2] ?? href[3] ?? '');
   }
+  return targets;
+}
+
+/** Every link target a file carries: HTML anchor and <link> hrefs, or markdown targets. */
+function linkTargets(path: string, text: string): string[] {
+  if (path.endsWith('.html')) return htmlTargets(text);
   return [...text.matchAll(/\]\(([^)\s]+)\)/g)].map(([, target]) => target);
 }
 

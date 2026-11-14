@@ -110,6 +110,10 @@ describe('loadFileDates — one git walk dates every file', () => {
     expect(fileDate.published('content/a.md')).toBe('2026-03-01');
     expect(fileDate.published(join(dir, 'content', 'b.md'))).toBe('2026-03-01');
     expect(fileDate.published('content/a.md', 'content/b.md')).toBe('2026-03-01');
+    await writeFile(join(dir, 'content', 'later.md'), 'later\n');
+    git(dir, ['add', '.']);
+    git(dir, ['commit', '-q', '-m', 'third'], '2026-05-02T12:00:00Z');
+    expect(loadFileDates(dir).published('content/later.md', 'content/a.md')).toBe('2026-03-01');
     await writeFile(join(dir, 'content', 'new.md'), 'new\n');
     expect(loadFileDates(dir).published('content/new.md')).toBe(new Date().toISOString().slice(0, 10));
   });
