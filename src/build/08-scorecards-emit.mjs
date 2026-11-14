@@ -23,6 +23,7 @@ import { buildRegistryEnvelope } from '../shared/audit-envelope';
 import { SCORECARDS_PATH, scoreMarkdownPath, scorePath } from '../shared/audit-routes';
 import { resultAlternateLinks } from '../shared/result-head';
 import { scoreOgAlt, scoreOgEdition, scoreOgKey, scoreOgPath } from '../shared/score-og';
+import { endSentence, fitDescription } from '../shared/search-head';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
 import { renderBadgeSvg } from './badge.mjs';
 import { newestDate, scorecardDate } from './content-dates.mjs';
@@ -267,7 +268,10 @@ export async function emitScorecardSurface({
     pageDates.set(canonicalPath, scorecardDate(scorecard));
     const toolMeta = {
       title: `${tool.name} — Agent-Native Scorecard`,
-      description: `Agent-readiness scorecard for ${tool.name}: ${tool.description}`,
+      description: fitDescription(
+        endSentence(`Agent-readiness scorecard for ${tool.name}: ${tool.description}`),
+        `Agent-readiness scorecard for ${tool.name}.`,
+      ),
       canonicalPath,
       dateModified: pageDates.get(canonicalPath),
     };

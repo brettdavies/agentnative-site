@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import { emitShellTemplate } from '../src/build/shell.mjs';
-import { scoreJsonPath, scoreMarkdownPath, scorePath } from '../src/shared/audit-routes';
+import { scoreJsonPath, scoreMarkdownPath, scorePath, TARGET_MAX_LENGTH } from '../src/shared/audit-routes';
 import type { RenderService } from '../src/shared/og-render';
 import { SCORE_OG_TEMPLATE, scoreOgClipPath, scoreOgPath } from '../src/shared/score-og';
 import { WEBMCP_SCRIPT } from '../src/shared/webmcp-script';
@@ -1588,5 +1588,49 @@ describe('a Worker-rendered result page carries the day its scoring ran', () => 
       twin: undefined,
       twinOpensWith: ['title', 'description', 'url', 'target'],
     });
+  });
+});
+
+describe('a Worker-rendered result page states a description search engines can show whole', () => {
+  const realShell = { '/_internal/score-live-shell.html': emitShellTemplate() };
+  const longHost = `${'a'.repeat(63)}.${'b'.repeat(30)}.example.com`;
+
+  const descriptionOf = (html: string) => html.match(/<meta name="?description"? content="([^"]*)"/)?.[1] ?? '';
+
+  test('a scorecard names its target when the sentence fits', async () => {
+    const env = await seededEnv({ assets: realShell });
+    const html = await (await route('/score/anc.dev', env, { accept: 'text/html' })).text();
+    expect(descriptionOf(html)).toMatch(/^anc\.dev scored \d+% for agent-readiness/);
+  });
+
+  test('a scorecard for a 100-character host drops the host and stays in range', async () => {
+    expect(longHost.length).toBeGreaterThan(100);
+    const env = await makeEnv({
+      cache: { [await webKeyFor(`https://${longHost}/`, SPEC_VERSION)]: WEB_RECORD },
+      assets: realShell,
+    });
+    const res = await route(`/score/${longHost}`, env, { accept: 'text/html' });
+    expect(res.status).toBe(200);
+    const description = descriptionOf(await res.text());
+    expect(description).toMatch(/^Scored \d+% for agent-readiness against the agentnative web audit/);
+    expect(description.length).toBeGreaterThanOrEqual(25);
+    expect(description.length).toBeLessThanOrEqual(160);
+  });
+
+  test('the not-audited page for a target at the length cap states a description in range', async () => {
+    const env = await makeEnv({ assets: realShell });
+    const target = `${'a'.repeat(63)}.${'b'.repeat(TARGET_MAX_LENGTH - 66)}.c`;
+    expect(target).toHaveLength(TARGET_MAX_LENGTH);
+    const res = await route(`/score/${target}`, env, { accept: 'text/html' });
+    expect(res.status).toBe(404);
+    expect(descriptionOf(await res.text())).toBe(`No audit exists for ${target} yet.`);
+    expect(`No audit exists for ${target} yet.`.length).toBeLessThanOrEqual(160);
+  });
+
+  test('the not-audited page for a one-character target states a description in range', async () => {
+    const env = await makeEnv({ assets: realShell });
+    const description = descriptionOf(await (await route('/score/x', env, { accept: 'text/html' })).text());
+    expect(description).toBe('No audit exists for x yet.');
+    expect(description.length).toBeGreaterThanOrEqual(25);
   });
 });
