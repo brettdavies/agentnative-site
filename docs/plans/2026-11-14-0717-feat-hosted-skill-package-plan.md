@@ -28,7 +28,7 @@ topic: hosted-skill-package
 - **Stop conditions:**
   - Brett picks an option this plan does not describe: re-plan the affected units before building.
   - A package byte changes in a PR with no matching `VERSION` bump: stop. A version names exactly one digest (R2).
-  - A PR would change a bundle file beyond the forced changes F1 to F9: stop and report. The bundle stays whole except for changes the move forces.
+  - A PR would change a bundle file beyond the forced changes F1 to F9 and the testing-guidance commits (S1b under OD10 (c), or S1 under OD10 (a)): stop and report. The bundle stays whole except for changes the move forces and that one body of Brett's own pre-freeze work.
   - The deployed archive's SHA-256 differs from the record's digest on staging or production: stop the release and report. Do not re-deploy over it.
   - The CLI drift gate stays red on CLI `dev` longer than one working day after S3 merges: stop and report. The window is planned (Risks), but an open-ended one is not.
   - Production and staging stay read-only for every planning and build session. A session may send plain public GETs and nothing else.
@@ -62,7 +62,7 @@ The skill lives in its own repo today and installs by `git clone`. The site, the
   - the WebMCP tool (S5);
   - `anc skill install|update`.
 - R2. **One version, one digest.** The bytes of a published version never change. A change to any package byte ships under a higher version.
-- R3. **The bundle stays whole.** Every file a host loads at run time ships: `SKILL.md`, `VERSION`, `getting-started.md`, `references/`, `templates/`, `spec/`, `bin/check-update`, and the two license files. Only the forced changes F1 to F9 alter bundle bytes, and each names its reason.
+- R3. **The bundle stays whole.** Every file a host loads at run time ships: `SKILL.md`, `VERSION`, `getting-started.md`, `references/`, `templates/`, `spec/`, `bin/check-update`, and the two license files. Only the forced changes F1 to F9 alter bundle bytes, and each names its reason. The one other change is the testing-guidance work Brett wrote before the freeze (OD10): S1b carries it under (c), and S1 imports it under (a). It is skill work in its own right, so it gets a skill review rather than a forced-change reason.
 - R4. **The archive follows the Cloudflare discovery RFC v0.2.0 archive rules.** It is a gzip-compressed tar with the files at its root and `SKILL.md` at the root. It has no wrapper directory, no links, no `..` segments, and no absolute paths. The same tree always yields the same bytes.
 - R5. **The record carries everything a consumer needs:**
   - the version;
@@ -73,7 +73,7 @@ The skill lives in its own repo today and installs by `git clone`. The site, the
 - R6. **The well-known index lists the skill.** The entry is `agent-native-cli` with `type: archive`, the record's URL and digest, and the description from `SKILL.md`.
 - R7. **`anc skill install|update <host>` installs the package.** It reads the record, downloads the archive, and checks the digest before anything reaches the destination. It extracts under the archive safety rules and swaps the result in with a rename. Failure reasons are typed in the existing envelope.
 - R8. **Existing git installs keep working.** Every git-clone install reaches the hosted package through the update path it already has: a new `anc`, an older `anc`, a `git pull`, or the update-check prompt (§ Existing installs).
-- R9. **The MCP server serves the skill (SEP-2640).** It answers `skills/list`, `skills/get`, and `resources/read` of `skill://agent-native-cli/<path>` with files and digests equal to the archive's (S4, OD8).
+- R9. **The MCP server serves the skill (SEP-2640).** It answers `skills/list`, `skills/get`, `resources/read` of `skill://agent-native-cli/<path>`, and `resources/directory/read`, with files and digests equal to the archive's (S4, OD8).
 - R10. **WebMCP returns the record's summary.** On the orientation paths and on `/skill`, one WebMCP tool returns the name, version, digest, archive URL, and install command.
 - R11. **Release gates.**
   - Preflight refuses a release in two cases: the release build's package differs from production's under the same version, or the release build's version is lower than production's.
@@ -111,13 +111,13 @@ The skill lives in its own repo today and installs by `git clone`. The site, the
 - **The Codex destination.** OpenAI's Codex docs place user skills at `$HOME/.agents/skills` (<https://developers.openai.com/codex/skills/>, read 2026-11-14). `src/data/skill/skill.json` and the CLI map `codex` to `~/.codex/skills/agent-native-cli`. This plan carries the existing destinations over unchanged.
 - **The update-check path in `SKILL.md`.** `SKILL.md:37` runs `bash "$(dirname "$0")/bin/check-update"`. In an agent's shell `$0` is the shell, so the path resolves against the working directory, not the skill directory. The problem is in `SKILL.md`, not in `bin/check-update`. F4 (under OD8 (a) or (b)) rewrites the paragraph that holds this line, so a fix could ride along at no extra review or test cost. The move does not force it, so it stays out.
 - **Links to files the bundle does not ship.** The vendored spec's principle files link to `spec/docs/badge.md`, `spec/docs/decisions/p1-behavioral-must.md`, and `spec/principles/AGENTS.md`. No consumer vendors those files, and `src/data/spec/` carries the same bytes. The fix belongs to the spec repo.
+- **`message` and `next_step` on the CLI's skill error envelope.** The envelope of `anc skill install|update` carries `reason` alone for every reason it has today (`agentnative-cli` `src/skill_install.rs:307-322`), short of the global error contract. The reasons this plan adds join that envelope as it is, and U14's docs say for each one whether a retry can help. Bringing the envelope to the contract is one change across every reason, old and new, so it is a CLI follow-up, not part of the move.
 
 #### Deferred to Follow-Up Work
 
 - **A `.zip` archive beside the `.tar.gz`.** RFC clients must support both formats, and the vercel CLI and the RFC both accept `.tar.gz`.
 - **A Claude Code plugin marketplace entry.** `marketplace.json` supports an `archive` source (a zip over HTTPS); <https://code.claude.com/docs/en/plugin-marketplaces>, read 2026-11-14.
 - **A skill entry in `/.well-known/ai-catalog.json`.** The ARD media types are a proposal.
-- **`directoryRead` on the MCP skills extension.**
 - **A PR-gate check that a change under `skill/agent-native-cli/` bumps `VERSION`.** Preflight enforces R2 at release time (KTD8).
 - **The spec's P8 pointer to the skill repo's `bin/check-update`.** That is spec text, and the archived repo still serves the file.
 
@@ -142,12 +142,12 @@ None beyond the open owner decisions.
   - The archived repo keeps its history readable.
   - No issues to carry: none was ever filed, and no PRs are open.
 - KTD3. **The bundle's `spec/` is committed, and one sync writes both copies.**
-  - At spec 0.7.0, the skill's `spec/principles/*`, `spec/VERSION`, and `spec/CHANGELOG.md` are byte-identical to `src/data/spec/`. `spec/README.md` and `spec/reading-the-spec.md` belong to the skill only.
+  - At spec 0.7.0, the skill's `spec/principles/*`, `spec/VERSION`, and `spec/CHANGELOG.md` are byte-identical to `src/data/spec/`. `spec/README.md` belongs to the skill only. `spec/reading-the-spec.md` is vendored too: the skill repo's sync generates it from the spec README's `## Reading the spec` section and points its relative links at the spec repo at the synced ref (`scripts/sync-spec.sh:251-269` there), and U3 ports that step.
   - `scripts/sync-spec.sh` writes both directories, and `tests/skill-spec-copy.test.ts` holds them byte-equal.
   - Copying at build time would leave the committed tree incomplete (KTD1).
   - A spec sync that changes the package needs a skill `VERSION` bump in the same PR (R2).
 - KTD4. **A deterministic archive with no compressor in the identity path.**
-  - **Tar layout:** ustar. Paths in byte order, files only (no directory entries). Mode `0644`, or `0755` when the file's owner-execute bit is set; a test holds that set equal to `git ls-files -s` mode `100755`, which is `bin/check-update` alone. uid and gid 0, empty uname and gname, mtime 0, two zero blocks at the end.
+  - **Tar layout:** ustar. Paths in byte order, files only (no directory entries). Mode `0644`, or `0755` when the file's git index mode is `100755`, which is `bin/check-update` alone. Modes come from the index, not the checkout, so a checkout's file modes cannot move the digest. uid and gid 0, empty uname and gname, mtime 0, two zero blocks at the end.
   - **Gzip layout:** stored deflate blocks of at most 65,535 bytes. Header mtime 0, XFL 0, OS byte 255. CRC-32 and ISIZE trailer.
   - **Why stored blocks:** the same tree yields the same bytes on any machine and under any Bun or zlib version. This repo's Bun pin follows the local Bun, so a compressor change would move the digest with no content change.
   - **Size:** at `origin/dev` the package is 33 files and 245,762 bytes, so the archive is about 274 KB. `gzip -9` would give about 78 KB. Both are far under every limit (SEP-2640: 512 files and 16 MiB; vercel: 50 MiB).
@@ -173,14 +173,14 @@ None beyond the open owner decisions.
   - **First run:** production's record has no `source.digest` yet, so the gate passes when the release version is higher than production's.
   - **Why release time:** staging sits behind Cloudflare Access with `noindex`, so production is the only public publication. Preflight runs before every release reaches it.
 - KTD9. **The CLI downloads with a spawned `curl`, then verifies and extracts in-process.**
-  - **The spawn:** `curl` runs through `Command::args` with no shell. `-q` comes first so no `.curlrc` is read, then `--proto =https --proto-redir =https --max-redirs 0 --fail --silent --show-error --max-filesize <record size> --max-time 60 --output <temp file>`.
+  - **The spawn:** `curl` runs through `Command::args` with no shell. `-q` comes first so no `.curlrc` is read, then the protocol flags, then `--max-redirs 0 --fail --silent --show-error --max-filesize <record size> --max-time 60 --output <temp file>`. The protocol flags follow the validated URL: `--proto =https --proto-redir =https` for an `https://` URL, and `--proto =http --proto-redir =http` only for a loopback `http://` override (KTD10). Tests pin both vectors.
   - **Environment:** the git-specific stripping goes, and the user's proxy variables are kept.
   - **In-process steps:** SHA-256 via the `sha2` crate, gunzip via `flate2` (pure-Rust backend), and a ustar reader of about 120 lines.
   - **Rejected alternative:** turning on the `web` feature's ureq and rustls stack in the default build. It brings aws-lc-rs and a C toolchain into every release target for one download.
   - **Prerequisite:** `curl` replaces `git`. It ships with macOS, mainstream Linux distributions, and Windows 10 and later.
 - KTD10. **The record URL is fixed, and the archive must come from the record's origin.**
   - `https://anc.dev/skill.json` is a constant.
-  - `ANC_SKILL_RECORD_URL` overrides it. The override accepts `https://` URLs, plus `http://127.0.0.1` and `http://localhost` for tests, and nothing else.
+  - `ANC_SKILL_RECORD_URL` overrides it. The override accepts `https://` URLs, plus `http://127.0.0.1` and `http://localhost` for tests, and nothing else. A loopback override is the only case in which curl may speak plain HTTP.
   - The archive URL must share the record's origin, or the install refuses with `record-invalid`. One origin stays the only root of trust, as GitHub's HTTPS is for the git clone.
 - KTD11. **Archive safety rules, the same in the CLI, the site's tests, and the e2e reader.** Every rule below refuses with `package-invalid`:
   - entries are regular files only (typeflag `0` or NUL); a link, hard link, or any other type is refused;
@@ -189,13 +189,13 @@ None beyond the open owner decisions.
   - at most 512 files and 16 MiB unpacked, the SEP-2640 limits.
   The digest check runs before extraction, and extraction writes only inside a staging directory beside the destination.
 - KTD12. **MCP via the SDK's `SkillsExtension.load` over an ASSETS adapter** (S4, under OD8 (a) or (b)).
-  - **The adapter:** `src/worker/mcp/skills.ts` implements the SDK's `SkillFiles` interface (`list(dir)`, `read(path)`). `list` derives directory listings from the record's `source.files`, and `read` fetches `/_internal/skill/agent-native-cli/<path>` through `env.ASSETS`.
+  - **The adapter:** `src/worker/mcp/skills.ts` implements the SDK's `SkillFiles` interface (`list(dir)`, `read(path)`). Its root is the skills folder: `list('')` returns the `agent-native-cli` directory, deeper listings derive from the record's `source.files`, and `read(path)` fetches `/_internal/skill/<path>` through `env.ASSETS`. The SDK skips a `SKILL.md` at the adapter root, so the root cannot be the skill directory itself.
   - **Load options:** `strict: true`, plus a cache hint of 3,600,000 ms `public`, matching `resources/read`.
-  - **Lifetime:** the catalog loads once per isolate, the way `loadCatalog` does, and `attach` runs on each per-request server.
-  - **Capabilities:** `MCP_SERVER_CAPABILITIES` gains `extensions: {"io.modelcontextprotocol/skills": {}}`, so the card and both lanes declare what `attach` registers.
-  - **No new tools:** the tools array and its 36,864-byte budget are untouched, and only `resources/templates/list` gains the skills template.
+  - **Lifetime:** the dispatch shell in `src/worker/index.ts` loads the skills catalog beside `loadCatalog(env)`, and `getWarmSkills()` reads it, as `getWarmCatalog()` reads the tool catalog. Only a successful load is cached, as in `loadCatalog`, so a transient ASSETS miss retries on the next request. `createAncServer` attaches the catalog on each per-request server.
+  - **Capabilities:** the catalog `load` returns implements `readDirectory` and `listResources`, so `attach` declares `{"io.modelcontextprotocol/skills": {"directoryRead": true}}`, registers `resources/directory/read`, and lists `skill://agent-native-cli/SKILL.md` in `resources/list`. `MCP_SERVER_CAPABILITIES` gains that same `extensions` value, so the card and both lanes declare what `attach` registers.
+  - **No new tools:** the tools array and its 36,864-byte budget are untouched. `resources/templates/list` gains the skills template and `resources/list` gains the `SKILL.md` entry; the existing resources stay as they are.
 - KTD13. **WebMCP: one orientation tool, `get_skill_package`.** It fetches `/skill.json` from its own origin when called and returns at most 1,500 characters (`WEBMCP_EXECUTE_MAX`): the name, version, digest, archive URL, install command, and `/skill`. It is registered on the orientation paths and on `/skill`.
-- KTD14. **The bridge release's bundle bytes equal the hosted package's.** K1 copies `skill/agent-native-cli/` from the site's `main` at the commit R1 deployed into the skill repo's root. Every file at the same relative path ends up byte-identical. A git install that pulls or re-clones the bridge holds exactly the hosted version.
+- KTD14. **The bridge release's bundle bytes equal the hosted package's.** K1 copies `skill/agent-native-cli/` from the site's `main` at the commit R1 deployed into the skill repo's root. Every package file at the same relative path ends up byte-identical. A git install that pulls or re-clones the bridge holds the hosted version's package files byte for byte, plus the repo files U15 lists, which a host never loads.
 
 ### Decided from evidence
 
@@ -233,7 +233,7 @@ Brett reads these once the plan has passed its three reviews. Each row names the
   - **(a) and (b):** the archive URL is versioned, so it is cached as `IMMUTABLE_CACHE` and never purged. The release purge covers the mutable documents only: `/skill.json`, `/skill`, `/skill.md`, `/.well-known/agent-skills/index.json`, and the version pointer.
   - **The stale window under (a) and (b):** until the purge lands, a client can still read the old record or index. That record names the old versioned archive, which the edge still holds, so the client gets a valid older package and never a digest mismatch.
   - **The old archive after deploy:** D3 drops it from `dist`, so a cache miss on its URL answers 404 and the client re-reads the index. Immutable edge copies may serve it until they are evicted, and those bytes still match the old digest.
-  - **(c):** the archive URL is mutable. It needs a new cache class, `public, max-age=60, s-maxage=300`, on the record, the index, the archive, and the version pointer, so a mismatch window lasts at most 5 minutes. All five documents are purged in one call immediately after deploy. Postflight's digest check may need one retry after the purge.
+  - **(c):** the archive URL is mutable. It needs a new cache class, `public, max-age=60, s-maxage=300`, on the record, the index, the archive, and the version pointer, so a mismatch window lasts at most 5 minutes. The operator's manual purge covers six URLs right after deploy: the five that (a) purges, plus the archive. Postflight's digest check retries once, 30 seconds later.
 - **OD4 with the bridge and the CLI's update path.**
   - Under (a) and (c), every released `anc` re-clones the bridge.
   - Under (b), a re-clone fails with `git-clone-failed`. `replace_bundle` puts the old install back, and the user stays on the old version until they install an `anc` that includes C1.
@@ -265,7 +265,7 @@ Brett reads these once the plan has passed its three reviews. Each row names the
 | `/skill.json` | `source.type`, `source.url`, `install.<host>`, `update` | values change (D1) | decided |
 | `/skill.json` | `source.digest`, `source.size`, `source.media_type`, `source.files`, `destinations` | new keys (D1) | decided |
 | Index | entry `agent-native-cli`, `type: archive` | new | decided |
-| MCP | capability `extensions["io.modelcontextprotocol/skills"]`; `skills/list`, `skills/get`; resources `skill://agent-native-cli/<path>`; one resource template | new (S4) | OD8 |
+| MCP | capability `extensions["io.modelcontextprotocol/skills"]` with `directoryRead: true`; `skills/list`, `skills/get`, `resources/directory/read`; resources `skill://agent-native-cli/<path>`, with `SKILL.md` in `resources/list`; one resource template | new (S4) | OD8 |
 | MCP | `MCP_SERVER_VERSION` `0.3.0` | bump (S4) | OD8 |
 | WebMCP | `get_skill_package` | new tool (S5) | decided |
 | CLI | `ANC_SKILL_RECORD_URL` | new environment variable (C1) | OD2 |
@@ -273,6 +273,8 @@ Brett reads these once the plan has passed its three reviews. Each row names the
 | CLI | reasons `curl-not-found`, `download-failed`, `digest-mismatch`, `package-invalid` | new | decided: both OD2 options download |
 | CLI | reasons `record-unreadable`, `record-invalid` | new | OD2 (a) |
 | CLI | reasons `git-not-found`, `git-clone-failed` | removed; a breaking change, so `anc` 0.8.0 moves the middle number | decided: both OD2 options drop git |
+| CLI | outcome `already-current` | new: `anc skill update` when the installed `VERSION` equals the baked one | OD2 (b) only |
+| Release script | `PRODUCTION_URL` (default `https://anc.dev`) | new `scripts/release/preflight.sh` environment variable, beside `STAGING_URL` and `LOCAL_URL`, so the gate tests can stub production | decided |
 | Bundle | `bin/check-update` default remote | becomes OD3's version pointer | OD3 |
 | Bundle | `VERSION` | `0.5.0` to OD1's value | OD1 |
 
@@ -300,7 +302,7 @@ Brett reads these once the plan has passed its three reviews. Each row names the
     "opencode": "~/.config/opencode/skills/agent-native-cli"
   },
   "install": { "claude_code": "anc skill install claude_code", "...": "one per destination" },
-  "license": "MIT",
+  "license": "MIT OR Apache-2.0",
   "name": "agent-native-cli",
   "principles_url": "https://anc.dev/p1",
   "schema_version": 1,
@@ -335,20 +337,20 @@ Each change below is forced by the move. Nothing else in the bundle changes.
 | F4 | `SKILL.md` § First action: update check | One sentence: skip the update check when this copy has no local `bin/` (served over MCP); the server always serves the current version | SEP-2640 forbids served content from causing host-side execution without per-skill approval. A served copy has no local script, and an update check means nothing for it. Applies under OD8 (a) or (b) only. |
 | F5 | `getting-started.md:80-81, 91-92, 107` | The dry-run comments describe D2. The manual fallback becomes the verifying download from `/skill`. The skill-bundle issue link goes to the site repo's issue chooser. | The git clone and the repo go away. |
 | F6 | `bin/check-update:22-23, 30` | The default `REMOTE_URL` becomes OD3's version pointer, and the comment says the bundle installs from the anc.dev package | The GitHub `main` copy freezes once the repo is retired. |
-| F7 | `references/update-check.md` | The first paragraph compares against the anc.dev version pointer. "Yes, upgrade now" runs `anc skill update <host>`. When that leaves `VERSION` unchanged, `anc` predates the hosted package, so upgrade `anc` first (`brew upgrade agentnative` or `cargo install agentnative`) and run it again. Hosts `anc` does not map get the manual line on `https://anc.dev/skill`. The `git pull` instruction goes. | A hosted install has no `.git`, so `git pull` fails. |
-| F8 | `spec/README.md` resync section | Names this repo's `scripts/sync-spec.sh`, which writes both copies (KTD3) | The skill repo's sync script goes away. |
+| F7 | `references/update-check.md` | The first paragraph (line 3) and the `UPGRADE_AVAILABLE` row (line 12, "A newer release is on `main`") name the anc.dev version pointer. "Yes, upgrade now" runs `anc skill update <host>`. When `VERSION` then does not equal the version the prompt named, `anc` predates the hosted package (an older `anc` re-clones the bridge, which leaves `VERSION` unchanged or lower), so upgrade `anc` first (`brew upgrade agentnative` or `cargo install agentnative`) and run it again. Hosts `anc` does not map get the manual line on `https://anc.dev/skill`. The `git pull` instruction goes. | A hosted install has no `.git`, so `git pull` fails. |
+| F8 | `spec/README.md`: the resync section and the Layout row for `.markdownlint-cli2.yaml` | The resync section names `scripts/sync-spec.sh` in `brettdavies/agentnative-site`, which writes both copies and generates `reading-the-spec.md` (KTD3). The Layout row goes. The text names the repo, because the same bytes ship in the archive, where "this repo" names nothing, and in the bridge, where it names the wrong repo. | The skill repo's sync script goes away, and the import leaves out the file the row describes (§ The package). |
 | F9 | `VERSION` | `0.5.0` to OD1's value | R2: the package bytes change. |
 
 ### Existing installs
 
 How each kind of install reaches the hosted package. "C1 `anc`" means an `anc` release that includes C1 (0.8.0 under OD1 (a)). "Older `anc`" means 0.5.x to 0.7.x.
 
-| Install today | What runs next | Result under OD4 (a) | Under (b) | Under (d) |
+| Install today | What runs next | Result under OD4 (a) and (c) | Under (b) | Under (d) |
 | --- | --- | --- | --- | --- |
 | Any git install | `anc skill update <host>` with a C1 `anc` | `holds_bundle` passes, the install moves aside, the package is downloaded, checked, and extracted, and the rename swaps it in. `.git` is gone, and local edits are lost, as with a re-clone today. | same | same |
-| Any git install | `anc skill update <host>` with an older `anc` | Moves aside, then a hardened `git clone` of the archived `main` lands the bridge: hosted bytes plus `.git` | `git-clone-failed`; `replace_bundle` restores the install | lands 0.5.0 again |
+| Any git install | `anc skill update <host>` with an older `anc` | Moves aside, then a hardened `git clone` of `main` lands the bridge: the hosted package files, plus `.git` and the repo files U15 lists | `git-clone-failed`; `replace_bundle` restores the install | lands 0.5.0 again |
 | A 0.5.0 git install that never updated | its `bin/check-update` compares GitHub `main`'s `VERSION` | `UPGRADE_AVAILABLE 0.5.0 0.6.0`, then the 0.5.0 instruction `git -C <dir> pull --ff-only` lands the bridge | the fetch fails, so the check stays silent forever | `main` stays 0.5.0, so the check stays silent forever |
-| A bridge install, once a newer hosted version ships | the bridge's `bin/check-update` reads the anc.dev pointer | prompt; the bridge's F7 text runs `anc skill update <host>`; an older `anc` re-clones the bridge, `VERSION` is unchanged, so F7 says to upgrade `anc` first | n/a | n/a |
+| A bridge install, once a newer hosted version ships | the bridge's `bin/check-update` reads the anc.dev pointer | prompt; the bridge's F7 text runs `anc skill update <host>`; an older `anc` re-clones the bridge, so `VERSION` does not equal the prompted version, and F7 says to upgrade `anc` first | n/a | n/a |
 | A manual clone with local edits | `git pull --ff-only` | refused, and the error is shown verbatim, as the 0.5.0 text already says | n/a | n/a |
 | A hosted install (C1 `anc`) | `bin/check-update` reads the anc.dev pointer, then `anc skill update` | the next hosted version | same | same |
 | A copy served over MCP (S4) | F4 skips the check | the server serves the current version | same | same |
@@ -362,7 +364,7 @@ A fresh `anc skill install` on an older `anc` after the archive clones the bridg
 3. **Preflight.** The release from `dev` to `main` (`RELEASES.md` § Releasing dev to main) runs `scripts/release/preflight.sh`:
    - the `coord` group's package-identity gate (KTD8) against production's `/skill.json`;
    - the `dist` group, which compares the deployed release build on staging with source: the served record's version and the served archive's SHA-256.
-4. **Deploy and purge.** After the deploy, the postflight `purge` group purges `/skill.json`, `/skill`, `/skill.md`, `/.well-known/agent-skills/index.json`, and the version pointer. It then checks that:
+4. **Deploy and purge.** After the deploy, the operator purges `/skill.json`, `/skill`, `/skill.md`, `/.well-known/agent-skills/index.json`, and the version pointer through the Cloudflare API, per `RELEASES.md` § Skill releases. The purge stays a manual step with its token in 1Password; no repo script calls `purge_cache`. Postflight's `purge` group then checks that:
    - the served record's version equals the release build's;
    - the archive at `source.url` hashes to `source.digest`, with no `Content-Encoding`;
    - the index entry equals the record;
@@ -442,14 +444,14 @@ dist/skill.json   index.json entry   /skill + /skill.md   dist/.well-known/agent
 | U7 | Deterministic package builder | `src/build/skill-package.mjs`, `src/build/build.mjs`, `tests/build-skill-package.test.ts`, `tests/helpers/ustar.ts` | U6 |
 | U8 | The record | `src/data/skill/skill.json`, `src/build/skill.mjs`, `src/build/08-scorecards-emit.mjs`, `tests/build.test.ts`, `tests/regression.test.ts` | U7 |
 | U9 | Index entry, headers, `llms.txt`, JSON-LD | `src/build/11a-discovery-emit.mjs`, `src/worker/headers.ts`, `src/build/09-llms-emit.mjs`, `src/build/shell.mjs`, tests | U8 |
-| U10 | `/skill`, its twin, and the skill e2e project | `src/build/skill.mjs`, `tests/e2e/skill.e2e.ts`, `tests/build.test.ts` | U8 |
+| U10 | `/skill`, its twin, and the skill e2e project | `src/build/skill.mjs`, `src/build/08-scorecards-emit.mjs`, `tests/e2e/skill.e2e.ts`, `tests/build.test.ts` | U8 |
 | U11 | Release gates and the release documents | `scripts/release/{preflight,postflight}.sh`, `tests/preflight-release-gates.test.ts`, `.github/workflows/skill-availability.yml` (deleted), `RELEASES*.md`, `DESIGN.md`, `AGENTS.md` | U9, U10 |
 | U12 | CLI: record, download, verification, extraction | `src/skill_install.rs`, `src/skill_install/archive.rs`, `Cargo.toml`, `tests/skill_install.rs` | site S3 on `dev` |
 | U13 | CLI: host map from `destinations`, fixture resync | `build.rs`, `src/skill_install/skill.json` | U12 |
 | U14 | CLI: envelope, reasons, docs | `src/skill_install.rs`, `src/cli.rs`, `CLAUDE.md`, `AGENTS.md`, `README.md`, `RELEASES*.md`, `.github/ISSUE_TEMPLATE/config.yml` | U12, U13 |
-| U15 | Skill repo: bridge release | the skill repo's bundle files, `README.md`, `.github/ISSUE_TEMPLATE/` | R1 on anc.dev |
-| U16 | MCP skills extension | `src/worker/mcp/skills.ts`, `src/worker/mcp/server.ts`, `src/shared/mcp-discovery.ts`, `src/worker/mcp/instructions.ts`, `content/mcp-skill.md`, `scripts/release/mcp-smoke.sh`, tests | OD8 |
-| U17 | WebMCP `get_skill_package` | `src/client/webmcp-orientation.ts`, `src/client/webmcp-lib.ts`, `tests/webmcp.test.ts` | U8 |
+| U15 | Skill repo: bridge release | the skill repo's bundle files, `README.md`, `.github/ISSUE_TEMPLATE/`, `scripts/release/preflight.sh` | R1 on anc.dev |
+| U16 | MCP skills extension | `src/worker/mcp/skills.ts`, `src/worker/index.ts`, `src/worker/mcp/server.ts`, `src/shared/mcp-discovery.ts`, `src/worker/mcp/instructions.ts`, `content/mcp-skill.md`, `scripts/release/mcp-smoke.sh`, tests | OD8 |
+| U17 | WebMCP `get_skill_package` | `src/client/webmcp-orientation.ts`, `src/client/webmcp-lib.ts`, `src/build/08-scorecards-emit.mjs`, `tests/webmcp.test.ts`, `tests/build.test.ts` | U8 |
 | U18 | Site references and issue routing | `README.md`, `CONTRIBUTING.md`, `content/contribute.md`, `BRAND.md`, `scripts/SYNCS.md`, `scripts/prose-check.sh`, `src/data/spec/README.md`, `.github/ISSUE_TEMPLATE/`, `skill/AGENTS.md` | U11 |
 | U19 | Spec repo routing and channel lists | spec repo `.github/ISSUE_TEMPLATE/`, `README.md`, `AGENTS.md`, `BRAND.md`, `RELEASES.md`, `docs/architecture/voice-enforcement.md` | O7 |
 
@@ -467,7 +469,7 @@ dist/skill.json   index.json entry   /skill + /skill.md   dist/.well-known/agent
 | 7 | K1 | skill | U15 | R1 live on anc.dev | the skill repo's release of the bridge (`v0.6.0` under OD1 (a)) | `ce-code-review`, `/devex-review` (the update path for every git install) |
 | 8 | O7 | skill | archive | K1 released | none | none: an operator step, no diff |
 | 9 | P1 | spec | U19 | O7 | none: docs only; spec releases trigger on principles or `VERSION` | `ce-code-review` |
-| 10 | S4 | site | U16 | OD8 (a): the op-layer `0.2.0` release on `main` | R2: the next site release | `ce-code-review`, `/devex-review` (a new MCP capability and methods), `/cso` (`resources/read` on caller-supplied URIs against ASSETS) |
+| 10 | S4 | site | U16 | OD8 (a): the op-layer `0.2.0` release on `main` | R2: the next site release | `ce-code-review`, `/devex-review` (a new MCP capability and methods), `/cso` (`resources/read` and `resources/directory/read` on caller-supplied URIs against ASSETS) |
 
 Every review runs one round on Opus, with its verdict in a PR comment and its start and end logged in this plan's Review log.
 
@@ -492,9 +494,9 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
 - **Goal:** the tree sits in the repo without the site's gates checking it as site code, and the gates that should cover it do.
 - **Requirements:** R3.
 - **Files:**
-  - `bunfig.toml`: `[test] pathIgnorePatterns = ["skill/**"]`.
+  - `bunfig.toml`: `[test] pathIgnorePatterns = ["skill/**", "dist/**"]`. The second pattern matters from S3 on: U7 copies `templates/tests/worker.test.ts` into `dist/_internal/skill/`, the build runs before the tests, and Bun 1.4.4 collects a test file under `dist/` that `skill/**` does not cover.
   - `.markdownlint-cli2.yaml`: `ignores` gains `skill/agent-native-cli/spec/CHANGELOG.md` and `skill/CHANGELOG.md`, the way `src/data/spec/CHANGELOG.md` is ignored.
-  - `scripts/prose-check.sh` (its site-local divergence block): `skill/agent-native-cli/spec/` joins the `src/data/spec/` exclusion at lines 181 and 198.
+  - `scripts/prose-check.sh` (its site-local divergence block): `skill/` joins the `src/data/spec/` exclusion in the changed-only filter (line 181) and the full-scope `find` (line 198). Measured 2026-11-14 on a scratch import of the frozen tree, the gate reports 120 blocking findings in 15 files: 99 `Vale.Spelling` hits on tool and crate names such as `argparse`, `yargs`, `oclif`, and `serde`, 9 `proselint.Cliches` hits, and 6 LanguageTool grammar hits. Fixing any of them changes imported bytes (R3), so the imported tree is excluded the way the vendored spec is. S2's reviews read the F1 to F9 prose instead.
   - `tests/skill-source.test.ts`.
 - **Approach:**
   - `biome.json`, `tsconfig*.json`, `knip.json`, and Playwright already scope away from `skill/`. The test pins that.
@@ -505,7 +507,8 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
   - The executable set equals `git ls-files -s skill/agent-native-cli` mode `100755`, which is `bin/check-update` alone.
   - At most 512 files and 16 MiB in total.
   - `SKILL.md` frontmatter `name` equals the directory name.
-  - `bunfig.toml` ignores `skill/**`.
+  - `bunfig.toml` ignores `skill/**` and `dist/**`.
+  - `scripts/prose-check.sh` excludes `skill/` from both of its file lists.
   - `biome.json` `files.includes`, `tsconfig.json` `include`, and `knip.json` `project` contain no pattern that matches `skill/`.
 - **Verification:**
   - Run `bun test` before the `bunfig.toml` change. It collects `skill/agent-native-cli/templates/tests/worker.test.ts` and fails, and that failure is quoted in the PR body.
@@ -519,24 +522,28 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
 - **Approach:**
   - `sync-spec.sh` writes `VERSION`, `CHANGELOG.md`, and `principles/*.md` to both `src/data/spec/` and `skill/agent-native-cli/spec/`. Stale orphans are removed in both, the way the existing script handles them.
   - Its flags and output stay as they are.
-  - `spec/README.md` and `spec/reading-the-spec.md` are not touched, because they are skill-only.
+  - `spec/README.md` is not touched, because it is skill-only.
+  - `spec/reading-the-spec.md` is generated into the bundle copy only, as the skill repo's sync generates it: the spec README's `## Reading the spec` section, from its heading to the next level-2 heading, with each relative link rewritten to `https://github.com/<spec repo>/blob/<resolved ref>/<path>`. `src/data/spec/` has no counterpart.
 - **Test scenarios:**
   - For every file in `src/data/spec/principles/`, plus `VERSION` and `CHANGELOG.md`, the bundle copy is byte-equal.
   - The two `principles/` directories hold the same set of names.
-- **Verification:** edit one byte in `skill/agent-native-cli/spec/principles/p1-*.md` and the test fails (quoted). Run `scripts/sync-spec.sh --ref v0.7.0` and the tree has no diff.
+- **Verification:** edit one byte in `skill/agent-native-cli/spec/principles/p1-*.md` and the test fails (quoted). Run `scripts/sync-spec.sh --ref v0.7.0` and the tree has no diff, `reading-the-spec.md` included. Delete `reading-the-spec.md`, run the sync again, and the file comes back byte-identical.
 
 ### S1b: Testing guidance (OD10 (c) only)
 
 #### U3b. Carry the testing-guidance commits
 
 - **Goal:** Brett's six local commits land in the bundle through the site's review flow.
-- **Files:** whatever the commits touch, mapped: bundle paths go to `skill/agent-native-cli/`, and `evals/` goes to `skill/evals/`.
+- **Files:** whatever the commits touch, mapped the way U1 maps the import. Paths outside the bundle and the producer files are dropped.
 - **Approach:**
   - Brett exports the patches from the skill prime checkout with `git format-patch origin/dev..feat/testing-guidance` (O2). The building session reads them; it does not check out the skill prime.
-  - Apply with `git am --directory=skill/agent-native-cli`, then `git mv skill/agent-native-cli/evals/* skill/evals/` in a follow-up commit on the same branch.
+  - The session applies them with `git am` in a scratch clone of the skill repo at the frozen SHA, where their paths resolve as written. Applying them in this repo with `git am --directory=skill/agent-native-cli` would fail on any patch that edits `evals/`, `PRODUCT.md`, or `CHANGELOG.md`, which U1 moved up into `skill/`.
+  - It carries the result over with U1's mapping. `git diff --name-status <frozen sha>..HEAD` in the scratch clone names every changed path, deletions and renames included. Bundle paths land under `skill/agent-native-cli/`. `evals/`, `PRODUCT.md`, and `CHANGELOG.md` land under `skill/`. Any other path, such as a `docs/` or `scripts/` file, is dropped and listed in the PR body.
+  - S1b is one squash commit, like S1, and its body names the six source SHAs.
   - No `VERSION` change here: S2 sets the first hosted version.
-- **Test scenarios:** `tests/skill-source.test.ts` and `tests/skill-spec-copy.test.ts` stay green.
-- **Verification:** the PR body lists each source commit SHA and the resulting paths.
+  - If a carried commit touches the `SKILL.md` frontmatter, U4 measures its description on S1b's tree, not S1's.
+- **Test scenarios:** `tests/skill-source.test.ts` and `tests/skill-spec-copy.test.ts` stay green, so no carried path breaks a package rule.
+- **Verification:** the PR body lists each source commit SHA, the resulting paths, and the dropped paths.
 
 ### S2: Forced bundle changes
 
@@ -546,7 +553,7 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
 - **Requirements:** R3, R6, R9.
 - **Files:** `skill/agent-native-cli/SKILL.md` (frontmatter only), `tests/skill-source.test.ts`.
 - **Approach:** replace the description with the draft below (1,006 characters, measured on the YAML-parsed value). The implementer may adjust the wording, under three rules:
-  - it keeps every trigger term except the four dropped as duplicates (`CLI standard`, `CLI for agents`, and the two markdown link targets, whose names stay as plain text);
+  - it keeps every trigger term but four: `CLI standard` and `CLI for agents` duplicate other terms, `anc` is a prefix of the four `anc ...` terms that stay, and `audit-profile` stays in the prose as `--audit-profile human-tui`; the two markdown link targets also go, and their names stay as plain text;
   - it keeps the literal `scorecard schema 0.9`, which the version model treats as a hand-edited literal;
   - it stays at or under 1,024 characters.
 
@@ -565,7 +572,7 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
 - **Files:**
   - `skill/agent-native-cli/SKILL.md`: line 190, line 203, and § First action under OD8 (a) or (b).
   - `skill/agent-native-cli/getting-started.md`: lines 80 and 81, 91 and 92, and 107.
-  - `skill/agent-native-cli/references/update-check.md`.
+  - `skill/agent-native-cli/references/update-check.md`: lines 3, 12, and 20 to 21.
 - **Approach:**
   - Write the text the Forced bundle changes table names, and nothing else.
   - The F7 fallback names the exact `anc` upgrade commands from the CLI README's install section.
@@ -581,7 +588,7 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
 - **Requirements:** R2, R8.
 - **Files:**
   - `skill/agent-native-cli/bin/check-update`: lines 22 and 23, and line 30.
-  - `skill/agent-native-cli/spec/README.md`.
+  - `skill/agent-native-cli/spec/README.md`: the resync section and the Layout row (F8).
   - `skill/agent-native-cli/VERSION` (OD1).
   - `tests/skill-check-update.test.ts`.
 - **Approach:** a literal change to `REMOTE_URL`. The script's output, its exit code, its three environment overrides, and its state files are untouched, because they are contract.
@@ -601,11 +608,16 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
 - **Requirements:** R1, R2, R4.
 - **Files:** `src/build/skill-package.mjs`, `src/build/build.mjs` (one stage, run before stage 8), `tests/build-skill-package.test.ts`, `tests/helpers/ustar.ts` (a test-only reader that applies KTD11).
 - **Approach:**
-  - Walk `skill/agent-native-cli/` and sort paths by byte order.
-  - Refuse, by failing the build with the offending path, anything that is not a regular file, any dotfile, and any path over 100 bytes.
+  - List the package with `git ls-files -z -s skill/agent-native-cli`, take each file's mode from the index, and sort paths by byte order. The build already needs git for page dates (`src/build/build.mjs:33`).
+  - Refuse, by failing the build with the offending path:
+    - an index entry whose mode is not `100644` or `100755` (a symlink is `120000`);
+    - a dotfile;
+    - a path over 100 bytes;
+    - a file on disk under the package directory that the index does not list, such as a `__pycache__/` left by running the Python template. So the operator's build and CI's build package the same files, and preflight's `coord` gate digests what deploy publishes.
   - Read the bytes and take the SHA-256 of each file.
   - Write the ustar archive and wrap it in stored-block gzip with a CRC-32 trailer (Bun's `zlib.crc32`, or a 20-line table implementation).
   - Return `{version, files, archiveBytes, digest, size}`.
+  - Empty `dist/.well-known/agent-skills/agent-native-cli/` and `dist/_internal/skill/`, because builds do not wipe `dist/` (`src/build/11a-discovery-emit.mjs:398-401`), so no earlier version's files survive a local rebuild.
   - Emit:
     - `dist/.well-known/agent-skills/agent-native-cli/<version>.tar.gz`;
     - the version pointer;
@@ -616,9 +628,10 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
   - The KTD11 reader extracts every file byte-equal to the source, with modes `0644` and `0755` as KTD4 says.
   - The system `tar -tzvf` lists the same paths with no wrapper directory, and `tar -xzf` extracts equal bytes.
   - The gzip header's mtime is 0 and its OS byte 255.
-  - A symlink planted in a temp copy of the tree fails the build, naming the path.
+  - In a temp git repo holding the fixture tree, a committed symlink fails the build, naming the path.
+  - In the same repo, an untracked file and an ignored file under the package directory each fail the build, naming the path.
   - The archive digest equals `sha256` of the emitted file.
-- **Verification:** the golden-digest test fails against a builder that writes the real mtime (quoted). `bun run build` emits the three outputs.
+- **Verification:** the golden-digest test fails against a builder that writes the real mtime (quoted). `bun run build` emits the three outputs, and `bun run build && bun test` passes with the private copy in `dist/` (quoted), which proves U2's `dist/**` ignore.
 
 #### U8. The record
 
@@ -655,10 +668,10 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
 - **Goal:** the discovery surfaces name the package (R1, R6, KTD7).
 - **Requirements:** R1, R6.
 - **Files:**
-  - `src/build/11a-discovery-emit.mjs`: `buildAgentSkillsIndex` takes the record.
+  - `src/build/11a-discovery-emit.mjs`: `buildAgentSkillsIndex` and its human twin `buildAgentSkillsIndexMd` (`/.well-known/agent-skills/index.md`, lines 272 to 293) take the record.
   - `src/worker/headers.ts`: a `gz` file class and a version-pointer rule, both in `isSingleRepresentation`, with their cache classes.
   - `src/build/09-llms-emit.mjs`: the Skill section names the archive and the record.
-  - `src/build/shell.mjs`: the JSON-LD `codeRepository` becomes `https://github.com/brettdavies/agentnative-site/tree/main/skill/agent-native-cli`, `downloadUrl` becomes `source.url`, and the footer source link at line 125 points at that tree.
+  - `src/build/shell.mjs`: the JSON-LD `codeRepository` becomes `https://github.com/brettdavies/agentnative-site/tree/main/skill/agent-native-cli`, and the footer source link at line 125 points at that tree. `downloadUrl` stays `${base}/skill.json`, the stable record. The node is in `emitShell`, which every page calls, starting with the principle pages before stage 8 builds the record. A versioned archive URL there would change every page's bytes on each skill release and leave edge-cached pages naming an archive D3 removes.
   - Tests: `tests/build-discovery-emit.test.ts`, `tests/agent-readiness-discovery.test.ts`, `tests/worker.test.ts`.
 - **Test scenarios:**
   - The index entry for `agent-native-cli` has `type` `archive`, and its `url` and `digest` equal the record's.
@@ -667,7 +680,8 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
   - The other entries are unchanged.
   - On the local Worker, the archive answers `GET` and `HEAD` with `Content-Type: application/gzip`, no `Content-Encoding`, `Cache-Control: public, max-age=31536000, immutable`, `Access-Control-Allow-Origin: *`, `X-Robots-Tag: noindex`, no `Link`, and no `X-Llms-Txt`.
   - `Accept: text/markdown` on the archive returns the archive.
-  - The version pointer answers `text/plain; charset=utf-8` with `SHORT_CACHE`.
+  - The version pointer answers its bytes as `text/plain; charset=utf-8` with `SHORT_CACHE` under no `Accept` header, under `Accept: */*` (what `bin/check-update`'s `curl` sends), and under `Accept: text/markdown`. Production answers that path 404 `text/markdown` today, so negotiation must never rewrite it.
+  - The index twin lists `agent-native-cli` with the archive URL.
   - A version that does not exist answers 404.
   - The site's own web audit check `agent-skills` still passes on the built index.
 - **Verification:** each header test fails against the unchanged `headers.ts` (quoted). On `bun run dev`, `curl -sI` on both URLs shows the headers, and `curl -s <archive> | shasum -a 256` equals `source.digest`.
@@ -676,7 +690,7 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
 
 - **Goal:** the human page and its twin show the hosted install from the record (R1).
 - **Requirements:** R1, R7.
-- **Files:** `src/build/skill.mjs` (`buildSkillMarkdown`, `renderSkillPage`), `tests/build.test.ts`, `tests/e2e/skill.e2e.ts`, `playwright.config.ts` (the `skill` project needs no network beyond localhost).
+- **Files:** `src/build/skill.mjs` (`buildSkillMarkdown`, `renderSkillPage`), `src/build/08-scorecards-emit.mjs` (the `/skill` `fileDate` inputs gain `skill/agent-native-cli/VERSION`, so a skill release moves the page date and the sitemap `lastmod`), `tests/build.test.ts`, `tests/e2e/skill.e2e.ts`, `playwright.config.ts` (the `skill` project needs no network beyond localhost).
 - **Approach:** the page holds:
   - `anc skill install <host>` and `--all`, and `anc skill update <host>`;
   - the version and the digest;
@@ -706,18 +720,18 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
   - `scripts/release/postflight.sh` (`purge`: lines 479 to 489 extended).
   - `tests/preflight-release-gates.test.ts`.
   - `.github/workflows/skill-availability.yml`: deleted.
-  - `RELEASES.md` § Skill releases: rewritten, including the SemVer contract (R15); § Skill-availability probe goes.
+  - `RELEASES.md` § Skill releases: rewritten, including the SemVer contract (R15), and its purge step's URL list gains `/.well-known/agent-skills/index.json` and the version pointer; § Skill-availability probe goes.
   - `RELEASES-PREFLIGHT.md`, `RELEASES-POSTFLIGHT.md`, `RELEASES-RATIONALE.md` § Skill releases.
   - `DESIGN.md` §3.9.
   - `AGENTS.md` § Structure.
 - **Approach:**
   - **The preflight gate:**
-    - It reads `jq -r '.version, .source.digest'` from `dist/skill.json` and from `curl -fsSL https://anc.dev/skill.json`.
+    - It reads `jq -r '.version, .source.digest'` from `dist/skill.json` and from `curl -fsSL "$PRODUCTION_URL/skill.json"`. `PRODUCTION_URL` defaults to `https://anc.dev`, beside the script's `STAGING_URL` and `LOCAL_URL`, and the gate tests point it at their stub.
     - It passes when the versions are equal and the digests are equal, or when the release version is greater by SemVer.
     - It fails with a named reason when the versions are equal and the digests differ, or when the version decreases.
     - It skips with a reason when production is unreachable, the way the existing gate skips.
   - **The postflight checks:** per § The skill release flow, step 4.
-- **Test scenarios:** `tests/preflight-release-gates.test.ts`, with production stubbed by a local server:
+- **Test scenarios:** `tests/preflight-release-gates.test.ts`, with production stubbed by a local server through `PRODUCTION_URL`:
   - same version, same digest: pass;
   - same version, different digest: fail with reason `skill-package-changed-without-version-bump`;
   - higher version: pass;
@@ -740,12 +754,13 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
   - **Read the record.** `curl` fetches the record into memory, capped at 1 MiB. The CLI parses only `name`, `version`, `source.type`, `source.url`, `source.digest`, and `source.size`, and refuses with `record-invalid` unless:
     - the name is `agent-native-cli`;
     - the type is `archive`;
-    - the URL is HTTPS on the record's origin;
+    - the URL has the record's origin, so it is HTTPS unless the record URL is a loopback override (KTD10);
     - the digest matches `^sha256:[0-9a-f]{64}$`;
     - the size is at most 16 MiB.
-  - **Download and check.** `curl` downloads the archive to a temp file in the destination's parent directory. The CLI checks that the length equals `size` and the SHA-256 equals `digest`. Only then does it extract, under KTD11, into `.<name>.anc-install-<pid>` beside the destination.
-  - **Swap in.** Install renames the staging directory onto an absent or empty destination. Update keeps today's aside-and-restore shape: the install moves aside, staging is renamed in, and the aside copy is deleted. On any failure the staging directory is deleted and the aside copy is restored.
+  - **Download and check.** The CLI first creates the destination's parent directory (`create_dir_all`): a host that never had a skill has none, and `git clone` creates it today. `curl` downloads the archive to a temp file in that directory. The CLI checks that the length equals `size` and the SHA-256 equals `digest`. Only then does it extract, under KTD11, into `.<name>.anc-install-<pid>` beside the destination.
+  - **Swap in.** Install removes an empty destination first, because a rename onto an existing directory fails on Windows, a release target, and then renames the staging directory in. Update keeps today's aside-and-restore shape: the install moves aside, staging is renamed in, and the aside copy is deleted. On any failure the staging directory is deleted and the aside copy is restored.
   - **Cleanup.** The temp file is always deleted.
+  - **`--all`.** The record and the archive are fetched and verified once per invocation and extracted once per host.
 - **Test scenarios:** `tests/skill_install.rs`, with a `std::net::TcpListener` server thread on `127.0.0.1` and `ANC_SKILL_RECORD_URL` pointing at it.
   - Install lands `SKILL.md` and `bin/check-update` with mode `0755` at the destination.
   - Update over a git-clone install removes `.git` and lands the package.
@@ -755,7 +770,9 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
   - An archive URL on another origin: `record-invalid`.
   - A redirect from the record URL: `record-unreadable`, because `--max-redirs 0` applies.
   - `curl` missing from `PATH`: `curl-not-found`.
-  - The exact `curl` argument vector is pinned, the way the git one is.
+  - The exact `curl` argument vectors are pinned for both cases, an `https://` URL and the loopback `http://` override, the way the git one is.
+  - Install into a temp HOME with no host directories succeeds for every host.
+  - `--all` sends one record request and one archive request to the test server.
 - **Verification:**
   - The tests run against the unchanged module and fail (quoted).
   - `cargo test`, `cargo clippy -- -D warnings`, and `cargo deny check` pass.
@@ -791,6 +808,7 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
   - A dry run reads the record (one GET) and writes nothing.
   - `would_succeed` covers both the record and the destination.
   - The two removed reasons are listed under Breaking in the CLI changelog, and `anc` takes 0.8.0.
+  - The docs list each new reason with whether a retry can help.
 - **Test scenarios:**
   - The dry-run envelope's `command` equals `anc skill install claude_code`, and it carries `url`, `digest`, and `version` from the record.
   - `eval "$(anc skill install --dry-run claude_code)"` in a temp HOME installs.
@@ -807,15 +825,16 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
   - every bundle file at the root, copied from the site's `main` at R1's commit;
   - `README.md`: a moved notice pointing at `https://anc.dev/skill` and the site repo's `skill/` directory;
   - `.github/ISSUE_TEMPLATE/config.yml`: routes to the site repo's issues, with blank issues off.
+  - `scripts/release/preflight.sh`: `CHECK_UPDATE_URL` (line 71) becomes OD3's version pointer, so `smoke_check_update` (lines 283 to 310) compares against anc.dev. A 0.0.0 install then prints `UPGRADE_AVAILABLE 0.0.0 <hosted version>`, and an install at the hosted version stays quiet. With the GitHub URL both checks fail before the bridge merges, because the candidate's `bin/check-update` reads anc.dev while GitHub `main` still holds 0.5.0.
 
-  Everything else stays as the archived record.
+  Everything else stays as the archived record. So the bridge's `main` also carries files a host never loads: `AGENTS.md`, `BRAND.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `PRODUCT.md`, `README.md`, `RELEASES.md`, `RELEASES-PREFLIGHT.md`, `RELEASES-POSTFLIGHT.md`, `RELEASES-RATIONALE.md`, `SECURITY.md`, `cliff.toml`, `.editorconfig`, `.gitattributes`, `.gitignore`, `.markdownlint-cli2.yaml`, `spec/.markdownlint-cli2.yaml`, `.github/`, `docs/`, `evals/`, and `scripts/`.
 - **Approach:**
   - A `fix/` branch from the skill repo's `dev`, PR'd to `dev`, then the skill repo's own release flow (`scripts/release/cut-release-branch.sh`, PR to `main`, the tag at OD1's value, a GitHub release).
   - The skill repo's preflight install smoke (`docs/solutions/logic-errors/preflight-install-smoke-that-clones-published-main-tests-the-previous-release.md`) runs on the candidate tree.
 - **Test scenarios:**
-  - A script in the PR body compares each bundle file with `https://anc.dev`'s package. It downloads the archive, checks the digest, extracts it, and diffs the extraction against the release branch's files: no difference.
+  - A script in the PR body downloads `https://anc.dev`'s archive, checks the digest, and extracts it. Every path in the extraction is byte-equal on the release branch, and every branch path missing from the extraction is on the list of repo files above.
   - `bin/check-update` against the live pointer prints nothing.
-- **Verification:** after the release, run a `git clone --depth 1` of `main` into a temp dir. Its files equal the hosted package, and its `bin/check-update` default URL is OD3's pointer.
+- **Verification:** after the release, run a `git clone --depth 1` of `main` into a temp dir and apply the same comparison: every archive path is byte-equal in the clone, every other clone path is on the list above, and the clone's `bin/check-update` default URL is OD3's pointer.
 
 ### S4: MCP skills extension (OD8 (a))
 
@@ -824,25 +843,29 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
 - **Goal:** MCP clients that implement the extension list, get, and read the package's files with digests equal to the record (R9, KTD12).
 - **Requirements:** R1, R9.
 - **Files:**
-  - `src/worker/mcp/skills.ts`: the `SkillFiles` adapter, the per-isolate catalog, and `attachSkills(server)`.
-  - `src/worker/mcp/server.ts`: `buildMcpHandler` loads the catalog, and `createAncServer` attaches it.
+  - `src/worker/mcp/skills.ts`: the `SkillFiles` adapter, `loadSkills(env)` with its success-only per-isolate cache, `getWarmSkills()`, and `attachSkills(server)`.
+  - `src/worker/index.ts`: the dispatch shell awaits `loadSkills(env)` beside `loadCatalog(env)`.
+  - `src/worker/mcp/server.ts`: `createAncServer` attaches the warm skills catalog. `buildMcpHandler` is marked deprecated and kept for test migration, so it gets no new wiring.
   - `src/shared/mcp-discovery.ts`: `MCP_SERVER_CAPABILITIES.extensions`, and `MCP_SERVER_VERSION` `0.3.0`.
   - `src/worker/mcp/instructions.ts`: one sentence naming `skill://agent-native-cli/SKILL.md` and `/skill.json`, within `client-limits.ts`.
-  - `content/mcp-skill.md`, `docs/runbooks/mcp-wire-protocol.md` (the extension methods and their errors).
+  - `content/mcp-skill.md`, `docs/runbooks/mcp-wire-protocol.md` (the extension methods, `resources/directory/read` included, and their errors).
   - `scripts/release/mcp-smoke.sh` (a `skills/list` check).
-  - `AGENTS.md` § MCP server: "five resources" becomes the count with the skills template.
+  - `AGENTS.md` § MCP server: "Fourteen tools, five resources" counts the skills template and the `SKILL.md` resource, and the section names `skills/list`, `skills/get`, and `resources/directory/read`.
   - Tests: `tests/mcp-capabilities.test.ts`, `tests/worker-mcp.test.ts`, `tests/mcp-client-limits.test.ts`, `tests/e2e/mcp.e2e.ts`.
 - **Approach:**
   - `SkillsExtension.load(adapter, { strict: true, cacheHint: { ttlMs: 3_600_000, cacheScope: 'public' } })`.
-  - The adapter's `list(dir)` derives children from `source.files`, and `read(path)` fetches `/_internal/skill/agent-native-cli/<path>` through ASSETS.
-  - A load failure (a missing record, or a strict-mode warning) fails `buildMcpHandler`, so a bad build cannot serve a partial skill. The handler cache keeps that failure, as it keeps `loadCatalog`'s.
+  - The adapter's root is the skills folder: `list('')` returns `agent-native-cli`, deeper listings derive from `source.files`, and `read(path)` fetches `/_internal/skill/<path>` through ASSETS.
+  - A load failure (a missing record, or a strict-mode warning) fails the request the way a `loadCatalog` failure does, so a bad build cannot serve a partial skill. As with `loadCatalog`, only a success is cached, so the next request loads again.
 - **Test scenarios:**
   - `skills/list` on the modern lane returns one entry, `skill://agent-native-cli/SKILL.md`, whose `frontmatter` deep-equals the parsed `SKILL.md` frontmatter.
   - That entry's `resources` (uri, digest, size) equal `source.files` mapped to `skill://agent-native-cli/<path>`.
   - `skills/get` of that URI returns the same entry.
   - `resources/read` of each URI returns bytes whose SHA-256 is the listed digest.
   - `resources/read` of `skill://agent-native-cli/../x`, `skill://agent-native-cli/missing.md`, and `skill://other/SKILL.md` answers the SDK's not-found error, never another `/_internal/` file.
-  - Capabilities on both lanes and on the SEP-1649 card deep-equal the constant with `extensions`.
+  - `resources/list` holds `skill://agent-native-cli/SKILL.md` and every resource it held before.
+  - `resources/directory/read` of the skill root and of `references/` lists exactly the children `source.files` implies.
+  - Capabilities on both lanes and on the SEP-1649 card deep-equal the constant, `extensions` with `directoryRead: true` included.
+  - A skills load failure answers the request as a catalog load failure does, and the next request loads again.
   - The `tools` array's bytes are unchanged.
   - The instructions are within the `cut` record.
 - **Verification:**
@@ -855,13 +878,14 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
 
 - **Goal:** a browser agent on anc.dev gets the package record's summary (R10, KTD13).
 - **Requirements:** R1, R10.
-- **Files:** `src/client/webmcp-orientation.ts`, `src/client/webmcp-lib.ts` (`/skill` joins the orientation paths), `tests/webmcp.test.ts`, `tests/webmcp-source-guard.test.ts`.
+- **Files:** `src/client/webmcp-orientation.ts`, `src/client/webmcp-lib.ts` (`/skill` joins the orientation paths), `src/build/08-scorecards-emit.mjs` (the `/skill` shell gains `extraScripts: [WEBMCP_SCRIPT]`, since the bundle loads today only on `/`, `/audit`, `/mcp-docs`, and the principle pages), `tests/webmcp.test.ts`, `tests/webmcp-source-guard.test.ts`, `tests/build.test.ts`.
 - **Approach:**
   - `execute` fetches `/skill.json` same-origin and returns a short text: name, version, digest, archive URL, `anc skill install <host>`, and `/skill`.
   - It returns a fixed message when the fetch fails.
   - The tool has `annotations.readOnlyHint: true`.
 - **Test scenarios:**
   - The tool is registered on `/`, `/mcp-docs`, `/p1` to `/p8`, and `/skill`.
+  - The built `dist/skill.html` references `WEBMCP_SCRIPT`.
   - Its output is at most 1,500 characters and carries the record's version and digest verbatim.
   - When the fetch fails, it returns the fixed message.
   - It sends no request to another origin.
@@ -942,8 +966,8 @@ Each subsection lists what changes when Brett picks an option other than the rec
   - **U12.** No record fetch at run time. `build.rs` emits the URL, digest, size, and version as constants, and `ANC_SKILL_RECORD_URL` is not added.
   - **U14.** Update installs the baked version, and reports `already-current` when the installed `VERSION` equals it. `CLAUDE.md`'s rule stays as it is.
   - **D3 alternative (the archives stay served).**
-    - U7 and U8: every released archive stays served at its URL. A committed `skill/released/<version>.tar.gz` holds each released archive's bytes, added by the release session after preflight.
-    - The build copies the committed archives into `dist`, and the record gains `releases: [{version, url, digest}]`.
+    - U7 and U8: every released archive stays served at its URL. A committed `skill/released/<version>.tar.gz` holds each released archive's bytes. It lands after the site release that published the version, as a `feat(skill)` PR to `dev` that downloads the archive from production and checks it against the record's digest, and it reaches `main` with the next release, like any `dev` change.
+    - The build builds the current version's archive from the tree and copies every committed archive into `dist`. When a committed archive exists for the current `VERSION`, the build checks that it is byte-equal to the one it just built, fails otherwise, and writes one file. The record gains `releases: [{version, url, digest}]`.
     - U11's preflight also checks that no committed archive changed (`git diff --diff-filter=MD` on `skill/released/` against `main` is empty).
   - **U5.** F7's text says that a newer skill arrives with a newer `anc`: upgrade `anc`, then run `anc skill update <host>`.
   - **Risks.** Every skill release needs an `anc` release before installs see it. The repo grows by about 274 KB per skill release.
@@ -960,7 +984,7 @@ Each subsection lists what changes when Brett picks an option other than the rec
 - **(c) An unversioned archive:**
   - U7 emits `dist/.well-known/agent-skills/agent-native-cli.tar.gz`.
   - U9 adds a cache class, `public, max-age=60, s-maxage=300, stale-while-revalidate=0`. It applies to the archive, the version pointer, `/skill.json`, and the index.
-  - U11's postflight purges all five documents in one API call, then retries its digest check once after 30 seconds.
+  - The purge stays the operator's manual step, and its URL list in `RELEASES.md` § Skill releases gains the archive, for six URLs. U11's postflight retries its digest check once, 30 seconds later.
   - § How the decisions combine gives the stale window: at most 5 minutes.
   - Under OD2 (b), (c) cannot serve the baked versions, so OD2 (b) requires OD3 (a) or (b).
 
@@ -1016,7 +1040,7 @@ Each subsection lists what changes when Brett picks an option other than the rec
 | --- | --- | --- |
 | Build before tests | `bun run build`, then `bun test` (`AGENTS.md` § Repo conventions) | every site PR |
 | Lint and types | `bun run lint`, `bun run typecheck` | every site PR |
-| Prose | `scripts/prose-check.sh --changed-only`, 0 blocking (run `vale sync` once in a fresh clone) | every PR touching markdown |
+| Prose | `scripts/prose-check.sh --changed-only`, 0 blocking (run `vale sync` once in a fresh clone); the imported `skill/` tree is excluded (U2) | every PR touching markdown |
 | Observed failing | each new test runs against the unfixed code, and the failure is quoted in the PR body | every code PR |
 | Package determinism | `tests/build-skill-package.test.ts`: the golden digest, and two builds producing equal bytes | S3 onward |
 | Record coherence | `version` equals `VERSION`; `source.digest` equals the archive's SHA-256; the index entry equals the record; `source.files` equals the archive's files | S3 onward |
@@ -1025,13 +1049,13 @@ Each subsection lists what changes when Brett picks an option other than the rec
 | Browser | both themes on `/skill`, with a screenshot in the PR body | S3 |
 | CLI | `cargo test`, `cargo clippy -- -D warnings`, `cargo deny check`; `scripts/sync-skill-fixture.sh --check` | C1 |
 | Release gates | `scripts/release/preflight.sh all` against the deployed release build, then postflight with the purge (operator) | R1, R2 |
-| Bridge equality | the extraction of the hosted archive diffs clean against the bridge's bundle files | K1 |
+| Bridge equality | every path in the extracted hosted archive is byte-equal in the bridge, and every other bridge path is on U15's list of repo files | K1 |
 
 ## Definition of Done
 
 - `https://anc.dev/skill.json`, the index entry, `/skill`, `/skill.md`, the version pointer, the WebMCP tool, and (under OD8 (a) or (b)) the MCP skills entry all name one version and one digest, and the archive at the record's URL hashes to that digest.
 - `anc skill install <host>` with `anc` 0.8.0 installs the package into a clean HOME for every mapped host, and `anc skill update <host>` moves a git-clone install to it.
-- A `git clone` of the skill repo's `main` holds the hosted version's bytes (OD4 (a), (b), (c)), and the repo is in OD4's state.
+- A `git clone` of the skill repo's `main` holds the hosted version's package files byte for byte (OD4 (a), (b), (c)), and the repo is in OD4's state.
 - No document in the four repos describes the skill as installed by `git clone` or sourced from the skill repo, except history and change records.
 - Every unit's tests pass and were observed failing against the unfixed code.
 - Each PR's reviews ran one round each, with verdicts in PR comments, and every in-brief finding is fixed.
@@ -1054,7 +1078,7 @@ Every place that names the skill repo, its location, the git install, or the ski
 | site | `README.md:18,90,119`; `CONTRIBUTING.md:137`; `content/contribute.md:54,59`; `BRAND.md:8,88,100`; `scripts/SYNCS.md`; `scripts/prose-check.sh:16`; `src/data/spec/README.md:93`; `.github/ISSUE_TEMPLATE/` | U18 |
 | site | `src/build/shell.mjs:138,398`; `src/build/12-minify-dist.mjs:6-15`; `src/worker/index.ts:866`; `content/_use.md:3`; `content/install.md:39` | stay |
 | bundle | `SKILL.md` description, `:37`, `:190`, `:203`; `getting-started.md:80-81,91-92,107`; `bin/check-update:22-23,30`; `references/update-check.md`; `spec/README.md`; `VERSION` | U4 to U6 |
-| skill repo | bundle files, `README.md`, `.github/ISSUE_TEMPLATE/` | U15 |
+| skill repo | bundle files, `README.md`, `.github/ISSUE_TEMPLATE/`, `scripts/release/preflight.sh:71` | U15 |
 | CLI | `src/skill_install.rs`; `src/skill_install/skill.json`; `build.rs:5,128-248`; `tests/skill_install.rs` | U12, U13 |
 | CLI | `CLAUDE.md:322-368`; `AGENTS.md:55-90`; `README.md:54-86`; `RELEASES.md:546-547`; `RELEASES-PREFLIGHT.md:16,175,213-214`; `RELEASES-RATIONALE.md:338`; `.github/ISSUE_TEMPLATE/config.yml:10`; `CONTRIBUTING.md:122`; `BRAND.md:87` | U14 |
 | spec | `.github/ISSUE_TEMPLATE/config.yml:10`; `00-blank.yml:31`; `README.md:20,136,178`; `AGENTS.md:16,120`; `BRAND.md:8,88,100`; `RELEASES.md:449`; `docs/architecture/voice-enforcement.md:253,259` | U19 |
@@ -1096,3 +1120,4 @@ All read 2026-11-14.
 
 - 2026-11-14: plan written.
 - 2026-11-14: `/plan-eng-review` round 1 started on 3e2b4d7, in its own process from a clone of the pushed plan.
+- 2026-11-14: `/plan-eng-review` round 1 ended: ready with fixes (P0 0, P1 4, P2 12, P3 11). All 27 findings are applied. The `/plan-eng-review` skill is not registered among the user skills on this machine, so the reviewer applied its lens (architecture, gates, tests) by hand. Decided from evidence: the MCP capability takes the SDK's `directoryRead: true` (finding 3, option (a), the smaller change); S1b applies the patches in a scratch clone of the skill repo and maps paths as U1 does (finding 14); the prose gate, measured at 120 blocking findings over the imported tree, excludes `skill/` (finding 16); the preflight override is `PRODUCTION_URL`, named after the script's `STAGING_URL` and `LOCAL_URL` (finding 23); and `message` and `next_step` on the CLI envelope go under Not in scope, with U14's docs saying which reasons a retry can help (finding 27).
