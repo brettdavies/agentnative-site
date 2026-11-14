@@ -16,6 +16,7 @@ import { assembleRemediation } from '../src/worker/audit-web/remediation';
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
 const REGISTRY_PATH = join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml');
 const REMEDIATION_PATH = join(REPO_ROOT, 'src', 'data', 'web-audit', 'remediation.yaml');
+const FILE_DATE = () => '2026-01-02';
 
 const tmpDirs: string[] = [];
 afterAll(async () => {
@@ -25,14 +26,15 @@ afterAll(async () => {
 async function emitToTmp() {
   const distDir = await mkdtemp(join(tmpdir(), 'web-audit-skills-'));
   tmpDirs.push(distDir);
-  const { pages } = await emitWebAuditSkillPages({
+  const emitted = await emitWebAuditSkillPages({
     distDir,
     registryPath: REGISTRY_PATH,
     remediationPath: REMEDIATION_PATH,
     themeInit: '',
+    fileDate: FILE_DATE,
     baseUrl: 'https://anc.dev',
   });
-  return { distDir, pages };
+  return { distDir, ...emitted };
 }
 
 describe('buildSkillMarkdown', () => {
@@ -115,7 +117,7 @@ describe('emitWebAuditSkillPages', () => {
     expect(html).toContain('<h1');
     expect(html).toContain('Copy-paste prompt');
     const md = await readFile(join(distDir, 'fix', 'openapi.md'), 'utf8');
-    expect(md.startsWith('# Fix: ')).toBe(true);
+    expect(md).toContain('\n---\n\n# Fix: ');
   });
 
   test('skill HTML carries the prompt in a hidden data attribute and renders no fenced prompt', async () => {
@@ -141,8 +143,26 @@ describe('emitWebAuditSkillPages', () => {
     expect(md).not.toContain('Issue:');
   });
 
+  test('every page, a retired id included, carries the one content day in its twin and its JSON-LD', async () => {
+    const { distDir, fixPaths, dateModified } = await emitToTmp();
+    expect(dateModified).toBe('2026-01-02');
+    expect(fixPaths).toContain('/fix/openapi');
+    expect(fixPaths).toContain('/fix/well-known-mcp-card');
+    for (const path of fixPaths) {
+      const id = path.slice('/fix/'.length);
+      const md = await readFile(join(distDir, 'fix', `${id}.md`), 'utf8');
+      expect(md.startsWith('---\n')).toBe(true);
+      const frontmatter = md.slice(0, md.indexOf('\n---\n'));
+      expect(frontmatter).toContain(`url: https://anc.dev/fix/${id}`);
+      expect(frontmatter).toContain("dateModified: '2026-01-02'");
+      const html = await readFile(join(distDir, 'fix', `${id}.html`), 'utf8');
+      expect(html).toContain('"dateModified":"2026-01-02"');
+    }
+  }, 30_000);
+
   test('every returned entry url maps to an emitted markdown artifact whose digest matches', async () => {
     const { distDir, pages } = await emitToTmp();
+    expect(pages.length).toBeGreaterThan(0);
     for (const page of pages) {
       expect(page.url).toBe(`https://anc.dev/fix/${page.id}.md`);
       const artifact = await readFile(join(distDir, 'fix', `${page.id}.md`));
@@ -165,6 +185,7 @@ describe('emitWebAuditSkillPages', () => {
       registryPath: REGISTRY_PATH,
       remediationPath: REMEDIATION_PATH,
       themeInit: '',
+      fileDate: FILE_DATE,
       baseUrl: 'https://anc.dev',
     });
     expect(await readdir(stale).catch(() => null)).toBeNull();
