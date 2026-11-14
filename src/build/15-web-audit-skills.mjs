@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import * as yaml from 'js-yaml';
 import { AUDIT_PATH, fixPath } from '../shared/audit-routes';
 import { escHtml } from '../shared/scorecard-format.mjs';
+import { headTitle } from '../shared/search-head';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from './13-web-audit-registry.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell } from './shell.mjs';
@@ -195,6 +196,7 @@ export async function emitWebAuditSkillPages({ distDir, registryPath, remediatio
       join(skillDir, `${check.id}.html`),
       emitShell({
         title: `Fix: ${check.title}`,
+        headTitle: headTitle(`Fix: ${check.title}`, `Fix: ${check.breadcrumb}`),
         description,
         canonicalPath: fixPath(check.id),
         breadcrumb: check.breadcrumb,

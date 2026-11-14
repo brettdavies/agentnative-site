@@ -3,7 +3,7 @@
 // same `emitShell()` that builds the static pages, so a Worker page and a
 // static page share one layout. It is fetched once per isolate and held.
 //
-// Placeholders: {{TITLE}}, {{DESCRIPTION}}, {{CANONICAL_PATH}}, {{BODY}},
+// Placeholders: {{TITLE}}, {{HEAD_TITLE}}, {{DESCRIPTION}}, {{CANONICAL_PATH}}, {{BODY}},
 // {{MARKDOWN_TWIN_PATH}} (the footer's twin link), {{ALTERNATES}} (the
 // `<link rel="alternate">` lines in the head), and the page's day in the
 // JSON-LD and the `article:modified_time` tag. A page that names no twin
@@ -15,6 +15,7 @@ import { SITE_OG_IMAGE_ALT, SITE_OG_IMAGE_PATH } from '../shared/og-card';
 import { DATE_MODIFIED_TOKEN, isDay, MODIFIED_TIME_META_TOKEN, modifiedTimeMeta } from '../shared/page-date';
 import { markdownAlternateLink } from '../shared/result-head';
 import { escHtml } from '../shared/scorecard-format.mjs';
+import { headTitle } from '../shared/search-head';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
 
 const BREADCRUMB_JSONLD_SLOT = `,"${BREADCRUMB_JSONLD_TOKEN}"`;
@@ -53,6 +54,8 @@ export function _resetShellTemplateCache(): void {
 
 export type ShellFields = {
   title: string;
+  /** The document `<title>`; defaults to the title and the brand. */
+  headTitle?: string;
   description: string;
   canonicalPath: string;
   /** Rendered body HTML; every visitor-controlled value is already escaped. */
@@ -94,6 +97,7 @@ export function substituteShell(template: string, fields: ShellFields): string {
     [DATE_MODIFIED_JSONLD_SLOT]: day ? `,"dateModified":${JSON.stringify(day)}` : '',
     [MODIFIED_TIME_META_TOKEN]: day ? modifiedTimeMeta(day) : '',
     '{{TITLE}}': escHtml(fields.title),
+    '{{HEAD_TITLE}}': escHtml(fields.headTitle ?? headTitle(fields.title)),
     '{{DESCRIPTION}}': escHtml(fields.description),
     '{{CANONICAL_PATH}}': escHtml(fields.canonicalPath),
     '{{MARKDOWN_TWIN_PATH}}': escHtml(twin),
