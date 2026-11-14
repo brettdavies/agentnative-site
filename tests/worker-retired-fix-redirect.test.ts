@@ -1,7 +1,6 @@
-// /web-audit/skill/<id> was the fix-page path before #355 moved the pages to
-// /fix/<id>. Search engines still list the old path, so every id the
-// remediation catalog holds redirects to its /fix/ twin, and any other id is
-// the same 404 the path gave before.
+// Search engines still list the retired /web-audit/skill/<id> fix-page path, so
+// every id the remediation catalog holds redirects to its /fix/<id> twin, and
+// any other id is a 404.
 
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';

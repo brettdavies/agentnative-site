@@ -277,8 +277,8 @@ server is still discovered. MCP-shape checks apply only when an endpoint is foun
 `n_a` and excluded from the relative score.
 
 Each check maps onto one of P1 through P8, so a web scorecard is isomorphic with a CLI scorecard and renders through the
-same presentation. Web results carry no badge; they live at a shareable `/score/<domain>` page, listed on the
-[web leaderboard](/scorecards?lane=web). The [web scorecard JSON schema](/web-scorecard-schema) documents the shape.
+same presentation. Web results carry no badge; they live at a shareable `/score/<domain>` page, and the
+[web leaderboard](/scorecards?lane=web) ranks the listed ones. The [web scorecard JSON schema](/web-scorecard-schema) documents the shape.
 
 ### Relative and global scores
 
