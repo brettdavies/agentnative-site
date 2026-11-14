@@ -103,9 +103,6 @@ export const RECLASSIFIED: Readonly<Record<Lane, string>> = {
 /** The page's headings. A failed audit reads like an idle one, because the next action is the same Start. */
 export type ScoringState = 'idle' | 'running' | 'done' | 'failed';
 
-/** The site's suffix on every document title. */
-export const TITLE_SUFFIX = ' — anc.dev';
-
 /** The heading's markup: the target in mono beside its lane chip. */
 export function scoringHeadingHtml(state: ScoringState, target: string, lane: Lane): string {
   const code = `<code>${escHtml(target)}</code>`;
@@ -115,7 +112,7 @@ export function scoringHeadingHtml(state: ScoringState, target: string, lane: La
   return `Audit ${code}${chip}`;
 }
 
-/** The document title for a state: it follows the heading and never a phase. */
+/** The page's own title for a state: it follows the heading and never a phase. */
 export function scoringTitle(state: ScoringState, target: string): string {
   const text =
     state === 'running'
@@ -125,7 +122,7 @@ export function scoringTitle(state: ScoringState, target: string): string {
         : state === 'failed'
           ? `${target}: audit failed`
           : `Audit ${target}`;
-  return `${text}${TITLE_SUFFIX}`;
+  return text;
 }
 
 type CheckEvent = Extract<AuditEvent, { type: 'check' }>;

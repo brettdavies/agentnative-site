@@ -21,6 +21,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AUDIT_PATH, auditPath, leaderboardPath, scorePath } from '../shared/audit-routes.ts';
 import { bandOf, principleTier, renderMeter } from '../shared/scorecard-format.mjs';
+import { HOME_HEAD_TITLE } from '../shared/search-head.ts';
 import { buildWebHeroCardEmptyState, buildWebHeroCardFromSnapshot } from '../shared/web-hero-card.mjs';
 import { WEBMCP_SCRIPT } from '../shared/webmcp-script.ts';
 import { renderAuditForm } from './audit-form.mjs';
@@ -319,6 +320,7 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles,
     join(distDir, 'index.html'),
     emitShell({
       title: introTitle,
+      headTitle: HOME_HEAD_TITLE,
       description: introDescription,
       canonicalPath: '/',
       bodyHtml: indexBody,

@@ -1,11 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import { extractDescription } from '../src/build/content.mjs';
+import { emitShell, emitShellTemplate } from '../src/build/shell.mjs';
+import { scoringTitle } from '../src/shared/scoring-copy';
 import {
+  BRAND,
   DESCRIPTION_MAX,
   DESCRIPTION_MIN,
   descriptionFits,
   endSentence,
   fitDescription,
+  HOME_HEAD_TITLE,
+  headTitle,
+  TITLE_MAX,
+  TITLE_MIN,
 } from '../src/shared/search-head';
 
 const page = (...paragraphs: string[]) => `# Title\n\n${paragraphs.join('\n\n')}\n`;
@@ -131,5 +138,75 @@ describe('endSentence', () => {
     ['A quoted "word."', 'A quoted "word."'],
   ])('%s', (text, expected) => {
     expect(endSentence(text)).toBe(expected);
+  });
+});
+
+describe('headTitle', () => {
+  test('puts the brand after the page title', () => {
+    expect(headTitle('Install anc')).toBe('Install anc · agentnative');
+  });
+
+  test('brings a one-character title up to the 15-character minimum', () => {
+    expect(headTitle('x').length).toBeGreaterThanOrEqual(TITLE_MIN);
+  });
+
+  test('prefers the first wording that keeps the whole title within 70 characters', () => {
+    const long = `Fix: ${'a long check title '.repeat(4)}`;
+    expect(headTitle(long, 'Fix: DNS-AID', 'Fix')).toBe('Fix: DNS-AID · agentnative');
+  });
+
+  test('keeps a title that lands exactly on the limit', () => {
+    const own = 'x'.repeat(TITLE_MAX - ' · agentnative'.length);
+    expect(headTitle(own)).toBe(`${own} · agentnative`);
+    expect(headTitle(own)).toHaveLength(TITLE_MAX);
+  });
+
+  test('cuts the last wording, never the brand, when none fits', () => {
+    const title = headTitle('a'.repeat(128));
+    expect(title).toHaveLength(TITLE_MAX);
+    expect(title.endsWith('…' + ' · agentnative')).toBe(true);
+    expect(title).toContain(BRAND);
+  });
+
+  test('names the brand and the standard on the home page', () => {
+    expect(HOME_HEAD_TITLE).toBe('agentnative: the agent-native CLI standard');
+  });
+
+  test('the scoring page title is its own part; the client adds the brand', () => {
+    expect(scoringTitle('running', 'ripgrep')).toBe('Auditing ripgrep…');
+    expect(headTitle(scoringTitle('running', 'ripgrep'))).toBe('Auditing ripgrep… · agentnative');
+  });
+});
+
+describe('the shell states the brand in <title> and the bare title in the social tags', () => {
+  const page = {
+    description: 'A description of a fitting length.',
+    canonicalPath: '/x',
+    bodyHtml: '',
+    themeInitJs: '',
+  };
+
+  test('a built page takes the brand suffix in <title> and leaves og:title and twitter:title bare', () => {
+    const html = emitShell({ ...page, title: 'Install anc', breadcrumb: 'Install anc' });
+    expect(html).toContain('<title>Install anc · agentnative</title>');
+    expect(html).toContain('<meta property="og:title" content="Install anc" />');
+    expect(html).toContain('<meta name="twitter:title" content="Install anc" />');
+  });
+
+  test('a page passes its own <title> when its own part runs long', () => {
+    const html = emitShell({
+      ...page,
+      title: 'The agent-native standard',
+      headTitle: HOME_HEAD_TITLE,
+      breadcrumb: 'x',
+    });
+    expect(html).toContain(`<title>${HOME_HEAD_TITLE}</title>`);
+    expect(html).toContain('<meta property="og:title" content="The agent-native standard" />');
+  });
+
+  test('the Worker template defers both titles to request time', () => {
+    const template = emitShellTemplate();
+    expect(template).toContain('<title>{{HEAD_TITLE}}</title>');
+    expect(template).toContain('<meta property="og:title" content="{{TITLE}}" />');
   });
 });

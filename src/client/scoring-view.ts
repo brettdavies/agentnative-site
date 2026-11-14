@@ -8,6 +8,7 @@ import type { CliPhase } from '../shared/audit-events';
 import type { Lane } from '../shared/audit-routes';
 import { escHtml } from '../shared/esc-html';
 import { CLI_PHASE_LABEL, type ScoringState, scoringHeadingHtml, scoringTitle } from '../shared/scoring-copy';
+import { headTitle } from '../shared/search-head';
 import type { BouncePanel } from './scoring-bounce';
 
 export type ScoringElements = {
@@ -62,7 +63,7 @@ export class ScoringView {
 
   state(state: ScoringState): void {
     this.el.heading.innerHTML = scoringHeadingHtml(state, this.target, this.lane);
-    document.title = scoringTitle(state, this.target);
+    document.title = headTitle(scoringTitle(state, this.target));
   }
 
   /** One write to the live region; an error is announced assertively. */
