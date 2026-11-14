@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { extractDescription } from '../src/build/content.mjs';
-import { DESCRIPTION_MAX, DESCRIPTION_MIN, descriptionFits, fitDescription } from '../src/shared/search-head';
+import {
+  DESCRIPTION_MAX,
+  DESCRIPTION_MIN,
+  descriptionFits,
+  endSentence,
+  fitDescription,
+} from '../src/shared/search-head';
 
 const page = (...paragraphs: string[]) => `# Title\n\n${paragraphs.join('\n\n')}\n`;
 
@@ -18,6 +24,22 @@ describe('extractDescription reads a page as plain text', () => {
     expect(extractDescription(page('The record is _agents.example.com and a*b*c stays.'))).toBe(
       'The record is _agents.example.com and a*b*c stays.',
     );
+  });
+
+  test('keeps the text of a code span as written, asterisks and underscores included', () => {
+    expect(extractDescription(page('Run `anc --glob *.md` or `**/*.md` and `*.rs` on a `snake_case_name`.'))).toBe(
+      'Run anc --glob *.md or **/*.md and *.rs on a snake_case_name.',
+    );
+  });
+
+  test('ends a link at its own closing parenthesis, even when the URL holds one', () => {
+    expect(extractDescription(page('See [the note](https://a.example/b_(c)) for the rule.'))).toBe(
+      'See the note for the rule.',
+    );
+  });
+
+  test('reads the text of a link whose label is a code span', () => {
+    expect(extractDescription(page('Read [`--dry-run`](/p5) before a write.'))).toBe('Read --dry-run before a write.');
   });
 
   test('skips sub-headings to reach the first prose paragraph', () => {
@@ -57,6 +79,11 @@ describe('extractDescription ends a long paragraph at a sentence boundary', () =
     expect(extractDescription(page(`${lead} ${third}`))).toBe(lead);
   });
 
+  test('splits after a word that only ends in vs, such as devs', () => {
+    const lead = 'The standard is written for CLI devs.';
+    expect(extractDescription(page(`${lead} ${third}`))).toBe(lead);
+  });
+
   test('refuses an opening sentence longer than the limit instead of cutting it', () => {
     const opening = `${'A single sentence that never stops, '.repeat(6)}and finally ends.`;
     expect(() => extractDescription(page(`${opening} Next.`))).toThrow(/opening sentence is \d+ characters/);
@@ -92,5 +119,17 @@ describe('fitDescription', () => {
     expect(descriptionFits('x'.repeat(25))).toBe(true);
     expect(descriptionFits('x'.repeat(160))).toBe(true);
     expect(descriptionFits('x'.repeat(161))).toBe(false);
+  });
+});
+
+describe('endSentence', () => {
+  test.each([
+    ['Command-line tool for transferring data with URLs', 'Command-line tool for transferring data with URLs.'],
+    ['Already a sentence.', 'Already a sentence.'],
+    ['Asks a question?', 'Asks a question?'],
+    ['Ends in a bracket (CSV, JSON, etc.)', 'Ends in a bracket (CSV, JSON, etc.)'],
+    ['A quoted "word."', 'A quoted "word."'],
+  ])('%s', (text, expected) => {
+    expect(endSentence(text)).toBe(expected);
   });
 });

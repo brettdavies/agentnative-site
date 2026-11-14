@@ -6,7 +6,7 @@
 import { beforeAll, describe, expect, test } from 'bun:test';
 import { readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
-import { DESCRIPTION_MAX, DESCRIPTION_MIN } from '../src/shared/search-head';
+import { DESCRIPTION_MAX, DESCRIPTION_MIN, SENTENCE_END } from '../src/shared/search-head';
 import { requireDistBuild } from './helpers/dist';
 
 const DIST = join(import.meta.dir, '..', 'dist');
@@ -26,6 +26,7 @@ const MARKDOWN_SYNTAX = [
   { label: 'code span', pattern: /`/ },
   { label: 'link', pattern: /\[[^\]]+\]\([^)]*\)/ },
   { label: 'emphasis', pattern: /(^|[\s(])\*[^*\s][^*]*\*(?=[\s).,;:!?]|$)/ },
+  { label: 'underscore emphasis', pattern: /(^|[\s(])_[^_\s][^_]*_(?=[\s).,;:!?]|$)/ },
   { label: 'heading', pattern: /^#/ },
 ] as const;
 
@@ -90,6 +91,10 @@ describe('built pages state a description search engines can show whole', () => 
     expect(
       violations((_label, text) => (text.endsWith('...') || text.endsWith('…') ? 'ends in an ellipsis' : null)),
     ).toEqual([]);
+  });
+
+  test('every description ends at a sentence boundary', () => {
+    expect(violations((_label, text) => (SENTENCE_END.test(text) ? null : 'does not end a sentence'))).toEqual([]);
   });
 
   test('every description is plain text, with no Markdown syntax', () => {

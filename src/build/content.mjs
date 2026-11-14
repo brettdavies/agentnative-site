@@ -12,15 +12,19 @@ import { DESCRIPTION_MAX } from '../shared/search-head.ts';
  * @returns {string}
  */
 function stripInlineMarkdown(text) {
-  return text
+  // Code spans hold literal text, so they leave the string before the other
+  // passes and come back unchanged after them.
+  const spans = [];
+  const held = text.replace(/`([^`]+)`/g, (_, code) => `\uE000${spans.push(code) - 1}\uE001`);
+  return held
     .replace(/\*\*/g, '') // strip bold markers
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1') // strip links and images → label only
-    .replace(/`([^`]+)`/g, '$1') // strip inline code → content only
+    .replace(/!?\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)/g, '$1') // strip links and images → label only
     .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,;:!?]|$)/g, '$1$2') // strip *emphasis*
-    .replace(/(^|[\s(])_([^_\s][^_]*?)_(?=[\s).,;:!?]|$)/g, '$1$2'); // strip _emphasis_
+    .replace(/(^|[\s(])_([^_\s][^_]*?)_(?=[\s).,;:!?]|$)/g, '$1$2') // strip _emphasis_
+    .replace(/\uE000(\d+)\uE001/g, (_, index) => spans[Number(index)]);
 }
 
-const NON_TERMINAL_ABBREVIATION = /(?:e\.g|i\.e|vs|etc|cf)\.$/i;
+const NON_TERMINAL_ABBREVIATION = /\b(?:e\.g|i\.e|vs|etc|cf)\.$/i;
 
 /**
  * Split prose into sentences. A boundary is terminal punctuation, any

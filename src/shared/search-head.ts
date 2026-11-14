@@ -5,9 +5,17 @@
 export const DESCRIPTION_MIN = 25;
 export const DESCRIPTION_MAX = 160;
 
+/** A description's last character: terminal punctuation, then any closing quote or bracket. */
+export const SENTENCE_END = /[.!?]["')\]]*$/;
+
 /** Whether a description sits inside the range engines show whole. */
 export function descriptionFits(description: string): boolean {
   return description.length >= DESCRIPTION_MIN && description.length <= DESCRIPTION_MAX;
+}
+
+/** The text, closed with a full stop when it does not already end a sentence. */
+export function endSentence(text: string): string {
+  return SENTENCE_END.test(text) ? text : `${text}.`;
 }
 
 /**

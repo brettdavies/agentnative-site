@@ -256,9 +256,9 @@ export function twinMeta({ title, description, canonicalPath, dateModified }, ba
   if (!isDay(dateModified)) {
     throw new Error(`twinMeta: ${canonicalPath} needs a YYYY-MM-DD dateModified; got "${dateModified}"`);
   }
-  // The description is body prose (extractDescription) and can carry
-  // authored site-relative links; the twin surface promises every link
-  // self-resolves, so absolutify it like the body.
+  // A description is plain text, so this changes nothing today; it keeps the
+  // twin surface's promise that every link self-resolves for a description
+  // that does carry a site-relative one.
   return {
     title,
     description: absolutifyMarkdownLinks(description, baseUrl),
