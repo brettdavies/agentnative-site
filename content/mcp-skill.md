@@ -519,11 +519,11 @@ without altering any record a client can read, and they send no request to an ou
 work, `score_cli` and `audit_website`, carry `readOnlyHint: false` with `destructiveHint: false`, `idempotentHint:
 false`, and `openWorldHint: true`, because they reach external systems and write cache and leaderboard state. The
 listing tool, `set_website_public_listing`, carries `readOnlyHint: false`, `destructiveHint: true`, `idempotentHint:
-true`, and `openWorldHint: false`, because it overwrites one stored choice in place, repeating a call with the same
-arguments changes nothing, and it reaches only anc's own storage. Annotations are hints for client UX and consent
-prompts, not a security boundary. Every tool's `inputSchema` carries `additionalProperties: false`: a call with an
-argument the tool does not declare is refused with `isError: true` and an `Input validation error` message naming the
-key, before the tool runs.
+true`, and `openWorldHint: true`, because it overwrites one stored choice in place, repeating a call with the same
+arguments changes nothing, and it changes the public visibility of any audited website, an open-ended set, although it
+reaches only anc's own storage. Annotations are hints for client UX and consent prompts, not a security boundary. Every
+tool's `inputSchema` carries `additionalProperties: false`: a call with an argument the tool does not declare is refused
+with `isError: true` and an `Input validation error` message naming the key, before the tool runs.
 
 **Accept-header negotiation.** Server picks between `application/json` and `text/event-stream`. JSON wins ties; q-values
 resolve unequal preferences. Absent or `*/*` Accept → JSON. Only a request that accepts neither MIME type returns `406`.

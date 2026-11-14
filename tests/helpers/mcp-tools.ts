@@ -53,13 +53,16 @@ const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: 
 // leaderboard state, so readOnlyHint is false and openWorldHint true.
 const AUDIT = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } as const;
 
-// set_website_public_listing overwrites one stored choice in place and reaches
-// only anc's own bindings: not read-only, destructive, repeatable, closed-world.
+// set_website_public_listing overwrites one stored choice in place: not
+// read-only, destructive, repeatable. openWorldHint is true although it reaches
+// only anc's own bindings, because it changes the public visibility of any
+// audited website, an open-ended set of entities
+// (https://developers.openai.com/plugins/plugin-guidelines#correct-annotation).
 const LISTING_WRITE = {
   readOnlyHint: false,
   destructiveHint: true,
   idempotentHint: true,
-  openWorldHint: false,
+  openWorldHint: true,
 } as const;
 
 // The exact hints each tool declares on tools/list.
