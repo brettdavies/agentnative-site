@@ -11,3 +11,6 @@
 
 [test]
 preload = ["./tests/bun-setup.ts"]
+# skill/ carries test templates for other projects, and dist/ is build output.
+# Neither is this repo's suite.
+pathIgnorePatterns = ["skill/**", "dist/**"]

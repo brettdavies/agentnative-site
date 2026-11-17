@@ -152,7 +152,7 @@ done
 # Exclusion regex has two anchored alternatives:
 #   - path-prefix group: matches paths under docs/{brainstorms,plans,research,solutions},
 #     styles/{proselint,write-good,.vale-config}, scripts/__fixtures__/, src/data/spec/,
-#     content/principles/
+#     skill/, content/principles/
 #   - basename group: matches AGENTS.md / CHANGELOG.md anywhere in the tree
 #     (line start OR after a slash), to keep parity with full-scan mode's
 #     `find -not -name 'AGENTS.md'` which matches basename anywhere.
@@ -164,6 +164,8 @@ done
 #      catches top-level; this repo has `scripts/design/node_modules/`.
 #   2. `src/data/spec/` and `content/principles/` — vendored from spec, lints
 #      upstream, double-linting wastes findings.
+#      `skill/` — the skill bundle's bytes ship as one package, so a prose
+#      fix there changes the package; the tree is checked by its own tests.
 #   3. `dist/` — build output (gitignored). Generated artifacts are not
 #      authored prose; they re-derive from content/* on each build.
 #   4. `.claude/` — vendored Claude tooling docs, not site-authored content.
@@ -178,7 +180,7 @@ done
 if ((CHANGED_ONLY)); then
   mapfile -t MD_FILES < <(
     git diff --name-only --diff-filter=ACM "$PROSE_CHECK_BASE"...HEAD -- '*.md' \
-      | grep -v -E '^(docs/(brainstorms|plans|research|solutions)/|styles/(proselint|write-good|\.vale-config)/|scripts/__fixtures__/|src/data/spec/|content/principles/|dist/|\.claude/)|(^|/)(AGENTS|CHANGELOG)\.md$|(^|/)node_modules/' \
+      | grep -v -E '^(docs/(brainstorms|plans|research|solutions)/|styles/(proselint|write-good|\.vale-config)/|scripts/__fixtures__/|src/data/spec/|skill/|content/principles/|dist/|\.claude/)|(^|/)(AGENTS|CHANGELOG)\.md$|(^|/)node_modules/' \
       | sort -u
   )
 else
@@ -196,6 +198,7 @@ else
       -not -path './docs/research/*' \
       -not -path './docs/solutions/*' \
       -not -path './src/data/spec/*' \
+      -not -path './skill/*' \
       -not -path './content/principles/*' \
       -not -path './styles/proselint/*' \
       -not -path './styles/write-good/*' \

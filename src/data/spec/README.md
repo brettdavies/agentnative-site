@@ -60,10 +60,13 @@ direction, deliberately."*
 
 1. agentnative-spec ships v0.X.Y with principle prose changes.
 2. Site contributor runs `./scripts/sync-spec.sh` from the repo root. The script picks up the latest v* tag from the
-   remote (or falls back to `$SPEC_ROOT`) and rewrites this directory. **Footer does NOT move yet** — `SPEC_VERSION`
-   updates here, but `SITE_SPEC_VERSION` (`content/principles/VERSION`) is unchanged. The footer correctly shows the
-   site is not yet reconciled.
-3. Inspect: `git diff src/data/spec/principles/` shows exactly what the spec changed.
+   remote (or falls back to `$SPEC_ROOT`) and rewrites this directory. The same run writes the skill bundle's copy
+   (`skill/agent-native-cli/spec/`: the same `VERSION`, `CHANGELOG.md`, and `principles/` bytes, plus the generated
+   `reading-the-spec.md`), and `tests/skill-spec-copy.test.ts` holds the two copies byte-equal. A sync that changes
+   those bytes changes the skill package, so it needs a `skill/agent-native-cli/VERSION` bump in the same PR.
+   **Footer does NOT move yet** — `SPEC_VERSION` updates here, but `SITE_SPEC_VERSION` (`content/principles/VERSION`) is
+   unchanged. The footer correctly shows the site is not yet reconciled.
+3. Inspect: `git diff src/data/spec/principles/ skill/agent-native-cli/spec/` shows exactly what the spec changed.
 4. **Manual editorial decision**: contributor decides whether (and how) to update `content/principles/p<n>-*.md` to
    reflect the spec change. The two file shapes are intentionally different — there is no automated 1-to-1 converter.
    Site copy may incorporate the spec change verbatim, paraphrase it for prose flow, add a code example, or deliberately
