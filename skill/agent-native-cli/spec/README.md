@@ -11,13 +11,14 @@ the upstream [`README`](https://github.com/brettdavies/agentnative#readme).
 
 ## Resync
 
-Run from the repo root:
+Run from the root of `brettdavies/agentnative-site`, where this bundle's source lives at `skill/agent-native-cli/`:
 
 ```bash
 scripts/sync-spec.sh    # queries the remote for the latest v* tag; falls back to local on network failure
 ```
 
-The script resolves the latest `v*` tag of `brettdavies/agentnative` through `gh api` and fetches each vendored file at
+The script writes this copy and the site's own `src/data/spec/` together, and generates `reading-the-spec.md`. It
+resolves the latest `v*` tag of `brettdavies/agentnative` through `gh api` and fetches each vendored file at
 that tag from the GitHub contents API, with no clone. `--ref <branch|tag|sha>` (or `SPEC_REF`) vendors another ref. If
 the API is unreachable, the script falls back to a local checkout (`$HOME/dev/agentnative-spec` by default; override
 with `SPEC_ROOT`) and reads files with `git show`, so the checkout's working tree is untouched. Override
@@ -32,7 +33,6 @@ with `SPEC_ROOT`) and reads files with `git show`, so the checkout's working tre
 | `principles/p*.md`        | `principles/p*.md`               | Frontmatter `requirements[]` is the machine-readable contract                                      |
 | `principles/scoring.md`   | `principles/scoring.md`          | Leaderboard formula, badge eligibility floor, and color bands                                      |
 | `reading-the-spec.md`     | `README.md` § "Reading the spec" | `requirements[]` fields and the flag-name reading rule; relative links point at the spec repo      |
-| `.markdownlint-cli2.yaml` | none; this repo's own            | Turns MD013 off for the vendored files, which keep upstream's line shapes; other rules still apply |
 
 Each principle file has a YAML frontmatter block with `id`, `title`, `last-revised`, `status`, and `requirements[]`.
 Each `requirements[]` entry carries a stable `id` (e.g. `p1-must-no-interactive`), a `level` (`must`/`should`/`may`), an
