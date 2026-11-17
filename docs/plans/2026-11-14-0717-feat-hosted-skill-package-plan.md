@@ -15,7 +15,7 @@ topic: hosted-skill-package
 
 - **Objective:** the `agent-native-cli` skill bundle is published once, as one versioned package on anc.dev with one name, one version, and one SHA-256 digest. The website (`/skill`, `/skill.json`, the well-known agent-skills index), the MCP server, WebMCP, and `anc skill install|update` all name that one package. The bundle stays whole, and `brettdavies/agentnative-skill` stops being a source.
 - **Means:** the bundle's source moves into this repo at `skill/agent-native-cli/` (KTD1). The site build turns that tree into one deterministic `.tar.gz` and one package record, `/skill.json` (KTD4, KTD5). Every surface reads the record. The CLI downloads the archive the record names, checks its digest, and extracts it under fixed safety rules (KTD9 to KTD11). The skill repo gets one bridge release that points every git install at anc.dev, and is then retired (OD4).
-- **Authority:** the Key Decisions, the decided rows, and the owner decisions bind. Seven owner decisions are open (OD1, OD2, OD3, OD4, OD7, OD8, OD10). Every unit is written for the recommended option, and § Option variants spells out every other option down to units, files, tests, verification, and operator steps. Requirements win on behavior, KTDs on mechanism, and units override neither.
+- **Authority:** the Key Decisions, the decided rows, and the owner decisions bind. Brett answered the seven owner decisions with the recommended option each (OD1 (a), OD2 (a), OD3 (a), OD4 (a), OD7 (a), OD8 (a), OD10 (c)) and took F10 into S2. Every unit is written for those answers, and § Option variants keeps every other option worked out down to units, files, tests, verification, and operator steps. Requirements win on behavior, KTDs on mechanism, and units override neither.
 - **Execution profile:**
   - Code, across four repos:
     - six site PRs (S1 to S6, plus S1b under OD10 (c));
@@ -26,9 +26,9 @@ topic: hosted-skill-package
   - Three releases carry the change: a site release (R1), an `anc` release, and the skill repo's bridge release. A second site release (R2) carries S4. R1 is the first site release that carries S3, whatever else it carries.
   - § PR sequence fixes the order.
 - **Stop conditions:**
-  - Brett picks an option this plan does not describe: re-plan the affected units before building.
+  - Brett changes an owner decision: re-plan the affected units before building.
   - A package byte changes in a PR with no matching `VERSION` bump: stop. A version names exactly one digest (R2).
-  - A PR would change a bundle file beyond the forced changes F1 to F9 the testing-guidance commits (S1b under OD10 (c), or S1 under OD10 (a)), and the changes § Option variants schedules: stop and report. The bundle stays whole except for changes the move forces and that one body of Brett's own pre-freeze work.
+  - A PR would change a bundle file beyond the bundle changes F1 to F10 and the testing-guidance commits S1b carries: stop and report. The bundle stays whole except for changes the move forces, F10, and that one body of Brett's own pre-freeze work.
   - The deployed archive's SHA-256 differs from the record's digest on staging or production: stop the release and report. Do not re-deploy over it.
   - The CLI drift gate stays red on CLI `dev` longer than one working day after S3 merges: stop and report. The window is planned (Risks), but an open-ended one is not.
   - Production and staging stay read-only for every planning and build session. A session may send plain public GETs and nothing else.
@@ -62,7 +62,7 @@ The skill lives in its own repo today and installs by `git clone`. The site, the
   - the WebMCP tool (S5);
   - `anc skill install|update`.
 - R2. **One version, one digest.** The bytes of a published version never change. A change to any package byte ships under a higher version.
-- R3. **The bundle stays whole.** Every file a host loads at run time ships: `SKILL.md`, `VERSION`, `getting-started.md`, `references/`, `templates/`, `spec/`, `bin/check-update`, and the two license files. Only the forced changes F1 to F9 alter bundle bytes, and each names its reason. The one other change is the testing-guidance work Brett wrote before the freeze (OD10): S1b carries it under (c), and S1 imports it under (a). It is skill work in its own right, so it gets a skill review rather than a forced-change reason. The changes § Option variants schedules (a spec resync under OD4 (b), and F4 in S4 when OD8 is answered after R1) are bundle changes too, each with its own `VERSION` bump.
+- R3. **The bundle stays whole.** Every file a host loads at run time ships: `SKILL.md`, `VERSION`, `getting-started.md`, `references/`, `templates/`, `spec/`, `bin/check-update`, and the two license files. Only the bundle changes F1 to F10 alter bundle bytes, and each names its reason: the move forces F1 to F9, and F10 is Brett's call. The one other change is the testing-guidance work Brett wrote before the freeze, which S1b carries (OD10 (c)). It is skill work in its own right, so it gets a skill review rather than a forced-change reason.
 - R4. **The archive follows the Cloudflare discovery RFC v0.2.0 archive rules.** It is a gzip-compressed tar with the files at its root and `SKILL.md` at the root. It has no wrapper directory, no links, no `..` segments, and no absolute paths. The same tree always yields the same bytes.
 - R5. **The record carries everything a consumer needs:**
   - the version;
@@ -88,7 +88,7 @@ The skill lives in its own repo today and installs by `git clone`. The site, the
 - **The site is the publisher.** The bundle's source, the archive, the record, and the release flow all live in `agentnative-site`, and the skill repo becomes read-only history. (Brett's brief: retire the standalone repo.)
 - **The bundle ships whole.** Only changes the move forces, each with its reason. (Brett's brief.)
 - **One record.** `/skill.json` is the record, and every other surface is a projection of it built in the same pass (KTD5).
-- **Owner decisions stay open until Brett reads the reviewed plan.** Each one is worked out fully in § Option variants, so the implementation slot builds whichever option he picks without a replan.
+- **Brett's answers bind.** He answered every owner decision after the three reviews, each with the recommended option, and took F10. § Option variants keeps the other options worked out, so a changed decision does not start the plan over.
 
 ### Scope Boundaries
 
@@ -109,7 +109,6 @@ The skill lives in its own repo today and installs by `git clone`. The site, the
 **Not in scope (each one tracked by prime as a follow-up):**
 
 - **The Codex destination.** OpenAI's Codex docs place user skills at `$HOME/.agents/skills` (<https://developers.openai.com/codex/skills/>, read 2026-11-14). `src/data/skill/skill.json` and the CLI map `codex` to `~/.codex/skills/agent-native-cli`. This plan carries the existing destinations over unchanged.
-- **The update-check path in `SKILL.md`.** `SKILL.md:37` runs `bash "$(dirname "$0")/bin/check-update"`. In an agent's shell `$0` is the shell, so the path resolves against the working directory, not the skill directory. The problem is in `SKILL.md`, not in `bin/check-update`. F4 (under OD8 (a) or (b)) rewrites the paragraph that holds this line, so a fix could ride along at no extra review or test cost. The move does not force it, so it stays out. On a host that runs commands through `bash -c`, `$0` is `bash`, so the line runs `./bin/check-update` from the working directory, and a cloned repository that ships its own `bin/check-update` has that script run. In a shell where `$0` is a full path, the call misses harmlessly. The index entry, `npx skills`, and MCP carry the bundle to more hosts. A fix would ride S2 beside F4 as F10: run `bin/check-update` by the directory that holds this `SKILL.md`, never through `$0`, with a test that no bundle file contains `dirname "$0"`. Whether to widen the bundle changes for it is Brett's call, raised through the coordinating session.
 - **Links to files the bundle does not ship.** The vendored spec's principle files link to `spec/docs/badge.md`, `spec/docs/decisions/p1-behavioral-must.md`, and `spec/principles/AGENTS.md`. No consumer vendors those files, and `src/data/spec/` carries the same bytes. The fix belongs to the spec repo.
 - **A mirror override for the record URL.** No requirement asks for one, so `ANC_SKILL_RECORD_URL` is a debug-build test seam (KTD10).
 - **`message` and `next_step` on the CLI's skill error envelope.** The envelope of `anc skill install|update` carries `reason` alone for every reason it has today (`agentnative-cli` `src/skill_install.rs:307-322`), short of the global error contract. The reasons this plan adds join that envelope as it is, and U14's docs give each one a retry answer and the next command. Bringing the envelope to the contract is one change across every reason, old and new, so it is a CLI follow-up, not part of the move.
@@ -124,7 +123,7 @@ The skill lives in its own repo today and installs by `git clone`. The site, the
 
 ### Outstanding Questions
 
-None beyond the open owner decisions.
+None.
 
 ---
 
@@ -213,9 +212,9 @@ These rows were owner decisions until the evidence or the coordinating session s
 
 ### Owner decisions
 
-Brett reads these once the plan has passed its three reviews. Each row names the recommendation the units are written for. § Option variants works out every other option.
+Brett answered these after the plan's three reviews, each with the recommended option. The Decision column records the answer the units are written for. § Option variants works out every other option.
 
-| # | Question | Options | Recommendation | Evidence |
+| # | Question | Options | Decision | Evidence |
 | --- | --- | --- | --- | --- |
 | OD1 | The first hosted version | (a) `0.6.0`; (b) `0.8.0`, matching the `anc` release C1 ships in; (c) `1.0.0` | (a) | The skill repo's `RELEASES.md` § What the contract is names the install root (a `git clone` of `main`) and the update check's remote as contract, so the move is a break. Before 1.0, a break moves the middle number. The v0.5.0 note "skill version pinned to anc version" lapsed when `anc` shipped 0.6.0 and 0.7.0 with no skill release. |
 | OD2 | How `anc skill install|update` learns what to download | (a) At run time: it reads `https://anc.dev/skill.json` for the package fields, and destinations stay compiled in. (b) At build time: each `anc` release bakes one version's URL and digest. | (a) | (a) amends the CLI rule "no `skill.json` parsing in production" (`CLAUDE.md` § Skill Install Verb), but keeps that rule's purpose: the record cannot name a destination. (b) needs an `anc` release for every skill release and forces D3's alternative. |
@@ -330,7 +329,7 @@ Brett reads these once the plan has passed its three reviews. Each row names the
 
 ### Forced bundle changes
 
-Each change below is forced by the move. Nothing else in the bundle changes.
+The move forces F1 to F9. F10 is not forced; Brett took it into S2. Nothing else in the bundle changes.
 
 | # | File | Change | Why it is forced |
 | --- | --- | --- | --- |
@@ -343,6 +342,7 @@ Each change below is forced by the move. Nothing else in the bundle changes.
 | F7 | `references/update-check.md` | The first paragraph (line 3) and the `UPGRADE_AVAILABLE` row (line 12, "A newer release is on `main`") name the anc.dev version pointer. "Yes, upgrade now" first runs `anc --version`. Below 0.8.0 it does not run `anc skill update`, because an older `anc` deletes the install before it clones git: it gives `brew upgrade agentnative` or `cargo install agentnative`, or the manual line on `https://anc.dev/skill`. At 0.8.0 or later it runs `anc skill update <host>`, where `<host>` is the slug whose destination equals this bundle's root, from a six-row table of `destinations` (`~/.claude/skills/agent-native-cli` is `claude_code`, and so on). It never runs `--all`, which installs a fresh copy into every host that lacks one. Under OD7 (a), a copy `npx skills` installed updates with `npx skills update -g -y` instead. Hosts `anc` does not map get the manual line on `https://anc.dev/skill`. The `git pull` instruction goes. | A hosted install has no `.git`, so `git pull` fails. |
 | F8 | `spec/README.md`: the resync section and the Layout row for `.markdownlint-cli2.yaml` | The resync section names `scripts/sync-spec.sh` in `brettdavies/agentnative-site`, which writes both copies and generates `reading-the-spec.md` (KTD3). The Layout row goes. The text names the repo, because the same bytes ship in the archive, where "this repo" names nothing, and in the bridge, where it names the wrong repo. | The skill repo's sync script goes away, and the import leaves out the file the row describes (§ The package). |
 | F9 | `VERSION` | `0.5.0` to OD1's value | R2: the package bytes change. |
+| F10 | `SKILL.md:37`, § First action: update check | The update check runs `bin/check-update` from the directory this `SKILL.md` was read from, named in the prose, never through `$(dirname "$0")` | Not forced; Brett's call. In an agent's shell `$0` is the shell, so the line resolves against the working directory. On a host that runs commands through `bash -c`, `$0` is `bash`, so a cloned repository that ships its own `bin/check-update` has that script run. The index entry, `npx skills`, and MCP carry the bundle to more hosts. `bin/check-update:24` keeps its own `dirname "$0"`, which is correct there: `$0` is the script's path. |
 
 ### Existing installs
 
@@ -443,7 +443,7 @@ dist/skill.json   index.json entry   /skill + /skill.md   dist/.well-known/agent
 | U3 | One spec sync for both copies | `scripts/sync-spec.sh`, `tests/skill-spec-copy.test.ts`, `src/data/spec/README.md` | U1 |
 | U3b | Carry the testing-guidance commits (OD10 (c) only) | `skill/agent-native-cli/references/`, `skill/agent-native-cli/templates/`, `skill/evals/`, `SKILL.md` | U1 |
 | U4 | Description within 1,024 characters (F1) | `skill/agent-native-cli/SKILL.md`, `tests/skill-source.test.ts` | U2 |
-| U5 | Install and update prose (F2 to F5, F7) | `SKILL.md`, `getting-started.md`, `references/update-check.md` | U4 |
+| U5 | Install and update prose (F2 to F5, F7, F10) | `SKILL.md`, `getting-started.md`, `references/update-check.md` | U4 |
 | U6 | Update-check remote, spec resync note, version (F6, F8, F9) | `bin/check-update`, `spec/README.md`, `VERSION`, `tests/skill-check-update.test.ts` | U4 |
 | U7 | Deterministic package builder | `src/build/skill-package.mjs`, `src/build/build.mjs`, `tests/build-skill-package.test.ts` | U6 |
 | U8 | The record | `src/data/skill/skill.json`, `src/build/skill.mjs`, `src/build/08-scorecards-emit.mjs`, `src/build/12-minify-dist.mjs`, `tests/build.test.ts`, `tests/regression.test.ts` | U7 |
@@ -500,7 +500,7 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
 - **Files:**
   - `bunfig.toml`: `[test] pathIgnorePatterns = ["skill/**", "dist/**"]`. The second pattern matters from S3 on: U7 copies `templates/tests/worker.test.ts` into `dist/_internal/skill/`, the build runs before the tests, and Bun 1.4.4 collects a test file under `dist/` that `skill/**` does not cover.
   - `.markdownlint-cli2.yaml`: `ignores` gains `skill/agent-native-cli/spec/CHANGELOG.md` and `skill/CHANGELOG.md`, the way `src/data/spec/CHANGELOG.md` is ignored.
-  - `scripts/prose-check.sh` (its site-local divergence block): `skill/` joins the `src/data/spec/` exclusion in the changed-only filter (line 181) and the full-scope `find` (line 198). Measured 2026-11-14 on a scratch import of the frozen tree, the gate reports 120 blocking findings in 15 files: 99 `Vale.Spelling` hits on tool and crate names such as `argparse`, `yargs`, `oclif`, and `serde`, 9 `proselint.Cliches` hits, and 6 LanguageTool grammar hits. Fixing any of them changes imported bytes (R3), so the imported tree is excluded the way the vendored spec is. S2's reviews read the F1 to F9 prose instead.
+  - `scripts/prose-check.sh` (its site-local divergence block): `skill/` joins the `src/data/spec/` exclusion in the changed-only filter (line 181) and the full-scope `find` (line 198). Measured 2026-11-14 on a scratch import of the frozen tree, the gate reports 120 blocking findings in 15 files: 99 `Vale.Spelling` hits on tool and crate names such as `argparse`, `yargs`, `oclif`, and `serde`, 9 `proselint.Cliches` hits, and 6 LanguageTool grammar hits. Fixing any of them changes imported bytes (R3), so the imported tree is excluded the way the vendored spec is. S2's reviews read the F1 to F10 prose instead.
   - `tests/skill-source.test.ts`.
 - **Approach:**
   - `biome.json`, `tsconfig*.json`, `knip.json`, and Playwright already scope away from `skill/`. The test pins that.
@@ -567,12 +567,12 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
   - The frontmatter holds only keys the Agent Skills spec defines.
 - **Verification:** the length test fails on S1's tree at 1,363 characters (quoted).
 
-#### U5. Install and update prose (F2, F3, F5, F7, and F4 under OD8 (a) or (b))
+#### U5. Install and update prose (F2 to F5, F7, F10)
 
 - **Goal:** the bundle's instructions describe the hosted install and update.
 - **Requirements:** R3, R8.
 - **Files:**
-  - `skill/agent-native-cli/SKILL.md`: line 190, line 203, and § First action under OD8 (a) or (b).
+  - `skill/agent-native-cli/SKILL.md`: line 37 and § First action (F4, F10), line 190, and line 203.
   - `skill/agent-native-cli/getting-started.md`: lines 80 and 81, 91 and 92, and 107.
   - `skill/agent-native-cli/references/update-check.md`: lines 3, 12, and 20 to 23.
 - **Approach:**
@@ -584,8 +584,9 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
   - The vendored `spec/` files are exempt by path: they hold three spec-owned mentions, kept byte-equal by KTD3.
   - In `references/update-check.md`, the `anc --version` check comes before the first `anc skill update`.
   - Every `destinations` key in `src/data/skill/skill.json` appears in `references/update-check.md` beside its path.
-  - Under OD8 (a) or (b), the F4 sentence names `skill://`.
-- **Verification:** that test fails on S1's tree, listing the 9 lines (quoted). `/devex-review` walks the update prompt as an agent would.
+  - The F4 sentence names `skill://`.
+  - No markdown file in the bundle contains `dirname "$0"`, and § First action names the skill's own directory for `bin/check-update` (F10). `bin/check-update` is not checked: its own `dirname "$0"` names the script's path.
+- **Verification:** that test fails on S1's tree, listing the 9 lines and `SKILL.md:37` (quoted). `/devex-review` walks the update prompt as an agent would.
 
 #### U6. Update-check remote, spec resync note, version (F6, F8, F9)
 
@@ -957,7 +958,7 @@ Every review runs one round on Opus, with its verdict in a PR comment and its st
 
 These are Brett's: each is a GitHub setting, a release, or a decision on his own work.
 
-- **O1. Answer the open owner decisions** (OD1, OD2, OD3, OD4, OD7, OD8, OD10).
+- **O1. Answer the owner decisions.** Answered: OD1 (a), OD2 (a), OD3 (a), OD4 (a), OD7 (a), OD8 (a), OD10 (c), and F10 taken.
 - **O2. The local testing-guidance commits, per OD10.**
   - (a) Push the branch and open, review, and merge its PR on the skill repo's `dev`.
   - (b) Delete the local branch.
@@ -1172,3 +1173,4 @@ All read 2026-11-14.
 - 2026-11-14: `/plan-devex-review` round 1 ended: ready with fixes (P0 0, P1 3, P2 8, P3 9). All 20 findings are applied, one with a different fix. Decided from evidence: the package-identity gate moves from `coord` to `build`, which builds before it reads (finding 1); `source.url` follows `resolveBaseUrl()`, so local checks build with `PUBLIC_BASE_URL` (finding 2); the OD2 (b) test seam is `ANC_SKILL_TEST_PIN`, read only in debug builds, and an up-to-date update answers `destination_status: "current"`, which replaces the eng round's `already-current` (finding 3); under OD2 (b) the `anc` release follows the site release it bakes from, because U13 bakes from production's record, so the reviewer's reverse release order is not taken and F7's "Not now" line covers the gap (finding 9); and `ANC_SKILL_RECORD_URL` is documented in the CLI's `CLAUDE.md` and README as a test and mirror override (finding 20).
 - 2026-11-14: `/compound-engineering:ce-doc-review` round 1 started on 8677b1e, in its own process from a clone of the pushed plan.
 - 2026-11-14: `/compound-engineering:ce-doc-review` round 1 ended: ready with fixes (P0 0, P1 1, P2 11, P3 18). 29 findings are applied; finding 9 is recorded under Not in scope and goes to Brett. Decided from evidence: released `anc` 0.5.x to 0.7.x delete an install before cloning (`v0.7.0` `src/skill_install.rs:618-629`), so § Existing installs and OD4 (b) state the loss (finding 1); C1 moves to order 4, directly after S3 (finding 2); R1 is the first site release that carries S3 (finding 3); the bridge copies the release production serves and never re-vendors `spec/` (finding 5); OD4 (d)'s README-only release is `0.5.1` (finding 6); the update prompt checks `anc --version` before it runs an update (finding 7); KTD11's path rule is a segment pattern that also refuses Windows drive prefixes (finding 8); the builder does not refuse untracked files, which the index list already leaves out (finding 15, which narrows the eng round's finding 11); `ANC_SKILL_RECORD_URL` is read only in debug builds (finding 27, which replaces the devex round's mirror override); and the TypeScript tar reader, U2's config-text tests, the new skill issue template, and OD2 (b)'s `releases` key are dropped (finding 28).
+- 2026-11-16: Brett answered the owner decisions: OD1 (a), OD2 (a), OD3 (a), OD4 (a), OD7 (a), OD8 (a), and OD10 (c), each the recommended option, and took F10 into S2. F10's test covers the bundle's markdown only, because `bin/check-update:24` uses `dirname "$0"` correctly.
