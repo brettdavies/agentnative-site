@@ -1,19 +1,15 @@
 ---
 name: agent-native-cli
 description: >-
-  Guide to designing, building, and auditing CLI tools for use by AI agents. Pairs with
-  [`anc`](https://github.com/brettdavies/agentnative-cli) (the canonical compliance auditor) and
-  [`agentnative-spec`](https://github.com/brettdavies/agentnative) (the canonical principle text, vendored at
-  `spec/`). Provides starter templates, language-specific implementation idioms (Rust/clap, Python Click & argparse,
-  Go Cobra, JS Commander/yargs/oclif, Ruby Thor), and a getting-started guide that points agents at
-  `anc audit --output json` (scorecard schema 0.9) and `anc skill install <host>` / `anc skill update --all`. Use
-  when designing a new CLI tool, building a Rust/clap binary intended for agents, reviewing one for agent-readiness,
-  claiming the agent-native badge (≥70% credit-weighted score), or remediating findings from `anc`. Triggers on
-  agentic CLI, agent-native, CLI design, CLI standard, agent-first, CLI for agents, agent-friendly CLI, CLI
-  compliance, agent-readiness, anc, anc audit, anc emit schema, anc skill install, anc skill update, agent-native
-  badge, scorecard, audit_id, audit-profile, opt_out, n_a, Rust CLI, clap derive. SKIP when the user is building a
-  TUI app meant for humans (use `--audit-profile human-tui` rather than this skill), writing a non-CLI library, or
-  asking unrelated Rust questions not specifically about agent-readiness of a CLI.
+  Guide to designing, building, and auditing CLI tools for use by AI agents. Pairs with `anc` (the compliance auditor)
+  and the agentnative spec (vendored at `spec/`). Provides starter templates, idioms for Rust/clap, Python Click and
+  argparse, Go Cobra, JS Commander/yargs/oclif, and Ruby Thor, and a getting-started guide for `anc audit --output json`
+  (scorecard schema 0.9) and `anc skill install <host>`. Use when designing a new CLI tool, building a Rust/clap binary
+  for agents, reviewing one for agent-readiness, claiming the agent-native badge (≥70% credit-weighted score), or
+  remediating `anc` findings. Triggers on agentic CLI, agent-native, CLI design, agent-first, agent-friendly CLI, CLI
+  compliance, agent-readiness, anc audit, anc emit schema, anc skill install, anc skill update, agent-native badge,
+  scorecard, audit_id, opt_out, n_a, Rust CLI, clap derive. SKIP for a TUI app meant for humans (use `--audit-profile
+  human-tui`), a non-CLI library, or Rust questions unrelated to agent-readiness.
 ---
 
 # Agent-Native CLI
@@ -31,11 +27,14 @@ surrounding context (spec, idioms, templates) that `anc`'s findings reference.
 
 ## First action: update check
 
-Run once per session before doing real work:
+Run once per session before doing real work. `<skill-dir>` is the directory this `SKILL.md` was read from, the one
+that holds `VERSION` and `bin/`:
 
 ```bash
-bash "$(dirname "$0")/bin/check-update"
+bash <skill-dir>/bin/check-update
 ```
+
+If you read this file through a `skill://` URI, skip the update check: the server always serves the current version.
 
 Empty output → continue. `UPGRADE_AVAILABLE <local> <remote>` → prompt the user via `AskUserQuestion` (Yes / Not now /
 Never). Full prompt text, snooze ladder, and state-file layout are in
@@ -187,7 +186,7 @@ To install **this skill bundle** into a host's canonical skills directory, use `
 ```bash
 anc skill install claude_code              # also: codex, cursor, factory, kiro, opencode
 anc skill install --all                    # install into every known host in one invocation
-anc skill install --dry-run claude_code    # print resolved git command without spawning
+anc skill install --dry-run claude_code    # print the package it would install, write nothing
 anc skill update claude_code               # refresh an existing install (guards on SKILL.md marker)
 anc skill update --all                     # refresh every known host
 ```
@@ -200,4 +199,5 @@ approach could produce.
 
 - [`agentnative-spec`](https://github.com/brettdavies/agentnative): canonical principle text (CC BY 4.0)
 - [`agentnative-cli`](https://github.com/brettdavies/agentnative-cli): `anc`, the canonical auditor (MIT / Apache-2.0)
-- [`agentnative-skill`](https://github.com/brettdavies/agentnative-skill): this repo (MIT)
+- [`agent-native-cli`](https://anc.dev/skill): this skill, published on anc.dev; source in
+  [`agentnative-site`](https://github.com/brettdavies/agentnative-site/tree/main/skill/agent-native-cli) (MIT)

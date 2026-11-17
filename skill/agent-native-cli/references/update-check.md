@@ -1,15 +1,16 @@
 # Update check — operational details
 
-The `bin/check-update` script compares this bundle's `VERSION` against `main` on GitHub. Exit code is always `0`;
-network failures, broken installs, and disabled checks all degrade silently. SKILL.md only documents the agent-visible
-surface; this file documents the script's contract for anyone debugging it.
+The `bin/check-update` script compares this bundle's `VERSION` against the version pointer anc.dev publishes at
+`https://anc.dev/.well-known/agent-skills/agent-native-cli/VERSION`. Exit code is always `0`; network failures, broken
+installs, and disabled checks all degrade silently. SKILL.md only documents the agent-visible surface; this file
+documents the script's contract for anyone debugging it.
 
 ## Output contract
 
 | Stdout                               | Meaning                                                                       |
 | ------------------------------------ | ----------------------------------------------------------------------------- |
 | (empty)                              | Up to date, snoozed, disabled, or check skipped (broken install, no network). |
-| `UPGRADE_AVAILABLE <local> <remote>` | A newer release is on `main`. Trigger the upgrade prompt below.               |
+| `UPGRADE_AVAILABLE <local> <remote>` | anc.dev publishes a different version. Trigger the upgrade prompt below.      |
 
 ## Prompt the user via `AskUserQuestion`
 
@@ -17,15 +18,33 @@ surface; this file documents the script's contract for anyone debugging it.
 
 Three options:
 
-- **"Yes, upgrade now"** — run `git -C <bundle-parent-dir> pull --ff-only`. The bundle root is the parent of `bin/`;
-  `git -C ../.. pull --ff-only` from `bin/` works for the default install layout (`~/<host>/skills/agent-native-cli/`).
-  If `--ff-only` rejects (uncommitted edits or divergent history), surface git's error verbatim and stop — do not
-  auto-stash.
+- **"Yes, upgrade now"** — first run `anc --version`.
+  - Below 0.8.0, or no `anc` on `PATH`: do not run `anc skill update`. Those versions delete the install before they
+    fetch a replacement. Upgrade `anc` first (`brew upgrade brettdavies/tap/agentnative` or `cargo install agentnative`),
+    or follow the manual install on <https://anc.dev/skill>.
+  - At 0.8.0 or later: run `anc skill update <host>`, where `<host>` is the slug in the table below whose destination is
+    this bundle's root (the parent of `bin/`). Never run `--all`: it installs a fresh copy into every host that lacks
+    one.
+  - If the user installed this copy with `npx skills add`, run `npx skills update -g -y` instead.
+  - A host `anc` does not map gets the manual install on <https://anc.dev/skill>.
 - **"Not now"** — write `$HOME/.cache/agent-native-cli/update-snoozed` in the format `<remote> <level> <epoch>`, where
   `<level>` is `1` (24h reminder), `2` (48h), or `3` (7 days), escalating each time the user defers. Tell the user the
   next reminder window.
 - **"Never ask again"** — `touch $HOME/.cache/agent-native-cli/disabled` and tell the user how to re-enable (`rm
   $HOME/.cache/agent-native-cli/disabled`).
+
+## Host slugs
+
+`anc skill update` takes the slug whose destination is this bundle's root:
+
+| Slug          | Destination                                  |
+| ------------- | -------------------------------------------- |
+| `claude_code` | `~/.claude/skills/agent-native-cli`          |
+| `codex`       | `~/.codex/skills/agent-native-cli`           |
+| `cursor`      | `~/.cursor/skills/agent-native-cli`          |
+| `factory`     | `~/.factory/skills/agent-native-cli`         |
+| `kiro`        | `~/.kiro/skills/agent-native-cli`            |
+| `opencode`    | `~/.config/opencode/skills/agent-native-cli` |
 
 ## State directory
 
