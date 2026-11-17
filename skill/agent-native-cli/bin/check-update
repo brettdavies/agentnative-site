@@ -19,15 +19,15 @@
 set -euo pipefail
 
 # Script is at <skill-dir>/bin/check-update; the skill (= install) root is
-# one dir up and holds VERSION. Consumers install via plain `git clone`
-# so the full repo lands at the skill root.
+# one dir up and holds VERSION. The bundle installs from the anc.dev package
+# archive, which extracts to the skill root.
 SKILL_DIR="${AGENTNATIVE_SKILL_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 STATE_DIR="${AGENTNATIVE_SKILL_STATE_DIR:-$HOME/.cache/agent-native-cli}"
 CACHE_FILE="$STATE_DIR/last-update-check"
 SNOOZE_FILE="$STATE_DIR/update-snoozed"
 DISABLED_FILE="$STATE_DIR/disabled"
 VERSION_FILE="$SKILL_DIR/VERSION"
-REMOTE_URL="${AGENTNATIVE_SKILL_REMOTE_URL:-https://raw.githubusercontent.com/brettdavies/agentnative-skill/main/VERSION}"
+REMOTE_URL="${AGENTNATIVE_SKILL_REMOTE_URL:-https://anc.dev/.well-known/agent-skills/agent-native-cli/VERSION}"
 
 # ─── Step 0: Bail if disabled ─────────────────────────────────
 # User opt-out: `touch $STATE_DIR/disabled`. Re-enable: `rm $STATE_DIR/disabled`.

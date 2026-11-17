@@ -77,8 +77,8 @@ cargo install agentnative
 #    Six hosts supported: claude_code, codex, cursor, factory, kiro, opencode.
 anc skill install claude_code
 anc skill install --all                              # install into every known host
-anc skill install --dry-run claude_code              # preview the git clone
-eval $(anc skill install --dry-run claude_code)      # captures cleanly for scripted installs
+anc skill install --dry-run claude_code              # preview: prints the install command (0.8.0+: --output json adds the URL, digest)
+eval "$(anc skill install --dry-run claude_code)"    # the dry run prints the install command, so this runs it
 anc skill install --output json claude_code          # uniform JSON envelope (success + error)
 anc skill update claude_code                         # refresh an existing install (SKILL.md marker required)
 anc skill update --all                               # refresh every known host
@@ -88,8 +88,8 @@ anc emit schema > scorecard-v0.9.schema.json         # validate downstream parse
 ```
 
 Binary name: `anc`. Prebuilt releases at <https://github.com/brettdavies/agentnative-cli/releases>. If your host is not
-yet in the binary's map, `anc skill install --dry-run <known-host>` prints a manual `git clone` you can adapt: `git
-clone --depth 1 https://github.com/brettdavies/agentnative-skill.git <dest>`.
+yet in the binary's map, use the verifying download on <https://anc.dev/skill>: it fetches the package archive, checks
+its SHA-256 digest, and extracts it into any directory.
 
 ## Where things live
 
@@ -104,4 +104,4 @@ clone --depth 1 https://github.com/brettdavies/agentnative-skill.git <dest>`.
 | What does the scorecard JSON look like?         | `anc emit schema` (schema 0.9) or `SKILL.md` § "The anc loop" |
 | File a spec question or proposal                | <https://github.com/brettdavies/agentnative>                  |
 | File an `anc` bug                               | <https://github.com/brettdavies/agentnative-cli>              |
-| File a skill-bundle issue                       | <https://github.com/brettdavies/agentnative-skill>            |
+| File a skill-bundle issue                       | <https://github.com/brettdavies/agentnative-site/issues/new/choose> |
