@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Vendor agentnative-spec into src/data/spec/.
+# Vendor agentnative-spec into src/data/spec/ and into the skill bundle's spec/.
 #
 # Default behavior: resolves the latest v* tag of agentnative-spec via the
 # GitHub API and pulls VERSION, CHANGELOG.md, principles/p*-*.md, and
@@ -52,6 +52,13 @@
 # tag publish — a consumer-side handler that auto-PRs the resync is
 # tracked as follow-up work.
 #
+# The skill bundle (skill/agent-native-cli/spec/) ships the same VERSION,
+# CHANGELOG.md, and principles/ bytes, so the one sync writes both copies. It
+# also writes the bundle-only reading-the-spec.md: the README's "Reading the
+# spec" section, with each relative link pointed at the spec repo at the
+# resolved ref. A sync that changes those bytes needs a skill VERSION bump in
+# the same PR.
+#
 # Stale orphan files in src/data/spec/principles/ (e.g., from a spec
 # rename) are accepted; `git status` surfaces them at commit time.
 
@@ -82,7 +89,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -h|--help)
-            sed -n '2,55p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,63p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -96,6 +103,10 @@ done
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST_DIR="$REPO_ROOT/src/data/spec"
 DEST_PRINCIPLES="$DEST_DIR/principles"
+BUNDLE_DIR="$REPO_ROOT/skill/agent-native-cli/spec"
+BUNDLE_PRINCIPLES="$BUNDLE_DIR/principles"
+READING_HEADING="## Reading the spec"
+READING_FILE="reading-the-spec.md"
 
 # Parse `<owner>/<repo>` out of SPEC_REMOTE_URL for `gh api` calls.
 # Handles both URL shapes:
@@ -190,16 +201,20 @@ echo "vendoring $resolved_ref ($resolved_sha) from $source_label"
 
 # === Extract =============================================================
 # Fetcher: API path uses `gh api` with raw accept header; local path uses
-# `git show`. Both write a single file to $2 from path $1.
-fetch_file() {
+# `git show`. show_file writes the file at path $1 to stdout; fetch_file
+# writes it to $2.
+show_file() {
     local path="$1"
-    local dest="$2"
     if $api_ok; then
         gh api -H "Accept: application/vnd.github.raw" \
-            "repos/$spec_repo/contents/$path?ref=$resolved_ref" >"$dest"
+            "repos/$spec_repo/contents/$path?ref=$resolved_ref"
     else
-        git -C "$SPEC_ROOT" show "$resolved_ref:$path" >"$dest"
+        git -C "$SPEC_ROOT" show "$resolved_ref:$path"
     fi
+}
+
+fetch_file() {
+    show_file "$1" >"$2"
 }
 
 # Lister: returns names (not paths) of files in a directory at the ref.
@@ -247,8 +262,34 @@ if [[ "$copied" -eq 0 ]]; then
     exit 1
 fi
 
-echo "wrote $copied principle file(s) to $DEST_PRINCIPLES"
-$scoring_found && echo "wrote principles/scoring.md to $DEST_PRINCIPLES"
-echo "wrote VERSION + CHANGELOG.md to $DEST_DIR"
+# The bundle's copy is a byte mirror of the site's. Orphans mirror too, so the
+# two principles/ directories always hold the same names.
+mkdir -p "$BUNDLE_PRINCIPLES"
+cp "$DEST_DIR/VERSION" "$DEST_DIR/CHANGELOG.md" "$BUNDLE_DIR/"
+cp "$DEST_PRINCIPLES"/*.md "$BUNDLE_PRINCIPLES/"
+
+# The rules for reading requirement text (the requirements[] fields, and how a
+# flag name applies to single-dash help) live in the README's "Reading the
+# spec" section, not in a principle file. The section runs from its heading
+# to the next level-2 heading. awk reads all of its input rather than exiting
+# at the section end, so the upstream reader never takes a SIGPIPE that
+# pipefail would turn into a failure. Relative links name spec files this
+# script does not vendor, so they point at the spec repo at the same ref.
+reading_section="$(show_file "README.md" | awk -v heading="$READING_HEADING" '
+    /^## / { inside = ($0 == heading) }
+    inside { print }
+')"
+if [[ -z "$reading_section" ]]; then
+    echo "error: README.md at ref \`$resolved_ref\` has no \`$READING_HEADING\` section" >&2
+    exit 1
+fi
+printf '%s\n' "$reading_section" \
+    | sed -E "s|[]][(]([^):#][^):]*)[)]|](https://github.com/$spec_repo/blob/$resolved_ref/\1)|g" \
+    >"$BUNDLE_DIR/$READING_FILE"
+
+echo "wrote $copied principle file(s) to $DEST_PRINCIPLES and $BUNDLE_PRINCIPLES"
+$scoring_found && echo "wrote principles/scoring.md to both"
+echo "wrote VERSION + CHANGELOG.md to $DEST_DIR and $BUNDLE_DIR"
+echo "wrote $READING_FILE to $BUNDLE_DIR"
 echo
 echo "next: review \`git diff\` for unexpected changes, then commit."
