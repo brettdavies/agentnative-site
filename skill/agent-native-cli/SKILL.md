@@ -35,6 +35,7 @@ bash "<skill-dir>/bin/check-update"
 ```
 
 If you read this file through a `skill://` URI, skip the update check: the server always serves the current version.
+If the script is missing, skip the check too.
 
 Empty output → continue. `UPGRADE_AVAILABLE <local> <remote>` → prompt the user via `AskUserQuestion` (Yes / Not now /
 Never). Full prompt text, snooze ladder, and state-file layout are in
@@ -186,7 +187,7 @@ To install **this skill bundle** into a host's canonical skills directory, use `
 ```bash
 anc skill install claude_code              # also: codex, cursor, factory, kiro, opencode
 anc skill install --all                    # install into every known host in one invocation
-anc skill install --dry-run claude_code    # print the install command, write nothing; --output json adds the package URL and digest
+anc skill install --dry-run claude_code    # print the install command, write nothing (0.8.0+: --output json adds the URL, digest)
 anc skill update claude_code               # refresh an existing install (guards on SKILL.md marker)
 anc skill update --all                     # refresh every known host
 ```
