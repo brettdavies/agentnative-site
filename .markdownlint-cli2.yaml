@@ -105,6 +105,9 @@ ignores:
   - "docs/research/**"
   - "docs/plans/**"
   - "src/data/spec/CHANGELOG.md"     # vendored spec changelog
+  - "skill/agent-native-cli/spec/CHANGELOG.md"  # the bundle's copy of the same changelog
+  - "skill/CHANGELOG.md"             # skill release record, one logical line per bullet
+  - "skill/agent-native-cli/spec/reading-the-spec.md"  # generated from the spec README, keeps its line shapes
   - ".claude/**"
   - ".context/**"
   - "test-results/**"
