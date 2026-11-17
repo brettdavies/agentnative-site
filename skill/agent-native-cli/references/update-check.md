@@ -18,14 +18,16 @@ documents the script's contract for anyone debugging it.
 
 Three options:
 
-- **"Yes, upgrade now"** — first run `anc --version`.
+- **"Yes, upgrade now"** — first work out how this copy was installed; when you cannot tell, ask the user.
+  - Installed with `npx skills add`: run `npx skills update -g -y` and stop.
+  - Otherwise run `anc --version`.
   - Below 0.8.0, or no `anc` on `PATH`: do not run `anc skill update`. Those versions delete the install before they
-    fetch a replacement. Upgrade `anc` first (`brew upgrade brettdavies/tap/agentnative` or `cargo install agentnative`),
-    or follow the manual install on <https://anc.dev/skill>.
+    fetch a replacement. Upgrade `anc` first (`brew upgrade brettdavies/tap/agentnative` when it is installed,
+    `brew install brettdavies/tap/agentnative` when it is not, or `cargo install agentnative`), or follow the manual
+    install on <https://anc.dev/skill>.
   - At 0.8.0 or later: run `anc skill update <host>`, where `<host>` is the slug in the table below whose destination is
     this bundle's root (the parent of `bin/`). Never run `--all`: it installs a fresh copy into every host that lacks
     one.
-  - If the user installed this copy with `npx skills add`, run `npx skills update -g -y` instead.
   - A host `anc` does not map gets the manual install on <https://anc.dev/skill>.
 - **"Not now"** — write `$HOME/.cache/agent-native-cli/update-snoozed` in the format `<remote> <level> <epoch>`, where
   `<level>` is `1` (24h reminder), `2` (48h), or `3` (7 days), escalating each time the user defers. Tell the user the

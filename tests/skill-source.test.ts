@@ -201,7 +201,7 @@ describe('skill install and update prose', () => {
     const hits = bundleMarkdown().filter((path) => bundleText(path).includes('dirname "$0"'));
     expect(hits).toEqual([]);
     const firstAction = bundleText('SKILL.md').split('## First action: update check')[1]?.split('\n## ')[0] ?? '';
-    expect(firstAction).toMatch(/bash <skill-dir>\/bin\/check-update/);
+    expect(firstAction).toMatch(/bash "?<skill-dir>\/bin\/check-update/);
     expect(firstAction).toContain('the directory this `SKILL.md` was read from');
   });
 });

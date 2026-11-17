@@ -31,7 +31,7 @@ Run once per session before doing real work. `<skill-dir>` is the directory this
 that holds `VERSION` and `bin/`:
 
 ```bash
-bash <skill-dir>/bin/check-update
+bash "<skill-dir>/bin/check-update"
 ```
 
 If you read this file through a `skill://` URI, skip the update check: the server always serves the current version.
@@ -186,7 +186,7 @@ To install **this skill bundle** into a host's canonical skills directory, use `
 ```bash
 anc skill install claude_code              # also: codex, cursor, factory, kiro, opencode
 anc skill install --all                    # install into every known host in one invocation
-anc skill install --dry-run claude_code    # print the package it would install, write nothing
+anc skill install --dry-run claude_code    # print the install command, write nothing; --output json adds the package URL and digest
 anc skill update claude_code               # refresh an existing install (guards on SKILL.md marker)
 anc skill update --all                     # refresh every known host
 ```

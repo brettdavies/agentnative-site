@@ -77,7 +77,7 @@ cargo install agentnative
 #    Six hosts supported: claude_code, codex, cursor, factory, kiro, opencode.
 anc skill install claude_code
 anc skill install --all                              # install into every known host
-anc skill install --dry-run claude_code              # preview: names the package URL and digest, writes nothing
+anc skill install --dry-run claude_code              # preview: prints the install command; --output json adds the package URL and digest
 eval $(anc skill install --dry-run claude_code)      # the dry run prints the install command, so this runs it
 anc skill install --output json claude_code          # uniform JSON envelope (success + error)
 anc skill update claude_code                         # refresh an existing install (SKILL.md marker required)
