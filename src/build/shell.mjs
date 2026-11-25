@@ -516,7 +516,7 @@ ${SOURCE_REPOS.map(
           <a href="/web-scorecard-schema">Web scorecard schema</a>
           <a href="/llms.txt">llms.txt</a>
           <a href="/llms-full.txt">llms-full.txt</a>
-          <a href="/mcp-skill/">MCP</a>
+          <a href="/mcp-skill">MCP</a>
           <a href="/mcp-docs">MCP docs</a>
           <a href="${markdownTwinPath}">This page as markdown</a>
         </p>

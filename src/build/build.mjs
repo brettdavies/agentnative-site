@@ -339,6 +339,19 @@ export async function build() {
   await ensureDir(join(DIST_DIR, '_internal'));
   await writeFile(join(DIST_DIR, '_internal', 'score-live-shell.html'), emitShellTemplate({ themeInitJs: themeInit }));
 
+  // 9c. Web-audit fix skills — one content page per check at /fix/<id>
+  // (+ .md twin), generated from the registry + remediation catalog. Runs
+  // BEFORE the sitemap, which lists every page it emits, and before the
+  // agent-readiness stage, whose agent-skills discovery index lists the
+  // pages with digests.
+  const webAuditSkillStats = await emitWebAuditSkillPages({
+    distDir: DIST_DIR,
+    registryPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml'),
+    remediationPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'remediation.yaml'),
+    themeInit,
+    fileDate,
+  });
+
   // 10. Sitemap (includes scorecard paths). /install (CLI) and /skill (skill
   // bundle) are indexed for humans; /skill.json carries X-Robots-Tag: noindex
   // so it stays out of the sitemap.
@@ -354,6 +367,7 @@ export async function build() {
     ...subPageData.map((page) => [`/${page.name}`, page.dateModified]),
     ...pageDates,
     ...webSeed.entries.map((entry) => [scorePath(entry.domain), null]),
+    ...webAuditSkillStats.fixPaths.map((path) => [path, webAuditSkillStats.dateModified]),
   ]);
   const sitemap = buildSitemap({
     principleNumbers: principles.map((p) => p.n),
@@ -366,6 +380,7 @@ export async function build() {
       '/web-scorecard-schema',
       ...scorecardPaths,
       ...webSeed.entries.map((entry) => scorePath(entry.domain)),
+      ...webAuditSkillStats.fixPaths,
     ],
     lastmodOf: (path) => lastmods.get(path),
   });
@@ -386,17 +401,6 @@ export async function build() {
   // and ai.txt is the operator's canonical inbox; the constant lives
   // in 11a-discovery-emit.mjs.
   const discoveryStats = await emitDiscovery({ distDir: DIST_DIR });
-
-  // 11a-bis. Web-audit fix skills — one content page per check at
-  // /web-audit/skill/<id> (+ .md twin), generated from the registry +
-  // remediation catalog. Runs BEFORE the agent-readiness stage because
-  // the agent-skills discovery index lists these pages with digests.
-  const webAuditSkillStats = await emitWebAuditSkillPages({
-    distDir: DIST_DIR,
-    registryPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml'),
-    remediationPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'remediation.yaml'),
-    themeInit,
-  });
 
   // 11b. Agent-readiness discovery surfaces — .well-known/{api-catalog,
   // agent-skills/index.json} + auth.md. MCP descriptor aliases are

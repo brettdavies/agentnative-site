@@ -43,7 +43,7 @@ informational; when both are present and disagree, the build aborts with an inte
 | Field              | Type                | Source        | Meaning                                                                                                          |
 | ------------------ | ------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `schema_version`   | string              | `anc` emitted | Version of the JSON envelope itself. Pre-1.0; bumped when fields are added, removed, or renamed. Current: 0.9.   |
-| `spec_version`     | string              | `anc` emitted | Version of the [agentnative spec](/principles) the run conformed to. Independent of `schema_version`.            |
+| `spec_version`     | string              | `anc` emitted | Version of the [agentnative spec](/) the run conformed to. Independent of `schema_version`.                       |
 | `tool`             | object              | `anc` emitted | Self-describing identity for the tool that was scored. See [tool](#tool) below. **Added in 0.4.**                |
 | `anc`              | object              | `anc` emitted | Provenance of the `anc` build that produced the scorecard. See [anc](#anc) below. **Added in 0.4.**              |
 | `run`              | object              | `anc` emitted | Run-context: what was invoked, when, on what platform. See [run](#run) below. **Added in 0.4.**                  |

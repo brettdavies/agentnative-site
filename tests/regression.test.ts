@@ -679,6 +679,14 @@ describe('regression #10 — one content date per page', () => {
         files: ['src/data/coverage-matrix.json', 'src/build/coverage.mjs', 'src/build/08-scorecards-emit.mjs'],
       },
       { path: '/skill', files: ['src/data/skill/skill.json', 'src/build/skill.mjs'] },
+      ...['openapi', 'well-known-mcp-card'].map((id) => ({
+        path: `/fix/${id}`,
+        files: [
+          'src/data/web-audit/registry.yaml',
+          'src/data/web-audit/remediation.yaml',
+          'src/build/15-web-audit-skills.mjs',
+        ],
+      })),
     ];
     for (const { path, files, board: ranksBoard } of inputMap) {
       const days = [...files.map(lastCommitDay), ...(ranksBoard ? board : [])];

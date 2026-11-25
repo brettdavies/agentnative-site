@@ -12,13 +12,16 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as yaml from 'js-yaml';
 import { AUDIT_PATH, fixPath } from '../shared/audit-routes';
 import { escHtml } from '../shared/scorecard-format.mjs';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from './13-web-audit-registry.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell } from './shell.mjs';
-import { absolutifyMarkdownLinks, resolveBaseUrl } from './util.mjs';
+import { composeTwin, resolveBaseUrl } from './util.mjs';
+
+const THIS_MODULE = fileURLToPath(import.meta.url);
 
 const KEYWORD_LABELS = { must: 'MUST', should: 'SHOULD', may: 'MAY' };
 
@@ -151,12 +154,15 @@ async function buildSkillHtmlBody(check, remediation, categories, baseUrl) {
 
 /**
  * Emit every fix-skill page (HTML + markdown twin) and return the entries
- * the agent-skills discovery index lists.
+ * the agent-skills discovery index lists, plus the canonical path of every
+ * page emitted, a retired check's included, and the one content day they
+ * share. Every page renders from the registry and the remediation catalog, so
+ * its content day is the newest change among those two files and this module.
  *
- * @param {{ distDir: string, registryPath: string, remediationPath: string, themeInit: string, baseUrl?: string }} opts
- * @returns {Promise<{ pages: Array<{ id: string, title: string, description: string, url: string, digest: string }> }>}
+ * @param {{ distDir: string, registryPath: string, remediationPath: string, themeInit: string, fileDate: (...paths: string[]) => string, baseUrl?: string }} opts
+ * @returns {Promise<{ pages: Array<{ id: string, title: string, description: string, url: string, digest: string }>, fixPaths: string[], dateModified: string }>}
  */
-export async function emitWebAuditSkillPages({ distDir, registryPath, remediationPath, themeInit, baseUrl }) {
+export async function emitWebAuditSkillPages({ distDir, registryPath, remediationPath, themeInit, fileDate, baseUrl }) {
   const base = resolveBaseUrl(baseUrl);
   const registry = normalizeWebAuditRegistry(yaml.load(await readFile(registryPath, 'utf8')));
   const retired = registry.retired ?? {};
@@ -166,6 +172,7 @@ export async function emitWebAuditSkillPages({ distDir, registryPath, remediatio
     Object.keys(retired),
   );
 
+  const dateModified = fileDate(registryPath, remediationPath, THIS_MODULE);
   const skillDir = join(distDir, 'fix');
   // dist/ survives between builds, and the Worker no longer claims the retired
   // path: a page left there would be served straight off the assets binding
@@ -174,11 +181,16 @@ export async function emitWebAuditSkillPages({ distDir, registryPath, remediatio
   await mkdir(skillDir, { recursive: true });
 
   const pages = [];
+  const fixPaths = [];
   for (const check of registry.checks) {
     const markdown = buildSkillMarkdown(check, remediation[check.id], registry.categories, base);
-    const served = absolutifyMarkdownLinks(markdown, baseUrl);
-    await writeFile(join(skillDir, `${check.id}.md`), served);
     const description = `Fix the "${check.title}" web-audit check.`;
+    const served = composeTwin(
+      { title: `Fix: ${check.title}`, description, canonicalPath: fixPath(check.id), dateModified },
+      markdown,
+      baseUrl,
+    );
+    await writeFile(join(skillDir, `${check.id}.md`), served);
     await writeFile(
       join(skillDir, `${check.id}.html`),
       emitShell({
@@ -188,6 +200,7 @@ export async function emitWebAuditSkillPages({ distDir, registryPath, remediatio
         breadcrumb: check.breadcrumb,
         bodyHtml: await buildSkillHtmlBody(check, remediation[check.id], registry.categories, base),
         themeInitJs: themeInit,
+        dateModified,
       }),
     );
     pages.push({
@@ -197,6 +210,7 @@ export async function emitWebAuditSkillPages({ distDir, registryPath, remediatio
       url: `${base}${fixPath(check.id)}.md`,
       digest: createHash('sha256').update(served).digest('hex'),
     });
+    fixPaths.push(fixPath(check.id));
   }
   // Retired pages answer old links only, so the agent-skills index, which
   // lists the checks an audit reports, does not carry them.
@@ -204,18 +218,25 @@ export async function emitWebAuditSkillPages({ distDir, registryPath, remediatio
   for (const [id, entry] of Object.entries(retired)) {
     const successor = checkById.get(entry.successor);
     const markdown = buildRetiredSkillMarkdown(id, entry, successor, remediation[id], registry.categories, base);
-    await writeFile(join(skillDir, `${id}.md`), absolutifyMarkdownLinks(markdown, baseUrl));
+    const title = `Fix: ${remediation[id].title}`;
+    const description = `The retired "${id}" web-audit check, replaced by ${entry.successor}.`;
+    await writeFile(
+      join(skillDir, `${id}.md`),
+      composeTwin({ title, description, canonicalPath: fixPath(id), dateModified }, markdown, baseUrl),
+    );
     await writeFile(
       join(skillDir, `${id}.html`),
       emitShell({
-        title: `Fix: ${remediation[id].title}`,
-        description: `The retired "${id}" web-audit check, replaced by ${entry.successor}.`,
+        title,
+        description,
         canonicalPath: fixPath(id),
         breadcrumb: `${successor.breadcrumb} (retired)`,
         bodyHtml: await renderMarkdown(markdown),
         themeInitJs: themeInit,
+        dateModified,
       }),
     );
+    fixPaths.push(fixPath(id));
   }
-  return { pages };
+  return { pages, fixPaths, dateModified };
 }

@@ -641,7 +641,7 @@ describe('site shell MCP discoverability (emitShell)', () => {
 
   test('footer MCP link targets the client integration guide', () => {
     const html = sampleShellHtml();
-    expect(html).toContain('<a href="/mcp-skill/">MCP</a>');
+    expect(html).toContain('<a href="/mcp-skill">MCP</a>');
   });
 });
 

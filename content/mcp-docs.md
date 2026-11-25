@@ -7,7 +7,7 @@ Allowed` with `Allow: POST`. This page describes the endpoint. It is not the end
 - Endpoint: `POST` [/mcp](/mcp)
 - Wire contract and tool catalog: [/mcp-skill](/mcp-skill)
 - JSON server card (SEP-1649): [/.well-known/mcp/server-card.json](/.well-known/mcp/server-card.json). Pointer aliases:
-  [/.well-known/mcp](/.well-known/mcp), [/mcp.json](/mcp.json).
+  `/.well-known/mcp`, `/mcp.json`.
 - JSON server card (SEP-2127): [/mcp/server-card](/mcp/server-card), served as `application/mcp-server-card+json`.
 - AI catalog listing the SEP-2127 card: [/.well-known/ai-catalog.json](/.well-known/ai-catalog.json), served as
   `application/ai-catalog+json`.
