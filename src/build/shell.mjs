@@ -19,6 +19,7 @@ import { MCP_DISCOVERY_DOCUMENTS, SEP_1649_CARD_PATH } from '../shared/mcp-disco
 import { SITE_OG_IMAGE_ALT, SITE_OG_IMAGE_PATH } from '../shared/og-card.ts';
 import { DATE_MODIFIED_TOKEN, isDay, MODIFIED_TIME_META_TOKEN, modifiedTimeMeta } from '../shared/page-date';
 import { markdownAlternateLink } from '../shared/result-head';
+import { headTitle as brandedTitle } from '../shared/search-head';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
 import { loadInstallCommands } from './install-commands.mjs';
 import { ANC_VERSION, canonicalBaseUrl, escHtml, SITE_SPEC_VERSION } from './util.mjs';
@@ -157,7 +158,8 @@ const esc = escHtml;
  * dynamic pages from it without duplicating the shell layout. Its main
  * placeholders:
  *
- *   {{TITLE}}            — document <title> + og:title (escaped at substitution)
+ *   {{TITLE}}            — og:title, twitter:title, and the JSON-LD headline (escaped at substitution)
+ *   {{HEAD_TITLE}}       — the document <title>: the title and the brand
  *   {{DESCRIPTION}}      — meta description + og:description
  *   {{CANONICAL_PATH}}   — site-relative canonical path (no trailing extension)
  *   {{ALTERNATES}}       — the head's page-specific `rel="alternate"` links,
@@ -180,6 +182,7 @@ const esc = escHtml;
 export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
   return emitShell({
     title: '{{TITLE}}',
+    headTitle: '{{HEAD_TITLE}}',
     description: '{{DESCRIPTION}}',
     canonicalPath: '{{CANONICAL_PATH}}',
     markdownTwinPath: '{{MARKDOWN_TWIN_PATH}}',
@@ -196,7 +199,9 @@ export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
 
 /**
  * @param {object} args
- * @param {string} args.title                — document <title> + og:title.
+ * @param {string} args.title                — og:title, twitter:title, and the JSON-LD headline.
+ * @param {string=} args.headTitle           — the document <title>; default is the title and the
+ *     brand (`brandedTitle`), and a page whose own part runs long passes its own shorter wording.
  * @param {string} args.description          — meta description + og:description.
  * @param {string} args.canonicalPath        — site-relative path, e.g. '/p3'.
  * @param {string=} args.markdownTwinPath    — href of the page's markdown twin
@@ -228,6 +233,7 @@ export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
  */
 export function emitShell({
   title,
+  headTitle = brandedTitle(title),
   description,
   canonicalPath,
   markdownTwinPath = canonicalPath === '/' ? '/index.md' : `${canonicalPath}.md`,
@@ -414,7 +420,7 @@ export function emitShell({
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
-    <title>${esc(title)}</title>
+    <title>${esc(headTitle)}</title>
     <meta name="description" content="${esc(description)}" />
     <link rel="canonical" href="${canonical}" />
     ${alternatesHtml}

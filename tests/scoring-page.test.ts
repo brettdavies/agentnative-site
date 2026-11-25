@@ -278,3 +278,25 @@ describe('GET /scoring states a description search engines can show whole', () =
     expect(description.length).toBeLessThanOrEqual(160);
   });
 });
+
+describe('GET /scoring states a title that names the brand', () => {
+  const realShell = emitShellTemplate();
+  const titleOf = (html: string) => html.match(/<title>([^<]*)<\/title>/)?.[1];
+
+  test.each([
+    ['a one-character target', '/scoring?target=x', 'Auditing x… · agentnative'],
+    ['a CLI target', '/scoring?target=ripgrep', 'Auditing ripgrep… · agentnative'],
+    ['the pointer page', '/scoring', 'Audit progress · agentnative'],
+  ])('%s', async (_label, path, expected) => {
+    const { html } = await page(path, env(SITEKEY, realShell));
+    expect(titleOf(html)).toBe(expected);
+  });
+
+  test('a target at the length cap keeps <title> within 70 characters and names the brand', async () => {
+    const target = `${'a'.repeat(63)}.${'b'.repeat(TARGET_MAX_LENGTH - 66)}.c`;
+    const { html } = await page(`/scoring?target=${target}`, env(SITEKEY, realShell));
+    const title = titleOf(html) ?? '';
+    expect(title.length).toBeLessThanOrEqual(70);
+    expect(title.endsWith(' · agentnative')).toBe(true);
+  });
+});
