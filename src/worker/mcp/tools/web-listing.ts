@@ -106,7 +106,7 @@ export function registerWebListingTool(server: McpServer, env: WebListingToolEnv
         url: z.string().describe(URL_DESCRIPTION),
         public_listing: z.boolean().describe(LISTING_DESCRIPTION),
       }),
-      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
     },
     async ({ url, public_listing }, extra) => {
       const siteUrl = siteOrigin();
