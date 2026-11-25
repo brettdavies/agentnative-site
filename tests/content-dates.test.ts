@@ -104,6 +104,20 @@ describe('loadFileDates — one git walk dates every file', () => {
     expect(fileDate('content/a.md', 'content/b.md')).toBe('2026-04-11');
   });
 
+  test('published is the UTC day of the first commit that touched the file, the earliest of several', async () => {
+    const dir = await datedRepo();
+    const fileDate = loadFileDates(dir);
+    expect(fileDate.published('content/a.md')).toBe('2026-03-01');
+    expect(fileDate.published(join(dir, 'content', 'b.md'))).toBe('2026-03-01');
+    expect(fileDate.published('content/a.md', 'content/b.md')).toBe('2026-03-01');
+    await writeFile(join(dir, 'content', 'later.md'), 'later\n');
+    git(dir, ['add', '.']);
+    git(dir, ['commit', '-q', '-m', 'third'], '2026-05-02T12:00:00Z');
+    expect(loadFileDates(dir).published('content/later.md', 'content/a.md')).toBe('2026-03-01');
+    await writeFile(join(dir, 'content', 'new.md'), 'new\n');
+    expect(loadFileDates(dir).published('content/new.md')).toBe(new Date().toISOString().slice(0, 10));
+  });
+
   test('a content file with uncommitted changes takes today: untracked or edited', async () => {
     const dir = await datedRepo();
     await writeFile(join(dir, 'content', 'new.md'), 'new\n');

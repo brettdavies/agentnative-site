@@ -128,11 +128,13 @@ const SOURCE_REPOS = [
 // Machine entry points listed in the <noscript> fallback. An agent or
 // fetch-only crawler that never runs the client bundle still reads an
 // explicit, in-body list of the structured surfaces instead of inferring
-// them. Mirrors the head links below.
+// them. Mirrors the head links below. An entry with `linked: false` is named
+// as code: GET /mcp answers 405, so an anchor to it sends every crawler that
+// follows it to an error, and the next entry links the endpoint's description.
 const MACHINE_ENTRY_POINTS = [
   { href: '/llms.txt', note: 'LLM-friendly index' },
   { href: '/llms-full.txt', note: 'full spec corpus' },
-  { href: '/mcp', note: 'Streamable-HTTP MCP endpoint (POST)' },
+  { href: '/mcp', note: 'Streamable-HTTP MCP endpoint (POST)', linked: false },
   { href: '/mcp-docs', note: 'MCP endpoint docs' },
   ...MCP_DISCOVERY_DOCUMENTS.map((d) => ({ href: d.path, note: d.label })),
   { href: '/skill.json', note: 'agent-native skill bundle' },
@@ -218,6 +220,10 @@ export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
  * @param {string=} args.dateModified        — the page's `YYYY-MM-DD` content date
  *     (content-dates.mjs), emitted as the TechArticle `dateModified` and as
  *     `article:modified_time`. Omitted on pages the build cannot date.
+ * @param {string=} args.datePublished       — the `YYYY-MM-DD` day the page's
+ *     source first appeared at its path (content-dates.mjs `published`), emitted
+ *     as the TechArticle `datePublished`. Omitted on pages with no single
+ *     authored source; never later than `dateModified`.
  * @returns {string} full HTML document.
  */
 export function emitShell({
@@ -241,9 +247,25 @@ export function emitShell({
   ogImageAlt = null,
   ogVideo = '',
   dateModified = null,
+  datePublished = null,
 }) {
   if (dateModified !== null && !isDay(dateModified)) {
     throw new Error(`emitShell: ${canonicalPath} dateModified "${dateModified}" is not a YYYY-MM-DD day`);
+  }
+  if (datePublished !== null) {
+    if (!isDay(datePublished)) {
+      throw new Error(`emitShell: ${canonicalPath} datePublished "${datePublished}" is not a YYYY-MM-DD day`);
+    }
+    if (dateModified === null) {
+      throw new Error(
+        `emitShell: ${canonicalPath} states a datePublished and needs a dateModified to order it against`,
+      );
+    }
+    if (datePublished > dateModified) {
+      throw new Error(
+        `emitShell: ${canonicalPath} datePublished ${datePublished} is after dateModified ${dateModified}`,
+      );
+    }
   }
   // Everything `base` feeds below is crawler-facing identity: the
   // canonical link, the OpenGraph/Twitter block, and the JSON-LD @id
@@ -286,6 +308,8 @@ export function emitShell({
         '@type': 'Organization',
         '@id': orgId,
         name: SITE_NAME,
+        description:
+          'Publishes the agent-native CLI standard, eight principles for command-line tools that AI agents operate, with a linter that audits a CLI against it and an audit of a website for agent readiness.',
         url: base,
         logo: `${base}/apple-touch-icon-180.png`,
         sameAs: SOURCE_REPOS.map((r) => r.url),
@@ -314,6 +338,7 @@ export function emitShell({
         description,
         url: canonical,
         image: resolvedOgImage,
+        ...(datePublished ? { datePublished } : {}),
         ...(jsonLdDate ? { dateModified: jsonLdDate } : {}),
         isPartOf: { '@id': siteId },
         author: {
@@ -350,6 +375,7 @@ export function emitShell({
         '@id': `${base}/#mcp-server`,
         name: 'anc.dev MCP server',
         applicationCategory: 'WebApplication',
+        operatingSystem: 'Any',
         description:
           'Streamable-HTTP MCP server exposing the agent-native CLI standard: scorecards, principles, vendored spec.',
         url: `${base}/mcp`,
@@ -436,7 +462,7 @@ ${ogVideo ? `    ${ogVideo}\n` : ''}    <meta property="og:site_name" content="$
       <nav class="machine-entry-points" aria-label="Machine entry points">
         <p>Machine entry points for agents and non-JS clients:</p>
         <ul>
-${MACHINE_ENTRY_POINTS.map((e) => `          <li><a href="${e.href}">${e.href}</a> (${e.note})</li>`).join('\n')}
+${MACHINE_ENTRY_POINTS.map((e) => `          <li>${e.linked === false ? `<code>${e.href}</code>` : `<a href="${e.href}">${e.href}</a>`} (${e.note})</li>`).join('\n')}
         </ul>
       </nav>
     </noscript>

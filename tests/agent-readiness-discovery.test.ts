@@ -632,6 +632,15 @@ describe('site shell MCP discoverability (emitShell)', () => {
     expect(html).toContain('<link rel="mcp" href="/mcp" />');
   });
 
+  // GET /mcp answers 405, so a crawler that follows an anchor to it records an
+  // error. The entry list names the endpoint as code and links its description.
+  test('the entry list names /mcp as code and links the endpoint docs instead', () => {
+    const html = sampleShellHtml();
+    expect(html).toContain('<li><code>/mcp</code> (Streamable-HTTP MCP endpoint (POST))</li>');
+    expect(html).toContain('<li><a href="/mcp-docs">/mcp-docs</a> (MCP endpoint docs)</li>');
+    expect(html).not.toMatch(/<a href="\/mcp">/);
+  });
+
   test('JSON-LD SoftwareApplication entry names the MCP server at /mcp', () => {
     const html = sampleShellHtml();
     expect(html).toContain('"@id":"https://anc.dev/#mcp-server"');
@@ -646,12 +655,13 @@ describe('site shell MCP discoverability (emitShell)', () => {
 });
 
 describe('homepage MCP prose (built dist/)', () => {
-  test('use-note links to the /mcp endpoint and /mcp-skill guide', async () => {
+  test('use-note names the /mcp endpoint as code and links the docs and the /mcp-skill guide', async () => {
     const html = await readFile(join(DIST_DIR, 'index.html'), 'utf8');
     const useIt = html.match(/<p class="use-note">[\s\S]*?<\/p>/)?.[0] ?? '';
     expect(useIt.length).toBeGreaterThan(0);
     expect(useIt).toContain('MCP');
-    expect(useIt).toContain('href="/mcp"');
+    expect(useIt).toContain('<code>https://anc.dev/mcp</code>');
+    expect(useIt).not.toContain('href="/mcp"');
     expect(useIt).toContain('href="/mcp-docs"');
     expect(useIt).toContain('href="/mcp-skill"');
     expect(useIt).toContain('streamable-HTTP');
@@ -674,7 +684,8 @@ describe('homepage MCP prose (built dist/)', () => {
 
   test('content/_use.md source still names the same two surfaces', async () => {
     const raw = await readFile(join(REPO_ROOT, 'content', '_use.md'), 'utf8');
-    expect(raw).toContain('(/mcp)');
+    expect(raw).toContain('`https://anc.dev/mcp`');
+    expect(raw).not.toContain('(/mcp)');
     expect(raw).toContain('(/mcp-docs)');
     expect(raw).toContain('(/mcp-skill)');
     expect(raw).not.toContain('/.well-known/mcp"');

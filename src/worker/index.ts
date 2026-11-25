@@ -92,6 +92,7 @@ import { LAKE_FRESHNESS_CRON, type LakeFreshnessEnv, runLakeFreshnessCheck } fro
 import { emitLog } from './telemetry/log';
 import { recordPageRequest } from './telemetry/page-request';
 import { runWithRequestContext } from './telemetry/request-context';
+import { permanentSlashRedirect } from './trailing-slash-redirect';
 
 // The CF Sandbox/Containers SDK looks up `ctx.exports.ContainerProxy` at
 // outbound-handler dispatch time and throws "ctx.exports.ContainerProxy
@@ -878,7 +879,11 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
     assetRequest = new Request(rewriteToMarkdown(url), request);
   }
 
-  const upstream = await env.ASSETS.fetch(assetRequest);
+  const upstream = permanentSlashRedirect(
+    await env.ASSETS.fetch(assetRequest),
+    new URL(assetRequest.url),
+    request.method,
+  );
 
   if (pathname === SITEMAP_PATH && upstream.ok) {
     return serveSitemap(upstream, env as unknown as WebBoardEnv, request);

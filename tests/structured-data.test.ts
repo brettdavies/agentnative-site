@@ -64,6 +64,11 @@ describe('JSON-LD graph', () => {
     expect(article?.publisher).toEqual({ '@id': `${CANONICAL_SITE_URL}/#organization` });
   });
 
+  test('the organization states what it is', () => {
+    const org = nodeOf(graphOf(shell()), 'Organization');
+    expect(String(org?.description ?? '').length).toBeGreaterThan(40);
+  });
+
   test('the organization states a contact point', () => {
     const org = nodeOf(graphOf(shell()), 'Organization');
     expect(org?.contactPoint).toMatchObject({ '@type': 'ContactPoint', contactType: 'technical support' });
@@ -162,6 +167,29 @@ describe('JSON-LD graph', () => {
     const mcp = graph.find((n) => n['@id'] === `${CANONICAL_SITE_URL}/#mcp-server`);
     expect(cli?.softwareVersion).toBe(ANC_VERSION);
     expect(mcp?.softwareVersion).toBe(SITE_SPEC_VERSION);
+  });
+
+  // Google wants two of offers, aggregateRating, applicationCategory and
+  // operatingSystem on a SoftwareApplication. A rating counts only from real
+  // user ratings, and nobody has rated this server, so none is stated.
+  test('the MCP server application states a category and an operating system, and no rating', () => {
+    const graph = graphOf(shell());
+    const mcp = graph.find((n) => n['@id'] === `${CANONICAL_SITE_URL}/#mcp-server`);
+    expect(typeof mcp?.applicationCategory).toBe('string');
+    expect(typeof mcp?.operatingSystem).toBe('string');
+    expect(JSON.stringify(graph)).not.toMatch(/"(aggregateRating|review|reviewRating)"/);
+  });
+
+  test('the article states datePublished only when the page has one', () => {
+    expect(nodeOf(graphOf(shell()), 'TechArticle')).not.toHaveProperty('datePublished');
+    const article = nodeOf(graphOf(shell({ datePublished: '2026-01-05', dateModified: '2026-02-06' })), 'TechArticle');
+    expect(article).toMatchObject({ datePublished: '2026-01-05', dateModified: '2026-02-06' });
+  });
+
+  test('a datePublished that is not a day, or falls after dateModified, is refused', () => {
+    expect(() => shell({ datePublished: '2026-1-5', dateModified: '2026-02-06' })).toThrow(/datePublished/);
+    expect(() => shell({ datePublished: '2026-03-01', dateModified: '2026-02-06' })).toThrow(/after dateModified/);
+    expect(() => shell({ datePublished: '2026-03-01' })).toThrow(/needs a dateModified/);
   });
 
   test('every node hangs off one organization rather than repeating it', () => {
